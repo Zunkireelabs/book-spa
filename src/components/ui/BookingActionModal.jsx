@@ -9,7 +9,8 @@ import MembershipWalletCard from './MembershipWalletCard';
 import PaymentModeCorrectionModal from './PaymentModeCorrectionModal';
 import PaymentMethodSelector from './PaymentMethodSelector';
 import TimeBoxInput from './TimeBoxInput';
-import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, recordTip, getCustomerFirstBookingFlag, adminCorrectBooking, adminDeleteBooking, correctPaymentAmount, correctPaymentMode } from '../../services/api';
+import InvoicePrintModal from './InvoicePrintModal';
+import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, recordTip, getCustomerFirstBookingFlag, adminCorrectBooking, adminDeleteBooking, correctPaymentAmount, correctPaymentMode, fetchInvoiceByBookingId } from '../../services/api';
 import { excludeRelatedFromPreviousDue, toDbStatus } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
@@ -109,6 +110,10 @@ const BookingActionModal = ({
   branchHours,
   defaultNewBookingMode,
   userRole = 'staff',
+  // Printing an invoice hands the customer their own name/phone on paper —
+  // an account with customer details hidden must not get that affordance,
+  // same gate as issue_invoice() itself (migration-334).
+  canViewCustomerDetails = true,
   // Optional: when provided, a small "view" affordance appears on each Related-
   // services/Other-unpaid-bookings row, letting staff jump straight to THAT
   // booking's own management dialog instead of only being able to select it for
@@ -140,6 +145,12 @@ const BookingActionModal = ({
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  // Keeps "Print invoice" reachable for a booking invoiced before billing was
+  // later disabled — the invoice data isn't orphaned, only this button would
+  // be if it hid unconditionally on the toggle. See CustomerSalesTab for the
+  // batched equivalent over a list; this is a single booking.
+  const [hasExistingInvoice, setHasExistingInvoice] = useState(false);
   // Admin correction — inline mode replacing the tab bar/content with an
   // edit-everything form (no separate popup modal). `showAdminCorrection`
   // toggles the mode; the rest is the form's own local state.
@@ -243,6 +254,16 @@ const BookingActionModal = ({
     });
     return () => { cancelled = true; };
   }, [showPaymentModal, branchId]);
+
+  useEffect(() => {
+    if (orgSettings?.billing_enabled === true) return; // button already shown; skip the lookup
+    if (booking?.paymentStatus !== 'paid' || !booking?.bookingId) return;
+    let cancelled = false;
+    fetchInvoiceByBookingId(booking.bookingId).then(({ data }) => {
+      if (!cancelled) setHasExistingInvoice(!!data);
+    });
+    return () => { cancelled = true; };
+  }, [orgSettings?.billing_enabled, booking?.bookingId, booking?.paymentStatus]);
 
   // Pre-select current therapists/room when booking changes or assign tab opens
   useEffect(() => {
@@ -2875,9 +2896,21 @@ const BookingActionModal = ({
                 )}
                 {booking.paymentStatus === 'paid' && (
                   <div className="space-y-2">
-                    <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-success/10 border border-success/20">
-                      <Icon name="CheckCircle" size={14} className="text-success flex-shrink-0" />
-                      <span className="font-body font-body-normal text-xs sm:text-sm text-success">Payment has been recorded.</span>
+                    <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-spa bg-success/10 border border-success/20">
+                      <div className="flex items-center space-x-2">
+                        <Icon name="CheckCircle" size={14} className="text-success flex-shrink-0" />
+                        <span className="font-body font-body-normal text-xs sm:text-sm text-success">Payment has been recorded.</span>
+                      </div>
+                      {canViewCustomerDetails && (orgSettings?.billing_enabled === true || hasExistingInvoice) && (
+                        <button
+                          type="button"
+                          onClick={() => setShowInvoiceModal(true)}
+                          className="flex items-center gap-1 text-xs font-body-medium text-primary hover:underline flex-shrink-0"
+                        >
+                          <Icon name="Receipt" size={14} />
+                          Print invoice
+                        </button>
+                      )}
                     </div>
                     {(booking.payments || []).map((p) => (
                       p.id && showAdminCorrection ? (
@@ -3332,6 +3365,10 @@ const BookingActionModal = ({
             if (onClose) onClose();
           }}
         />
+      )}
+
+      {showInvoiceModal && (
+        <InvoicePrintModal bookingId={booking.bookingId} onClose={() => setShowInvoiceModal(false)} />
       )}
 
       {/* Payment Modal */}

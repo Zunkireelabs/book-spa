@@ -12,6 +12,8 @@ import EmptySlotChoiceMenu from './EmptySlotChoiceMenu';
 import TransferFromCalendarModal from './TransferFromCalendarModal';
 import AddBlockModal from './AddBlockModal';
 import EditBlockModal from './EditBlockModal';
+import WaitlistPanel from './WaitlistPanel';
+import TimeBoxInput from '../../../../components/ui/TimeBoxInput';
 import TransferManagementModal from '../../../../components/ui/TransferManagementModal';
 import {
   getCalendarBookings,
@@ -42,6 +44,7 @@ import {
   createComboBookingItems,
   fetchBranchWorkingHours,
   fetchRosterOverrides,
+  updateWaitlistEntry,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus, to12h } from '../../../../services/bookingTransformers';
 import { isAfterCheckout } from '../../../../services/therapistBranchWindow';
@@ -174,7 +177,7 @@ function formatTimeDisplay(time) {
 
 // ── Quick Create Panel ────────────────────────────────────────
 
-const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours }) => {
+const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId }) => {
   const { staffLabel } = useOrg();
   const [serviceId, setServiceId] = useState('');
   const isCoupleService = (services || []).find(s => s.id === serviceId)?.is_couple || false;
@@ -191,6 +194,12 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // per-component one, see the Therapist(s) block.
   const comboAllDifferentStaff = isComboService && comboComponents.length > 0 && comboComponents.every((c) => !c.defaultSameStaff);
   const [customerName, setCustomerName] = useState('');
+  // Set only when opened from a waitlist entry that already has a linked
+  // customer (slotInfo.defaultCustomerId) — see createBooking's knownCustomerId.
+  // customerName/customerPhone below may be masked display copies for a
+  // restricted account; this is what tells submission to resolve the real
+  // customer by id server-side instead of trusting those fields.
+  const [knownCustomerId, setKnownCustomerId] = useState(null);
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerCountryCode, setCustomerCountryCode] = useState('+977');
   const [customerEmail, setCustomerEmail] = useState('');
@@ -216,15 +225,11 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [groupServiceId, setGroupServiceId] = useState('');     // shared service when 'same'
   const [groupRoomId, setGroupRoomId] = useState('');           // shared room (couple)
   const [people, setPeople] = useState([]);                     // per-person rows
-  const [timeText, setTimeText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const submitInFlightRef = useRef(false);
   const [error, setError] = useState(null);
   const [therapistSearch, setTherapistSearch] = useState('');
-  const [timeDropdownOpen, setTimeDropdownOpen] = useState(false);
   const nameRef = useRef(null);
-  const timeDropdownRef = useRef(null);
-  const timeListRef = useRef(null);
 
   // Previous-due reminder — set when the selected/typed phone matches an existing
   // outstanding balance from an earlier visit. Non-blocking: booking creation isn't
@@ -302,8 +307,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   useEffect(() => {
     setServiceId(slotInfo?.defaultServiceId || '');
     setCustomerName(slotInfo?.defaultCustomerName || '');
-    setCustomerPhone('');
-    setCustomerCountryCode('+977');
+    setCustomerPhone(slotInfo?.defaultCustomerPhone || '');
+    setKnownCustomerId(slotInfo?.defaultCustomerId || null);
+    setCustomerCountryCode(slotInfo?.defaultCustomerCountryCode || '+977');
     setCustomerEmail('');
     setCustomerGender('');
     setSpecialRequests('');
@@ -323,11 +329,15 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setComboTherapistOverrides({});
     setComboRoomOverrides({});
     setBookingDate(slotInfo?.day || '');
+    // A real booking always needs a concrete time — unlike the waitlist's
+    // deliberately-optional "any time", there's no blank state to preserve
+    // here. Falls back to 09:00 (matching TimeBoxInput's own default for an
+    // empty value) rather than '', so the boxes and bookingTime never disagree
+    // about whether a time is set.
     const slotTime = slotInfo && Number.isFinite(slotInfo.hour) && Number.isFinite(slotInfo.minute)
       ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`
-      : '';
+      : '09:00';
     setBookingTime(slotTime);
-    setTimeText(slotTime ? format12h(slotTime) : '');
     setBookingMode('individual');
     setGroupType('couple');
     setSeparateCount(3);
@@ -454,60 +464,12 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     return n + (s[(v - 20) % 10] || s[v] || s[0]);
   };
 
-  const timeOptions = useMemo(() => {
-    const [openH] = (branchHours?.openTime || '09:00:00').split(':').map(Number);
-    const [closeH, closeM] = (branchHours?.closeTime || '21:00:00').split(':').map(Number);
-    const opts = [];
-    for (let h = openH; h <= closeH; h++) {
-      for (let m = 0; m < 60; m += 15) {
-        if (h === closeH && m > closeM) break;
-        const val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-        opts.push(val);
-      }
-    }
-    // Include current bookingTime if it doesn't match a 15-min slot
-    if (bookingTime && !opts.includes(bookingTime)) {
-      opts.push(bookingTime);
-      opts.sort();
-    }
-    return opts;
-  }, [branchHours, bookingTime]);
-
   const format12h = (time24) => {
     const [h, m] = time24.split(':').map(Number);
     const suffix = h >= 12 ? 'pm' : 'am';
     const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
     return `${h12}:${String(m).padStart(2, '0')}${suffix}`;
   };
-
-  // Parse free-typed time (e.g. "9", "9:30", "9:30am", "21:15") into "HH:MM".
-  // Returns null while the text is incomplete/invalid so the field can keep it.
-  const parseTimeInput = (raw) => {
-    const match = raw.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
-    if (!match) return null;
-    let h = parseInt(match[1], 10);
-    const m = match[2] ? parseInt(match[2], 10) : 0;
-    const ampm = match[3]?.toLowerCase();
-    if (ampm) {
-      if (h < 1 || h > 12) return null;
-      if (ampm === 'pm' && h < 12) h += 12;
-      if (ampm === 'am' && h === 12) h = 0;
-    }
-    if (h < 0 || h > 23 || m < 0 || m > 59) return null;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-  };
-
-  // Close time dropdown on outside click
-  useEffect(() => {
-    if (!timeDropdownOpen) return;
-    const handleClick = (e) => {
-      if (timeDropdownRef.current && !timeDropdownRef.current.contains(e.target)) {
-        setTimeDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [timeDropdownOpen]);
 
   // Close the people-count dropdown on outside click
   useEffect(() => {
@@ -528,13 +490,6 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setCountText(String(clamped));
   };
 
-  // Auto-scroll to selected time when dropdown opens
-  useEffect(() => {
-    if (timeDropdownOpen && timeListRef.current) {
-      const selected = timeListRef.current.querySelector('[data-selected="true"]');
-      if (selected) selected.scrollIntoView({ block: 'center' });
-    }
-  }, [timeDropdownOpen]);
 
   // Same mode → one shared service; Different mode → every person must pick one.
   const groupServiceValid = serviceMode === 'same'
@@ -571,7 +526,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || !customerPhone.replace(/\D/g, ''))) return;
+    if (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || (!customerPhone.replace(/\D/g, '') && !knownCustomerId))) return;
     // Synchronous re-entry guard: the `submitting` state disables the button
     // only after a re-render, so a fast double-click can fire two submits and
     // create duplicate bookings. The ref blocks the second call immediately.
@@ -593,6 +548,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
           customerPhone: customerPhone.replace(/\D/g, '')
             ? customerCountryCode + customerPhone.replace(/\D/g, '')
             : null,
+          knownCustomerId,
           customerEmail: customerEmail.trim() || null,
           customerGender: customerGender || null,
           specialRequests: specialRequests.trim() || null,
@@ -678,52 +634,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   className="font-body font-body-medium text-sm text-text-primary bg-transparent border border-border rounded-spa px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </div>
-              <div className="relative flex items-center gap-1.5" ref={timeDropdownRef}>
+              <div className="flex items-center gap-1.5">
                 <Icon name="Clock" size={14} className="text-primary" />
-                <input
-                  type="text"
-                  value={timeText}
-                  onChange={(e) => {
-                    // Let the field reflect whatever is typed; commit to
-                    // bookingTime only once it parses to a valid time.
-                    const raw = e.target.value;
-                    setTimeText(raw);
-                    setBookingTime(parseTimeInput(raw) ?? '');
-                  }}
-                  onFocus={(e) => { e.target.select(); setTimeDropdownOpen(true); }}
-                  onBlur={() => {
-                    // Normalize to the canonical 12h display once editing ends.
-                    setTimeText(bookingTime ? format12h(bookingTime) : '');
-                  }}
-                  placeholder="--:--"
-                  autoComplete="off"
-                  className="font-body font-body-medium text-sm text-text-primary bg-transparent border border-border rounded-spa px-2 py-0.5 w-20 focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-                <button
-                  type="button"
-                  onClick={() => setTimeDropdownOpen((v) => !v)}
-                  className="text-text-secondary hover:text-primary transition-colors"
-                >
-                  <Icon name="ChevronDown" size={14} />
-                </button>
-                {timeDropdownOpen && (
-                  <div
-                    ref={timeListRef}
-                    className="absolute top-full left-0 mt-1 w-28 max-h-48 overflow-y-auto bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown"
-                  >
-                    {timeOptions.map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        data-selected={t === bookingTime}
-                        onClick={() => { setBookingTime(t); setTimeText(format12h(t)); setTimeDropdownOpen(false); }}
-                        className={`w-full text-left px-3 py-1.5 text-sm font-body cursor-pointer hover:bg-primary/10 ${t === bookingTime ? 'bg-primary/10 font-body-medium text-primary' : 'text-text-primary'}`}
-                      >
-                        {format12h(t)}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <TimeBoxInput value={bookingTime} onChange={setBookingTime} />
               </div>
             </div>
             <div className="flex items-center gap-1.5 mt-1.5">
@@ -1597,6 +1510,13 @@ const OperationalCalendar = ({ branchId }) => {
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   const userRole = profile?.role || 'staff';
+  // Mirrors resolveVisibility's privileged bypass (api.js): manager/admin are
+  // never restricted regardless of the column, same as every server-side
+  // check. Without this, a manager with can_view_customer_details=false would
+  // have "Book in" hidden here while fetchWaitlist returns their data
+  // unmasked — stricter-than-the-API, which is the safe direction, but the
+  // two should agree rather than drift.
+  const canViewCustomerDetails = userRole === 'manager' || userRole === 'admin' || profile?.can_view_customer_details !== false;
   const calendarStartHour = (() => {
     const t = orgSettings?.calendar_start_time;
     if (!t || typeof t !== 'string') return undefined;
@@ -1832,6 +1752,12 @@ const OperationalCalendar = ({ branchId }) => {
 
   // Quick-create panel state
   const [quickCreateSlot, setQuickCreateSlot] = useState(null);
+  // Which waitlist entry (if any) the open Quick Create panel is converting —
+  // cleared on cancel, so a closed-without-saving form leaves the queue
+  // untouched (the entry only flips to 'booked' once the booking actually saves).
+  const [bookingWaitlistEntryId, setBookingWaitlistEntryId] = useState(null);
+  const [waitlistCollapsed, setWaitlistCollapsed] = useState(true);
+  const [waitlistRefreshToken, setWaitlistRefreshToken] = useState(0);
   const [servicesCache, setServicesCache] = useState(null);
   const [servicesLoading, setServicesLoading] = useState(false);
 
@@ -2483,6 +2409,39 @@ const OperationalCalendar = ({ branchId }) => {
     }
   }, [servicesCache, servicesLoading, branchId]);
 
+  // "Book this person in" from the waitlist panel — opens the normal Quick
+  // Create form prefilled with what they asked for. Staff still pick the real
+  // slot/date/time and therapist; this only saves them retyping the customer
+  // and service. The entry only flips to 'booked' once the booking actually
+  // saves (handleQuickCreateSubmit) — closing this form leaves the queue
+  // exactly as it was.
+  const handleBookInFromWaitlist = useCallback((entry) => {
+    // A restricted account (can_view_customer_details=false) only ever sees
+    // MASKED name/phone for this entry — "A***** T******", "+**********655".
+    // That text must never be typed into a write. When the entry has a linked
+    // customer_id, createBooking's knownCustomerId resolves the real record
+    // server-side and ignores whatever's in these display fields, so masked
+    // text here is inert. When there's no customer_id (a walk-in waitlist
+    // entry), a restricted account genuinely doesn't hold the data needed to
+    // create the booking — the panel hides "Book in" for that case entirely
+    // (see WaitlistPanel's canViewCustomerDetails prop) rather than this
+    // function inventing values, so this branch is never reached for one.
+    const canSeeContact = canViewCustomerDetails;
+    setBookingWaitlistEntryId(entry.id);
+    openQuickCreateForSlot({
+      day: entry.preferred_date || currentDate,
+      hour: entry.preferred_time ? parseInt(entry.preferred_time.slice(0, 2), 10) : undefined,
+      minute: entry.preferred_time ? parseInt(entry.preferred_time.slice(3, 5), 10) : undefined,
+      colType: entry.preferred_therapist_id ? 'therapist' : null,
+      colId: entry.preferred_therapist_id || null,
+      defaultServiceId: entry.service_id,
+      defaultCustomerName: entry.customer_name,
+      defaultCustomerPhone: canSeeContact && entry.customer_phone ? entry.customer_phone.replace(/^\+\d{1,3}/, '') : '',
+      defaultCustomerCountryCode: canSeeContact ? (entry.customer_phone?.match(/^\+\d{1,3}/)?.[0] || '+977') : '+977',
+      defaultCustomerId: entry.customer_id || null,
+    });
+  }, [openQuickCreateForSlot, currentDate, canViewCustomerDetails]);
+
   const handleEmptySlotClick = useCallback(async (slotInfo) => {
     // Block new bookings/blocks on any slot covered by a manual block (migration-212).
     const manualBlock = findManualBlockForSlot(calendarData?.blockOccurrences, slotInfo.colType, slotInfo.colId, slotInfo.day, slotInfo.hour, slotInfo.minute);
@@ -2644,6 +2603,7 @@ const OperationalCalendar = ({ branchId }) => {
 
   const handleQuickCreateClose = useCallback(() => {
     setQuickCreateSlot(null);
+    setBookingWaitlistEntryId(null);
   }, []);
 
   // Auto-open the Quick Booking panel when the mobile FAB navigates here with
@@ -2724,9 +2684,24 @@ const OperationalCalendar = ({ branchId }) => {
       referringCustomerId: formData.referringCustomerId,
       referringRewardType: formData.referringRewardType,
       referringRewardAmount: formData.referringRewardAmount,
+      knownCustomerId: formData.knownCustomerId || undefined,
     });
     if (result.error) {
       return result.error.message || 'Failed to create booking.';
+    }
+
+    // The booking now exists for real — flip the waitlist entry to 'booked'
+    // regardless of whether a combo-items write below succeeds, since the
+    // booking itself (and the customer's place in the queue) is already
+    // settled. Best-effort: a failure here shouldn't undo an otherwise
+    // successful booking, so it's logged rather than surfaced as an error.
+    if (bookingWaitlistEntryId && result.data?.id) {
+      const waitlistResult = await updateWaitlistEntry({ id: bookingWaitlistEntryId, status: 'booked', bookingId: result.data.id });
+      if (waitlistResult.error) {
+        console.error('[Calendar] failed to flip waitlist entry to booked:', waitlistResult.error.message);
+      }
+      setBookingWaitlistEntryId(null);
+      setWaitlistRefreshToken((v) => v + 1);
     }
 
     if (formData.comboAssignments?.length > 0 && result.data?.id) {
@@ -2754,7 +2729,7 @@ const OperationalCalendar = ({ branchId }) => {
     setQuickCreateSlot(null);
     refreshCalendar();
     return null;
-  }, [branchId, refreshCalendar]);
+  }, [branchId, refreshCalendar, bookingWaitlistEntryId]);
 
   // ── Rebook "pick and place" handlers ───────────────────────
 
@@ -3478,8 +3453,9 @@ const OperationalCalendar = ({ branchId }) => {
             </div>
           </div>
 
-          {/* Calendar grid */}
-          <div className="flex-1 min-h-0 overflow-x-auto md:overflow-hidden">
+          {/* Calendar grid + waitlist panel */}
+          <div className="flex-1 min-h-0 flex overflow-hidden">
+          <div className="flex-1 min-w-0 overflow-x-auto md:overflow-hidden">
               {calendarData ? (
                 viewMode === 'month' ? (
                   <MonthGridView
@@ -3538,6 +3514,18 @@ const OperationalCalendar = ({ branchId }) => {
                   </div>
                 </div>
               )}
+          </div>
+
+          <WaitlistPanel
+            branchId={branchId}
+            services={servicesCache || []}
+            therapists={calendarData?.therapists || []}
+            collapsed={waitlistCollapsed}
+            onToggleCollapse={() => setWaitlistCollapsed((v) => !v)}
+            onBookIn={handleBookInFromWaitlist}
+            refreshToken={waitlistRefreshToken}
+            canViewCustomerDetails={canViewCustomerDetails}
+          />
           </div>
         </div>
 
@@ -3636,6 +3624,7 @@ const OperationalCalendar = ({ branchId }) => {
         branchHours={calendarData?.branchHours}
         defaultNewBookingMode={rebookFallback ? 'rebook' : null}
         userRole={profile?.role || 'staff'}
+        canViewCustomerDetails={canViewCustomerDetails}
         onViewBooking={(bookingId) => handleBookingClick({ bookingId })}
       />
 
@@ -3671,7 +3660,6 @@ const OperationalCalendar = ({ branchId }) => {
         onClose={handleQuickCreateClose}
         onSubmit={handleQuickCreateSubmit}
         branchId={branchId}
-        branchHours={calendarData?.branchHours}
       />
 
       {/* Empty-slot choice menu — Add booking / Add block / Transfer staff */}

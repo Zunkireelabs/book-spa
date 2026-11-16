@@ -17,6 +17,7 @@ import RevenueCards from '../branch-manager-dashboard/components/RevenueCards';
 import TipsSummaryCard from '../branch-manager-dashboard/components/TipsSummaryCard';
 import TodayInsightsPanel from '../branch-manager-dashboard/components/TodayInsightsPanel';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLock } from '../../contexts/LockContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, recordTip, applyDiscount } from '../../services/api';
 import { transformBookings, toDbStatus, isNoShow } from '../../services/bookingTransformers';
@@ -27,6 +28,7 @@ import { getTodayISO, toISO } from '../../utils/periodPresets';
 
 const BranchStaffDashboard = () => {
   const { profile, signOut, user } = useAuth();
+  const { lock } = useLock();
   const { branchId, branchName } = useBranch();
   const [searchParams, setSearchParams] = useSearchParams();
   const { items: notifications, markRead: markNotifRead, markAllRead: markAllNotifsRead } = usePersistentNotifications(user?.id);
@@ -562,6 +564,14 @@ const BranchStaffDashboard = () => {
                   {showProfileDropdown && (
                     <div className="absolute right-0 mt-2 w-56 bg-background rounded-spa spa-shadow-elevated z-dropdown border border-border overflow-hidden">
                       <button
+                        onClick={() => { setShowProfileDropdown(false); lock(); }}
+                        aria-label="Lock screen"
+                        className="w-full flex items-center space-x-2 px-4 py-2.5 text-sm text-text-primary hover:bg-background transition-colors"
+                      >
+                        <Icon name="Lock" size={16} className="text-text-secondary" />
+                        <span className="font-body font-body-medium">Lock Screen</span>
+                      </button>
+                      <button
                         onClick={handleLogout}
                         className="w-full flex items-center space-x-2 px-4 py-2.5 text-sm text-error hover:bg-error/5 transition-colors"
                       >
@@ -677,6 +687,7 @@ const BranchStaffDashboard = () => {
                       onGroupPaymentRecorded={handleGroupPaymentRecorded}
                       onApplyDiscount={handleApplyDiscount}
                       userRole={profile?.role || 'staff'}
+                      canViewCustomerDetails={profile?.role === 'manager' || profile?.role === 'admin' || profile?.can_view_customer_details !== false}
                       onRefresh={loadData}
                       dateRange={filters.dateRange}
                     />

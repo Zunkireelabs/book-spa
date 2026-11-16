@@ -4,7 +4,7 @@ import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
 import { createBooking, createBookingGroup, lookupReferrerByPhone, fetchServiceComboComponents, createComboBookingItems } from '../../../services/api';
 import { toE164 } from '../../../utils/phone';
-import { formatNPR } from '../../../services/bookingTransformers';
+import { useResolvedServicePricing } from '../../../hooks/useCustomerServicePricing';
 
 const BookingConfirmation = ({
   orgSlug,
@@ -205,8 +205,9 @@ const BookingConfirmation = ({
   const servicesToShow = (Array.isArray(additionalServices) && additionalServices.length > 0)
     ? additionalServices
     : (selectedService ? [selectedService] : []);
-  const priceOf = (s) => Number(s?.price ?? s?.effective_price_npr ?? s?.price_npr ?? 0);
-  const totalPrice = servicesToShow.reduce((sum, s) => sum + priceOf(s), 0);
+  const pricingItems = servicesToShow.map((s, i) => ({ key: s?.id ?? i, service: s, therapistId }));
+  const { perItem: pricedServices, totalLabel } = useResolvedServicePricing(pricingItems);
+  const labelFor = (s, i) => pricedServices.find((p) => p.key === (s?.id ?? i))?.label ?? null;
   const heroService = servicesToShow[0];
 
   return (
@@ -236,12 +237,12 @@ const BookingConfirmation = ({
             {servicesToShow.map((s, i) => (
               <div key={s?.id ?? i} className="flex justify-between text-sm">
                 <span className="text-text-secondary">{s?.name}</span>
-                <span className="font-medium">{formatNPR(priceOf(s))}</span>
+                {labelFor(s, i) != null && <span className="font-medium">{labelFor(s, i)}</span>}
               </div>
             ))}
             <div className="flex justify-between text-sm pt-2 border-t border-border">
               <span className="text-text-secondary font-medium">Total</span>
-              <span className="text-primary font-bold">{formatNPR(totalPrice)}</span>
+              <span className="text-primary font-bold">{totalLabel}</span>
             </div>
           </div>
         </div>

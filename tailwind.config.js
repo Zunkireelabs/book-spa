@@ -94,6 +94,7 @@ module.exports = {
           'modal': '1000',
           'modal-overlay': '1100',
           'notification': '1200',
+          'lock': '1300',
         },
         animation: {
           'pulse-gentle': 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',

@@ -1,4 +1,4 @@
-import { supabase, supabaseCustomer } from '../lib/supabase';
+import { supabase, supabaseCustomer, supabaseProvision } from '../lib/supabase';
 import { transformMembership, transformMemberships, toTitleCase, isNoShow } from './bookingTransformers';
 import { dedupeTransfersByKey, sortTransfersByTime } from './transferDedup';
 import { capture } from '../lib/analytics';
@@ -171,7 +171,7 @@ async function getAuthenticatedUser() {
   }
   const { data: profile, error: profileError } = await supabase
     .from('users')
-    .select('id, role, branch_id, org_id')
+    .select('id, role, branch_id, org_id, calendar_visibility, can_view_customer_details, can_view_prices')
     .eq('id', user.id)
     .single();
 
@@ -309,9 +309,19 @@ export async function fetchServices(branchId) {
       return { data: [], error: null };
     }
 
+    // A staff member with prices hidden must not see the SERVICE MENU prices
+    // either — hiding the amount on a booking card while the service list
+    // still shows NPR 4,200 for the same treatment achieves nothing. The price
+    // columns are left out of the select rather than blanked afterwards, so
+    // they never reach the browser.
+    const vis = await resolveVisibility(profile);
+    const priceCols = vis.canViewPrices
+      ? ', price_npr, effective_price_npr, is_on_offer, original_price_npr'
+      : '';
+
     const { data, error } = await supabase
       .from('services_with_offer_pricing')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_combo, requires_therapist, effective_price_npr, is_on_offer, original_price_npr')
+      .select(`id, name, duration_minutes, description, image_url, category, is_couple, is_combo, requires_therapist, price_type${priceCols}`)
       .eq('org_id', profile.org_id)
       .eq('is_active', true)
       .order('name');
@@ -749,8 +759,9 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
     }
 
     // 5. Auth
-    const { user, error: authError } = await getAuthenticatedUser();
+    const { user, profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
+    const vis = await resolveVisibility(profile);
 
     // 6. Determine already-collected and remaining
     const finalAmount = Number(booking.final_amount);
@@ -833,7 +844,13 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
 
     const nprTenderTotal = Math.round(tenderList.reduce((s, t) => s + t.amount, 0) * 100) / 100;
     if (nprTenderTotal > remaining) {
-      return { data: null, error: { code: 'OVERPAYMENT', message: `Payment (NPR ${nprTenderTotal}) exceeds the remaining balance (NPR ${remaining}).` } };
+      // The amounts themselves are withheld for a price-restricted staff
+      // account — "hidden everywhere, including at payment" (migration-320)
+      // — so this message must not hand the balance back in plain text.
+      const message = vis.canViewPrices
+        ? `Payment (NPR ${nprTenderTotal}) exceeds the remaining balance (NPR ${remaining}).`
+        : 'Payment exceeds the remaining balance.';
+      return { data: null, error: { code: 'OVERPAYMENT', message } };
     }
 
     // SessionPackage tenders settle whatever balance is left after the NPR
@@ -1061,8 +1078,7 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
         success: true,
         paymentIds: insertedIds,
         bookingId,
-        amountPaid: tenderTotal,
-        amountDue: leftover,
+        ...(vis.canViewPrices ? { amountPaid: tenderTotal, amountDue: leftover } : {}),
         fullyPaid: leftover === 0,
       },
       error: null,
@@ -2365,6 +2381,36 @@ export async function updateBookingStatus({ bookingId, newStatus, reason }) {
   }
 }
 
+// Tiered pricing: what base_amount should a booking carry, given who is now
+// assigned? Returns null when the service isn't tiered, so callers can leave
+// the amount alone.
+//
+// Shared by assignTherapist and rescheduleBooking because BOTH change who is
+// assigned. rescheduleBooking takes a newTherapistId and rewrites the
+// booking_therapists junction, so a tiered booking moved onto a cheaper or
+// dearer therapist would otherwise keep the old price — the charge is
+// supposed to follow whoever actually delivers (migration-319).
+async function tieredBaseAmountFor(serviceId, therapistId) {
+  if (!serviceId) return null;
+  const { data: svc, error: svcErr } = await supabase
+    .from('services')
+    .select('price_type, price_npr')
+    .eq('id', serviceId)
+    .single();
+  if (svcErr) throw svcErr;
+  if (svc.price_type !== 'tiered') return null;
+
+  // Unassigned rate is the floor: no therapist, or a therapist whose tier has
+  // no price for this service, both charge it. Never zero.
+  let amount = Number(svc.price_npr);
+  if (therapistId) {
+    const { data: tierPrice, error: tierErr } = await fetchServicePriceForTherapist(serviceId, therapistId);
+    if (tierErr) throw tierErr;
+    if (tierPrice != null) amount = tierPrice;
+  }
+  return amount;
+}
+
 export async function assignTherapist({ bookingId, therapistIds = [], roomId, therapistRoomOverrides, companionName, companionPhone }) {
   try {
     // Support legacy single therapistId param
@@ -2373,7 +2419,7 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
     // 1. Fetch booking (include room_id + date for attendance check)
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, is_locked, branch_id, room_id, date, start_time')
+      .select('id, status, is_locked, branch_id, room_id, date, start_time, service_id')
       .eq('id', bookingId)
       .single();
 
@@ -2466,6 +2512,19 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
     };
     if (companionName !== undefined) updatePayload.companion_name = companionName?.trim() || null;
     if (companionPhone !== undefined) updatePayload.companion_phone = companionPhone ? toE164(companionPhone) : null;
+
+    // Tiered pricing: the charge follows whoever actually delivers, not who
+    // was originally quoted (migration-319's standing decision) — reassigning
+    // the primary therapist here recomputes the price right now, through the
+    // same DB function the booking and payment screens use, so none of the
+    // three can disagree about what this person costs. final_amount recomputes
+    // itself from base_amount via the existing compute_final_amount trigger.
+    if (booking.service_id) {
+      const newBaseAmount = await tieredBaseAmountFor(booking.service_id, primaryId);
+      if (newBaseAmount !== null) {
+        updatePayload.base_amount = newBaseAmount;
+      }
+    }
 
     // 6. Room assignment (if roomId provided)
     if (roomId !== undefined) {
@@ -3485,7 +3544,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
     // 1. Fetch booking with service duration, room, therapist, and branch
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, is_locked, payment_status, room_id, therapist_id, branch_id, service:services(duration_minutes)')
+      .select('id, status, is_locked, payment_status, room_id, therapist_id, branch_id, service_id, service:services(duration_minutes)')
       .eq('id', bookingId)
       .single();
 
@@ -3660,6 +3719,22 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       }
     }
 
+    // 7b. Tiered pricing: a reschedule can also change WHO is assigned, via
+    // newTherapistId. The charge follows whoever delivers (migration-319), so
+    // recompute here too — assignTherapist is not the only path that reassigns,
+    // and without this a tiered booking moved onto a cheaper or dearer
+    // therapist would keep the old price. Same shared helper, so the two paths
+    // cannot disagree. final_amount follows base_amount via the existing
+    // compute_final_amount trigger.
+    if (newTherapistId !== undefined && booking.service_id) {
+      const resolvedTherapistId =
+        newTherapistId === 'unassigned' || newTherapistId === null ? null : newTherapistId;
+      const newBaseAmount = await tieredBaseAmountFor(booking.service_id, resolvedTherapistId);
+      if (newBaseAmount !== null) {
+        updatePayload.base_amount = newBaseAmount;
+      }
+    }
+
     // 8. Update the booking
     const { data: updated, error: updateError } = await supabase
       .from('bookings')
@@ -3738,6 +3813,16 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
 
 export async function getDailySummary(branchId, date) {
   try {
+    // Every figure this report returns is money — there's no partial redaction
+    // to do here the way getCalendarBookings keeps non-money fields. A
+    // price-restricted account gets a clean denial instead of an empty shell.
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const vis = await resolveVisibility(profile);
+    if (!vis.canViewPrices) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'This account cannot view pricing reports.' } };
+    }
+
     const overall = isOverallBranch(branchId);
 
     // 1. Fetch all bookings for the branch + date
@@ -4297,6 +4382,16 @@ export async function getDailyOperationalReport(branchId, date) {
     }
     if (!date) {
       return { data: null, error: { code: 'INVALID_DATE', message: 'Date is required.' } };
+    }
+
+    // Same reasoning as getDailySummary: this is the day's takings end to end
+    // (base/discount/final amounts, payment breakdown) — a price-restricted
+    // account doesn't get a stripped-down version of it, it doesn't get it.
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const vis = await resolveVisibility(profile);
+    if (!vis.canViewPrices) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'This account cannot view pricing reports.' } };
     }
 
     const overall = isOverallBranch(branchId);
@@ -5153,6 +5248,10 @@ export async function getCustomerBookingHistory(customerAccountId) {
 
 export async function fetchBookingById(bookingId) {
   try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const vis = await resolveVisibility(profile);
+
     const { data, error } = await supabase
       .from('bookings')
       .select(`
@@ -5174,7 +5273,33 @@ export async function fetchBookingById(bookingId) {
       }
       throw error;
     }
-    return { data, error: null };
+
+    // This select is shared with every role, so columns can't just be left
+    // out of it the way getCalendarBookings does — redact what was already
+    // fetched instead. "Own bookings only" additionally means a booking that
+    // isn't theirs doesn't exist as far as this caller is concerned.
+    if (vis.ownBookingsOnly) {
+      const isMine = vis.therapistId != null && (
+        data.therapist_id === vis.therapistId ||
+        (data.booking_therapists || []).some((bt) => bt.therapist_id === vis.therapistId)
+      );
+      if (!isMine) {
+        return { data: null, error: { code: 'BOOKING_NOT_FOUND', message: 'Booking not found.' } };
+      }
+    }
+
+    const [redacted] = redactRows([data], vis);
+    if (!vis.canViewPrices) {
+      redacted.payments = (redacted.payments || []).map(({ amount, ...rest }) => rest);
+      redacted.booking_tips = (redacted.booking_tips || []).map(({ amount, ...rest }) => rest);
+      redacted.payment_refunds = (redacted.payment_refunds || []).map(({ amount, ...rest }) => rest);
+      if (redacted.service) {
+        const { price_npr, ...serviceRest } = redacted.service;
+        redacted.service = serviceRest;
+      }
+    }
+
+    return { data: redacted, error: null };
   } catch (error) {
     console.error('[API] fetchBookingById error:', error.message);
     return { data: null, error };
@@ -5188,6 +5313,31 @@ export async function fetchBookingById(bookingId) {
 export async function getCalendarBookings(branchId, startDate, endDate) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const vis = await resolveVisibility(profile);
+
+    // "Own bookings only" is enforced by migration-322's RESTRICTIVE RLS
+    // policy on `bookings` itself now — every SELECT below already comes back
+    // pre-filtered to this therapist's own rows server-side. This used to
+    // also fetch an all-time ownBookingIds list from booking_therapists and
+    // .in('id', ownBookingIds) the main query, but that .in() grows with the
+    // therapist's entire history and PostgREST rejects a bare .in() above
+    // ~500-700 ids with an undetailed 400 (see the pagination note at
+    // fetchAllPages, :1345) — a therapist with a year of bookings got a blank
+    // calendar. RLS doesn't have that limit; removing the client-side filter
+    // removes the bug along with the now-redundant code.
+    //
+    // The fail-closed early return stays: RLS also fails closed for an
+    // unlinked restricted account, but this avoids a pointless round trip
+    // and keeps the intent legible here.
+    if (vis.ownBookingsOnly && !vis.therapistId) {
+      return {
+        data: { branchHours: { openTime: '09:00:00', closeTime: '21:00:00', timezone: 'Asia/Kathmandu' }, therapists: [], rooms: [], bookings: [], checkedOutByTherapistAndDate: {} },
+        error: null,
+      };
+    }
 
     // 1. Fetch branch hours + timezone
     const { data: branch, error: branchError } = await supabase
@@ -5410,29 +5560,72 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     const mergedTherapists = [...normalTherapists, ...transferredOutTherapists, ...transferredInTherapists]
       .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name));
 
-    // 3. Fetch bookings in date range, excluding Cancelled and No Show
-    const { data: bookings, error: bookingsError } = await supabase
-      .from('bookings')
-      .select(`
-        id, booking_number, customer_id, customer_name, customer_phone, status, payment_status,
-        date, start_time, end_time, start_datetime, end_datetime, created_at, created_by,
-        therapist_id, room_id,
-        base_amount, discount_amount, final_amount, special_requests,
-        service:services(name, duration_minutes, requires_therapist),
-        therapist:therapists(id, name),
-        room:rooms(id, name),
-        creator:users!created_by(full_name),
-        booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name), room:rooms(id, name)),
-        booking_combo_items(id, service_id, therapist_id, room_id, start_time, end_time, display_order, service:services(name, duration_minutes), therapist:therapists(id, name)),
-        payments(amount)
-      `)
-      .eq('branch_id', resolvedBranchId)
-      .gte('date', startDate)
-      .lte('date', endDate)
-      .not('status', 'in', '("Cancelled","No Show")')
-      .order('start_time');
+    // 3. Fetch bookings in date range, excluding Cancelled and No Show.
+    // Money and customer-contact columns are left out of the select entirely
+    // when withheld, rather than fetched and blanked after — once a column
+    // never leaves the database, there's nothing for devtools to recover.
+    let bookings = [];
+    {
+      const bookingFields = [
+        'id', 'booking_number', 'customer_id', 'customer_name',
+        'customer_phone',   // fetched always; masked below when withheld — see maskPhone
+        'status', 'payment_status',
+        'date', 'start_time', 'end_time', 'start_datetime', 'end_datetime', 'created_at', 'created_by',
+        'therapist_id', 'room_id',
+        vis.canViewPrices && 'base_amount, discount_amount, final_amount',
+        'special_requests',
+        'service:services(name, duration_minutes, requires_therapist)',
+        'therapist:therapists(id, name)',
+        'room:rooms(id, name)',
+        'creator:users!created_by(full_name)',
+        'booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name), room:rooms(id, name))',
+        'booking_combo_items(id, service_id, therapist_id, room_id, start_time, end_time, display_order, service:services(name, duration_minutes), therapist:therapists(id, name))',
+        vis.canViewPrices && 'payments(amount)',
+      ].filter(Boolean).join(', ');
 
-    if (bookingsError) throw bookingsError;
+      let bookingsQuery = supabase
+        .from('bookings')
+        .select(bookingFields)
+        .eq('branch_id', resolvedBranchId)
+        .gte('date', startDate)
+        .lte('date', endDate)
+        .not('status', 'in', '("Cancelled","No Show")')
+        .order('start_time');
+      // No client-side own-bookings filter needed — migration-322's
+      // RESTRICTIVE RLS policy already scopes this SELECT to the caller's
+      // own bookings when vis.ownBookingsOnly is true.
+
+      const { data: bookingsData, error: bookingsError } = await bookingsQuery;
+      if (bookingsError) throw bookingsError;
+
+    // Name and phone are MASKED, not withheld: staff still need to tell two
+    // bookings apart and confirm the person in front of them.
+    //
+    // Be clear about what this is. This file runs in the browser, so masking
+    // here happens AFTER the row arrives — the real name and number are in the
+    // network response and recoverable with devtools. That is different from
+    // the money and email columns above, which are omitted from the select and
+    // genuinely never sent. Masking is a display guarantee; column omission is
+    // an access guarantee. Making names a real one needs a view or an RPC that
+    // masks in Postgres — tracked alongside the column-privilege gap in
+    // migration-320.
+    if (!vis.canViewCustomerDetails) {
+      bookings = (bookings || []).map((b) => ({
+        ...b,
+        customer_name: maskCustomerName(b.customer_name),
+        customer_phone: maskPhone(b.customer_phone),
+      }));
+    }
+
+    // Tell the UI the amount was WITHHELD, rather than leaving it to infer
+    // that from an absent field. Without this a restricted booking renders the
+    // same "—" as a booking that genuinely has no amount recorded, which reads
+    // as missing data instead of a deliberate restriction.
+    if (!vis.canViewPrices) {
+      bookings = (bookings || []).map((b) => ({ ...b, pricesWithheld: true }));
+    }
+      bookings = bookingsData || [];
+    }
 
     // "New" tag: same "does this customer have any earlier non-Cancelled booking?" definition
     // as getCustomerFirstBookingFlag, batched for every customer appearing in this range
@@ -5576,13 +5769,50 @@ export async function createBooking({
   referralSource,
   referralSourceDetail,
   customerAccountId,
+  // Set only when the caller already knows the real customer record — e.g.
+  // converting a waitlist entry (see migration-327 / WaitlistPanel). Bypasses
+  // the phone/name lookup-and-rename below entirely: customerName/customerPhone
+  // might be masked (a restricted staff account's canViewCustomerDetails=false
+  // view of the entry), and masked text must never re-enter a write — see the
+  // incident this fixed. Never set this from a value the caller typed; only
+  // from a column that's already a real customers.id.
+  knownCustomerId,
 }) {
   try {
-    if (!customerPhone || !customerPhone.trim()) {
+    if ((!customerPhone || !customerPhone.trim()) && !knownCustomerId) {
       return { data: null, error: { message: 'Phone number is required' } };
     }
 
-    customerName = toTitleCase(customerName);
+    // knownCustomerId: overwrite whatever was passed as customerName/Phone/Email
+    // with the real customer record, before any of those values reach a write.
+    // The caller's own copies may be masked (canViewCustomerDetails=false), and
+    // masked text must never land in bookings.customer_name/_phone — that was
+    // exactly the Yukta Dhungana-style corruption this closes, made automatic
+    // instead of a one-off typo.
+    if (knownCustomerId) {
+      const { data: realCustomer, error: custLookupErr } = await supabase
+        .from('customers')
+        .select('full_name, phone, email')
+        .eq('id', knownCustomerId)
+        .single();
+      if (custLookupErr) {
+        return { data: null, error: { code: 'CUSTOMER_NOT_FOUND', message: 'Could not find the linked customer record.' } };
+      }
+      customerName = realCustomer.full_name;
+      customerPhone = realCustomer.phone;
+      customerEmail = realCustomer.email;
+      // Relaxing the phone-required gate above for this path is correct — a
+      // restricted account has no phone to retype — but downstream code
+      // (outstanding-balance lookups, reports) groups by phone, and a
+      // customer record can legitimately have neither on file. Fail closed
+      // here rather than silently writing a booking with no way to look the
+      // customer back up by contact info.
+      if (!customerPhone && !customerEmail) {
+        return { data: null, error: { code: 'NO_CONTACT_INFO', message: 'This customer has no phone or email on file — add one to their profile before booking.' } };
+      }
+    } else {
+      customerName = toTitleCase(customerName);
+    }
     const resolvedBranchId = resolveBranchId(branchId);
 
     // 1. Fetch service for duration + price, and the branch's industry config.
@@ -5597,7 +5827,7 @@ export async function createBooking({
     ] = await Promise.all([
       supabase
         .from('services_with_offer_pricing')
-        .select('id, name, duration_minutes, price_npr, effective_price_npr, is_couple, category')
+        .select('id, name, duration_minutes, price_npr, effective_price_npr, is_couple, category, price_type')
         .eq('id', serviceId)
         .single(),
       supabase
@@ -5766,10 +5996,15 @@ export async function createBooking({
     // 6. Look up or create customer record for CRM linking.
     // Identity is org-wide (org_id + normalized phone), so a returning customer first
     // seen at another branch links to their single profile instead of duplicating.
-    let customerId = null;
+    let customerId = knownCustomerId || null;
     let isNewCustomer = false;
     const orgId = branchData?.org_id || null;
-    try {
+    // knownCustomerId means the caller already has the real customer row —
+    // never re-resolve by name/phone in that case (those fields may be masked
+    // for the acting account, and the lookup below unconditionally overwrites
+    // full_name/phone/email on a match, which is exactly how masked text would
+    // corrupt a real customer record).
+    if (!knownCustomerId) try {
       // Canonical E.164 ("+<countrycode><national>") so the same number always
       // resolves to the same customer regardless of how it was typed, and two
       // different countries' numbers never collide. See src/utils/phone.js.
@@ -5974,6 +6209,20 @@ export async function createBooking({
     // reject the whole insert. Instead skip .select() below and read the row back
     // through public_get_booking_by_request_id (migration-223), keyed on this id.
     const clientRequestId = orgSlug ? crypto.randomUUID() : null;
+
+    // Tiered pricing: the quote at booking time follows whoever is actually
+    // requested, same as every other price type — "Any available" (no
+    // primaryTherapistId yet) still charges the Unassigned rate
+    // (effective_price_npr, already services.price_npr for a tiered service).
+    // Reassignment later recomputes this at payment time per the standing
+    // quote-vs-final decision (migration-319) — this is only the quote.
+    let resolvedBaseAmount = Number(service.effective_price_npr);
+    if (service.price_type === 'tiered' && primaryTherapistId) {
+      const { data: tierPrice, error: tierPriceError } = await fetchServicePriceForTherapist(serviceId, primaryTherapistId);
+      if (tierPriceError) throw tierPriceError;
+      if (tierPrice != null) resolvedBaseAmount = tierPrice;
+    }
+
     const insertPayload = {
       branch_id: resolvedBranchId,
       room_id: availableRoom?.id || null,
@@ -5990,7 +6239,7 @@ export async function createBooking({
       companion_phone: companionPhone ? toE164(companionPhone) : null,
       date: date,
       start_time: startTime,
-      base_amount: Number(service.effective_price_npr),
+      base_amount: resolvedBaseAmount,
       discount_amount: 0,
       special_requests: specialRequests || null,
       created_by: authUser?.id || null,
@@ -6001,7 +6250,7 @@ export async function createBooking({
       // Phase 9A: Snapshot fields — preserve original values at booking time
       service_name_snapshot: service.name,
       service_duration_snapshot: service.duration_minutes,
-      service_price_snapshot: Number(service.effective_price_npr),
+      service_price_snapshot: resolvedBaseAmount,
       service_category_snapshot: service.category,
       room_name_snapshot: availableRoom?.name || null,
       therapist_name_snapshot: therapistNameSnapshot,
@@ -8440,7 +8689,7 @@ export async function fetchServicesForManagement() {
 
     const { data, error } = await supabase
       .from('services_with_offer_pricing')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_combo, is_active, created_at, offer_enabled, offer_type, offer_value, category_offer_enabled, category_offer_percent, effective_price_npr, is_on_offer, original_price_npr, active_campaign_name, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_combo, is_active, created_at, offer_enabled, offer_type, offer_value, category_offer_enabled, category_offer_percent, effective_price_npr, is_on_offer, original_price_npr, active_campaign_name, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist, price_type')
       .eq('org_id', profile.org_id)
       .order('name');
 
@@ -8889,11 +9138,13 @@ export async function createComboBookingItems({ bookingId, branchId, date, start
         date,
         start_time: compStartTime,
         commission_weight: 1,
-        base_share_amount: 0,
       };
     });
 
     if (orgSlug) {
+      // The anon RPC prices each line itself (service_price_for_therapist,
+      // migration-326) rather than trusting a client-supplied amount — an
+      // anonymous insert is not a session worth trusting with its own price.
       const { data, error } = await supabase.rpc('public_create_combo_booking_items', {
         p_booking_id: bookingId,
         p_items: rows.map((r) => ({
@@ -8910,11 +9161,38 @@ export async function createComboBookingItems({ bookingId, branchId, date, start
       return { data, error: null };
     }
 
+    // Each line prices as its own service — the component's own price_type,
+    // never the parent combo's (decided 2026-11-15: a combo line is a service
+    // delivered by a therapist, exactly like a standalone booking of that same
+    // service, so there is one pricing rule, not a parent rule and a child
+    // rule that could disagree). service_price_for_therapist already resolves
+    // tier price / Unassigned-rate fallback / plain fixed price / free's and
+    // no_default's own price_npr (forced to 0 at the DB level for those two
+    // types) in one COALESCE — no price_type branching needed here.
+    const linePrices = await Promise.all(rows.map(async (r) => {
+      const { data: price, error: priceErr } = await fetchServicePriceForTherapist(r.service_id, r.therapist_id);
+      if (priceErr) throw priceErr;
+      return price ?? 0;
+    }));
+    const pricedRows = rows.map((r, i) => ({ ...r, base_share_amount: linePrices[i] }));
+
     const { data, error } = await supabase
       .from('booking_combo_items')
-      .insert(rows)
-      .select('id, service_id, therapist_id, room_id, start_time, end_time');
+      .insert(pricedRows)
+      .select('id, service_id, therapist_id, room_id, start_time, end_time, base_share_amount');
     if (error) throw error;
+
+    // The combo's base_amount is the sum of its lines, full stop — the parent
+    // combo service's own price_type no longer drives the total (same decision
+    // as above). final_amount recomputes itself via the existing
+    // compute_final_amount trigger once base_amount is written.
+    const comboTotal = linePrices.reduce((sum, p) => sum + p, 0);
+    const { error: totalErr } = await supabase
+      .from('bookings')
+      .update({ base_amount: comboTotal })
+      .eq('id', bookingId);
+    if (totalErr) throw totalErr;
+
     return { data, error: null };
   } catch (error) {
     console.error('[API] createComboBookingItems error:', error.message);
@@ -8986,7 +9264,9 @@ export async function setServiceAddons(serviceId, addonServiceIds) {
   }
 }
 
-export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, isCombo, offerEnabled, offerType, offerValue, bookableOnline, isAddon, paddingBeforeMinutes, paddingAfterMinutes, paddingAfterType, requiresTherapist }) {
+const SERVICE_PRICE_TYPES = ['fixed', 'free', 'calendar_only', 'no_default', 'tiered'];
+
+export async function createService({ name, priceNpr, priceType, durationMinutes, description, imageUrl, category, isCouple, isCombo, offerEnabled, offerType, offerValue, bookableOnline, isAddon, paddingBeforeMinutes, paddingAfterMinutes, paddingAfterType, requiresTherapist }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -8997,6 +9277,20 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
 
     if (!name || !name.trim()) {
       return { data: null, error: { code: 'VALIDATION', message: 'Service name is required.' } };
+    }
+
+    const resolvedPriceType = priceType || 'fixed';
+    if (!SERVICE_PRICE_TYPES.includes(resolvedPriceType)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Invalid price type.' } };
+    }
+    // free/no_default carry no meaningful amount — services.price_npr still
+    // needs SOME number (NOT NULL, no default-removal migration), so it's
+    // pinned to 0 rather than asking the form for one that means nothing.
+    // fixed/calendar_only/tiered all need a real amount — tiered's is the
+    // Unassigned rate (migration-323), not a tier price.
+    const resolvedPriceNpr = ['free', 'no_default'].includes(resolvedPriceType) ? 0 : priceNpr;
+    if (['fixed', 'calendar_only', 'tiered'].includes(resolvedPriceType) && (!resolvedPriceNpr || resolvedPriceNpr <= 0)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Price must be a positive number.' } };
     }
 
     // Check for duplicate name within the same organization
@@ -9016,7 +9310,8 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
       .from('services')
       .insert({
         name: name.trim(),
-        price_npr: priceNpr,
+        price_npr: resolvedPriceNpr,
+        price_type: resolvedPriceType,
         duration_minutes: durationMinutes,
         description: description || null,
         image_url: imageUrl || null,
@@ -9035,7 +9330,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
         padding_after_type: paddingAfterType || 'padding',
         requires_therapist: requiresTherapist !== undefined ? !!requiresTherapist : true,
       })
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_combo, is_active, created_at, offer_enabled, offer_type, offer_value, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist')
+      .select('id, name, duration_minutes, price_npr, price_type, description, image_url, category, is_couple, is_combo, is_active, created_at, offer_enabled, offer_type, offer_value, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist')
       .single();
 
     if (error) throw error;
@@ -9046,7 +9341,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
   }
 }
 
-export async function updateServicePricing({ serviceId, name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, isCombo, offerEnabled, offerType, offerValue, bookableOnline, isAddon, paddingBeforeMinutes, paddingAfterMinutes, paddingAfterType, requiresTherapist }) {
+export async function updateServicePricing({ serviceId, name, priceNpr, priceType, durationMinutes, description, imageUrl, category, isCouple, isCombo, offerEnabled, offerType, offerValue, bookableOnline, isAddon, paddingBeforeMinutes, paddingAfterMinutes, paddingAfterType, requiresTherapist }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -9060,9 +9355,21 @@ export async function updateServicePricing({ serviceId, name, priceNpr, duration
       return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
     }
 
+    if (priceType !== undefined && !SERVICE_PRICE_TYPES.includes(priceType)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Invalid price type.' } };
+    }
+    // Same rule as createService: free/no_default carry no meaningful amount,
+    // so price_npr is forced to 0 for them rather than trusting whatever the
+    // form last held (e.g. a value typed before switching price type).
+    const resolvedPriceNpr = priceType !== undefined && ['free', 'no_default'].includes(priceType) ? 0 : priceNpr;
+    if (priceType !== undefined && ['fixed', 'calendar_only', 'tiered'].includes(priceType) && (!resolvedPriceNpr || resolvedPriceNpr <= 0)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Price must be a positive number.' } };
+    }
+
     const updatePayload = {};
     if (name !== undefined) updatePayload.name = name;
-    if (priceNpr !== undefined) updatePayload.price_npr = priceNpr;
+    if (priceType !== undefined) updatePayload.price_type = priceType;
+    if (resolvedPriceNpr !== undefined) updatePayload.price_npr = resolvedPriceNpr;
     if (durationMinutes !== undefined) updatePayload.duration_minutes = durationMinutes;
     if (description !== undefined) updatePayload.description = description;
     if (imageUrl !== undefined) updatePayload.image_url = imageUrl;
@@ -9091,7 +9398,7 @@ export async function updateServicePricing({ serviceId, name, priceNpr, duration
       .update(updatePayload)
       .eq('id', serviceId)
       .eq('org_id', profile.org_id)  // Tenant isolation filter
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, offer_enabled, offer_type, offer_value, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist')
+      .select('id, name, duration_minutes, price_npr, price_type, description, image_url, category, is_couple, is_active, offer_enabled, offer_type, offer_value, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist')
       .single();
 
     if (error) {
@@ -11994,6 +12301,9 @@ export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
       original_price_npr: s.original_price_npr,
       active_campaign_name: s.active_campaign_name,
       is_combo: s.is_combo,
+      price_type: s.price_type,
+      min_price: s.min_price,
+      max_price: s.max_price,
     }));
 
     if (branchId) {
@@ -16612,4 +16922,1339 @@ export async function adminVoidPackageRedemption({ redemptionId, reason }) {
   return callAdminCorrection('admin_void_package_redemption',
     { p_redemption_id: redemptionId },
     { reason, event: 'admin_package_redemption_voided', meta: { redemption_id: redemptionId } });
+}
+
+// ============================================================
+// Staff access (migration-318): link a therapist to a login account.
+// therapists.user_id <-> users.id, both nullable, partial-unique on the
+// therapist side. See migration-318-staff-access.sql for the full rationale.
+// ============================================================
+
+// Who may grant which role. A manager can hand out staff/manager; only an
+// admin can hand out admin or admin_viewer — same ceiling as every other
+// privilege-escalation check in this file (DISCOUNT_LIMITS, setStaffCompensation).
+// ── Staff data visibility (migration-320) ───────────────────────────────────
+// Three admin-set restrictions, resolved once per request and applied by the
+// read functions below:
+//   calendar_visibility 'own'   — only this person's own bookings
+//   can_view_customer_details   — customer phone/email/notes withheld
+//   can_view_prices             — every money field withheld
+//
+// Deliberately NOT applied to manager/admin. A manager who cannot see prices
+// cannot do their job, and the Staff access UI only offers these restrictions
+// for staff. Checking role here as well means a mis-set flag on a manager
+// account degrades to "no restriction" rather than locking them out of the
+// product.
+const MONEY_FIELDS = [
+  'base_amount', 'discount_amount', 'final_amount', 'amount',
+  'tip_amount', 'paid_amount', 'due_amount', 'price_npr',
+];
+const CUSTOMER_DETAIL_FIELDS = ['customer_email', 'notes', 'customer_notes'];
+
+// What this caller may see. Returns the linked therapist id too, since
+// "own bookings only" is meaningless without knowing which therapist the
+// account belongs to — that link is therapists.user_id from migration-318.
+async function resolveVisibility(profile) {
+  const privileged = profile.role === 'manager' || profile.role === 'admin';
+  const vis = {
+    ownBookingsOnly: !privileged && profile.calendar_visibility === 'own',
+    canViewCustomerDetails: privileged || profile.can_view_customer_details !== false,
+    canViewPrices: privileged || profile.can_view_prices !== false,
+    therapistId: null,
+  };
+  if (vis.ownBookingsOnly) {
+    const { data: linked } = await supabase
+      .from('therapists')
+      .select('id')
+      .eq('user_id', profile.id)
+      .maybeSingle();
+    // No linked therapist row means we cannot tell which bookings are
+    // "theirs". Fail closed: show nothing rather than everything.
+    vis.therapistId = linked?.id ?? null;
+  }
+  return vis;
+}
+
+// Strip withheld fields from rows already fetched. Used where a query's
+// column list is shared with callers who ARE allowed the data; where the
+// select is ours alone, prefer omitting the columns so they never leave the
+// database (see getCalendarBookings).
+// "Anisha Thakuri" → "A***** T*******". Keeps the initials and the shape of
+// the name so staff can still tell two bookings apart, match a customer to the
+// person in front of them, and read a list — without learning who anyone is.
+//
+// Masked server-side rather than in the component: a restricted account never
+// receives the real name, so devtools cannot recover it. Deliberately NOT
+// dropping the field entirely, which was the first design — a booking with no
+// customer at all is unusable for the staff member actually delivering it.
+export function maskCustomerName(name) {
+  if (!name) return name;
+  return String(name)
+    .split(/(\s+)/)             // keep the whitespace runs so spacing survives
+    .map((part) => (/^\s+$/.test(part) || part.length === 0
+      ? part
+      : part[0] + '*'.repeat(Math.max(part.length - 1, 0))))
+    .join('');
+}
+
+// "+9779818088655" → "**********655". Last three digits only: enough for
+// staff to confirm they have the right customer on the phone or at the desk,
+// not enough to contact them outside the business. Keeps the original length
+// so the shape of the number still reads normally.
+export function maskPhone(phone) {
+  if (!phone) return phone;
+  const str = String(phone);
+  const digits = str.replace(/\D/g, '');
+  if (digits.length <= 3) return str;          // too short to mask meaningfully
+  let remaining = digits.length - 3;           // how many leading digits to hide
+  return str
+    .split('')
+    .map((ch) => {
+      if (!/\d/.test(ch)) return ch;           // keep +, spaces, dashes
+      if (remaining > 0) { remaining -= 1; return '*'; }
+      return ch;
+    })
+    .join('');
+}
+
+const CUSTOMER_NAME_FIELDS = ['customer_name'];
+// Phone is masked rather than dropped — see maskPhone. Email and notes are
+// still removed outright: there is no partial form of those that is both
+// useful to staff and safe to show.
+const CUSTOMER_MASKED_PHONE_FIELDS = ['customer_phone'];
+
+function redactRows(rows, vis) {
+  if (vis.canViewPrices && vis.canViewCustomerDetails) return rows;
+  const drop = [
+    ...(vis.canViewPrices ? [] : MONEY_FIELDS),
+    ...(vis.canViewCustomerDetails ? [] : CUSTOMER_DETAIL_FIELDS),
+  ];
+  return (rows || []).map((row) => {
+    const copy = { ...row };
+    drop.forEach((f) => { if (f in copy) delete copy[f]; });
+    if (!vis.canViewCustomerDetails) {
+      CUSTOMER_NAME_FIELDS.forEach((f) => {
+        if (f in copy) copy[f] = maskCustomerName(copy[f]);
+      });
+      CUSTOMER_MASKED_PHONE_FIELDS.forEach((f) => {
+        if (f in copy) copy[f] = maskPhone(copy[f]);
+      });
+      // Nested customer relation, where a join pulled one in.
+      if (copy.customer && typeof copy.customer === 'object') {
+        copy.customer = {
+          ...copy.customer,
+          full_name: maskCustomerName(copy.customer.full_name),
+          phone: maskPhone(copy.customer.phone),
+        };
+      }
+    }
+    return copy;
+  });
+}
+
+const ROLES_MANAGER_CAN_GRANT = ['staff', 'manager'];
+const ALL_GRANTABLE_ROLES = ['staff', 'manager', 'admin', 'admin_viewer'];
+
+// Which roles `actorRole` is allowed to hand out. Exported so the UI can show
+// only grantable options instead of offering one that assertCanGrantRole will
+// reject on save — same list, one definition, so the two cannot drift.
+export function grantableRolesFor(actorRole) {
+  if (actorRole === 'admin') return [...ALL_GRANTABLE_ROLES];
+  if (actorRole === 'manager') return [...ROLES_MANAGER_CAN_GRANT];
+  return [];
+}
+
+function assertCanGrantRole(granterRole, targetRole) {
+  if (!ALL_GRANTABLE_ROLES.includes(targetRole)) {
+    return { code: 'VALIDATION', message: 'Invalid role.' };
+  }
+  if (granterRole === 'admin') return null;
+  if (granterRole === 'manager' && ROLES_MANAGER_CAN_GRANT.includes(targetRole)) return null;
+  return { code: 'UNAUTHORIZED', message: 'Managers cannot grant admin or admin_viewer access.' };
+}
+
+async function resolveOrgIdForBranch(branchId) {
+  if (isOverallBranch(branchId)) {
+    const { profile, error } = await getAuthenticatedUser();
+    if (error) return { orgId: null, error };
+    return { orgId: profile.org_id, error: null };
+  }
+  const resolvedBranchId = resolveBranchId(branchId);
+  const { data: branch, error } = await supabase
+    .from('branches')
+    .select('org_id')
+    .eq('id', resolvedBranchId)
+    .single();
+  if (error) return { orgId: null, error };
+  return { orgId: branch.org_id, error: null };
+}
+
+// The list screen's one read: every active therapist in the org (linked or
+// not) plus every org user with no therapist (account-only). Org-scoped, not
+// branch-scoped — branchId only resolves the org, same reasoning as
+// getCustomerIntelligence. Paginated: 63 therapists today, but this is
+// exactly the function that lists all of them, and migration-316/postgrest
+// truncation already burned two PRs on an unpaginated "list everyone" read.
+export async function fetchStaffAccess(branchId) {
+  try {
+    const { orgId, error: orgErr } = await resolveOrgIdForBranch(branchId);
+    if (orgErr) return { data: null, error: orgErr };
+
+    const [therapists, users] = await Promise.all([
+      fetchAllPages((opts) =>
+        supabase
+          .from('therapists')
+          .select('id, name, branch_id, position, gender, is_active, is_service_staff, user_id', opts)
+          .eq('org_id', orgId)
+          .eq('is_active', true)
+          .order('name')
+          .order('id')
+      ),
+      fetchAllPages((opts) =>
+        supabase
+          .from('users')
+          .select('id, email, full_name, role, branch_id, is_active, login_access, calendar_visibility, can_view_customer_details, can_view_prices', opts)
+          .eq('org_id', orgId)
+          .order('full_name')
+          .order('id')
+      ),
+    ]);
+
+    // Manually-ticked extra branches, per user — folded onto each user object
+    // so the detail screen's Locations card doesn't need a second round trip
+    // (and a second loading state) just to pre-check its boxes.
+    const userIds = users.map((u) => u.id);
+    // Paginated like every other list read in this file: one row per
+    // (user, branch), so a tenant with ~200+ accounts crosses PostgREST's
+    // 1000-row cap and would silently lose branch grants — the same silent
+    // truncation fixed in #457/#459.
+    const grants = userIds.length > 0
+      ? await fetchAllPages((opts) =>
+          supabase
+            .from('user_branches')
+            .select('user_id, branch_id', opts)
+            .in('user_id', userIds)
+            .order('user_id')
+            .order('branch_id')
+        )
+      : [];
+    const branchIdsByUser = new Map();
+    (grants || []).forEach((g) => {
+      if (!branchIdsByUser.has(g.user_id)) branchIdsByUser.set(g.user_id, []);
+      branchIdsByUser.get(g.user_id).push(g.branch_id);
+    });
+
+    const usersById = new Map(users.map((u) => [u.id, { ...u, branchIds: branchIdsByUser.get(u.id) || [] }]));
+    const linkedUserIds = new Set(therapists.filter((t) => t.user_id).map((t) => t.user_id));
+
+    const linked = therapists
+      .filter((t) => t.user_id && usersById.has(t.user_id))
+      .map((t) => ({ therapist: t, user: usersById.get(t.user_id) }));
+    const noLogin = therapists.filter((t) => !t.user_id);
+    const accountOnly = Array.from(usersById.values()).filter((u) => !linkedUserIds.has(u.id));
+
+    return { data: { linked, noLogin, accountOnly }, error: null };
+  } catch (error) {
+    console.error('[API] fetchStaffAccess error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// 4-digit plaintext PIN, same format as the column already holds for every
+// existing account (migration-018). Shared by provisionStaffLogin (new
+// account), grantStaffAccess (existing account) and updateStaffAccess (edit).
+function validatePin(pin) {
+  if (pin === undefined || pin === null || pin === '') return null;
+  if (!/^\d{4}$/.test(pin)) {
+    return { code: 'VALIDATION', message: 'PIN must be exactly 4 digits.' };
+  }
+  return null;
+}
+
+// Create a brand-new staff login and its public.users row.
+//
+// public.users.id is a hard FK into auth.users, and an auth.users row can only
+// be created by the service-role key (which must never reach the browser) or
+// by signUp. We use signUp on `supabaseProvision`, an isolated client — signUp
+// returns a session for the account it creates, and on the shared client that
+// would silently swap the admin's session for the staff member's mid-task.
+//
+// The admin types the password themselves and hands it to the staff member in
+// person — a spa admin does this face to face, so there's no email round trip
+// and no reset link nobody can get to. Left blank, a password nobody needs is
+// generated instead; that account then relies on its PIN (or a future reset
+// flow) to ever sign in. Never surfaced in a return value or a log line — the
+// admin typed it, they already know it.
+//
+// Requires public signup to be enabled on the Supabase project (it is, with
+// mailer_autoconfirm on, so the account works immediately). If signup is ever
+// disabled for hardening, this is the one place that breaks and the work moves
+// to a service-role Edge Function mirroring pin-login.
+async function provisionStaffLogin({ email, fullName, orgId, branchId, role, loginAccess, calendarVisibility, password, pin }) {
+  const pinError = validatePin(pin);
+  if (pinError) return { data: null, error: pinError };
+
+  if (password && password.length > 0 && password.length < 6) {
+    return { data: null, error: { code: 'VALIDATION', message: 'Password must be at least 6 characters.' } };
+  }
+  // crypto.randomUUID is available in every browser this app supports and is
+  // CSPRNG-backed — good enough for a password nobody is meant to use.
+  const finalPassword = (password && password.length >= 6) ? password : `${crypto.randomUUID()}${crypto.randomUUID()}`;
+
+  const { data: signUpData, error: signUpError } = await supabaseProvision.auth.signUp({
+    email,
+    password: finalPassword,
+  });
+
+  if (signUpError) {
+    // An auth account can exist without a public.users row — a half-finished
+    // earlier attempt, or an account from another org. Either way the admin
+    // cannot fix it from here, so say what happened rather than retrying.
+    if (/already registered|already exists/i.test(signUpError.message || '')) {
+      return {
+        data: null,
+        error: {
+          code: 'AUTH_ACCOUNT_EXISTS',
+          message: `An account for ${email} already exists but isn't set up for this organization. Ask an admin to check it in Supabase, or use a different email.`,
+        },
+      };
+    }
+    return { data: null, error: signUpError };
+  }
+
+  const authUserId = signUpData?.user?.id;
+  if (!authUserId) {
+    return { data: null, error: { code: 'PROVISION_FAILED', message: 'The login was not created. Try again.' } };
+  }
+
+  // Drop the session signUp just handed us. persistSession:false keeps it out
+  // of storage, but it still lives on this client in memory and would be sent
+  // on that client's next request.
+  await supabaseProvision.auth.signOut().catch(() => {});
+
+  const { data: created, error: insertError } = await supabase
+    .from('users')
+    .insert({
+      id: authUserId,
+      email,
+      full_name: fullName,
+      role,
+      org_id: orgId,
+      branch_id: branchId,
+      is_active: true,
+      login_access: loginAccess,
+      calendar_visibility: calendarVisibility || 'all',
+      pin: pin || null,
+    })
+    .select('id, org_id')
+    .single();
+
+  if (insertError) {
+    // The auth.users row now exists with no public.users row behind it. We
+    // cannot delete it without the service-role key, so it is an orphan.
+    // Surfacing that plainly beats a generic failure: retrying with the same
+    // email will hit AUTH_ACCOUNT_EXISTS above and look inexplicable.
+    console.error('[API] provisionStaffLogin: auth user created but users insert failed', insertError.message);
+    return {
+      data: null,
+      error: {
+        code: 'PROVISION_INCOMPLETE',
+        message: `The login for ${email} was created but could not be set up. An admin needs to remove it in Supabase before trying this email again.`,
+      },
+    };
+  }
+
+  return { data: created, error: null };
+}
+
+export async function grantStaffAccess({ therapistId, email, loginAccess, role, branchIds, calendarVisibility, canViewCustomerDetails, canViewPrices, password, pin }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can grant staff access.' } };
+    }
+
+    const roleError = assertCanGrantRole(profile.role, role);
+    if (roleError) return { data: null, error: roleError };
+
+    if (!['email', 'none'].includes(loginAccess)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Invalid login access value.' } };
+    }
+    if (!email || !email.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Email is required to find the account to link.' } };
+    }
+    const pinError = validatePin(pin);
+    if (pinError) return { data: null, error: pinError };
+
+    const { data: therapist, error: therapistErr } = await supabase
+      .from('therapists')
+      .select('id, org_id, user_id, name, branch_id')
+      .eq('id', therapistId)
+      .eq('org_id', profile.org_id)
+      .single();
+    if (therapistErr) {
+      if (therapistErr.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Therapist not found in your organization.' } };
+      }
+      throw therapistErr;
+    }
+    if (therapist.user_id) {
+      return { data: null, error: { code: 'ALREADY_LINKED', message: `${therapist.name} already has a linked login.` } };
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    let { data: account, error: accountErr } = await supabase
+      .from('users')
+      .select('id, org_id')
+      .eq('org_id', profile.org_id)
+      .ilike('email', cleanEmail)
+      .maybeSingle();
+    if (accountErr) throw accountErr;
+
+    if (!account) {
+      // No login exists for this email yet — provision one.
+      const provisioned = await provisionStaffLogin({
+        email: cleanEmail,
+        fullName: therapist.name,
+        orgId: profile.org_id,
+        branchId: therapist.branch_id,
+        role,
+        loginAccess,
+        calendarVisibility,
+        password,
+        pin,
+      });
+      if (provisioned.error) return { data: null, error: provisioned.error };
+      account = provisioned.data;
+    }
+    // `password` only ever applies to the branch above — changing an EXISTING
+    // account's password from here would mean changing someone else's auth
+    // credential from the admin's own session, which Supabase's client API
+    // doesn't allow without the service-role key. Silently dropped rather than
+    // pretended to work; the UI doesn't even collect it once an email matches
+    // an existing account, so this is a belt-and-suspenders no-op, not a gap
+    // the caller can hit by surprise.
+
+    // therapists_user_id_uniq (partial unique on user_id) rejects a second
+    // therapist pointing at the same account — catch and return a clean error
+    // instead of a raw Postgres constraint message.
+    const { data: linkedTherapist, error: linkErr } = await supabase
+      .from('therapists')
+      .update({ user_id: account.id })
+      .eq('id', therapistId)
+      .select('id, name, user_id')
+      .single();
+    if (linkErr) {
+      if (linkErr.code === '23505') {
+        return { data: null, error: { code: 'ACCOUNT_ALREADY_LINKED', message: 'This account is already linked to another therapist.' } };
+      }
+      throw linkErr;
+    }
+
+    // These two restrictions only make sense for staff — a manager or admin
+    // who can't see prices or customer details can't do their job, and the
+    // UI only offers the toggles for the staff role. Ignore any attempt to
+    // set them on a higher role rather than trust the caller.
+    const restrictable = role === 'staff';
+    const settingsUpdate = {
+      role,
+      login_access: loginAccess,
+      calendar_visibility: calendarVisibility || 'all',
+      can_view_customer_details: restrictable ? canViewCustomerDetails !== false : true,
+      can_view_prices: restrictable ? canViewPrices !== false : true,
+    };
+    // Only touch the PIN when one was actually given — an empty value here
+    // must mean "leave it alone", never "clear it", especially on the
+    // existing-account path where provisionStaffLogin never ran.
+    if (pin) settingsUpdate.pin = pin;
+    const { error: settingsErr } = await supabase
+      .from('users')
+      .update(settingsUpdate)
+      .eq('id', account.id);
+    if (settingsErr) {
+      // Roll back the link rather than leave a therapist pointing at an
+      // account whose settings never landed.
+      await supabase.from('therapists').update({ user_id: null }).eq('id', therapistId);
+      throw settingsErr;
+    }
+
+    // Branch access is ticked manually — write exactly what was given, no
+    // defaulting to the therapist's home branch and no "all branches" fallback.
+    const ids = [...new Set((branchIds || []).filter(Boolean))];
+    if (ids.length > 0) {
+      const { error: branchErr } = await supabase
+        .from('user_branches')
+        .upsert(ids.map((branch_id) => ({ user_id: account.id, branch_id })), { onConflict: 'user_id,branch_id', ignoreDuplicates: true });
+      if (branchErr) throw branchErr;
+    }
+
+    capture('staff_access_granted', { therapist_id: therapistId, role, login_access: loginAccess });
+    return { data: linkedTherapist, error: null };
+  } catch (error) {
+    console.error('[API] grantStaffAccess error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// The inverse of grantStaffAccess: attach an existing login to an existing
+// therapist without changing the account's settings. Rejects if either side
+// is already linked.
+export async function linkStaffToAccount({ therapistId, userId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can link staff accounts.' } };
+    }
+
+    const { data: therapist, error: therapistErr } = await supabase
+      .from('therapists')
+      .select('id, org_id, user_id, name')
+      .eq('id', therapistId)
+      .eq('org_id', profile.org_id)
+      .single();
+    if (therapistErr) throw therapistErr;
+    if (therapist.user_id) {
+      return { data: null, error: { code: 'ALREADY_LINKED', message: `${therapist.name} already has a linked login.` } };
+    }
+
+    const { data: account, error: accountErr } = await supabase
+      .from('users')
+      .select('id, org_id')
+      .eq('id', userId)
+      .eq('org_id', profile.org_id)
+      .single();
+    if (accountErr) throw accountErr;
+
+    const { data, error } = await supabase
+      .from('therapists')
+      .update({ user_id: account.id })
+      .eq('id', therapistId)
+      .select('id, name, user_id')
+      .single();
+    if (error) {
+      if (error.code === '23505') {
+        return { data: null, error: { code: 'ACCOUNT_ALREADY_LINKED', message: 'This account is already linked to another therapist.' } };
+      }
+      throw error;
+    }
+
+    capture('staff_account_linked', { therapist_id: therapistId });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] linkStaffToAccount error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Unlinking is not deletion: the users row survives, it just stops being
+// anyone's "who am I" link. The therapist goes back to no-login.
+export async function unlinkStaffAccess({ therapistId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can unlink staff access.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('therapists')
+      .update({ user_id: null })
+      .eq('id', therapistId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, user_id')
+      .single();
+    if (error) throw error;
+
+    capture('staff_access_unlinked', { therapist_id: therapistId });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] unlinkStaffAccess error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Detail screen's Save: role / login_access / calendar_visibility / branch
+// grants for an already-linked (or account-only) user. Branch grants, when
+// provided, REPLACE the full set — same manual-ticking rule as grantStaffAccess.
+export async function updateStaffAccess({ userId, role, loginAccess, calendarVisibility, branchIds, canViewCustomerDetails, canViewPrices, pin }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update staff access.' } };
+    }
+    const pinError = validatePin(pin);
+    if (pinError) return { data: null, error: pinError };
+
+    const { data: target, error: targetErr } = await supabase
+      .from('users')
+      .select('id, org_id, role')
+      .eq('id', userId)
+      .eq('org_id', profile.org_id)
+      .single();
+    if (targetErr) throw targetErr;
+
+    const updatePayload = {};
+    if (role !== undefined && role !== target.role) {
+      const roleError = assertCanGrantRole(profile.role, role);
+      if (roleError) return { data: null, error: roleError };
+      updatePayload.role = role;
+    }
+    if (loginAccess !== undefined) {
+      if (!['email', 'none'].includes(loginAccess)) {
+        return { data: null, error: { code: 'VALIDATION', message: 'Invalid login access value.' } };
+      }
+      updatePayload.login_access = loginAccess;
+    }
+    if (calendarVisibility !== undefined) {
+      if (!['own', 'own_view', 'all', 'all_view'].includes(calendarVisibility)) {
+        return { data: null, error: { code: 'VALIDATION', message: 'Invalid calendar visibility value.' } };
+      }
+      updatePayload.calendar_visibility = calendarVisibility;
+    }
+
+    // Same rule as grantStaffAccess: these only mean something for staff.
+    // Resolve against the role this account will actually end up with (the
+    // incoming one if it's changing, otherwise the one it already has).
+    if (canViewCustomerDetails !== undefined || canViewPrices !== undefined) {
+      const effectiveRole = role !== undefined ? role : target.role;
+      const restrictable = effectiveRole === 'staff';
+      if (canViewCustomerDetails !== undefined) {
+        updatePayload.can_view_customer_details = restrictable ? canViewCustomerDetails !== false : true;
+      }
+      if (canViewPrices !== undefined) {
+        updatePayload.can_view_prices = restrictable ? canViewPrices !== false : true;
+      }
+    }
+
+    // A blank PIN here means "leave it alone", never "clear it" — same as
+    // grantStaffAccess.
+    if (pin) updatePayload.pin = pin;
+
+    if (Object.keys(updatePayload).length > 0) {
+      const { error: updateErr } = await supabase
+        .from('users')
+        .update(updatePayload)
+        .eq('id', userId);
+      if (updateErr) throw updateErr;
+    }
+
+    if (branchIds !== undefined) {
+      const ids = [...new Set((branchIds || []).filter(Boolean))];
+      const { error: deleteErr } = await supabase
+        .from('user_branches')
+        .delete()
+        .eq('user_id', userId);
+      if (deleteErr) throw deleteErr;
+      if (ids.length > 0) {
+        const { error: insertErr } = await supabase
+          .from('user_branches')
+          .insert(ids.map((branch_id) => ({ user_id: userId, branch_id })));
+        if (insertErr) throw insertErr;
+      }
+    }
+
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, email, full_name, role, login_access, calendar_visibility, can_view_customer_details, can_view_prices')
+      .eq('id', userId)
+      .single();
+    if (error) throw error;
+
+    capture('staff_access_updated', { user_id: userId });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateStaffAccess error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Tiered pricing (migration-319/323/324): named staff tiers, per-service
+// per-tier prices, and the two DB functions that resolve what a service
+// actually costs. service_price_range/service_price_for_therapist are called
+// via rpc() rather than reimplemented here — see their own comments in
+// migration-323 for why (so the booking screen, payment screen and reports
+// can't drift apart). Neither is gated behind canViewPrices: both are used
+// either by the anonymous customer booking flow (no profile to gate on) or
+// internally by a write path that must compute the real charge regardless of
+// the acting staff member's own visibility — exactly like recordPayment's
+// `remaining` is computed unconditionally and only the DISPLAYED message is
+// withheld.
+// ============================================================
+
+export async function fetchPriceTiers() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const tiers = await fetchAllPages((opts) =>
+      supabase
+        .from('price_tiers')
+        .select('id, name, sort_order', opts)
+        .eq('org_id', profile.org_id)
+        .order('sort_order')
+        .order('id')
+    );
+    return { data: tiers, error: null };
+  } catch (error) {
+    console.error('[API] fetchPriceTiers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function createPriceTier({ name }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can create price tiers.' } };
+    }
+    if (!name || !name.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Tier name is required.' } };
+    }
+
+    const { data: existing } = await supabase
+      .from('price_tiers')
+      .select('id')
+      .eq('org_id', profile.org_id)
+      .ilike('name', name.trim())
+      .maybeSingle();
+    if (existing) {
+      return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A tier with this name already exists.' } };
+    }
+
+    const { data: maxRow } = await supabase
+      .from('price_tiers')
+      .select('sort_order')
+      .eq('org_id', profile.org_id)
+      .order('sort_order', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const nextSortOrder = (maxRow?.sort_order ?? -1) + 1;
+
+    const { data, error } = await supabase
+      .from('price_tiers')
+      .insert({ org_id: profile.org_id, name: name.trim(), sort_order: nextSortOrder })
+      .select('id, name, sort_order')
+      .single();
+    if (error) {
+      if (error.code === '23505') {
+        return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A tier with this name already exists.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createPriceTier error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function renamePriceTier({ tierId, name }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can rename price tiers.' } };
+    }
+    if (!name || !name.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Tier name is required.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('price_tiers')
+      .update({ name: name.trim() })
+      .eq('id', tierId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, sort_order')
+      .single();
+    if (error) {
+      if (error.code === '23505') {
+        return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A tier with this name already exists.' } };
+      }
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Tier not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] renamePriceTier error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Reassigns sort_order to match the given order exactly — the drag-to-reorder
+// write. Caller passes every tier's id in its new order, not a partial list.
+export async function reorderPriceTiers({ orderedIds }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can reorder price tiers.' } };
+    }
+    if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+      return { data: null, error: { code: 'VALIDATION', message: 'No tiers to reorder.' } };
+    }
+
+    const results = await Promise.all(
+      orderedIds.map((id, index) =>
+        supabase
+          .from('price_tiers')
+          .update({ sort_order: index })
+          .eq('id', id)
+          .eq('org_id', profile.org_id)
+      )
+    );
+    const failed = results.find((r) => r.error);
+    if (failed) throw failed.error;
+
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] reorderPriceTiers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Deleting a tier SET NULLs therapists.price_tier_id (untiers its staff, see
+// migration-319) and CASCADEs service_tier_prices (loses its per-service
+// prices). The caller surfaces both counts in a confirmation before calling
+// this — fetched here so the warning can't drift from what the delete
+// actually does.
+export async function fetchPriceTierImpact({ tierId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const [{ count: staffCount, error: staffErr }, { count: priceCount, error: priceErr }] = await Promise.all([
+      supabase.from('therapists').select('id', { count: 'exact', head: true }).eq('price_tier_id', tierId).eq('org_id', profile.org_id),
+      supabase.from('service_tier_prices').select('id', { count: 'exact', head: true }).eq('price_tier_id', tierId),
+    ]);
+    if (staffErr) throw staffErr;
+    if (priceErr) throw priceErr;
+
+    return { data: { staffCount: staffCount || 0, servicePriceCount: priceCount || 0 }, error: null };
+  } catch (error) {
+    console.error('[API] fetchPriceTierImpact error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deletePriceTier({ tierId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete price tiers.' } };
+    }
+
+    const { error } = await supabase
+      .from('price_tiers')
+      .delete()
+      .eq('id', tierId)
+      .eq('org_id', profile.org_id);
+    if (error) throw error;
+
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deletePriceTier error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Every active therapist in the org plus their tier (or none), for the tier
+// manager's staff-count pill and assignment popover. Paginated — same reason
+// as fetchStaffAccess: this is exactly the function that lists all of them.
+export async function fetchTherapistsForTierAssignment() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const therapists = await fetchAllPages((opts) =>
+      supabase
+        .from('therapists')
+        .select('id, name, position, price_tier_id', opts)
+        .eq('org_id', profile.org_id)
+        .eq('is_active', true)
+        .order('name')
+        .order('id')
+    );
+    return { data: therapists, error: null };
+  } catch (error) {
+    console.error('[API] fetchTherapistsForTierAssignment error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// tierId: null un-tiers the therapist (back to charging the Unassigned rate).
+export async function assignTherapistTier({ therapistId, tierId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can assign price tiers.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('therapists')
+      .update({ price_tier_id: tierId || null })
+      .eq('id', therapistId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, price_tier_id')
+      .single();
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Therapist not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] assignTherapistTier error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Every tier price set for one service (sparse — a tier with no row charges
+// the Unassigned rate, services.price_npr, never zero). Manager/admin only,
+// same gate as the Service Detail page these feed — a price-restricted
+// account can never reach this screen (createService/updateServicePricing
+// already require manager/admin, and that restriction only ever applies to
+// the staff role), so no separate canViewPrices check is needed here.
+export async function fetchServiceTierPrices(serviceId) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can view tier prices.' } };
+    }
+
+    const rows = await fetchAllPages((opts) =>
+      supabase
+        .from('service_tier_prices')
+        .select('id, price_tier_id, price_npr', opts)
+        .eq('service_id', serviceId)
+        .order('id')
+    );
+    return { data: rows, error: null };
+  } catch (error) {
+    console.error('[API] fetchServiceTierPrices error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Replaces the full set of tier prices for a service. `prices` is
+// [{ priceTierId, priceNpr }] — a tier left out of the array (not just given
+// a falsy price) is the one true way to mean "same as Unassigned"; passing
+// price_npr: 0 would make that tier free, which is a different thing.
+export async function setServiceTierPrices(serviceId, prices) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can set tier prices.' } };
+    }
+
+    const { error: serviceErr } = await supabase
+      .from('services')
+      .select('id, org_id')
+      .eq('id', serviceId)
+      .eq('org_id', profile.org_id)
+      .single();
+    if (serviceErr) {
+      if (serviceErr.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Service not found.' } };
+      }
+      throw serviceErr;
+    }
+
+    const entries = (prices || []).filter((p) => p.priceNpr !== null && p.priceNpr !== undefined && p.priceNpr !== '');
+    const invalid = entries.find((p) => Number(p.priceNpr) < 0);
+    if (invalid) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Tier prices cannot be negative.' } };
+    }
+
+    const { error: deleteErr } = await supabase
+      .from('service_tier_prices')
+      .delete()
+      .eq('service_id', serviceId);
+    if (deleteErr) throw deleteErr;
+
+    if (entries.length > 0) {
+      const { error: insertErr } = await supabase
+        .from('service_tier_prices')
+        .insert(entries.map((p) => ({ service_id: serviceId, price_tier_id: p.priceTierId, price_npr: Number(p.priceNpr) })));
+      if (insertErr) throw insertErr;
+    }
+
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] setServiceTierPrices error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// { min_price, max_price } across the Unassigned rate and every tier price
+// (migration-323). Drives the "Rs 160 - 380" range shown to customers online.
+export async function fetchServicePriceRange(serviceId) {
+  try {
+    const { data, error } = await supabase.rpc('service_price_range', { p_service_id: serviceId });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    return { data: row ? { minPrice: Number(row.min_price), maxPrice: Number(row.max_price) } : null, error: null };
+  } catch (error) {
+    console.error('[API] fetchServicePriceRange error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// What this specific therapist charges for this service — their tier price,
+// or the Unassigned rate if they have none (migration-323's own COALESCE,
+// never reimplemented here).
+export async function fetchServicePriceForTherapist(serviceId, therapistId) {
+  try {
+    const { data, error } = await supabase.rpc('service_price_for_therapist', {
+      p_service_id: serviceId,
+      p_therapist_id: therapistId,
+    });
+    if (error) throw error;
+    return { data: data != null ? Number(data) : null, error: null };
+  } catch (error) {
+    console.error('[API] fetchServicePriceForTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Waitlist (migration-327): customers waiting for a slot, modelled on
+// Timely's. Deliberately not a booking with a special status — see the
+// migration's own comment. Booking someone in reuses the normal booking
+// flow entirely (createBooking/createComboBookingItems); this module only
+// tracks the queue itself and flips an entry to 'booked' once that other
+// flow actually succeeds.
+// ============================================================
+
+// Every waiting entry for a branch, oldest-first by default — the point of a
+// queue is that waiting longer gets you served sooner. Holds a customer name
+// and phone, so it goes through the same canViewCustomerDetails masking as
+// bookings (redactRows) rather than inventing a second masking path.
+export async function fetchWaitlist(branchId, { sort = 'oldest' } = {}) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const vis = await resolveVisibility(profile);
+
+    // Overall sentinel must not route through resolveBranchId — it would
+    // silently coerce to a hardcoded default branch (same trap withBranch's
+    // own comment warns about). The write path (addToWaitlist) requires a
+    // concrete branch since a waitlist entry outlives the request; a read
+    // can safely go org-wide for Overall the same way withBranch already
+    // does everywhere else, since RLS is org-scoped regardless.
+    const rows = await fetchAllPages((opts) =>
+      withBranch(
+        supabase
+          .from('waitlist_entries')
+          .select(`
+            id, customer_id, customer_name, customer_phone, service_id,
+            preferred_date, preferred_time, preferred_therapist_id, notes,
+            status, booking_id, created_at,
+            service:services(id, name),
+            therapist:therapists(id, name)
+          `, opts)
+          .eq('status', 'waiting'),
+        branchId
+      )
+        .order('created_at', { ascending: sort !== 'newest' })
+        .order('id')
+    );
+
+    return { data: redactRows(rows, vis), error: null };
+  } catch (error) {
+    console.error('[API] fetchWaitlist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Everything but who/where is optional — "any time this week" is a real
+// request, and forcing a date or service would make staff invent one.
+export async function addToWaitlist({ branchId, customerId, customerName, customerPhone, serviceId, preferredDate, preferredTime, preferredTherapistId, notes }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!customerName || !customerName.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Customer name is required.' } };
+    }
+    // The Overall sentinel has no real branch — resolveBranchId would silently
+    // coerce it to a hardcoded default (see its own warning comment), filing
+    // a durable row under a branch nobody chose. A read inheriting that
+    // (getCalendarBookings does the same) is defensible; a write is not —
+    // require an explicit branch for an entry that will outlive this request.
+    if (isOverallBranch(branchId)) {
+      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Select a specific branch before adding to the waitlist.' } };
+    }
+
+    const resolvedBranchId = resolveBranchId(branchId);
+    const { data, error } = await supabase
+      .from('waitlist_entries')
+      .insert({
+        org_id: profile.org_id,
+        branch_id: resolvedBranchId,
+        customer_id: customerId || null,
+        customer_name: customerName.trim(),
+        customer_phone: customerPhone || null,
+        service_id: serviceId || null,
+        preferred_date: preferredDate || null,
+        preferred_time: preferredTime || null,
+        preferred_therapist_id: preferredTherapistId || null,
+        notes: notes || null,
+        created_by: profile.id,
+      })
+      .select('id, customer_id, customer_name, customer_phone, service_id, preferred_date, preferred_time, preferred_therapist_id, notes, status, created_at')
+      .single();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] addToWaitlist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Covers both "Edit" (any field) and the convert-to-booking flip
+// (status: 'booked', bookingId) — same narrow update, different fields.
+export async function updateWaitlistEntry({ id, customerId, customerName, customerPhone, serviceId, preferredDate, preferredTime, preferredTherapistId, notes, status, bookingId }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!id) return { data: null, error: { code: 'VALIDATION', message: 'Entry id is required.' } };
+    // 'removed' only ever goes through removeFromWaitlist, which also sets
+    // removed_at/removed_by — allowing it here would let a caller flip the
+    // status and silently skip those audit fields.
+    if (status === 'removed') {
+      return { data: null, error: { code: 'VALIDATION', message: 'Use removeFromWaitlist to remove an entry.' } };
+    }
+
+    const updatePayload = {};
+    if (customerId !== undefined) updatePayload.customer_id = customerId || null;
+    if (customerName !== undefined) {
+      if (!customerName.trim()) {
+        return { data: null, error: { code: 'VALIDATION', message: 'Customer name is required.' } };
+      }
+      updatePayload.customer_name = customerName.trim();
+    }
+    if (customerPhone !== undefined) updatePayload.customer_phone = customerPhone || null;
+    if (serviceId !== undefined) updatePayload.service_id = serviceId || null;
+    if (preferredDate !== undefined) updatePayload.preferred_date = preferredDate || null;
+    if (preferredTime !== undefined) updatePayload.preferred_time = preferredTime || null;
+    if (preferredTherapistId !== undefined) updatePayload.preferred_therapist_id = preferredTherapistId || null;
+    if (notes !== undefined) updatePayload.notes = notes || null;
+    if (status !== undefined) updatePayload.status = status;
+    if (bookingId !== undefined) updatePayload.booking_id = bookingId || null;
+
+    if (Object.keys(updatePayload).length === 0) {
+      return { data: null, error: { code: 'NO_CHANGES', message: 'No fields to update.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('waitlist_entries')
+      .update(updatePayload)
+      .eq('id', id)
+      .select('id, customer_name, customer_phone, service_id, preferred_date, preferred_time, preferred_therapist_id, notes, status, booking_id')
+      .single();
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Waitlist entry not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateWaitlistEntry error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Never a hard delete — there is deliberately no DELETE policy on this table
+// (migration-327). Removing sets status='removed' so the queue keeps its
+// history of who was waiting and why they left.
+export async function removeFromWaitlist(id) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('waitlist_entries')
+      .update({ status: 'removed', removed_at: new Date().toISOString(), removed_by: profile.id })
+      .eq('id', id)
+      .select('id, status')
+      .single();
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Waitlist entry not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] removeFromWaitlist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Billing / tax invoices (migration-328/329).
+// ============================================================
+
+const BILLING_SETTING_KEYS = [
+  'billing_legal_name', 'billing_pan', 'billing_address', 'billing_phone',
+  'billing_email', 'billing_tax_mode', 'billing_vat_rate',
+  'billing_invoice_prefix', 'billing_footer_text', 'billing_enabled',
+];
+
+// Every billing_* key read off organizations.settings in one call — the
+// Billing settings panel and the "can I issue?" gate both need the full set.
+export async function fetchBillingSettings() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data: org, error } = await supabase
+      .from('organizations')
+      .select('name, settings')
+      .eq('id', profile.org_id)
+      .single();
+    if (error) throw error;
+
+    const settings = org.settings || {};
+    return {
+      data: {
+        orgName: org.name,
+        billingEnabled: settings.billing_enabled === true,
+        legalName: settings.billing_legal_name || '',
+        pan: settings.billing_pan || '',
+        address: settings.billing_address || '',
+        phone: settings.billing_phone || '',
+        email: settings.billing_email || '',
+        taxMode: settings.billing_tax_mode || '',
+        vatRate: settings.billing_vat_rate != null ? Number(settings.billing_vat_rate) : 13,
+        invoicePrefix: settings.billing_invoice_prefix || '',
+        footerText: settings.billing_footer_text || '',
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchBillingSettings error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Thin wrapper over update_org_profile_settings (migration-329 widened its
+// allow-list) — same RPC every other org setting in this app already uses.
+// Admin-only is enforced server-side inside that function.
+export async function updateBillingSetting(key, value) {
+  if (!BILLING_SETTING_KEYS.includes(key)) {
+    return { data: null, error: { code: 'VALIDATION', message: `Unknown billing setting: ${key}` } };
+  }
+  const { data, error } = await supabase.rpc('update_org_profile_settings', { p_key: key, p_value: value });
+  if (error) {
+    return { data: null, error: { code: error.code || 'UPDATE_FAILED', message: error.message || 'Failed to update billing setting.' } };
+  }
+  return { data, error: null };
+}
+
+// Issue (or re-fetch, if already issued) the tax invoice for a paid booking.
+// All validation, numbering, and the VAT math live in issue_invoice()
+// (SECURITY DEFINER, migration-328) — this is a thin wrapper so the same
+// error messages the DB function raises reach the UI unmodified.
+export async function issueInvoice(bookingId) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!bookingId) return { data: null, error: { code: 'VALIDATION', message: 'Booking id is required.' } };
+
+    const { data, error } = await supabase.rpc('issue_invoice', { p_booking_id: bookingId });
+    if (error) {
+      return { data: null, error: { code: error.code || 'ISSUE_FAILED', message: error.message || 'Could not issue the invoice.' } };
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] issueInvoice error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchInvoiceByBookingId(bookingId) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('booking_id', bookingId)
+      .maybeSingle();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchInvoiceByBookingId error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Which of these bookings already has an invoice — one query for the whole
+// set, not one per row. Lets a list (CustomerSalesTab) keep the "Print
+// invoice" entry point visible for a booking that was invoiced before billing
+// got disabled, without an N+1 lookup across every paid booking in the list.
+export async function fetchInvoiceExistenceForBookingIds(bookingIds) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const ids = [...new Set((bookingIds || []).filter(Boolean))];
+    if (ids.length === 0) return { data: new Set(), error: null };
+
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('booking_id')
+      .in('booking_id', ids);
+    if (error) throw error;
+    return { data: new Set((data || []).map((r) => r.booking_id)), error: null };
+  } catch (error) {
+    console.error('[API] fetchInvoiceExistenceForBookingIds error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Logs that an invoice was actually printed, and tells the caller whether to
+// render it as ORIGINAL or COPY. The ordinal is allocated atomically inside
+// record_invoice_print() (migration-331) — a count-then-insert from the
+// client raced: two concurrent prints (e.g. a double-click) could both read
+// count=0 and both print ORIGINAL.
+export async function recordInvoicePrint({ invoiceId, printType }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['a4', 'thermal'].includes(printType)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Invalid print type.' } };
+    }
+
+    const { data, error } = await supabase.rpc('record_invoice_print', {
+      p_invoice_id: invoiceId,
+      p_print_type: printType,
+    });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    return { data: { copyLabel: row.copy_label }, error: null };
+  } catch (error) {
+    console.error('[API] recordInvoicePrint error:', error.message);
+    return { data: null, error };
+  }
 }

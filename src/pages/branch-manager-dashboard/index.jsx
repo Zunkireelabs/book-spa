@@ -5,6 +5,7 @@ import StaffSidebar from '../../components/ui/StaffSidebar';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLock } from '../../contexts/LockContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
 import BranchSwitcher from '../../components/ui/BranchSwitcher';
@@ -35,6 +36,9 @@ import OnlineBookingCapacityPanel from './components/MasterData/OnlineBookingCap
 import AdvanceBookingWindowPanel from './components/MasterData/AdvanceBookingWindowPanel';
 import ProviderProfilePanel from './components/MasterData/ProviderProfilePanel';
 import LocationsPanel from './components/MasterData/LocationsPanel';
+import BillingSettingsPanel from './components/MasterData/BillingSettingsPanel';
+import StaffAccessPanel from './components/MasterData/StaffAccessPanel';
+import PriceTiersPanel from './components/MasterData/PriceTiersPanel';
 import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
 import BookingsViewPanel from './components/BookingsViewPanel';
@@ -84,6 +88,7 @@ const ORG_WIDE_VIEWS = new Set(['customers', 'transfer-report']);
 
 const BranchManagerDashboard = () => {
   const { profile, signOut, user } = useAuth();
+  const { lock } = useLock();
   const { branchId, branchName, isOverall } = useBranch();
   // Gates the online-booking-limit panel: the cap only bites when customers DON'T pick a
   // staff member (check_branch_online_capacity() exempts bookings with a therapist_id).
@@ -607,6 +612,16 @@ const BranchManagerDashboard = () => {
                           <span>Settings</span>
                         </button>
 
+                        {/* Lock Screen */}
+                        <button
+                          onClick={() => { setShowProfileDropdown(false); lock(); }}
+                          aria-label="Lock screen"
+                          className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
+                          <Icon name="Lock" size={16} className="text-gray-500" />
+                          <span>Lock Screen</span>
+                        </button>
+
                         {/* Logout */}
                         <button
                           onClick={handleLogout}
@@ -730,9 +745,12 @@ const BranchManagerDashboard = () => {
               {viewMode === 'calendar-settings' && profile?.role === 'admin' && <CalendarSettingsPanel />}
               {viewMode === 'provider-profile' && profile?.role === 'admin' && <ProviderProfilePanel />}
               {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />}
+              {viewMode === 'staff-access' && ['manager', 'admin', 'admin_viewer'].includes(profile?.role) && <StaffAccessPanel branchId={branchId} readOnly={profile?.role === 'admin_viewer'} />}
+              {viewMode === 'price-tiers' && !isOverall && ['manager', 'admin', 'admin_viewer'].includes(profile?.role) && <PriceTiersPanel readOnly={profile?.role === 'admin_viewer'} />}
               {viewMode === 'roster' && !isOverall && ['manager', 'admin'].includes(profile?.role) && <RosterPanel branchId={branchId} />}
               {viewMode === 'closed-dates' && !isOverall && profile?.role === 'admin' && <ClosedDatesPanel branchId={branchId} />}
               {viewMode === 'locations' && profile?.role === 'admin' && <LocationsPanel orgId={orgId} />}
+              {viewMode === 'billing' && profile?.role === 'admin' && <BillingSettingsPanel />}
               {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
               {viewMode === 'new-booking' && !isOverall && <StaffBookingForm onBookingCreated={loadData} />}
               {viewMode === 'check-booking' && !isOverall && <CheckBookingPanel branchId={branchId} />}

@@ -1,7 +1,7 @@
 import React from 'react';
 import Button from '../../../../components/ui/Button';
-import { formatNPR } from '../../../../services/bookingTransformers';
 import { VenueThumb } from '../SummaryCard';
+import { useResolvedServicePricing } from '../../../../hooks/useCustomerServicePricing';
 
 // Group-booking counterpart to SummaryCard — same persistent, sticky right-hand
 // summary pattern (venue identity, what's being booked, running total, the primary
@@ -10,8 +10,6 @@ import { VenueThumb } from '../SummaryCard';
 // GroupConfirmStep already renders its own equivalent "Your group" breakdown
 // inline as the final review, so this card isn't duplicated there (same split
 // SummaryCard has with BookingView's confirm step via `showContinue`).
-const priceOf = (s) => Number(s?.effective_price_npr ?? s?.price_npr ?? 0);
-
 const GroupSummaryCard = ({
   orgName,
   logoUrl,
@@ -23,7 +21,13 @@ const GroupSummaryCard = ({
   stickyTop = '1.5rem',
 }) => {
   const peopleWithServices = people.filter((p) => p.service);
-  const total = peopleWithServices.reduce((sum, p) => sum + priceOf(p.service), 0);
+  const pricingItems = peopleWithServices.map((p) => ({
+    key: p.id,
+    service: p.service,
+    therapistId: p.professional?.mode === 'specific' ? (p.professional.therapist?.id || null) : null,
+  }));
+  const { perItem, totalLabel } = useResolvedServicePricing(pricingItems);
+  const labelFor = (personId) => perItem.find((p) => p.key === personId)?.label ?? null;
 
   return (
     <div
@@ -56,9 +60,11 @@ const GroupSummaryCard = ({
                 </p>
                 <div className="flex items-baseline justify-between gap-3">
                   <p className="font-medium text-sm text-[var(--zn-foreground)]">{person.service.name}</p>
-                  <p className="font-['Space_Mono'] tabular-nums text-sm text-[var(--zn-foreground)] shrink-0">
-                    {formatNPR(priceOf(person.service))}
-                  </p>
+                  {labelFor(person.id) != null && (
+                    <p className="font-['Space_Mono'] tabular-nums text-sm text-[var(--zn-foreground)] shrink-0">
+                      {labelFor(person.id)}
+                    </p>
+                  )}
                 </div>
                 <p className="text-sm text-[var(--zn-muted-foreground)] mt-0.5">
                   {person.service.duration_minutes} min{withWhom ? ` with ${withWhom}` : ''}
@@ -79,7 +85,7 @@ const GroupSummaryCard = ({
           )}
         </div>
         <p className="font-['Space_Mono'] tabular-nums text-lg font-semibold text-[var(--zn-foreground)]">
-          {formatNPR(total)}
+          {totalLabel}
         </p>
       </div>
 

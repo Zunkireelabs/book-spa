@@ -1,14 +1,16 @@
 import React from 'react';
 import Button from '../../../components/ui/Button';
-import { formatNPR } from '../../../services/bookingTransformers';
 
 // Mirrors SummaryCard's live total + Continue, for the mobile breakpoint where the
-// card sits below the service list instead of alongside it.
-const MobileBookingBar = ({ total, count, totalMinutes, onContinue, disabled }) => (
+// card sits below the service list instead of alongside it. totalLabel is a
+// pre-formatted string (see useCustomerServicePricing) rather than a number —
+// an unresolved tiered service in the cart makes this a range, not a figure
+// this component can format on its own.
+const MobileBookingBar = ({ totalLabel, count, totalMinutes, onContinue, disabled }) => (
   <div className="zn-scope lg:hidden fixed bottom-0 left-0 right-0 z-sticky-filter bg-[var(--zn-card)] border-t border-[var(--zn-border)] shadow-[0_-2px_8px_rgba(35,33,29,0.08)] px-4 py-3 flex items-center gap-4">
     <div className="flex-1 min-w-0">
       <p className="font-['Space_Mono'] tabular-nums text-base font-semibold text-[var(--zn-foreground)]">
-        {formatNPR(total)}
+        {totalLabel}
       </p>
       {count > 1 && (
         <p className="text-xs text-[var(--zn-muted-foreground)]">

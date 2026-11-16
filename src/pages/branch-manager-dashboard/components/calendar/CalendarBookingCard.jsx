@@ -424,7 +424,7 @@ export const BookingHoverPreview = ({ booking, position, draggable, hideSensitiv
           <div className="flex items-center justify-between">
             <div className="flex items-baseline gap-1">
               <span className="font-caption text-[10px] text-text-secondary uppercase tracking-wider">Amount</span>
-              {hideSensitive ? (
+              {hideSensitive || booking.pricesWithheld ? (
                 <span className="font-data text-sm text-text-primary font-semibold">NPR •••</span>
               ) : booking.finalAmount != null ? (
                 <span className="font-data text-sm text-text-primary font-semibold">
@@ -448,7 +448,7 @@ export const BookingHoverPreview = ({ booking, position, draggable, hideSensitiv
               {isUnpaid ? 'Unpaid' : 'Paid'}
             </span>
           </div>
-          {booking.discountAmount > 0 && !hideSensitive && (
+          {booking.discountAmount > 0 && !hideSensitive && !booking.pricesWithheld && (
             <div className="font-caption text-[10px] text-text-secondary mt-0.5">
               Discount: NPR {formatAmount(booking.discountAmount)}
             </div>

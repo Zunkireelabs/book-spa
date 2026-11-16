@@ -4,11 +4,13 @@ import Icon from '../../../components/AppIcon';
 import NotificationBell from '../../../components/ui/NotificationBell';
 import BrandMark from '../../../components/ui/BrandMark';
 import { useAuth } from '../../../contexts/AuthContext';
+import { useLock } from '../../../contexts/LockContext';
 import { usePersistentNotifications } from '../../../hooks/usePersistentNotifications';
 
 const StaffHeader = ({ userName: propName, branchName: propBranch, viewMode = 'dashboard', onViewChange }) => {
   const { orgSlug: urlOrgSlug } = useParams();
   const { profile, signOut, user } = useAuth();
+  const { lock } = useLock();
   const { items: notifications, markRead, markAllRead } = usePersistentNotifications(user?.id);
   const unreadCount = notifications.filter((n) => !n.read).length;
 
@@ -197,7 +199,15 @@ const StaffHeader = ({ userName: propName, branchName: propBranch, viewMode = 'd
                       <span className="font-body font-body-normal text-sm text-text-primary">Help</span>
                     </button>
                     <div className="border-t border-border my-2"></div>
-                    <button 
+                    <button
+                      onClick={() => { setShowProfileDropdown(false); lock(); }}
+                      aria-label="Lock screen"
+                      className="flex items-center space-x-2 w-full px-3 py-2 text-left hover:bg-background text-text-primary spa-transition-fast"
+                    >
+                      <Icon name="Lock" size={16} className="text-text-secondary" />
+                      <span className="font-body font-body-normal text-sm">Lock Screen</span>
+                    </button>
+                    <button
                       onClick={handleLogout}
                       className="flex items-center space-x-2 w-full px-3 py-2 text-left hover:bg-error/10 text-error spa-transition-fast"
                     >
