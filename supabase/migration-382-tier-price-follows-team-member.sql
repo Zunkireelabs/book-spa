@@ -15,9 +15,11 @@
 BEGIN;
 
 CREATE OR REPLACE FUNCTION public._booking_price_locked(p_booking_id uuid) RETURNS boolean
-LANGUAGE sql STABLE SET search_path = public AS $$ SELECT EXISTS (SELECT 1 FROM public.payments WHERE booking_id = p_booking_id) $$;
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$ SELECT EXISTS (SELECT 1 FROM public.payments WHERE booking_id = p_booking_id) $$;
+-- runs as the owner: the lock must not depend on what the CALLER's RLS lets them see of the payments table
+REVOKE ALL ON FUNCTION public._booking_price_locked(uuid) FROM PUBLIC, anon, authenticated;
 
-CREATE OR REPLACE FUNCTION public.trg_bookings_tier_reprice() RETURNS trigger LANGUAGE plpgsql SET search_path = public AS $$
+CREATE OR REPLACE FUNCTION public.trg_bookings_tier_reprice() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_tiered boolean;
 BEGIN
   IF NEW.therapist_id IS NOT DISTINCT FROM OLD.therapist_id THEN RETURN NEW; END IF;
@@ -34,10 +36,11 @@ BEGIN
   NEW.final_amount := NEW.base_amount - NEW.discount_amount;
   RETURN NEW;
 END $$;
+REVOKE ALL ON FUNCTION public.trg_bookings_tier_reprice() FROM PUBLIC, anon, authenticated;
 DROP TRIGGER IF EXISTS trg_bookings_tier_reprice ON public.bookings;
 CREATE TRIGGER trg_bookings_tier_reprice BEFORE UPDATE OF therapist_id ON public.bookings FOR EACH ROW EXECUTE FUNCTION public.trg_bookings_tier_reprice();
 
-CREATE OR REPLACE FUNCTION public.trg_combo_item_tier_reprice() RETURNS trigger LANGUAGE plpgsql SET search_path = public AS $$
+CREATE OR REPLACE FUNCTION public.trg_combo_item_tier_reprice() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_total numeric(10,2); v_share numeric(10,2);
 BEGIN
   IF NEW.therapist_id IS NOT DISTINCT FROM OLD.therapist_id THEN RETURN NULL; END IF;
@@ -49,6 +52,7 @@ BEGIN
    WHERE id = NEW.booking_id AND base_amount IS DISTINCT FROM v_total;
   RETURN NULL;
 END $$;
+REVOKE ALL ON FUNCTION public.trg_combo_item_tier_reprice() FROM PUBLIC, anon, authenticated;
 DROP TRIGGER IF EXISTS trg_combo_item_tier_reprice ON public.booking_combo_items;
 CREATE TRIGGER trg_combo_item_tier_reprice AFTER UPDATE OF therapist_id ON public.booking_combo_items FOR EACH ROW EXECUTE FUNCTION public.trg_combo_item_tier_reprice();
 

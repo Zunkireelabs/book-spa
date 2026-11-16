@@ -85,6 +85,28 @@ BEGIN
   RAISE NOTICE 'assign / lock / combo passed';
 END $$;
 
+-- the lock must not depend on what the caller can see: a staff user whose RLS hides the booking's payments (a restrictive policy stands in
+-- for any such rule) re-assigns a part-paid booking; the price must stay locked. Runs as a non-superuser.
+BEGIN;
+INSERT INTO auth.users (id, email) VALUES ('20800000-0000-0000-0000-000000000102', 'zz208-staff@example.test');
+INSERT INTO users (id, email, full_name, role, branch_id, org_id, login_access)
+  VALUES ('20800000-0000-0000-0000-000000000102', 'zz208-staff@example.test', 'ZZ208 Staff', 'staff', '20800000-0000-0000-0000-0000000000a1', '20800000-0000-0000-0000-00000000000a', 'email');
+CREATE POLICY zz208_hide_payments ON payments AS RESTRICTIVE FOR SELECT TO authenticated USING (false);
+SELECT set_config('request.jwt.claims', '{"sub":"20800000-0000-0000-0000-000000000102","role":"authenticated"}', true);
+SET LOCAL ROLE authenticated;
+DO $$
+DECLARE b3 constant uuid := '20800000-0000-0000-0000-0000000b0003'; n int;
+BEGIN
+  SELECT count(*) INTO n FROM payments WHERE booking_id = b3;
+  ASSERT n = 0, 'S0 the staff user must not see the payments (policy under test), saw ' || n;
+  ASSERT (SELECT base_amount FROM bookings WHERE id = b3) = 800, 'S1 booking readable, price 800';
+  UPDATE bookings SET therapist_id = '20800000-0000-0000-0000-000000000001' WHERE id = b3;   -- Senior would be 2000
+  ASSERT (SELECT base_amount FROM bookings WHERE id = b3) = 800, 'S2 price stays locked although the caller cannot see the payments';
+  ASSERT NOT has_function_privilege('authenticated', 'public._booking_price_locked(uuid)', 'EXECUTE'), 'S3 the lock helper is not callable by users';
+  RAISE NOTICE 'lock-as-owner passed';
+END $$;
+ROLLBACK;
+
 -- reschedule (the RPC copies the booking): the new row is priced from the NEW member, discount on top
 BEGIN;
 SELECT set_config('request.jwt.claims', '{"sub":"20800000-0000-0000-0000-000000000101","role":"authenticated"}', true);
