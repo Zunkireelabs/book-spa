@@ -154,6 +154,52 @@ BEGIN
 END $$;
 ROLLBACK;
 
+-- ───────────── Part B2 (migration 379): resolving saved link conflicts (one transaction, rolled back) ─────────────
+BEGIN;
+DO $$
+DECLARE
+  a1 constant uuid := '20500000-0000-0000-0000-0000000000a1';
+  orga constant uuid := '20500000-0000-0000-0000-00000000000a';
+  c3 bigint; c5 bigint;
+BEGIN
+  ASSERT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='znly205_link_conflicts' AND column_name='resolved_at'), 'B2-1 resolved_at column';
+  SELECT id INTO c3 FROM znly205_link_conflicts WHERE user_id='20500000-0000-0000-0000-000000000103' AND reason <> 'login_access_backfilled_to_email';
+  SELECT id INTO c5 FROM znly205_link_conflicts WHERE user_id='20500000-0000-0000-0000-000000000105' AND reason <> 'login_access_backfilled_to_email';
+  INSERT INTO auth.users (id, email) VALUES ('20500000-0000-0000-0000-0000000001ae', 'zz205-admin2@example.test');
+  INSERT INTO users (id, email, full_name, role, branch_id, org_id) VALUES ('20500000-0000-0000-0000-0000000001ae', 'zz205-admin2@example.test', 'ZZ205 admin2', 'admin', a1, orga);
+  -- a non-admin (U1 is staff) is refused
+  PERFORM set_config('request.jwt.claims', '{"sub":"20500000-0000-0000-0000-000000000101","role":"authenticated"}', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN PERFORM public.resolve_link_conflict(c3, 'keep'); RESET ROLE; ASSERT false, 'B2-2 staff must be refused';
+  EXCEPTION WHEN insufficient_privilege THEN RESET ROLE; END;
+  PERFORM set_config('request.jwt.claims', '{"sub":"20500000-0000-0000-0000-0000000001ae","role":"authenticated"}', true);
+  -- the link is refused while T3 still belongs to U7, and the row stays open (one transaction)
+  SET LOCAL ROLE authenticated;
+  BEGIN PERFORM public.resolve_link_conflict(c3, 'link'); RESET ROLE; ASSERT false, 'B2-3 link must be refused while the person is taken';
+  EXCEPTION WHEN unique_violation THEN RESET ROLE; END;
+  ASSERT (SELECT resolved_at FROM znly205_link_conflicts WHERE id = c3) IS NULL, 'B2-4 a refused link leaves the row open';
+  -- free T3, then the same call links and marks the row
+  UPDATE therapists SET user_id = NULL WHERE id = '20500000-0000-0000-0000-000000000003';
+  SET LOCAL ROLE authenticated;
+  PERFORM public.resolve_link_conflict(c3, 'link');
+  RESET ROLE;
+  ASSERT (SELECT user_id FROM therapists WHERE id='20500000-0000-0000-0000-000000000003') = '20500000-0000-0000-0000-000000000103', 'B2-5 link written';
+  ASSERT (SELECT resolution FROM znly205_link_conflicts WHERE id = c3) = 'link' AND (SELECT resolved_at FROM znly205_link_conflicts WHERE id = c3) IS NOT NULL, 'B2-6 row marked';
+  -- keep marks without linking; a second resolve is refused; org_mismatch cannot be linked
+  SET LOCAL ROLE authenticated;
+  BEGIN PERFORM public.resolve_link_conflict(c5, 'link'); RESET ROLE; ASSERT false, 'B2-7 org_mismatch cannot be linked';
+  EXCEPTION WHEN insufficient_privilege THEN RESET ROLE; END;
+  SET LOCAL ROLE authenticated;
+  PERFORM public.resolve_link_conflict(c5, 'keep');
+  RESET ROLE;
+  ASSERT (SELECT resolution FROM znly205_link_conflicts WHERE id = c5) = 'keep', 'B2-8 keep recorded';
+  SET LOCAL ROLE authenticated;
+  BEGIN PERFORM public.resolve_link_conflict(c5, 'keep'); RESET ROLE; ASSERT false, 'B2-9 already resolved';
+  EXCEPTION WHEN invalid_parameter_value THEN RESET ROLE; END;
+  RAISE NOTICE 'Part B2 passed';
+END $$;
+ROLLBACK;
+
 -- ───────────── Part C: remove the ZZ205 fixtures ─────────────
 BEGIN;
 DELETE FROM public.znly205_link_conflicts WHERE org_id IN ('20500000-0000-0000-0000-00000000000a','20500000-0000-0000-0000-00000000000b');

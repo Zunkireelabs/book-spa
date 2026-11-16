@@ -35,7 +35,6 @@ import OnlineBookingCapacityPanel from './components/MasterData/OnlineBookingCap
 import AdvanceBookingWindowPanel from './components/MasterData/AdvanceBookingWindowPanel';
 import LocationsPanel from './components/MasterData/LocationsPanel';
 import BillingSettingsPanel from './components/MasterData/BillingSettingsPanel';
-import StaffAccessPanel from './components/MasterData/StaffAccessPanel';
 import PriceTiersPanel from './components/MasterData/PriceTiersPanel';
 import NotificationSettingsContent from '../inbox/NotificationSettingsPanel';
 import AuditPanel from './components/Governance/AuditPanel';
@@ -497,7 +496,6 @@ const BranchManagerDashboard = () => {
       );
       case 'locations': return profile?.role === 'admin' ? <LocationsPanel orgId={orgId} /> : null;
       case 'billing': return profile?.role === 'admin' ? <BillingSettingsPanel /> : null;
-      case 'staff-access': return ['manager', 'admin', 'admin_viewer'].includes(profile?.role) ? <StaffAccessPanel branchId={branchId} readOnly={profile?.role === 'admin_viewer'} /> : null;
       case 'price-tiers': return !isOverall && ['manager', 'admin', 'admin_viewer'].includes(profile?.role) ? <PriceTiersPanel readOnly={profile?.role === 'admin_viewer'} /> : null;
       case 'calendar-settings': return profile?.role === 'admin' ? <CalendarSettingsPanel /> : null;
       case 'attendance-settings': return !isOverall && ['admin', 'manager'].includes(profile?.role) ? <AttendanceSettingsPanel branchId={branchId} /> : null;

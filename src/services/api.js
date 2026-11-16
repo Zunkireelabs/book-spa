@@ -674,24 +674,6 @@ export async function fetchSetupState({ branchId }) {
   }
 }
 
-// The org's logins for the Therapists "Login" field: RLS scopes it to the caller's org. therapist_id is the person each is linked to,
-// read from therapists.user_id (the one link, migration-377).
-export async function fetchOrgLogins() {
-  try {
-    const [usersRes, linksRes] = await Promise.all([
-      supabase.from('users').select('id, full_name, email, role').in('role', ['staff', 'manager', 'admin']).order('full_name'),
-      supabase.from('therapists').select('id, user_id').not('user_id', 'is', null),
-    ]);
-    if (usersRes.error) throw usersRes.error;
-    if (linksRes.error) throw linksRes.error;
-    const therapistOf = new Map((linksRes.data || []).map((t) => [t.user_id, t.id]));
-    return { data: (usersRes.data || []).map((u) => ({ ...u, therapist_id: therapistOf.get(u.id) || null })), error: null };
-  } catch (error) {
-    console.error('[API] fetchOrgLogins error:', error.message);
-    return { data: [], error };
-  }
-}
-
 // The therapist this login is (therapists.user_id, migration-377), or null. Used by the staff "My day" view.
 export async function fetchMyTherapistId(userId) {
   try {
@@ -705,14 +687,76 @@ export async function fetchMyTherapistId(userId) {
   }
 }
 
-// Link a login to the person they work as (therapists.user_id since migration-377). Manager/admin only; null unlinks. The RPC is the only write path.
-export async function setUserTherapist({ userId, therapistId = null }) {
+// ── Access section (ZNLY-198 4b): read one person's login, and the "Link needs review" prompt ──
+// What a role may direct-apply, in whole percent, from the one table the booking rules use (so the role cards never drift from it).
+export const directDiscountPercent = (role) => Math.round((DISCOUNT_LIMITS[role] || 0) * 100);
+
+// One person's login: their users row, whether a PIN is set (the PIN itself is never read), and the extra branches ticked for them.
+// data = { userId, user, hasPin, branchIds } with user = null when the person has no login yet. Writes go through grantStaffAccess / updateStaffAccess.
+export async function fetchTherapistAccess(therapistId) {
   try {
-    const { error } = await supabase.rpc('set_user_therapist', { p_user_id: userId, p_therapist_id: therapistId });
+    const { data: t, error: tErr } = await supabase.from('therapists').select('id, user_id, branch_id').eq('id', therapistId).single();
+    if (tErr) throw tErr;
+    if (!t.user_id) return { data: { userId: null, user: null, hasPin: false, branchIds: [], homeBranchId: t.branch_id }, error: null };
+    const [u, pin, grants] = await Promise.all([
+      supabase.from('users').select('id, email, full_name, role, login_access, calendar_visibility, can_view_customer_details, can_view_prices').eq('id', t.user_id).single(),
+      supabase.from('users').select('id').eq('id', t.user_id).not('pin', 'is', null).maybeSingle(), // existence only, the PIN never leaves the database
+      supabase.from('user_branches').select('branch_id').eq('user_id', t.user_id),
+    ]);
+    if (u.error) throw u.error;
+    if (grants.error) throw grants.error;
+    return { data: { userId: t.user_id, user: u.data, hasPin: pin.error ? null : !!pin.data, branchIds: (grants.data || []).map((g) => g.branch_id), homeBranchId: t.branch_id }, error: null };
+  } catch (error) {
+    console.error('[API] fetchTherapistAccess error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Open migration conflicts for the admin prompt (znly205_link_conflicts, admin-only read). Excludes the login_access backfill notes.
+// Each row carries the names the sentence needs, plus whether the suggested link could work right now.
+export async function fetchLinkConflicts() {
+  try {
+    const { data: rows, error } = await supabase.from('znly205_link_conflicts')
+      .select('id, user_id, therapist_id, therapist_current_user_id, reason')
+      .is('resolved_at', null).neq('reason', 'login_access_backfilled_to_email').order('id');
+    if (error) throw error;
+    if (!rows?.length) return { data: [], error: null };
+    const userIds = [...new Set(rows.flatMap((r) => [r.user_id, r.therapist_current_user_id]).filter(Boolean))];
+    const tIds = [...new Set(rows.map((r) => r.therapist_id).filter(Boolean))];
+    const [users, ts, links] = await Promise.all([
+      supabase.from('users').select('id, email').in('id', userIds),
+      tIds.length ? supabase.from('therapists').select('id, name, user_id').in('id', tIds) : { data: [], error: null },
+      supabase.from('therapists').select('id, user_id').in('user_id', userIds),
+    ]);
+    for (const r of [users, ts, links]) if (r.error) throw r.error;
+    const email = new Map((users.data || []).map((u) => [u.id, u.email]));
+    const tById = new Map((ts.data || []).map((x) => [x.id, x]));
+    return {
+      data: rows.map((r) => {
+        const th = tById.get(r.therapist_id);
+        return {
+          id: r.id, reason: r.reason, userId: r.user_id, userEmail: email.get(r.user_id) || null, therapistId: r.therapist_id,
+          therapistName: th?.name || null, therapistUserId: th?.user_id || null, currentEmail: email.get(r.therapist_current_user_id) || null,
+          loginLinkedElsewhere: (links.data || []).some((l) => l.user_id === r.user_id && l.id !== r.therapist_id),
+        };
+      }),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchLinkConflicts error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Settle one saved conflict (admin only): action 'link' links as the row suggested, 'keep' leaves things as they are. One transaction in the
+// database (resolve_link_conflict, migration-379): a refused link leaves the row open.
+export async function resolveLinkConflict({ id, action }) {
+  try {
+    const { error } = await supabase.rpc('resolve_link_conflict', { p_conflict_id: id, p_action: action });
     if (error) throw error;
     return { error: null };
   } catch (error) {
-    console.error('[API] setUserTherapist error:', error.message);
+    console.error('[API] resolveLinkConflict error:', error.message);
     return { error };
   }
 }

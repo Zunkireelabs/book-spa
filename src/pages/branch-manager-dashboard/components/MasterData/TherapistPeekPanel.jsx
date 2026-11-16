@@ -8,7 +8,7 @@ import { Avatar, npr } from '../Area/listKit';
 import { formatMinutes, timeToMinutes, DB_DOW_LABELS } from '../../../../utils/staffDay';
 import { subLine } from '../../../../services/therapistsOverview';
 import { TodayCell } from './therapistBits';
-import TherapistLoginField from './TherapistLoginField';
+import StaffAccessSection from './StaffAccessSection';
 import TransferPill from '../../../../components/ui/TransferPill';
 import { describeTransfer, transferState } from '../../../../utils/transferText';
 import { homeServiceNameSet, servicesBookableHere } from '../../../../utils/visitorServices';
@@ -46,6 +46,8 @@ const TherapistPeekPanel = ({ t, branchName, totalServices, canSeeRates, ratesRe
   const { profile } = useAuth();
   const { branchId } = useBranch();
   const visitor = !!t.visiting;
+  // While the Edit access panel is open on top, Esc / click-away must reach it (and its discard guard), not close this peek underneath.
+  const [editingAccess, setEditingAccess] = useState(false);
   const homeName = t.transfer?.input?.fromBranch || `their home ${locationLabel.toLowerCase()}`;
   const visit = useMemo(() => {
     if (!visitor || !t.transfer) return null;
@@ -139,7 +141,7 @@ const TherapistPeekPanel = ({ t, branchName, totalServices, canSeeRates, ratesRe
   );
 
   return (
-    <SidePanel isOpen title={t.name} header={header} titleId="therapist-peek-title" onClose={onClose} width="min(460px, 100vw)">
+    <SidePanel isOpen title={t.name} header={header} titleId="therapist-peek-title" onClose={editingAccess ? undefined : onClose} width="min(460px, 100vw)">
       <div className="px-5 py-5 space-y-6" data-peek={t.id}>
         <section>
           <div className="flex items-baseline justify-between mb-2">
@@ -201,7 +203,7 @@ const TherapistPeekPanel = ({ t, branchName, totalServices, canSeeRates, ratesRe
           )}
         </section>
 
-        {!visitor && ['manager', 'admin'].includes(profile?.role) && <TherapistLoginField therapistId={t.id} personName={t.name.split(' ')[0]} />}
+        {!visitor && <StaffAccessSection therapistId={t.id} personName={t.name} onEditingChange={setEditingAccess} />}
 
         {visitor && (
           <section>

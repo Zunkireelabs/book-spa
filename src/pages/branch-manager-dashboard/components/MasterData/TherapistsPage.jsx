@@ -9,6 +9,7 @@ import { nepalNow } from '../../../../utils/customerDirectory';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { ListPageShell, useToast, useExportSlot, ExportButton, PrimaryButton, leadNodes } from '../Area/listKit';
 import TherapistManagementPanel from './TherapistManagementPanel';
+import LinkConflictsNotice from './LinkConflictsNotice';
 import TherapistPositionsPanel from './TherapistPositionsPanel';
 import TherapistTransferLogPanel from './TherapistTransferLogPanel';
 import RosterPanel from './RosterPanel';
@@ -95,6 +96,7 @@ const TherapistsPage = ({ view }) => {
       counts={{ therapists: ov ? activeList.length : undefined, 'therapists-inactive': ov ? inactiveCount : undefined, 'therapists-positions': ov ? positionCount : undefined }}>
       {(stickyTop) => (
         <>
+          {isList && <LinkConflictsNotice />}
           {isList && (
             <TherapistManagementPanel key={view} tab={view === 'therapists' ? 'active' : 'inactive'} ov={ov} error={error} onRetry={load} canManage={canManage} canSeeRates={canSeeRates}
               isOverall={isOverall} branchName={branchName} branchNameById={branchNameById} today={now.today} nowTime={now.hm} stickyTop={stickyTop} registerExport={registerExport}

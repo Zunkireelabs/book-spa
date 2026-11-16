@@ -57,7 +57,7 @@ echo "== migrations 3..375"
 apply_range 3 375
 echo "== pre-377 fixtures, then 376..378"
 run -f supabase/tests/znly-205-pre377-setup.sql || fail "fixtures"
-apply_range 376 378
+apply_range 376 379
 
 echo "== SQL test"
 psql "$DB" -v ON_ERROR_STOP=1 -f supabase/tests/znly-204-205.sql >/tmp/qc-4a-test.log 2>&1
@@ -66,6 +66,6 @@ grep -q "ALL PASSED" /tmp/qc-4a-test.log || fail "SQL test"
 psql "$DB" -qAt -c "select 'ledger: '||count(*)||' versions, max '||max(version::int) from schema_migrations where version ~ '^[0-9]+$'"
 
 echo "== migration self-record check (vs origin/stage)"
-bash scripts/check-migrations.sh origin/stage | grep -E "FAIL|^OK: .*migration-37[678]" || true
+bash scripts/check-migrations.sh origin/stage | grep -E "FAIL|^OK: .*migration-37[6789]" || true
 bash scripts/check-migrations.sh origin/stage | grep -q "^FAIL" && fail "check-migrations"
 echo "QC 4a: ALL PASSED"
