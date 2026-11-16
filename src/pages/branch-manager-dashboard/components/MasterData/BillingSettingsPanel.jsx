@@ -13,9 +13,12 @@ import { useOrg } from '../../../../contexts/OrgContext';
 // charged for a tenant that never explicitly chose.
 const TAX_MODE_OPTIONS = [
   { value: 'inclusive', label: 'Prices include VAT — shown separately, total unchanged' },
-  { value: 'addon', label: 'Add VAT on top — customer pays more than the listed price' },
   { value: 'none', label: 'No VAT — no tax line on the invoice' },
 ];
+
+// ZNLY-218: not offered until checkout can collect the VAT (the database refuses to set it). A tenant that already has it set sees it
+// as the current value, flagged, so the screen never shows an empty choice; saving any other mode clears it.
+const LEGACY_ADDON_OPTION = { value: 'addon', label: 'Add VAT on top (not available yet): choose another' };
 
 const PAN_PATTERN = /^\d{9}$/;
 
@@ -221,12 +224,12 @@ const BillingSettingsPanel = ({ readOnly = false }) => {
       <div className="space-y-1">
         <label className="block font-body font-body-medium text-sm text-text-primary">Tax mode</label>
         <p className="font-caption text-xs text-text-tertiary mb-1">
-          How VAT applies to your prices. Invoices cannot be issued until this is chosen — there is no default.
+          How VAT applies to your prices. Invoices cannot be issued until this is chosen — there is no default. Add VAT on top will come later; prices include VAT or no VAT.
         </p>
         <CustomSelect
           value={form.taxMode}
           onChange={(val) => setForm((f) => ({ ...f, taxMode: val }))}
-          options={TAX_MODE_OPTIONS}
+          options={form.taxMode === 'addon' ? [...TAX_MODE_OPTIONS, LEGACY_ADDON_OPTION] : TAX_MODE_OPTIONS}
           placeholder="Choose a tax mode"
           size="md"
           disabled={readOnly}

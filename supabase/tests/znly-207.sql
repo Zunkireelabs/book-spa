@@ -39,7 +39,9 @@ COMMIT;
 CREATE FUNCTION pg_temp.set_mode(m text) RETURNS void LANGUAGE plpgsql AS $f$
 BEGIN
   EXECUTE 'RESET ROLE';
+  ALTER TABLE organizations DISABLE TRIGGER trg_org_billing_no_addon;   -- ZNLY-218 refuses addon: the VAT maths of issue_invoice is still tested
   UPDATE organizations SET settings = jsonb_set(settings, '{billing_tax_mode}', to_jsonb(m)) WHERE id = '20700000-0000-0000-0000-00000000000a';
+  ALTER TABLE organizations ENABLE TRIGGER trg_org_billing_no_addon;
   EXECUTE 'SET LOCAL ROLE authenticated';
 END $f$;
 BEGIN;
