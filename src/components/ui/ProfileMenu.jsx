@@ -34,7 +34,8 @@ const Avatar = ({ name, src }) => {
 
 const ProfileMenu = () => {
   const { profile, signOut } = useAuth();
-  const { lock } = useLock();
+  const { lock, hasPin } = useLock();
+  const canLock = hasPin === true;
   const navigate = useGuardedNavigate();
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
@@ -96,9 +97,10 @@ const ProfileMenu = () => {
             </button>
           )}
           <div className="my-1.5 h-px bg-border" />
-          <button type="button" role="menuitem" className={row} aria-label="Lock screen" onClick={run(() => lock())}>
+          <button type="button" role="menuitem" className={`${row} ${canLock ? '' : 'opacity-60 cursor-not-allowed'}`} aria-label="Lock screen" aria-disabled={!canLock}
+            title={canLock ? undefined : 'Needs a PIN. Ask your manager to set one for you.'} onClick={canLock ? run(() => lock()) : undefined} data-lock-item data-lock-off={canLock ? undefined : 'true'}>
             <Icon name="Lock" size={16} className="text-text-tertiary" />
-            <span className="flex-1">Lock screen</span>
+            <span className="flex-1">Lock screen{canLock ? '' : <span className="block text-[11px] font-normal text-text-tertiary">Needs a PIN. Ask your manager to set one.</span>}</span>
           </button>
           <button type="button" role="menuitem" className={row} onClick={run(() => signOut())}>
             <Icon name="LogOut" size={16} className="text-text-tertiary" />

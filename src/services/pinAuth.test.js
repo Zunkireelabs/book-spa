@@ -86,7 +86,7 @@ describe('loginWithPin', () => {
 
     const result = await loginWithPin('staff@zenly.app', '0000', 'nuad-thai-spa');
 
-    expect(result).toEqual({ success: false, error: 'PIN login failed.' });
+    expect(result).toEqual({ success: false, error: 'PIN login failed.', kind: 'wrong_pin' });
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(verifyOtpMock).not.toHaveBeenCalled();
   });
@@ -112,7 +112,7 @@ describe('loginWithPin', () => {
 
     const result = await loginWithPin('staff@zenly.app', '1234', 'nuad-thai-spa');
 
-    expect(result).toEqual({ success: false, error: 'still bad' });
+    expect(result).toEqual({ success: false, error: 'still bad', kind: 'unavailable' });
     expect(global.fetch).toHaveBeenCalledTimes(2);
     expect(verifyOtpMock).toHaveBeenCalledTimes(2);
   });
@@ -138,5 +138,19 @@ describe('loginWithPin', () => {
 
     expect(result.success).toBe(true);
     expect(signOutMock).not.toHaveBeenCalled();
+  });
+  it('a dropped connection is "unavailable", not a wrong PIN', async () => {
+    global.fetch.mockRejectedValue(new TypeError('Failed to fetch'));
+    const result = await loginWithPin('staff@zenly.app', '1234', 'nuad-thai-spa');
+    expect(result.success).toBe(false);
+    expect(result.kind).toBe('unavailable');
+    expect(result.error).toMatch(/Can't check your PIN right now/);
+  });
+
+  it('a 5xx answer or a non-JSON body is "unavailable"', async () => {
+    global.fetch.mockResolvedValue({ status: 503, json: async () => ({ success: false, error: 'upstream' }) });
+    expect((await loginWithPin('staff@zenly.app', '1234', 'nuad-thai-spa')).kind).toBe('unavailable');
+    global.fetch.mockResolvedValue({ status: 200, json: async () => { throw new SyntaxError('Unexpected token <'); } });
+    expect((await loginWithPin('staff@zenly.app', '1234', 'nuad-thai-spa')).kind).toBe('unavailable');
   });
 });

@@ -74,11 +74,12 @@ export const getSafeRedirect = (from, orgSlug) => {
  * When called without a token (page refresh), the supabase client reads
  * the stored session from localStorage automatically — this path works fine.
  */
+// ZNLY-216: an explicit column list, never '*': users.pin is not readable by the app (migration-384), so '*' would be refused.
 async function fetchProfile(userId, accessToken) {
   try {
     if (accessToken) {
       const url = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/users`
-        + `?select=*,branches!users_branch_id_fkey(name),organizations(id,name,code,slug,industry_type,industries(id,name,staff_label,staff_label_plural,location_label,location_label_plural,enable_rooms,enable_staff_gender))&id=eq.${userId}`;
+        + `?select=id,email,full_name,role,branch_id,is_active,created_at,org_id,login_access,calendar_visibility,can_view_customer_details,can_view_prices,branches!users_branch_id_fkey(name),organizations(id,name,code,slug,industry_type,industries(id,name,staff_label,staff_label_plural,location_label,location_label_plural,enable_rooms,enable_staff_gender))&id=eq.${userId}`;
       // Routed through the shared retryingFetch (not a raw fetch) so this PostgREST
       // call gets the same 25P02/40001/40P01 retry + telemetry as every request
       // issued through the supabase-js clients — this is the same poisoned-pool
@@ -120,7 +121,7 @@ async function fetchProfile(userId, accessToken) {
     // Fallback: use supabase client (session from localStorage)
     const { data, error } = await supabase
       .from('users')
-      .select('*, branches!users_branch_id_fkey(name), organizations(id, name, code, slug, industry_type, industries(id, name, staff_label, staff_label_plural, location_label, location_label_plural, enable_rooms, enable_staff_gender))')
+      .select('id, email, full_name, role, branch_id, is_active, created_at, org_id, login_access, calendar_visibility, can_view_customer_details, can_view_prices, branches!users_branch_id_fkey(name), organizations(id, name, code, slug, industry_type, industries(id, name, staff_label, staff_label_plural, location_label, location_label_plural, enable_rooms, enable_staff_gender))')
       .eq('id', userId)
       .single();
 

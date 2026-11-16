@@ -692,6 +692,13 @@ export async function fetchMyTherapistId(userId) {
 export const directDiscountPercent = (role) => Math.round((DISCOUNT_LIMITS[role] || 0) * 100);
 
 // One person's login: their users row, whether a PIN is set (the PIN itself is never read), and the extra branches ticked for them.
+// Does the SIGNED-IN person have a PIN? (ZNLY-210: the lock screen needs one; has_pin() answers yes/no, the PIN is never read.) { data: boolean|null }
+export async function fetchOwnHasPin() {
+  const { data, error } = await supabase.rpc('has_pin');
+  if (error) return { data: null, error };
+  return { data: data === true, error: null };
+}
+
 // data = { userId, user, hasPin, branchIds } with user = null when the person has no login yet. Writes go through grantStaffAccess / updateStaffAccess.
 export async function fetchTherapistAccess(therapistId) {
   try {
@@ -700,12 +707,12 @@ export async function fetchTherapistAccess(therapistId) {
     if (!t.user_id) return { data: { userId: null, user: null, hasPin: false, branchIds: [], homeBranchId: t.branch_id }, error: null };
     const [u, pin, grants] = await Promise.all([
       supabase.from('users').select('id, email, full_name, role, login_access, calendar_visibility, can_view_customer_details, can_view_prices').eq('id', t.user_id).single(),
-      supabase.from('users').select('id').eq('id', t.user_id).not('pin', 'is', null).maybeSingle(), // existence only, the PIN never leaves the database
+      supabase.rpc('has_pin', { p_user_id: t.user_id }), // ZNLY-210: a yes/no from the database; users.pin is not readable (migration-384)
       supabase.from('user_branches').select('branch_id').eq('user_id', t.user_id),
     ]);
     if (u.error) throw u.error;
     if (grants.error) throw grants.error;
-    return { data: { userId: t.user_id, user: u.data, hasPin: pin.error ? null : !!pin.data, branchIds: (grants.data || []).map((g) => g.branch_id), homeBranchId: t.branch_id }, error: null };
+    return { data: { userId: t.user_id, user: u.data, hasPin: pin.error ? null : pin.data === true, branchIds: (grants.data || []).map((g) => g.branch_id), homeBranchId: t.branch_id }, error: null };
   } catch (error) {
     console.error('[API] fetchTherapistAccess error:', error.message);
     return { data: null, error };

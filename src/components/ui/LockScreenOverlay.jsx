@@ -84,7 +84,10 @@ const LockScreenOverlay = () => {
 
     if (!result.success) {
       setPin('');
-      if (result.signedOut) {
+      if (result.unavailable) {
+        // Not a wrong PIN: no attempt used. (ZNLY-210)
+        setError(result.error);
+      } else if (result.signedOut) {
         // Too many failed attempts — unlock() already signed out; the app
         // will fall through to the login redirect on its own.
         setError('Too many failed attempts. Signed out for security.');
