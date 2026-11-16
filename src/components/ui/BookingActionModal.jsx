@@ -9,7 +9,9 @@ import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
 import PaymentMethodSelector from './PaymentMethodSelector';
 import PaymentModeCorrectionModal from './PaymentModeCorrectionModal';
-import { adminCorrectBooking, correctPaymentMode, adminDeleteBooking, correctPaymentAmount, fetchMemberDiscountContext, applyMemberDiscount, fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, checkoutWithProducts, fetchBookingProductSales, refundProductSale, recordTip, getCustomerFirstBookingFlag } from '../../services/api';
+import TimeBoxInput from './TimeBoxInput';
+import InvoicePrintModal from './InvoicePrintModal';
+import { adminCorrectBooking, correctPaymentMode, adminDeleteBooking, correctPaymentAmount, fetchMemberDiscountContext, applyMemberDiscount, fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, checkoutWithProducts, fetchBookingProductSales, refundProductSale, recordTip, getCustomerFirstBookingFlag, fetchInvoiceByBookingId } from '../../services/api';
 import { excludeRelatedFromPreviousDue, toDbStatus } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
@@ -227,6 +229,9 @@ const BookingActionModal = ({
   defaultNewBookingMode,
   userRole = 'staff',
   // variant: 'modal' (default, centered dialog — every other caller) | 'panel' (docked SidePanel, used by the calendar).
+  // Printing an invoice hands the customer their own name/phone on paper: an account with customer details hidden must not
+  // get that affordance (same gate as issue_invoice(), migration-334).
+  canViewCustomerDetails = true,
   variant = 'modal',
   previewBooking = null,   // panel only: the calendar card's already-known data, shown while the full booking loads
   onRefreshBooking,        // panel only: re-fetch the open booking after an in-place action (status change)
@@ -244,7 +249,7 @@ const BookingActionModal = ({
   onRescheduleStart,
 }) => {
   const { branchId } = useBranch();
-  const { paymentMethods, orgSettings } = useOrg();
+  const { paymentMethods, orgSettings, staffLabel } = useOrg();
   const cancelReasonOptions = orgSettings?.cancellation_reasons?.length
     ? orgSettings.cancellation_reasons
     : CANCEL_REASON_OPTIONS;
@@ -265,6 +270,12 @@ const BookingActionModal = ({
   // Products added to this visit (V26, product_sales.booking_id): read-only lines on the Payment tab; a manager/admin can refund one.
   const [visitProducts, setVisitProducts] = useState([]);
   const [visitProductRefund, setVisitProductRefund] = useState(null); // the sale awaiting a refund confirmation
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  // Keeps "Print invoice" reachable for a booking invoiced before billing was
+  // later disabled — the invoice data isn't orphaned, only this button would
+  // be if it hid unconditionally on the toggle. See CustomerSalesTab for the
+  // batched equivalent over a list; this is a single booking.
+  const [hasExistingInvoice, setHasExistingInvoice] = useState(false);
   // Admin correction — inline mode replacing the tab bar/content with an
   // edit-everything form (no separate popup modal). `showAdminCorrection`
   // toggles the mode; the rest is the form's own local state.
@@ -372,6 +383,16 @@ const BookingActionModal = ({
     });
     return () => { cancelled = true; };
   }, [showPaymentModal, branchId]);
+
+  useEffect(() => {
+    if (orgSettings?.billing_enabled === true) return; // button already shown; skip the lookup
+    if (booking?.paymentStatus !== 'paid' || !booking?.bookingId) return;
+    let cancelled = false;
+    fetchInvoiceByBookingId(booking.bookingId).then(({ data }) => {
+      if (!cancelled) setHasExistingInvoice(!!data);
+    });
+    return () => { cancelled = true; };
+  }, [orgSettings?.billing_enabled, booking?.bookingId, booking?.paymentStatus]);
 
   // Pre-select current therapists/room when booking changes or assign tab opens
   useEffect(() => {
@@ -756,7 +777,19 @@ const BookingActionModal = ({
     const [h, m] = time24.split(':').map(Number);
     const suffix = h >= 12 ? 'pm' : 'am';
     const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-    return `${h12}:${String(m).padStart(2, '0')}${suffix}`;
+    return `${h12}:${String(m).padStart(2, '0')} ${suffix}`;
+  };
+
+  // TimeBoxInput lets staff type any time, unlike the old dropdown which only
+  // ever offered times inside branch hours — not a hard rule (nothing blocks
+  // this server-side either), just a heads-up so an out-of-hours edit isn't
+  // silent.
+  const isWithinBranchHours = (time24) => {
+    const [h, m] = time24.split(':').map(Number);
+    const minutes = h * 60 + m;
+    const [openH, openM] = (branchHours?.openTime || '09:00:00').split(':').map(Number);
+    const [closeH, closeM] = (branchHours?.closeTime || '21:00:00').split(':').map(Number);
+    return minutes >= openH * 60 + openM && minutes <= closeH * 60 + closeM;
   };
 
   const openNewBookingForm = (mode) => {
@@ -2113,19 +2146,22 @@ const BookingActionModal = ({
                             />
                           </div>
                         ) : isEditing ? (
-                          <div className="flex gap-2">
+                          <div className="space-y-1.5">
                             <input
                               type="date"
                               value={editForm.date}
                               onChange={(e) => setEditForm(f => ({ ...f, date: e.target.value }))}
                               className={inputClasses}
                             />
-                            <input
-                              type="time"
+                            <TimeBoxInput
                               value={editForm.startTime}
-                              onChange={(e) => setEditForm(f => ({ ...f, startTime: e.target.value }))}
-                              className={inputClasses}
+                              onChange={(val) => setEditForm(f => ({ ...f, startTime: val }))}
                             />
+                            {editForm.startTime && !isWithinBranchHours(editForm.startTime) && (
+                              <p className="font-caption text-[11px] text-warning">
+                                Outside branch hours ({format12h(branchHours?.openTime?.slice(0, 5) || '09:00')} – {format12h(branchHours?.closeTime?.slice(0, 5) || '21:00')})
+                              </p>
+                            )}
                           </div>
                         ) : null}
                         {isEditing ? (
@@ -2148,7 +2184,7 @@ const BookingActionModal = ({
                 {(booking.therapists?.length > 0 || booking.therapist) && !isEditing && (
                   <div className="space-y-1.5 sm:space-y-2">
                     <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">
-                      Assigned Therapist{(booking.therapists?.length || 0) > 1 ? 's' : ''}
+                      Assigned {staffLabel}{(booking.therapists?.length || 0) > 1 ? 's' : ''}
                     </label>
                     <div className="font-body font-body-normal text-sm text-text-primary">
                       {(booking.therapists?.length > 0 ? booking.therapists : [booking.therapist]).filter(Boolean).map((t, i) => (
@@ -2158,6 +2194,14 @@ const BookingActionModal = ({
                         </span>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {/* Gender Preference — read-only, customer-submitted at booking time */}
+                {booking.genderPreference && booking.genderPreference !== 'no-preference' && (
+                  <div className="space-y-1.5 sm:space-y-2">
+                    <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Gender Preference</label>
+                    <p className="font-body font-body-normal text-sm text-text-primary capitalize">{booking.genderPreference}</p>
                   </div>
                 )}
 
@@ -3487,9 +3531,21 @@ const BookingActionModal = ({
                 )}
                 {booking.paymentStatus === 'paid' && (
                   <div className="space-y-2">
-                    <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-success/10 border border-success/20">
-                      <Icon name="CheckCircle" size={14} className="text-success flex-shrink-0" />
-                      <span className="font-body font-body-normal text-xs sm:text-sm text-success">Payment has been recorded.</span>
+                    <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-spa bg-success/10 border border-success/20">
+                      <div className="flex items-center space-x-2">
+                        <Icon name="CheckCircle" size={14} className="text-success flex-shrink-0" />
+                        <span className="font-body font-body-normal text-xs sm:text-sm text-success">Payment has been recorded.</span>
+                      </div>
+                      {canViewCustomerDetails && (orgSettings?.billing_enabled === true || hasExistingInvoice) && (
+                        <button
+                          type="button"
+                          onClick={() => setShowInvoiceModal(true)}
+                          className="flex items-center gap-1 text-xs font-body-medium text-primary hover:underline flex-shrink-0"
+                        >
+                          <Icon name="Receipt" size={14} />
+                          Print invoice
+                        </button>
+                      )}
                     </div>
                     {(booking.payments || []).map((p) => (
                       p.id && showAdminCorrection ? (
@@ -3682,7 +3738,7 @@ const BookingActionModal = ({
 
                   {/* Therapist */}
                   <div>
-                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Therapist</label>
+                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">{staffLabel}</label>
                     <CustomSelect
                       value={newBookingForm.therapistId}
                       onChange={(val) => setNewBookingForm(f => ({ ...f, therapistId: val }))}
@@ -3751,6 +3807,9 @@ const BookingActionModal = ({
           }}
         />
       )}
+      {showInvoiceModal && (
+        <InvoicePrintModal bookingId={booking.bookingId} onClose={() => setShowInvoiceModal(false)} />
+      )}
       {/* Cancel / No Show confirmation */}
       {pendingStatus === 'no show' && (
         <ConfirmDialog
@@ -3771,7 +3830,7 @@ const BookingActionModal = ({
           title="Cancel Booking"
           message="This will cancel the booking. This cannot be undone."
           confirmLabel="Cancel Booking"
-          reasonOptions={CANCEL_REASON_OPTIONS}
+          reasonOptions={cancelReasonOptions}
           isSubmitting={isLoading}
           onClose={() => setPendingStatus(null)}
           onConfirm={(reason) => handleStatusUpdate(pendingStatus, reason)}

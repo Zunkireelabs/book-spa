@@ -4,12 +4,14 @@ import { Helmet } from 'react-helmet';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLock } from '../../contexts/LockContext';
 import { useBranch } from '../../contexts/BranchContext';
 import AppShell from '../../components/ui/AppShell';
 import { fetchBookings, fetchTherapists, updateBookingStatus, fetchPendingDiscounts } from '../../services/api';
 import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
 import { supabase } from '../../lib/supabase';
 import { useNotifications } from '../../contexts/NotificationsContext';
+import { useOrg } from '../../contexts/OrgContext';
 
 // Import all components
 import MetricsCard from './components/MetricsCard';
@@ -29,6 +31,12 @@ import CalendarSettingsPanel from './components/MasterData/CalendarSettingsPanel
 import ClosedDatesPanel from './components/MasterData/ClosedDatesPanel';
 import AttendanceSettingsPanel from './components/MasterData/AttendanceSettingsPanel';
 import ProviderProfilePanel from './components/MasterData/ProviderProfilePanel';
+import OnlineBookingCapacityPanel from './components/MasterData/OnlineBookingCapacityPanel';
+import AdvanceBookingWindowPanel from './components/MasterData/AdvanceBookingWindowPanel';
+import LocationsPanel from './components/MasterData/LocationsPanel';
+import BillingSettingsPanel from './components/MasterData/BillingSettingsPanel';
+import StaffAccessPanel from './components/MasterData/StaffAccessPanel';
+import PriceTiersPanel from './components/MasterData/PriceTiersPanel';
 import NotificationSettingsContent from '../inbox/NotificationSettingsPanel';
 import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
@@ -83,8 +91,15 @@ import DashboardHome from '../dashboard-home';
 import { AIAssistantPanel } from '../../components/ui/AIAssistant';
 import { useAIAssistant } from '../../contexts/AIAssistantContext';
 
+// Views that render org-wide data and therefore hide the branch switcher —
+// see the comment at its render site for why each one qualifies.
+const ORG_WIDE_VIEWS = new Set(['customers', 'transfer-report']);
+
 const BranchManagerDashboard = () => {
   const { profile, user } = useAuth();
+  // Gates the online-booking-limit panel: the cap only bites when customers DON'T pick a staff member (check_branch_online_capacity()
+  // exempts bookings with a therapist_id). orgLoading matters because settings are null until the org loads.
+  const { showStaffSelection, loading: orgLoading, orgId } = useOrg();
   const { branchId, branchName, isOverall, loading: branchLoading } = useBranch();
   const { items: persistentNotifs, openItem: openNotificationItem, markAllRead: markAllPersistentRead } = useNotifications();
   const { isOpen: isAssistantOpen, toggleAssistant } = useAIAssistant();
@@ -463,7 +478,27 @@ const BranchManagerDashboard = () => {
       case 'categories': return <CategoryManagementPanel />;
       case 'payment-methods': return <PaymentMethodsPanel />;
       case 'reward-catalog': return <RewardCatalogPanel />;
-      case 'booking-settings': return <BookingSettingsPanel />;
+      case 'booking-settings': return (
+        <div className="space-y-8">
+          <BookingSettingsPanel />
+          {!isOverall && !orgLoading ? (
+            <>
+              {!showStaffSelection && (
+                <div className="border-t border-border pt-8"><OnlineBookingCapacityPanel branchId={branchId} /></div>
+              )}
+              <div className="border-t border-border pt-8"><AdvanceBookingWindowPanel branchId={branchId} /></div>
+            </>
+          ) : (
+            <div className="border-t border-border pt-8 font-body text-sm text-text-secondary">
+              Select a specific branch to configure the online booking limit and advance booking window.
+            </div>
+          )}
+        </div>
+      );
+      case 'locations': return profile?.role === 'admin' ? <LocationsPanel orgId={orgId} /> : null;
+      case 'billing': return profile?.role === 'admin' ? <BillingSettingsPanel /> : null;
+      case 'staff-access': return ['manager', 'admin', 'admin_viewer'].includes(profile?.role) ? <StaffAccessPanel branchId={branchId} readOnly={profile?.role === 'admin_viewer'} /> : null;
+      case 'price-tiers': return !isOverall && ['manager', 'admin', 'admin_viewer'].includes(profile?.role) ? <PriceTiersPanel readOnly={profile?.role === 'admin_viewer'} /> : null;
       case 'calendar-settings': return profile?.role === 'admin' ? <CalendarSettingsPanel /> : null;
       case 'attendance-settings': return !isOverall && ['admin', 'manager'].includes(profile?.role) ? <AttendanceSettingsPanel branchId={branchId} /> : null;
       case 'closed-dates': return !isOverall && profile?.role === 'admin' ? <ClosedDatesPanel branchId={branchId} /> : null;

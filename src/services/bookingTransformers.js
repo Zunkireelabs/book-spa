@@ -11,6 +11,41 @@ export function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
 }
 
+// price_type = 'calendar_only' (migration-323) is priced internally — staff see
+// the amount, a customer booking online never does, per the user's "hide it
+// completely". Null here means genuinely nothing to show, not zero: every
+// cart/summary/confirmation screen in the customer booking flow must call this
+// instead of reading service.price_npr/effective_price_npr directly, or a
+// price hidden on the service list reappears one step later in the cart.
+//
+// The ONE implementation of customer-facing price display — previously
+// ServicesSection.jsx (the service list) had its own correct version of this
+// (servicePriceLabel, handling tiered/free/no_default) while this function
+// didn't, so a tiered service showed its real range on the list and then the
+// Unassigned rate — a number the customer might not actually be charged — in
+// the cart one step later. ServicesSection now imports this instead of
+// keeping its own copy.
+//
+// Returns a STRING label (or null), never a bare number: a tiered service has
+// no single price until a specific therapist is known, so unresolved tiered
+// is a range ("NPR 1,200 - 8,600"), not a number. Callers that need an actual
+// amount to sum into a total must resolve the therapist-specific price first
+// (fetchServicePriceForTherapist / service_price_for_therapist) — see
+// src/hooks/useCustomerServicePricing.js, which wraps exactly that resolution
+// for the cart/confirmation screens that show a total.
+export function customerFacingServicePriceLabel(service) {
+  if (!service || service.price_type === 'calendar_only') return null;
+  if (service.price_type === 'free') return 'Free';
+  if (service.price_type === 'no_default') return null;
+  if (service.price_type === 'tiered') {
+    if (service.min_price == null || service.max_price == null) return null;
+    return Number(service.min_price) === Number(service.max_price)
+      ? formatNPR(service.min_price)
+      : `NPR ${Number(service.min_price).toLocaleString('en-IN')} - ${Number(service.max_price).toLocaleString('en-IN')}`;
+  }
+  return formatNPR(service.effective_price_npr ?? service.price_npr ?? service.price ?? 0);
+}
+
 // Normalize a person's name to Title Case (customers, therapists, due-holders).
 // Lowercases each word then capitalizes its first letter, preserving hyphens/
 // apostrophes within a word (e.g. "mary-jane o'brien" -> "Mary-Jane O'Brien").
@@ -167,6 +202,7 @@ export function transformBooking(dbBooking) {
     acknowledgedAt: dbBooking.acknowledged_at || null,
     acknowledgedBy: dbBooking.acknowledged_by || null,
     specialRequests: dbBooking.special_requests || null,
+    genderPreference: dbBooking.gender_preference || null,
     referredBy: dbBooking.referred_by || null,
     referralSource: dbBooking.referral_source || null,
     referralSourceDetail: dbBooking.referral_source_detail || null,

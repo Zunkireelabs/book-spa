@@ -14,7 +14,7 @@ const plusDays = (ymd, n) => { const d = new Date(`${ymd}T00:00:00`); d.setDate(
 // replaces here: a date from tomorrow to 14 days out, a time between 9:00am and 8:30pm; availability (room capacity, therapist
 // branch window / check-out) is enforced by rescheduleBooking, so its verdict is shown after the inputs.
 // `onConfirm({ bookingId, newDate, newStartTime })` returns { error? }; on success the panel closes.
-const StaffReschedulePanel = ({ booking, onClose, onConfirm }) => {
+const StaffReschedulePanel = ({ booking, onClose, onConfirm, staffLabel = 'Therapist' }) => {
   const today = toDateInputValue(new Date());
   const minDate = plusDays(today, 1);
   const maxDate = plusDays(today, 14);
@@ -64,7 +64,7 @@ const StaffReschedulePanel = ({ booking, onClose, onConfirm }) => {
   const rows = useMemo(() => [
     ['Current slot', oldSlot],
     newSlot ? ['New slot', `${newSlot}${durationMin ? ` – ${format12h(addMinutes(time, durationMin))}` : ''}`, 'total'] : null,
-    ['Therapist', booking?.therapist?.name || 'Therapist TBA'],
+    [staffLabel, booking?.therapist?.name || `${staffLabel} TBA`],
     booking?.roomName ? ['Room', booking.roomName] : null,
   ], [oldSlot, newSlot, durationMin, time, booking]);
 
@@ -87,7 +87,7 @@ const StaffReschedulePanel = ({ booking, onClose, onConfirm }) => {
             <Icon name="AlertTriangle" size={14} className="mt-0.5 flex-shrink-0" /><span>{conflict}</span>
           </p>
         ) : (
-          <p className="text-xs text-text-secondary">Room availability and the therapist's schedule are checked when you confirm. The same therapist stays assigned if they are available.</p>
+          <p className="text-xs text-text-secondary">Room availability and the {staffLabel.toLowerCase()}'s schedule are checked when you confirm. The same {staffLabel.toLowerCase()} stays assigned if they are available.</p>
         )}
       </FormBody>
     </PanelShell>

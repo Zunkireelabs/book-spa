@@ -3,9 +3,9 @@ import { AVAILABILITY_CODES } from '../../../services/availability';
 import Button from '../../../components/ui/Button';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
-import { createBooking, createBookingGroup, fetchRooms, lookupReferrerByPhone } from '../../../services/api';
+import { createBooking, createBookingGroup, lookupReferrerByPhone, fetchServiceComboComponents, createComboBookingItems } from '../../../services/api';
 import { toE164 } from '../../../utils/phone';
-import { formatNPR } from '../../../services/bookingTransformers';
+import { useResolvedServicePricing } from '../../../hooks/useCustomerServicePricing';
 
 const BookingConfirmation = ({
   orgSlug,
@@ -26,20 +26,6 @@ const BookingConfirmation = ({
   const [isConfirming, setIsConfirming] = useState(false);
   const [bookingError, setBookingError] = useState(null);
   const [showQRCode, setShowQRCode] = useState(false);
-  const [amenities, setAmenities] = useState([]);
-
-  useEffect(() => {
-    async function loadAmenities() {
-      if (selectedBranch?.id) {
-        const { data } = await fetchRooms(selectedBranch.id);
-        if (data) {
-          const unique = [...new Set(data.flatMap(r => r.amenities || []))];
-          setAmenities(unique);
-        }
-      }
-    }
-    loadAmenities();
-  }, [selectedBranch?.id]);
 
   const formatDateTime = () => {
     if (!selectedDateTime?.date || !selectedDateTime?.time) return '';
@@ -113,6 +99,7 @@ const BookingConfirmation = ({
         customerPhone: toE164(customerInfo.phone, customerInfo.phoneCountryCode || '+977'),
         customerGender: customerInfo.gender || null,
         specialRequests: customerInfo.specialRequests || null,
+        genderPreference: genderPreference || 'no-preference',
         referringCustomerId,
         orgSlug,
         referralSource: customerInfo.referralSource || null,
@@ -167,6 +154,49 @@ const BookingConfirmation = ({
         );
         return;
       }
+      // ZNLY-182: a combo service (e.g. "Bold transformation") previously landed as
+      // ONE flat-duration booking row with no way to assign each sub-service to a
+      // different staff member — the per-component booking_combo_items table and
+      // CalendarGrid's split-card rendering already existed (staff Quick Create uses
+      // them), this was simply never wired up for the online flow. Not the group
+      // (isGroup/createBookingGroup) path above — that's a different, unrelated
+      // feature (several distinct services back-to-back). `data` here is the raw
+      // row createBooking() returns (NOT run through transformBooking), so the real
+      // booking id is `data.id`, not `data.bookingId`.
+      if (!isGroup && selectedService?.is_combo) {
+        const { data: components } = await fetchServiceComboComponents(selectedService.id);
+        if (components?.length > 0) {
+          const comboComponents = components.map((c) => ({
+            serviceId: c.serviceId,
+            componentId: c.componentId,
+            defaultTiming: c.defaultTiming,
+            // Online customers never get a per-component staff picker — they either
+            // see no picker (gender-preference-only) or pick ONE overall professional,
+            // which becomes the booking's single therapistId. A component flagged
+            // default_same_staff inherits that same person (or stays unassigned if
+            // the booking itself has none); default_same_staff: false always stays
+            // unassigned for staff to pick later, exactly like a Quick Create combo
+            // booking where a component was explicitly left unassigned.
+            therapistId: c.defaultSameStaff ? (therapistId || null) : null,
+          }));
+          const { error: comboError } = await createComboBookingItems({
+            bookingId: data.id,
+            branchId: commonFields.branchId,
+            date: commonFields.date,
+            startTime: commonFields.startTime,
+            roomId: null,
+            components: comboComponents,
+            orgSlug,
+          });
+          // Non-blocking — the booking itself already succeeded; mirror the Quick
+          // Create flow's own pattern (calendar/index.jsx) of surfacing a warning
+          // without failing the confirmation screen.
+          if (comboError) {
+            console.error('[BookingConfirmation] createComboBookingItems failed:', comboError.message);
+          }
+        }
+      }
+
       onConfirmBooking({ bookingId: data.booking_number });
     } catch (err) {
       console.error('[BookingConfirmation] unexpected error confirming booking:', err);
@@ -181,8 +211,9 @@ const BookingConfirmation = ({
   const servicesToShow = (Array.isArray(additionalServices) && additionalServices.length > 0)
     ? additionalServices
     : (selectedService ? [selectedService] : []);
-  const priceOf = (s) => Number(s?.price ?? s?.effective_price_npr ?? s?.price_npr ?? 0);
-  const totalPrice = servicesToShow.reduce((sum, s) => sum + priceOf(s), 0);
+  const pricingItems = servicesToShow.map((s, i) => ({ key: s?.id ?? i, service: s, therapistId }));
+  const { perItem: pricedServices, totalLabel } = useResolvedServicePricing(pricingItems);
+  const labelFor = (s, i) => pricedServices.find((p) => p.key === (s?.id ?? i))?.label ?? null;
   const heroService = servicesToShow[0];
 
   return (
@@ -212,12 +243,12 @@ const BookingConfirmation = ({
             {servicesToShow.map((s, i) => (
               <div key={s?.id ?? i} className="flex justify-between text-sm">
                 <span className="text-text-secondary">{s?.name}</span>
-                <span className="font-medium">{formatNPR(priceOf(s))}</span>
+                {labelFor(s, i) != null && <span className="font-medium">{labelFor(s, i)}</span>}
               </div>
             ))}
             <div className="flex justify-between text-sm pt-2 border-t border-border">
               <span className="text-text-secondary font-medium">Total</span>
-              <span className="text-primary font-bold">{formatNPR(totalPrice)}</span>
+              <span className="text-primary font-bold">{totalLabel}</span>
             </div>
           </div>
         </div>
@@ -238,22 +269,6 @@ const BookingConfirmation = ({
           </div>
         </div>
       </div>
-
-      {amenities.length > 0 && (
-        <div className="bg-primary/5 border border-primary/10 rounded-spa-lg p-5">
-          <div className="flex items-center gap-2 mb-3 text-primary">
-            <Icon name="Sparkles" size={18} />
-            <h3 className="font-heading font-semibold">Facilities at {selectedBranch?.name}</h3>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {amenities.map((a, i) => (
-              <span key={i} className="px-3 py-1 bg-white border border-primary/20 text-primary rounded-full text-xs font-medium uppercase">
-                {a}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
 
       {bookingError && (
         <div className="bg-error/10 border border-error/20 rounded-spa p-4 flex items-center gap-3 text-error">

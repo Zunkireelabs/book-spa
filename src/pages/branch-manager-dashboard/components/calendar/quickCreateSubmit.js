@@ -62,6 +62,7 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
     referringCustomerId: formData.referringCustomerId,
     referringRewardType: formData.referringRewardType,
     referringRewardAmount: formData.referringRewardAmount,
+    knownCustomerId: formData.knownCustomerId || undefined,
     overrideReason,
   }));
   if (result.error) return { error: result.error.message || 'Failed to create booking.' };
@@ -77,12 +78,12 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
       overrideReason: result.overrideReason,
     });
     if (comboResult.error) {
-      return { toast: { msg: `Booking created, but combo components failed: ${comboResult.error.message || 'unknown error'}`, type: 'error' } };
+      return { toast: { msg: `Booking created, but combo components failed: ${comboResult.error.message || 'unknown error'}`, type: 'error' }, bookingId: result.data?.id };
     }
   }
 
   if (result.data?._therapistAssignmentWarning) {
-    return { toast: { msg: `Booking created, but: ${result.data._therapistAssignmentWarning}`, type: 'error' } };
+    return { toast: { msg: `Booking created, but: ${result.data._therapistAssignmentWarning}`, type: 'error' }, bookingId: result.data?.id };
   }
-  return { toast: { msg: 'Booking created successfully' } };
+  return { toast: { msg: 'Booking created successfully' }, bookingId: result.data?.id };
 }

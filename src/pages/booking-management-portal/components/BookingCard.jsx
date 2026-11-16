@@ -119,14 +119,16 @@ const BookingCard = ({ booking, onReschedule, onCancel }) => {
                     {booking.bookingDate}
                   </span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="font-body font-body-normal text-sm text-text-secondary">
-                    Gender Preference:
-                  </span>
-                  <span className="font-body font-body-normal text-sm text-text-primary capitalize">
-                    {booking.genderPreference}
-                  </span>
-                </div>
+                {booking.genderPreference && booking.genderPreference !== 'no-preference' && (
+                  <div className="flex items-center justify-between">
+                    <span className="font-body font-body-normal text-sm text-text-secondary">
+                      Gender Preference:
+                    </span>
+                    <span className="font-body font-body-normal text-sm text-text-primary capitalize">
+                      {booking.genderPreference}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

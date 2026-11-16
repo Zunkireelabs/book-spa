@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
 import { AuthProvider } from "./contexts/AuthContext";
+import { LockProvider } from "./contexts/LockContext";
 import { OrgProvider } from "./contexts/OrgContext";
 import { BranchProvider } from "./contexts/BranchContext";
 import { AIAssistantProvider } from "./contexts/AIAssistantContext";
@@ -13,17 +14,19 @@ function App() {
 
   return (
     <AuthProvider>
-      <OrgProvider>
-        <BranchProvider>
-          <AIAssistantProvider>
-            <CustomerAuthProvider>
-              <AvailabilityOverrideProvider>
-                <Routes />
-              </AvailabilityOverrideProvider>
-            </CustomerAuthProvider>
-          </AIAssistantProvider>
-        </BranchProvider>
-      </OrgProvider>
+      <LockProvider>
+        <OrgProvider>
+          <BranchProvider>
+            <AIAssistantProvider>
+              <CustomerAuthProvider>
+                <AvailabilityOverrideProvider>
+                  <Routes />
+                </AvailabilityOverrideProvider>
+              </CustomerAuthProvider>
+            </AIAssistantProvider>
+          </BranchProvider>
+        </OrgProvider>
+      </LockProvider>
     </AuthProvider>
   );
 }

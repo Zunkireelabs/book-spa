@@ -24,6 +24,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerCountryCode, setCustomerCountryCode] = useState('+977');
+  // Set only when opened from a waitlist entry with a linked customer: createBooking resolves the real customer by id
+  // server-side, so a restricted account's masked name/phone copies are never written.
+  const [knownCustomerId, setKnownCustomerId] = useState(null);
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerGender, setCustomerGender] = useState('');
   const [specialRequests, setSpecialRequests] = useState('');
@@ -143,8 +146,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   useEffect(() => {
     setServiceId(slotInfo?.defaultServiceId || '');
     setCustomerName(slotInfo?.defaultCustomerName || '');
-    setCustomerPhone('');
-    setCustomerCountryCode('+977');
+    setCustomerPhone(slotInfo?.defaultCustomerPhone || '');
+    setCustomerCountryCode(slotInfo?.defaultCustomerCountryCode || '+977');
+    setKnownCustomerId(slotInfo?.defaultCustomerId || null);
     setCustomerEmail('');
     setCustomerGender('');
     setSpecialRequests('');
@@ -455,7 +459,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || !customerPhone.replace(/\D/g, ''))) return;
+    if (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || (!customerPhone.replace(/\D/g, '') && !knownCustomerId))) return;
     if (blockOverlapMsg) return;
     // Synchronous re-entry guard: the `submitting` state disables the button
     // only after a re-render, so a fast double-click can fire two submits and
@@ -475,6 +479,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       : {
           serviceId,
           customerName: customerName.trim(),
+          knownCustomerId: knownCustomerId || undefined,
           customerPhone: customerPhone.replace(/\D/g, '')
             ? customerCountryCode + customerPhone.replace(/\D/g, '')
             : null,
@@ -602,8 +607,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     ? (/^Overlaps '(Transferred|Visiting)/.test(blockOverlapMsg) ? 'Therapist unavailable' : 'Overlaps a block')
     : bookingMode === 'group'
       ? (groupValid ? '' : 'Complete the group details')
-      : !serviceId ? 'Pick a service' : !customerName.trim() ? 'Enter the customer name' : !customerPhone.replace(/\D/g, '') ? 'Enter the customer phone' : '';
-  const createDisabled = submitting || !!blockOverlapMsg || precheck.blocked || (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || !customerPhone.replace(/\D/g, '')));
+      : !serviceId ? 'Pick a service' : !customerName.trim() ? 'Enter the customer name' : (!customerPhone.replace(/\D/g, '') && !knownCustomerId) ? 'Enter the customer phone' : '';
+  const createDisabled = submitting || !!blockOverlapMsg || precheck.blocked || (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || (!customerPhone.replace(/\D/g, '') && !knownCustomerId)));
   const confirmSlotLabel = confirm?.type === 'move'
     ? [therapists.find((d) => d.id === confirm.slot.colId)?.name || rooms.find((c) => c.id === confirm.slot.colId)?.name || confirm.slot.colName,
        confirm.slot.day,

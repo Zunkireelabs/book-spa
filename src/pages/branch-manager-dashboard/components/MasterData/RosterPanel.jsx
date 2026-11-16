@@ -198,8 +198,8 @@ const RosterPanel = ({ branchId }) => {
     if (state.isDayOff) {
       setCell(therapistId, dateInfo.date, {
         isDayOff: false,
-        startTime: state.startTime || '09:00',
-        endTime: state.endTime || '17:00',
+        startTime: state.startTime || '10:00',
+        endTime: state.endTime || '18:00',
         breaks: state.breaks || [],
       });
     } else {
@@ -211,8 +211,8 @@ const RosterPanel = ({ branchId }) => {
   const startEditing = (therapist, dateInfo, state) => {
     setEditTarget({ therapist, dateInfo });
     setEditDraft({
-      startTime: String(state.startTime || '09:00').slice(0, 5),
-      endTime: String(state.endTime || '17:00').slice(0, 5),
+      startTime: String(state.startTime || '10:00').slice(0, 5),
+      endTime: String(state.endTime || '18:00').slice(0, 5),
       breaks: (state.breaks || []).map((b) => ({ name: b.name || '', startTime: b.startTime, endTime: b.endTime })),
     });
   };

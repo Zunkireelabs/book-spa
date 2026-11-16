@@ -3,6 +3,7 @@ import { useGuardedNavigate } from '../../contexts/DirtyGuardContext';
 import Icon from '../AppIcon';
 import { useAuth } from 'contexts/AuthContext';
 import { useBranch } from 'contexts/BranchContext';
+import { useLock } from 'contexts/LockContext';
 import { useMenuNav } from './useMenuNav';
 
 const ROLE_LABELS = {
@@ -33,6 +34,7 @@ const Avatar = ({ name, src }) => {
 
 const ProfileMenu = () => {
   const { profile, signOut } = useAuth();
+  const { lock } = useLock();
   const navigate = useGuardedNavigate();
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
@@ -94,6 +96,10 @@ const ProfileMenu = () => {
             </button>
           )}
           <div className="my-1.5 h-px bg-border" />
+          <button type="button" role="menuitem" className={row} aria-label="Lock screen" onClick={run(() => lock())}>
+            <Icon name="Lock" size={16} className="text-text-tertiary" />
+            <span className="flex-1">Lock screen</span>
+          </button>
           <button type="button" role="menuitem" className={row} onClick={run(() => signOut())}>
             <Icon name="LogOut" size={16} className="text-text-tertiary" />
             <span className="flex-1">Sign out</span>

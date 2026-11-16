@@ -26,6 +26,7 @@ import { isOverallBranch } from '../../../../services/api';
 import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
+import WaitlistPanel from './WaitlistPanel';
 import { todayStr, addDays, addMonths, getStepDays } from './calendarDates';
 
 // ── Component ────────────────────────────────────────────────
@@ -40,6 +41,8 @@ const OperationalCalendar = ({ branchId }) => {
   const focusTherapistId = searchParams.get('therapist');
   const clearFocusTherapist = () => { const next = new URLSearchParams(searchParams); next.delete('therapist'); setSearchParams(next, { replace: true }); };
   const userRole = profile?.role || 'staff';
+  // Restricted staff (can_view_customer_details = false) see masked customer details; managers/admins always see them.
+  const canViewCustomerDetails = userRole === 'manager' || userRole === 'admin' || profile?.can_view_customer_details !== false;
   // Calendar settings (admin: ⋮ → Calendar settings): visible hours, interval, full-day view
   const hourFromSetting = (t, min, max) => {
     if (!t || typeof t !== 'string') return undefined;
@@ -163,10 +166,11 @@ const OperationalCalendar = ({ branchId }) => {
     transferModalTarget, setTransferModalTarget, editingTransferTherapist, setEditingTransferTherapist,
     blockPanelOpen, blockRetarget,
     servicesCache, servicesLoading, rebookSource, rebookFallback, rebookCardRef, reschedulePending,
+    waitlistCollapsed, setWaitlistCollapsed, waitlistRefreshToken, handleBookInFromWaitlist,
     openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick,
     handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,
-  } = useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, gridRef });
+  } = useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, gridRef, canViewCustomerDetails });
 
   const {
     handleStatusUpdate, handleAssignTherapist, handleBookingResize, handleEditBooking, handleApplyDiscount, handleRecordPayment, handleGroupPaymentRecorded,
@@ -359,6 +363,17 @@ const OperationalCalendar = ({ branchId }) => {
               )}
             </div>
 
+            <WaitlistPanel
+              branchId={branchId}
+              services={servicesCache || []}
+              therapists={calendarData?.therapists || []}
+              collapsed={waitlistCollapsed}
+              onToggleCollapse={() => setWaitlistCollapsed((v) => !v)}
+              onBookIn={handleBookInFromWaitlist}
+              refreshToken={waitlistRefreshToken}
+              canViewCustomerDetails={canViewCustomerDetails}
+            />
+
             {/* Quick-create: docked at lg+ (shrinks the calendar), overlay below */}
             <QuickCreatePanel
               slotInfo={quickCreateSlot}
@@ -453,10 +468,21 @@ const OperationalCalendar = ({ branchId }) => {
         onRebookStart={isOverallBranch(branchId) ? undefined : handleRebookStart}
         onRescheduleStart={isOverallBranch(branchId) ? undefined : handleRescheduleStart}
         onGroupPaymentRecorded={handleGroupPaymentRecorded}
+        canViewCustomerDetails={canViewCustomerDetails}
+        onViewBooking={(bookingId) => handleBookingClick({ bookingId })}
         branchHours={calendarData?.branchHours}
         defaultNewBookingMode={rebookFallback ? 'rebook' : null}
         userRole={profile?.role || 'staff'}
       />
+
+      {printReportOpen && (
+        <PrintReportModal
+          date={currentDate}
+          bookings={calendarData?.bookings || []}
+          onClose={() => setPrintReportOpen(false)}
+          use24h={use24h}
+        />
+      )}
 
       {/* Toast */}
       {actionToast && (

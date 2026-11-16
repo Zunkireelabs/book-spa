@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
+import CustomerHeader from '../../../../components/ui/CustomerHeader';
 import SummaryCard from '../SummaryCard';
 import ProfessionalStep from './ProfessionalStep';
 import DateTimeStep from './DateTimeStep';
@@ -33,6 +34,8 @@ const BookingView = ({
   onProfessionalSelect,
   selectedDateTime,
   onDateTimeSelect,
+  genderPreference,
+  onGenderPreferenceChange,
   customerInfo,
   onCustomerInfoChange,
   customerAccountId,
@@ -91,7 +94,6 @@ const BookingView = ({
 
   const handleEditBooking = () => setShowConfirmation(false);
 
-  const goBack = () => setStepIndex((i) => Math.max(0, i - 1));
   const goNext = () => setStepIndex((i) => Math.min(steps.length - 1, i + 1));
 
   const isCustomerInfoValid = () => {
@@ -115,33 +117,23 @@ const BookingView = ({
   const currentStep = steps[stepIndex]?.key;
   const onReview = currentStep === 'confirm' && showConfirmation;
 
-  // From the review screen, back edits the details again; otherwise it walks the
-  // steps — and from the first step, back exits to the profile page (the services
-  // step now lives there), same destination as the Services breadcrumb crumb below.
-  const handleBack = onReview ? handleEditBooking : (stepIndex > 0 ? goBack : onClose);
-
   const continueLabel = currentStep === 'confirm' ? 'Review' : 'Continue';
   const handleContinue = currentStep === 'confirm' ? () => setShowConfirmation(true) : goNext;
 
-  return (
-    <div className="zn-scope min-h-screen bg-[var(--zn-background)]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 flex items-center justify-between">
-        <button
-          onClick={handleBack}
-          aria-label="Back"
-          className="w-10 h-10 rounded-full border border-[var(--zn-border)] bg-[var(--zn-card)] flex items-center justify-center hover:border-[var(--zn-foreground)]/40"
-        >
-          <Icon name="ArrowLeft" size={18} className="text-[var(--zn-foreground)]" />
-        </button>
+  const pageTitle = onReview ? 'Review and confirm' : STEP_HEADINGS[currentStep];
 
-        <button
-          onClick={() => setConfirmingClose(true)}
-          aria-label="Close booking"
-          className="w-10 h-10 rounded-full border border-[var(--zn-border)] bg-[var(--zn-card)] flex items-center justify-center hover:border-[var(--zn-foreground)]/40"
-        >
-          <Icon name="X" size={18} className="text-[var(--zn-foreground)]" />
-        </button>
-      </div>
+  // No back/X icon row -- matches the solo profile page exactly (persistent
+  // CustomerHeader, no floating icon buttons at all). Anish: "make it similar like
+  // individual bookings with no back button and no cross button." Exiting the flow and
+  // moving between steps both go through the nav below (the "Services" crumb opens
+  // DiscardDialog, which confirms before calling onClose -- the one piece of customer
+  // input protection this view has, since browser Back isn't gated the same way and
+  // never has been) or the browser's own Back button (already wired via history
+  // push/pop in the parent). The review screen's own "Edit" control (inside ConfirmStep
+  // -> BookingConfirmation) is independent of this and still works unchanged.
+  return (
+    <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
+      <CustomerHeader branch={selectedBranch} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
 
       {confirmingClose && (
         <DiscardDialog onCancel={() => setConfirmingClose(false)} onConfirm={onClose} />
@@ -151,7 +143,7 @@ const BookingView = ({
         <nav aria-label="Booking steps" className="flex items-center gap-2 flex-wrap mt-4">
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => setConfirmingClose(true)}
             className="text-sm text-[var(--zn-muted-foreground)] hover:text-[var(--zn-foreground)] underline transition-colors"
           >
             Services
@@ -179,7 +171,7 @@ const BookingView = ({
         </nav>
 
         <h1 className="font-normal text-[32px] sm:text-[40px] tracking-[-0.01em] text-[var(--zn-foreground)] mt-4 mb-6">
-          {onReview ? 'Review and confirm' : STEP_HEADINGS[currentStep]}
+          {pageTitle}
         </h1>
 
         <div className="grid gap-8 lg:gap-12 lg:grid-cols-[minmax(0,1fr)_380px] items-start">
@@ -203,6 +195,8 @@ const BookingView = ({
                 totalMinutes={totalMinutes}
                 selectedDateTime={selectedDateTime}
                 onDateTimeSelect={onDateTimeSelect}
+                genderPreference={genderPreference}
+                onGenderPreferenceChange={onGenderPreferenceChange}
                 therapistFilter={therapistFilter}
               />
             )}
@@ -213,6 +207,7 @@ const BookingView = ({
                 selectedBranch={selectedBranch}
                 selectedServices={selectedServices}
                 selectedDateTime={selectedDateTime}
+                genderPreference={genderPreference}
                 selectedProfessional={selectedProfessional}
                 customerInfo={customerInfo}
                 onCustomerInfoChange={onCustomerInfoChange}
@@ -235,6 +230,11 @@ const BookingView = ({
             continueLabel={continueLabel}
             disabled={!canContinue[currentStep]}
             showContinue={!onReview}
+            // Matches the profile page's own SummaryCard exactly (index.jsx) -- header
+            // height plus breathing room, not just the bare header height, which left
+            // the card touching the header with zero gap (Anish caught the mismatch
+            // comparing solo's profile-page service list to group's GuestsStep).
+            stickyTop="calc(var(--customer-header-h, 64px) + 1.5rem)"
           />
         </div>
       </div>

@@ -25,7 +25,7 @@ import NotificationSettingsContent, { CATEGORY_META } from './NotificationSettin
 
 const TYPE_ICON = {
   new_online_booking: 'Globe', booking_cancelled_by_guest: 'CalendarX', booking_rescheduled_by_guest: 'CalendarClock',
-  discount_request: 'Percent', discount_big_fyi: 'Percent', discount_approved: 'Check', discount_declined: 'X', low_stock: 'Package',
+  discount_request: 'Percent', discount_big_fyi: 'Percent', discount_approved: 'Check', discount_declined: 'X', booking_group_stuck: 'AlertTriangle', low_stock: 'Package',
   attendance_gap: 'Clock', attendance_gaps: 'Clock', transferred_staff_reminder: 'ArrowLeftRight', outreach_review_pending: 'Heart', renewal_due: 'Heart',
 };
 const ICON_STYLE = { bookings: 'bg-primary/10 text-primary', approvals: 'bg-warning/10 text-warning', team: 'bg-blue-50 text-blue-600', stock: 'bg-gray-100 text-gray-600', guests: 'bg-pink-50 text-pink-600' };

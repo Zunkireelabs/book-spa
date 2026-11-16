@@ -7,8 +7,10 @@ import StaffReschedulePanel from './StaffReschedulePanel';
 import ConfirmDialog from '../../../components/ui/ConfirmDialog';
 import { searchBookings, updateBookingStatus, rescheduleBooking } from '../../../services/api';
 import { transformBookings, toDbStatus } from '../../../services/bookingTransformers';
+import { useIndustry } from '../../../hooks/useIndustry';
 
 const CheckBookingPanel = ({ branchId }) => {
+  const { staffLabel } = useIndustry();
   const [currentBooking, setCurrentBooking] = useState(null);
   const [bookingHistory, setBookingHistory] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -146,7 +148,7 @@ const CheckBookingPanel = ({ branchId }) => {
 
               {bookingHistory.length > 0 && (
                 <div className="border-t border-border pt-8">
-                  <BookingHistory bookings={bookingHistory} />
+                  <BookingHistory bookings={bookingHistory} staffLabel={staffLabel} />
                 </div>
               )}
             </>
@@ -169,6 +171,7 @@ const CheckBookingPanel = ({ branchId }) => {
       {showRescheduleModal && selectedBooking && (
         <StaffReschedulePanel
           booking={selectedBooking}
+          staffLabel={staffLabel}
           onClose={() => setShowRescheduleModal(false)}
           onConfirm={handleRescheduleConfirm}
         />

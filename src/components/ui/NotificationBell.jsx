@@ -40,6 +40,7 @@ const CAT_STYLE = {
 };
 const typeStyle = (n) => {
   if (n.type === 'discount_declined') return { icon: 'X', wrap: 'bg-error/10', color: 'text-error' };
+  if (n.type === 'booking_group_stuck') return { icon: 'AlertTriangle', wrap: 'bg-error/10', color: 'text-error' };
   if (n.type === 'discount_approved') return { icon: 'Check', wrap: 'bg-success/10', color: 'text-success' };
   return CAT_STYLE[n.category] || CAT_STYLE.bookings;
 };

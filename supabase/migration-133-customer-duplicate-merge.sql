@@ -1,5 +1,13 @@
 -- Migration 133: duplicate-customer review — dismissals table, candidate view, merge RPC
 --
+-- ledger-collision-ack: the STAGING ledger records version 133 as "phone-e164", which now lives
+-- at migration-137. This file's own content was applied to staging under version 135 (visible as
+-- a ghost in migrate-status.sh, since no 135 file exists) before the renumbering; production
+-- records 133 correctly as "customer-duplicate-merge". merge_customers and
+-- customer_duplicate_dismissals are verified present in BOTH databases, so nothing is missing —
+-- staging just has it filed under a different number. Skipping this file on staging is correct;
+-- re-applying it there is unnecessary. Do not renumber: production's 133 is already right.
+--
 -- Production has 171 phone-normalization collision groups (342 of 1506 nuad-thai-spa
 -- customers) discovered while validating migration-137's pre-flight guard. Unlike
 -- migration-034/035 (one-off dry-run + destructive migration, bookings-only repoint),

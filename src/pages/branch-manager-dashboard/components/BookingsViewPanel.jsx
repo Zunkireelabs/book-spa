@@ -756,6 +756,7 @@ const BookingsViewPanel = ({ branchId }) => {
 
       <BookingActionModal
         variant="panel"
+        canViewCustomerDetails={profile?.role === 'manager' || profile?.role === 'admin' || profile?.can_view_customer_details !== false}
         isOpen={!!openId}
         previewBooking={rows.find((r) => r.bookingId === openId) || null}
         onRefreshBooking={refreshSelected}

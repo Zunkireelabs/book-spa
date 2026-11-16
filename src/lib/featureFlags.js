@@ -43,3 +43,7 @@ export const PRODUCTS_ENABLED = import.meta.env.VITE_ENABLE_PRODUCTS === 'true';
 // flags. Gate every campaign entry point behind this until the schema has
 // been promoted to production.
 export const CAMPAIGNS_ENABLED = import.meta.env.VITE_ENABLE_CAMPAIGNS === 'true';
+
+// Group booking (one checkout, up to 6 people, one shared time slot) — gated while
+// it's being verified on staging; the entry-choice screen only renders when this is on.
+export const GROUP_BOOKING_ENABLED = import.meta.env.VITE_ENABLE_GROUP_BOOKING === 'true';

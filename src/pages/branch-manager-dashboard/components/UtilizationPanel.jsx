@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import { getUtilizationIntelligence } from '../../../services/api';
+import { useIndustry } from '../../../hooks/useIndustry';
 
 function formatMinutes(min) {
   if (min < 60) return `${min}m`;
@@ -43,6 +44,7 @@ function BarRow({ label, percent, bookedMinutes, totalMinutes, color }) {
 }
 
 const UtilizationPanel = ({ branchId, period }) => {
+  const { staffLabel, staffLabelPlural } = useIndustry();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -156,9 +158,9 @@ const UtilizationPanel = ({ branchId, period }) => {
               <Icon name="Users" size={16} className="text-purple-600" />
             </div>
             <div>
-              <h3 className="text-sm font-medium text-gray-900">Therapist Utilization</h3>
+              <h3 className="text-sm font-medium text-gray-900">{staffLabel} Utilization</h3>
               <p className="text-[11px] text-gray-400">
-                {summary.therapistCount} active therapists
+                {summary.therapistCount} active {staffLabelPlural.toLowerCase()}
               </p>
             </div>
           </div>
@@ -181,7 +183,7 @@ const UtilizationPanel = ({ branchId, period }) => {
               />
             ))
           ) : (
-            <p className="text-xs text-gray-400 text-center py-4">No active therapists</p>
+            <p className="text-xs text-gray-400 text-center py-4">No active {staffLabelPlural.toLowerCase()}</p>
           )}
         </div>
       </div>

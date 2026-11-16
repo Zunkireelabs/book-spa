@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zenly — Price Tiers (mockup board)</title>
+<style>
+  :root {
+    --primary: #2D5A27;
+    --primary-light: #2D5A2714;
+    --secondary: #8B4513;
+    --accent: #DAA520;
+    --accent-light: #DAA52020;
+    --background: #FAFAF9;
+    --surface: #FFFFFF;
+    --border: #E1E3E5;
+    --success: #10B981;
+    --warning: #D97706;
+    --warning-light: #D9770618;
+    --error: #DC2626;
+    --error-light: #DC262614;
+    --text-primary: #1F2421;
+    --text-secondary: #5B6460;
+    --text-tertiary: #8A938E;
+    --shadow-resting: 0 1px 3px rgba(0,0,0,.1), 0 1px 2px rgba(0,0,0,.06);
+    --shadow-elevated: 0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.06);
+    --shadow-modal: 0 10px 15px rgba(0,0,0,.1), 0 4px 6px rgba(0,0,0,.05);
+    --radius: 8px;
+    --radius-lg: 12px;
+    --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --font-heading: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --font-data: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+    --canvas: #DEDEDA;
+    --sidebar-bg: #EBEBEB;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--canvas); color: var(--text-primary); font-family: var(--font-body); -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; }
+  .ic { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+  .mockup-banner { background: #1F2421; color: #FAFAF9; font-size: 12.5px; padding: 8px 20px; text-align: center; font-family: var(--font-data); letter-spacing: .02em; flex-shrink: 0; }
+  .mockup-banner strong { color: var(--accent); }
+
+  /* ============ BOARD CANVAS ============ */
+  .board-canvas { flex: 1; min-height: 0; overflow: auto; background: var(--canvas); background-image: radial-gradient(#cfcfca 1px, transparent 1px); background-size: 18px 18px; }
+  .board-track { display: grid; grid-template-columns: repeat(3, 900px); gap: 46px 48px; padding: 40px; width: max-content; }
+  .panel { display: flex; flex-direction: column; gap: 10px; }
+  .panel-caption { display: flex; align-items: center; justify-content: space-between; font-family: var(--font-data); font-size: 12px; color: var(--text-secondary); letter-spacing: .01em; }
+  .panel-caption .cap-text b { color: var(--text-primary); }
+  .panel-caption .cap-icons { display: flex; gap: 10px; color: var(--text-tertiary); }
+  .panel-caption .cap-icons .ic { width: 15px; height: 15px; cursor: default; }
+  .panel-card { background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-elevated); border: 1px solid var(--border); padding: 22px; overflow: hidden; }
+  .panel-card-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .panel-card-head h2 { margin: 0; font-size: 18px; font-family: var(--font-heading); }
+  .panel-card-head .rule { font-size: 12.5px; color: var(--text-tertiary); }
+
+  .subcard-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .subcard-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .subcard-grid.cols-1 { grid-template-columns: 1fr; }
+  .subcard { border: 1px solid var(--border); border-radius: var(--radius); background: var(--background); padding: 12px 14px 14px; }
+  .subcard-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
+  .subcard-label { font-family: var(--font-data); font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-tertiary); }
+  .subcard-route { font-family: var(--font-data); font-size: 10.5px; color: var(--text-tertiary); background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+  .subcard-body { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .subcard-note { font-size: 11.5px; color: var(--text-tertiary); margin-top: 8px; line-height: 1.5; }
+  .subcard-note b { color: var(--text-secondary); }
+
+  /* ============ SHARED APP-UI COMPONENTS ============ */
+  .btn { font-family: var(--font-body); font-size: 13.5px; font-weight: 600; border-radius: var(--radius); padding: 9px 16px; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); transition: filter .12s ease, transform .05s ease; }
+  .btn:hover { filter: brightness(0.97); }
+  .btn:active { transform: scale(.98); }
+  .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-sm { padding: 6px 12px; font-size: 12.5px; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 22px; margin-bottom: 18px; box-shadow: var(--shadow-resting); }
+  .card h3 { margin: 0 0 4px; font-size: 15.5px; }
+  .card .desc { color: var(--text-secondary); font-size: 13px; margin: 0 0 16px; line-height: 1.55; max-width: 620px; }
+
+  /* tier manager */
+  .tier-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; background: var(--surface); cursor: grab; }
+  .tier-row.dragging { opacity: .4; }
+  .drag-handle { color: var(--text-tertiary); font-size: 15px; letter-spacing: -2px; cursor: grab; user-select: none; }
+  .tier-name-input { flex: 1; border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; font-size: 13.5px; font-family: var(--font-body); }
+  .tier-name-input:focus { outline: 2px solid var(--primary); outline-offset: 1px; }
+  .count-pill { display: inline-flex; align-items: center; gap: 6px; background: var(--primary-light); color: var(--primary); border: none; border-radius: 999px; padding: 6px 12px; font-size: 12.5px; font-weight: 700; cursor: pointer; position: relative; }
+  .count-pill:hover { filter: brightness(0.96); }
+  .popover { position: absolute; top: calc(100% + 6px); right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-modal); width: 230px; padding: 10px 0; z-index: 30; text-align: left; }
+  .popover-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-tertiary); padding: 2px 14px 8px; }
+  .popover label { display: flex; align-items: center; gap: 9px; padding: 7px 14px; font-size: 13px; font-weight: 400; cursor: pointer; color: var(--text-primary); }
+  .popover label:hover { background: var(--background); }
+  .popover input { accent-color: var(--primary); width: 15px; height: 15px; }
+  .del-btn { color: var(--error); background: transparent; border: none; cursor: pointer; font-size: 16px; padding: 6px; border-radius: var(--radius); }
+  .del-btn:hover { background: var(--error-light); }
+
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: none; align-items: center; justify-content: center; z-index: 1100; }
+  .modal-overlay.show { display: flex; }
+  .modal-box { background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-modal); padding: 24px; width: 420px; max-width: 92vw; }
+  .modal-box h4 { margin: 0 0 10px; font-size: 16px; display:flex; align-items:center; gap:8px; }
+  .modal-box ul { margin: 10px 0 18px; padding-left: 20px; font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+  /* service price section (modeled on service-detail/index.jsx) */
+  .svc-edit-mock { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 14px 16px; font-size: 12.5px; }
+  .svc-info-banner { display: flex; align-items: center; gap: 6px; background: var(--accent-light); border: 1px solid #DAA52040; border-radius: 6px; padding: 7px 10px; font-size: 11px; color: #8a6b10; margin-bottom: 12px; }
+  .svc-field-label { font-weight: 600; font-size: 12.5px; color: var(--text-primary); margin-bottom: 2px; }
+  .svc-edit-tiers-link { font-size: 11.5px; color: var(--primary); font-weight: 600; text-decoration: underline; cursor: default; display: inline-block; margin: 2px 0 8px; }
+  .svc-price-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--border); }
+  .svc-price-row:last-child { border-bottom: none; }
+  .svc-price-row .svc-tier-name { font-weight: 600; }
+  .svc-price-row.base-row .svc-tier-name { font-weight: 700; }
+  .svc-price-row .svc-tier-sub { display: block; font-size: 10.5px; color: var(--text-tertiary); font-weight: 400; }
+  .svc-price-input { width: 84px; border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-family: var(--font-data); font-size: 12px; text-align: right; }
+  .svc-price-input.is-fallback { color: var(--text-tertiary); font-style: italic; border-style: dashed; }
+
+  /* booking-flow panel */
+  .booking-mock { max-width: 440px; border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; background: var(--surface); box-shadow: var(--shadow-resting); }
+  .booking-mock .field-label { font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 5px; display: block; text-transform: uppercase; letter-spacing: .03em; }
+  .select-trigger { border: 1px solid var(--border); border-radius: 6px; padding: 9px 12px; font-size: 13.5px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; background: var(--surface); margin-bottom: 14px; }
+  .select-trigger:hover { border-color: var(--primary); }
+  .select-panel { border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-modal); background: var(--surface); margin: -10px 0 14px; max-height: 280px; overflow-y: auto; display: none; }
+  .select-panel.open { display: block; }
+  .select-opt { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; font-size: 13px; cursor: pointer; border-bottom: 1px solid var(--border); }
+  .select-opt:last-child { border-bottom: none; }
+  .select-opt:hover { background: var(--primary-light); }
+  .select-opt .nm { font-weight: 600; }
+  .select-opt .tier-tag { font-size: 10.5px; color: var(--text-tertiary); margin-left: 6px; font-weight: 400; }
+  .select-opt .px { font-family: var(--font-data); font-weight: 700; }
+  .select-opt.any-opt .px { color: var(--primary); }
+  .price-preview { margin-top: 18px; border-radius: var(--radius); background: var(--background); border: 1px solid var(--border); padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; }
+  .price-preview .svcname { font-size: 13.5px; font-weight: 600; }
+  .price-preview .sel { font-size: 11.5px; color: var(--text-secondary); margin-top: 3px; }
+  .price-preview .price { font-family: var(--font-data); font-size: 19px; font-weight: 700; color: var(--primary); }
+  .combo-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+  .combo-table th, .combo-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+  .combo-table th { font-size: 11px; text-transform: uppercase; color: var(--text-secondary); }
+  .combo-table .pill-req { font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 5px; background: var(--accent-light); color: #8a6b10; }
+  .combo-table .pill-any { font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 5px; background: var(--primary-light); color: var(--primary); }
+  .combo-total-row td { font-weight: 700; border-top: 2px solid var(--text-primary); border-bottom: none; }
+
+  .proposal-tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; background: var(--accent-light); color: #8a6b10; padding: 1px 7px; border-radius: 5px; margin-left: 6px; }
+  .rejected-tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; background: var(--error-light); color: var(--error); padding: 1px 7px; border-radius: 5px; margin-left: 6px; }
+
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--text-primary); color: #fff; padding: 12px 22px; border-radius: var(--radius); font-size: 13.5px; box-shadow: var(--shadow-modal); opacity: 0; pointer-events: none; transition: all .25s ease; z-index: 1200; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-thumb { background: #D8DAD7; border-radius: 6px; }
+
+  /* ============ APP SHELL REPLICA (Panel 1 only) ============ */
+  .shell { display: flex; height: 780px; width: 1300px; border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--border); }
+  .shell-sidebar { width: 240px; flex-shrink: 0; background: var(--sidebar-bg); display: flex; flex-direction: column; overflow-y: auto; }
+  .shell-sidebar-head { height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; flex-shrink: 0; }
+  .shell-brand { font-family: var(--font-accent, Georgia, serif); font-weight: 700; font-size: 19px; color: var(--primary); letter-spacing: -.01em; }
+  .shell-sidebar-head button { background: none; border: none; padding: 8px; border-radius: 6px; color: #8A938E; cursor: default; }
+  .shell-nav { flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 4px; }
+  .shell-nav-item, .shell-nav-group-btn { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 6px; font-size: 13.5px; font-weight: 500; color: #6B7280; text-decoration: none; cursor: default; background: none; border: none; width: 100%; text-align: left; font-family: var(--font-body); }
+  .shell-nav-item:hover, .shell-nav-group-btn:hover { background: var(--background); color: #111827; }
+  .shell-nav-group { display: flex; flex-direction: column; }
+  .shell-nav-group-row { display: flex; align-items: center; }
+  .shell-nav-group-row .shell-nav-group-btn { flex: 1; }
+  .shell-nav-group-row .chev-btn { padding: 8px 10px; border-radius: 6px; background: none; border: none; color: #6B7280; cursor: default; }
+  .shell-nav-group-row.active .shell-nav-group-btn, .shell-nav-item.active { background: var(--background); color: #111827; font-weight: 600; }
+  .chev-btn .ic { transition: transform .15s; }
+  .chev-btn.open .ic { transform: rotate(180deg); }
+  .shell-nav-children { position: relative; margin-top: 2px; padding-left: 38px; display: flex; flex-direction: column; }
+  .shell-nav-child { padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #6B7280; cursor: default; }
+  .shell-nav-child.active { background: var(--background); color: #111827; font-weight: 600; }
+  .shell-sidebar-foot { padding: 12px; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .shell-sidebar-foot .dot { width: 14px; height: 14px; border-radius: 50%; background: #DC2626; flex-shrink: 0; }
+  .shell-sidebar-foot span { font-size: 11px; color: #9CA3AF; }
+  .shell-sidebar-foot b { font-size: 11px; color: #4B5563; font-weight: 600; }
+
+  .shell-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--background); }
+  .shell-header { flex-shrink: 0; background: var(--sidebar-bg); padding: 10px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .shell-header-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .pill-platform-admin { font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #FCE7F3; color: #BE185D; white-space: nowrap; font-weight: 500; }
+  .shell-branch { display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: var(--background); border: 1px solid var(--border); border-radius: var(--radius); font-size: 13px; color: var(--text-primary); font-weight: 500; }
+  .shell-branch .ic { width: 14px; height: 14px; color: var(--text-secondary); }
+  .shell-divider { width: 1px; height: 18px; background: var(--border); }
+  .shell-datetime { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+  .shell-header-right { display: flex; align-items: center; gap: 10px; }
+  .pill-live { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 999px; background: var(--background); border: 1px solid var(--border); font-size: 11.5px; font-weight: 600; color: var(--text-secondary); }
+  .pill-live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); position: relative; }
+  .pill-live .dot::after { content: ''; position: absolute; inset: -3px; border-radius: 50%; background: var(--success); opacity: .35; animation: ping 1.6s infinite; }
+  @keyframes ping { 0%{transform:scale(1);opacity:.35;} 70%{transform:scale(2.2);opacity:0;} 100%{opacity:0;} }
+  .pill-role-admin { font-size: 11px; padding: 3px 9px; border-radius: 5px; background: #FCE7F3; color: #BE185D; font-weight: 500; }
+  .assistant-btn { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px; background: linear-gradient(90deg,#a855f7,#ec4899); color: #fff; font-size: 12.5px; font-weight: 600; border: none; cursor: default; }
+  .bell-btn { padding: 7px; border-radius: 999px; background: none; border: none; color: var(--text-secondary); cursor: default; position: relative; }
+  .profile-chip { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: var(--radius); cursor: default; }
+  .profile-chip:hover { background: var(--background); }
+  .profile-avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--primary-light); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; font-family: var(--font-data); }
+  .profile-name-wrap { display: flex; flex-direction: column; line-height: 1.25; }
+  .profile-name-wrap .pn { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+  .profile-name-wrap .pr { font-size: 11px; color: var(--text-secondary); }
+  .shell-content { flex: 1; overflow-y: auto; }
+  .shell-content .app-shell { max-width: none; margin: 0; padding: 28px 20px 60px; }
+</style>
+</head>
+<body>
+
+<div class="mockup-banner">⚠ NON-FUNCTIONAL DESIGN MOCKUP — Zenly Price Tiers · drafted 2026-11-13 · no data leaves this page, nothing here is wired to Supabase</div>
+
+<svg style="display:none" aria-hidden="true">
+  <defs>
+    <symbol id="i-dashboard" viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></symbol>
+    <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><rect x="8.5" y="2" width="7" height="4" rx="1"/><line x1="8" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="14" y2="15"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4"/><path d="M3 20c0-4 2.8-6.2 6-6.2s6 2.2 6 6.2"/><circle cx="18" cy="9" r="2.6"/><path d="M16.3 20c.2-2.6 1.6-4.2 3.8-4.7"/></symbol>
+    <symbol id="i-barchart" viewBox="0 0 24 24"><line x1="5" y1="20" x2="5" y2="13"/><line x1="12" y1="20" x2="12" y2="7"/><line x1="19" y1="20" x2="19" y2="4"/></symbol>
+    <symbol id="i-wallet" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10.5h18"/><circle cx="16.8" cy="14.5" r="1.1" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-bag" viewBox="0 0 24 24"><path d="M7.5 8L9 4h6l1.5 4"/><rect x="5" y="8" width="14" height="12.5" rx="2"/></symbol>
+    <symbol id="i-card" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/><line x1="3" y1="10" x2="21" y2="10"/></symbol>
+    <symbol id="i-ticket" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2.5"/><line x1="12" y1="6.5" x2="12" y2="17.5" stroke-dasharray="2.2 2.2"/></symbol>
+    <symbol id="i-megaphone" viewBox="0 0 24 24"><path d="M3 10v4h4l10 5V5L7 10H3z"/><path d="M14 12.5a2.4 2.4 0 000-5"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M3 11.2l18-7.2-7.2 18-2.4-7.6-8.4-3.2z"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M21 12h-3M6 12H3M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1M18.4 18.4l-2.1-2.1M7.7 7.7L5.6 5.6"/></symbol>
+    <symbol id="i-chevdown" viewBox="0 0 24 24"><path d="M5 8l7 7 7-7"/></symbol>
+    <symbol id="i-chevleft" viewBox="0 0 24 24"><path d="M14.5 5l-7 7 7 7"/></symbol>
+    <symbol id="i-building" viewBox="0 0 24 24"><rect x="4" y="3" width="12" height="18" rx="1"/><rect x="16" y="9" width="4.5" height="12" rx="1"/><circle cx="7.5" cy="7" r="0.7" fill="currentColor" stroke="none"/><circle cx="12.5" cy="7" r="0.7" fill="currentColor" stroke="none"/><circle cx="7.5" cy="12" r="0.7" fill="currentColor" stroke="none"/><circle cx="12.5" cy="12" r="0.7" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9.5a6 6 0 1112 0c0 5 2 6.2 2 6.2H4s2-1.2 2-6.2z"/><path d="M10 18.5a2 2 0 004 0"/></symbol>
+    <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3l1.3 3.7L17 8l-3.7 1.3L12 13l-1.3-3.7L7 8l3.7-1.3L12 3z"/><path d="M19 14l.6 1.8 1.8.6-1.8.6L19 19l-.6-1.8-1.8-.6 1.8-.6L19 14z"/></symbol>
+    <symbol id="i-warning" viewBox="0 0 24 24"><path d="M12 3.2l9.3 16H2.7l9.3-16z"/><line x1="12" y1="10" x2="12" y2="14.2"/><circle cx="12" cy="17" r="0.7" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8 10.5V7.3a4 4 0 018 0v3.2"/></symbol>
+    <symbol id="i-empty" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><rect x="8.5" y="2" width="7" height="4" rx="1"/><line x1="8.5" y1="12" x2="15.5" y2="12" stroke-dasharray="1.6 2"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></symbol>
+  </defs>
+</svg>
+
+<div class="board-canvas">
+<div class="board-track">
+
+  <!-- ============ PANEL 1 — FULL SCREEN ============ -->
+  <div class="panel" style="grid-column: 1 / span 3;">
+    <div class="panel-caption">
+      <span class="cap-text"><b>PRICE TIERS</b> · Full screen · P1 · new</span>
+      <span class="cap-icons"><svg class="ic"><use href="#i-expand"/></svg><svg class="ic"><use href="#i-download"/></svg></span>
+    </div>
+    <div class="panel-card" style="padding:0; width:max-content; margin:0;">
+      <div class="shell">
+        <aside class="shell-sidebar">
+          <div class="shell-sidebar-head">
+            <span class="shell-brand">zennly</span>
+            <button aria-hidden="true"><svg class="ic" style="width:15px;height:15px;"><use href="#i-chevleft"/></svg></button>
+          </div>
+          <nav class="shell-nav">
+            <a class="shell-nav-item"><svg class="ic"><use href="#i-dashboard"/></svg>Dashboard</a>
+            <div class="shell-nav-group"><div class="shell-nav-group-row"><button class="shell-nav-group-btn"><svg class="ic"><use href="#i-clipboard"/></svg>Operations</button><button class="chev-btn"><svg class="ic" style="width:15px;height:15px;"><use href="#i-chevdown"/></svg></button></div></div>
+            <a class="shell-nav-item"><svg class="ic"><use href="#i-users"/></svg>Customers</a>
+            <div class="shell-nav-group"><div class="shell-nav-group-row"><button class="shell-nav-group-btn"><svg class="ic"><use href="#i-barchart"/></svg>Reports</button><button class="chev-btn"><svg class="ic" style="width:15px;height:15px;"><use href="#i-chevdown"/></svg></button></div></div>
+            <div class="shell-nav-group"><div class="shell-nav-group-row"><button class="shell-nav-group-btn"><svg class="ic"><use href="#i-users"/></svg>Staff</button><button class="chev-btn"><svg class="ic" style="width:15px;height:15px;"><use href="#i-chevdown"/></svg></button></div></div>
+            <a class="shell-nav-item"><svg class="ic"><use href="#i-wallet"/></svg>Payroll</a>
+            <a class="shell-nav-item"><svg class="ic"><use href="#i-bag"/></svg>Products</a>
+            <div class="shell-nav-group"><div class="shell-nav-group-row"><button class="shell-nav-group-btn"><svg class="ic"><use href="#i-card"/></svg>Memberships</button><button class="chev-btn"><svg class="ic" style="width:15px;height:15px;"><use href="#i-chevdown"/></svg></button></div></div>
+            <div class="shell-nav-group"><div class="shell-nav-group-row"><button class="shell-nav-group-btn"><svg class="ic"><use href="#i-ticket"/></svg>Vouchers</button><button class="chev-btn"><svg class="ic" style="width:15px;height:15px;"><use href="#i-chevdown"/></svg></button></div></div>
+            <a class="shell-nav-item"><svg class="ic"><use href="#i-megaphone"/></svg>Campaigns</a>
+            <a class="shell-nav-item"><svg class="ic"><use href="#i-send"/></svg>Outreach</a>
+            <!-- Setup — expanded, Price tiers active (Staff access is its sibling from the other board) -->
+            <div class="shell-nav-group">
+              <div class="shell-nav-group-row active">
+                <button class="shell-nav-group-btn" style="font-weight:600;color:#111827;"><svg class="ic"><use href="#i-gear"/></svg>Setup</button>
+                <button class="chev-btn open"><svg class="ic" style="width:15px;height:15px;"><use href="#i-chevdown"/></svg></button>
+              </div>
+              <div class="shell-nav-children">
+                <div class="shell-nav-child">Staff access</div>
+                <div class="shell-nav-child">Rooms</div>
+                <div class="shell-nav-child active">Price tiers</div>
+                <div class="shell-nav-child">Services</div>
+                <div class="shell-nav-child">Categories</div>
+                <div class="shell-nav-child">Payment Methods</div>
+                <div class="shell-nav-child">Booking Settings</div>
+                <div class="shell-nav-child">Provider Profile</div>
+                <div class="shell-nav-child">Locations</div>
+                <div class="shell-nav-child">Audit Log</div>
+              </div>
+            </div>
+          </nav>
+          <div class="shell-sidebar-foot"><span>A Product of</span><span class="dot"></span><b>zunkireelabs</b></div>
+        </aside>
+
+        <div class="shell-main">
+          <header class="shell-header">
+            <div class="shell-header-left">
+              <span class="pill-platform-admin">Platform Admin</span>
+              <svg class="ic" style="color:var(--text-secondary);"><use href="#i-building"/></svg>
+              <span class="shell-branch">Lazimpat <svg class="ic" style="width:13px;height:13px;"><use href="#i-chevdown"/></svg></span>
+              <span class="shell-divider"></span>
+              <span class="shell-datetime">Fri 13 Nov · 12:04 PM</span>
+            </div>
+            <div class="shell-header-right">
+              <span class="pill-live"><span class="dot"></span>Live</span>
+              <span class="pill-role-admin">Admin</span>
+              <button class="assistant-btn"><svg class="ic" style="width:15px;height:15px;"><use href="#i-sparkles"/></svg>Assistant</button>
+              <button class="bell-btn"><svg class="ic"><use href="#i-bell"/></svg></button>
+              <div class="profile-chip">
+                <div class="profile-avatar">ST</div>
+                <div class="profile-name-wrap"><span class="pn">Subash Tamang</span><span class="pr">Admin</span></div>
+                <svg class="ic" style="width:14px;height:14px;color:var(--text-tertiary);"><use href="#i-chevdown"/></svg>
+              </div>
+            </div>
+          </header>
+
+          <div class="shell-content">
+            <div class="app-shell">
+              <div class="crumb" style="color:var(--text-tertiary); font-size:13px; margin-bottom:4px;">Setup · Your business · Services</div>
+              <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:18px; flex-wrap:wrap; gap:10px;">
+                <h1 style="font-family:var(--font-heading); font-weight:700; font-size:26px; margin:0;">Price tiers</h1>
+                <div style="display:flex; gap:10px;">
+                  <button class="btn btn-primary" onclick="showToast('Saved')">Save</button>
+                </div>
+              </div>
+
+              <div class="card">
+                <h3>Create price tiers based on the skill level of your staff</h3>
+                <p class="desc">e.g. "Junior", "Senior" — drag to reorder, rename inline, and manage who's on each tier from the staff-count pill.</p>
+                <div id="tier-rows"></div>
+                <button class="btn" style="margin-top:4px;" onclick="addTier()">+ Add new</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PANEL 2 — TIER MANAGER ============ -->
+  <div class="panel">
+    <div class="panel-caption">
+      <span class="cap-text"><b>PRICE TIERS</b> · Tier manager · P1 · new</span>
+      <span class="cap-icons"><svg class="ic"><use href="#i-expand"/></svg><svg class="ic"><use href="#i-download"/></svg></span>
+    </div>
+    <div class="panel-card">
+      <div class="panel-card-head"><h2>Tier manager</h2><span class="rule">Reordering is cosmetic. Deleting a tier is not — it drops staff assignments and custom prices.</span></div>
+      <div class="subcard-grid cols-1" id="panel-tiermanager"></div>
+    </div>
+  </div>
+
+  <!-- ============ PANEL 3 — SERVICE PRICE SECTION ============ -->
+  <div class="panel" style="grid-column: span 2;">
+    <div class="panel-caption">
+      <span class="cap-text"><b>PRICE TIERS</b> · Service price section · P1 · new</span>
+      <span class="cap-icons"><svg class="ic"><use href="#i-expand"/></svg><svg class="ic"><use href="#i-download"/></svg></span>
+    </div>
+    <div class="panel-card">
+      <div class="panel-card-head"><h2>Service price section</h2><span class="rule">Tier prices are set per service, on that service's own edit page — not in a central grid. Modeled on <code style="font-family:var(--font-data);">src/pages/service-detail/index.jsx</code>.</span></div>
+      <div class="subcard-grid cols-3" id="panel-pricinggrid"></div>
+    </div>
+  </div>
+
+  <!-- ============ PANEL 4 — BOOKING FLOW ============ -->
+  <div class="panel" style="grid-column: span 2;">
+    <div class="panel-caption">
+      <span class="cap-text"><b>PRICE TIERS</b> · Booking flow · P1 · new</span>
+      <span class="cap-icons"><svg class="ic"><use href="#i-expand"/></svg><svg class="ic"><use href="#i-download"/></svg></span>
+    </div>
+    <div class="panel-card">
+      <div class="panel-card-head"><h2>Booking flow</h2><span class="rule">The real fork at <code style="font-family:var(--font-data);">BookingActionModal.jsx:3077</code> — today it carries no price on either side. This is what adding one looks like.</span></div>
+
+      <!-- BUILD NOTE: the therapist control below is a dropdown. CLAUDE.md Quality Standards
+           rule 8 requires every dropdown/select in this app — including this one — to render
+           through the shared CustomSelect component (src/components/ui/CustomSelect.jsx), never
+           a raw <select>. The real BookingActionModal.jsx:3077 control already uses CustomSelect;
+           any build of this tier-price enhancement must keep it on CustomSelect, just add the
+           per-option price/tier text shown here. -->
+
+      <div style="display:flex; gap:22px; flex-wrap:wrap; align-items:flex-start;">
+        <div class="booking-mock">
+          <span class="field-label">Service</span>
+          <div class="select-trigger" style="cursor:default;">
+            <span>NUAD THAI TRADITIONAL HOT OIL MASSAGE – 60min</span>
+          </div>
+          <span class="field-label">Therapist</span>
+          <div class="select-trigger" id="therapist-trigger" onclick="toggleTherapistPanel()">
+            <span id="therapist-selected-label">Any available</span><span>▾</span>
+          </div>
+          <div class="select-panel" id="therapist-panel"></div>
+          <div class="price-preview">
+            <div>
+              <div class="svcname" id="preview-service">NUAD THAI TRADITIONAL HOT OIL MASSAGE – 60min</div>
+              <div class="sel" id="preview-selection">Any available therapist</div>
+            </div>
+            <div class="price" id="preview-price">NPR 4,200</div>
+          </div>
+        </div>
+        <div style="flex:1; min-width:280px; font-size:12.5px; color:var(--text-secondary); line-height:1.6;">
+          <b style="color:var(--text-primary);">Price locks at booking time</b> off what the customer actually chose. If this booking is reassigned later by a manager, the price shown here does not change — see consequence #1 in the Rules panel.
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px;">
+        <h3>Multi-therapist booking — per-line pricing (consequence #3)</h3>
+        <p class="desc">A combo booking with two service lines, each with its own therapist. Per-line pricing checks whether <i>that</i> line's therapist was requested or auto-assigned.</p>
+        <table class="combo-table">
+          <thead><tr><th>Line</th><th>Service</th><th>Therapist</th><th>Selection</th><th>Price</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>NUAD THAI TRADITIONAL HOT OIL MASSAGE – 60min</td><td>Ankita Yonjan</td><td><span class="pill-req">Requested · Senior</span></td><td style="font-family:var(--font-data);">NPR 5,200</td></tr>
+            <tr><td>2</td><td>FOOT REFLEXOLOGY – 30min</td><td>Junu Ale Magar</td><td><span class="pill-any">Any available</span></td><td style="font-family:var(--font-data);">NPR 2,400</td></tr>
+            <tr class="combo-total-row"><td colspan="4">Booking total</td><td style="font-family:var(--font-data);">NPR 7,600</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PANEL 5 — EMPTY / LOADING / ERROR ============ -->
+  <div class="panel">
+    <div class="panel-caption">
+      <span class="cap-text"><b>PRICE TIERS</b> · Empty, loading, error states · P2 · new</span>
+      <span class="cap-icons"><svg class="ic"><use href="#i-expand"/></svg><svg class="ic"><use href="#i-download"/></svg></span>
+    </div>
+    <div class="panel-card">
+      <div class="panel-card-head"><h2>Empty, loading and error states</h2><span class="rule">Icon, one line of what happened, one line of what to do, one action.</span></div>
+      <div class="subcard-grid cols-1">
+        <div class="subcard" style="text-align:center; padding:20px 14px;">
+          <div class="subcard-top" style="text-align:left;"><span class="subcard-label">Empty · No tiers yet</span><span class="subcard-route">/price-tiers</span></div>
+          <svg class="ic" style="width:28px;height:28px;color:var(--text-tertiary); margin:8px auto 4px;"><use href="#i-empty"/></svg>
+          <div style="font-weight:700; font-size:14px;">No price tiers configured</div>
+          <div style="font-size:11.5px; color:var(--text-secondary); margin:4px 0 10px;">Every booking charges the service's base price until a tier exists.</div>
+          <button class="btn btn-primary btn-sm">Create first tier</button>
+        </div>
+        <div class="subcard" style="text-align:center; padding:20px 14px;">
+          <div class="subcard-top" style="text-align:left;"><span class="subcard-label">Loading · Grid skeleton</span><span class="subcard-route">196 rows</span></div>
+          <div style="margin:10px 0;">
+            <div style="height:24px; background:#ECECE9; border-radius:6px; margin-bottom:6px; animation:pulse 1.4s ease-in-out infinite;"></div>
+            <div style="height:24px; background:#ECECE9; border-radius:6px; margin-bottom:6px; animation:pulse 1.4s ease-in-out infinite .15s;"></div>
+            <div style="height:24px; background:#ECECE9; border-radius:6px; animation:pulse 1.4s ease-in-out infinite .3s;"></div>
+          </div>
+          <div class="subcard-note">196 rows — skeleton shows after 300 ms, paginates rather than rendering all at once.</div>
+        </div>
+        <div class="subcard" style="text-align:center; padding:20px 14px;">
+          <div class="subcard-top" style="text-align:left;"><span class="subcard-label">Save conflict</span><span class="subcard-route">409</span></div>
+          <svg class="ic" style="width:28px;height:28px;color:var(--error); margin:8px auto 4px;"><use href="#i-warning"/></svg>
+          <div style="font-weight:700; font-size:14px;">Someone else changed this price</div>
+          <div style="font-size:11.5px; color:var(--text-secondary); margin:4px 0 10px;">Senior price for Foot Reflexology – 30min was set to NPR 2,900 while you had NPR 2,800 open.</div>
+          <button class="btn btn-sm">Use their value / Overwrite</button>
+        </div>
+        <div class="subcard" style="text-align:center; padding:20px 14px;">
+          <div class="subcard-top" style="text-align:left;"><span class="subcard-label">Tier deleted mid-edit</span><span class="subcard-route">race</span></div>
+          <svg class="ic" style="width:28px;height:28px;color:var(--error); margin:8px auto 4px;"><use href="#i-lock"/></svg>
+          <div style="font-weight:700; font-size:14px;">"Senior" no longer exists</div>
+          <div style="font-size:11.5px; color:var(--text-secondary); margin:4px 0 10px;">Another admin deleted this tier while you were editing its price. Your change can't be saved.</div>
+          <button class="btn btn-sm">Reload grid</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PANEL 6 — RULES & OPEN QUESTIONS ============ -->
+  <div class="panel" style="grid-column: 1 / span 3;">
+    <div class="panel-caption">
+      <span class="cap-text"><b>PRICE TIERS</b> · Rules &amp; open questions · P1 · new</span>
+      <span class="cap-icons"><svg class="ic"><use href="#i-expand"/></svg><svg class="ic"><use href="#i-download"/></svg></span>
+    </div>
+    <div class="panel-card">
+      <div class="panel-card-head"><h2>Rules &amp; open questions</h2><span class="rule">Pure spec — the decided model, the rejected alternative, and what's still unanswered.</span></div>
+      <div class="subcard-grid cols-3">
+        <div class="subcard" style="grid-column: span 2;">
+          <div class="subcard-top"><span class="subcard-label">Decided model</span></div>
+          <div style="font-size:12px; line-height:1.6; color:var(--text-secondary);">
+            Tier pricing is a premium for <b style="color:var(--text-primary);">naming a specific staff member</b> — the value is letting a customer choose who serves them, and pay for that choice.<br>
+            "Any available" → the service's base price (<code style="font-family:var(--font-data);">services.price_npr</code>).<br>
+            Naming someone → that person's tier price.
+          </div>
+        </div>
+        <div class="subcard">
+          <div class="subcard-top"><span class="subcard-label">Rejected alternative</span><span class="rejected-tag">not this</span></div>
+          <div style="font-size:12px; line-height:1.6; color:var(--text-secondary);">
+            "Price follows the person" — whoever actually performs the service sets the price, regardless of what was requested or who was originally assigned. The team hasn't seen the two side by side yet; kept here as a labelled contrast, not given equal billing in the main flow.
+          </div>
+        </div>
+        <div class="subcard" style="grid-column: span 3;">
+          <div class="subcard-top"><span class="subcard-label">Three open consequence cases</span></div>
+          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:14px; font-size:12px; line-height:1.6; color:var(--text-secondary);">
+            <div>
+              <b style="color:var(--text-primary);">1. Reassignment after booking.</b> Customer books "Any available" at base; a Senior is assigned later.<br>
+              <span class="proposal-tag" style="margin:4px 0; display:inline-block;">proposal</span> Price locks at booking time; reassignment never changes it. <b style="color:var(--text-primary);">Already consistent with existing behavior</b> — <code style="font-family:var(--font-data);">service-detail/index.jsx</code> already warns that price/duration changes "only affect future bookings; historical bookings are protected by snapshot fields." The lock this proposes isn't new machinery, it's the same snapshot discipline already in place.
+            </div>
+            <div>
+              <b style="color:var(--text-primary);">2. Requested staff doesn't deliver.</b> Customer paid the Senior premium; a Junior covers.<br>
+              <span class="proposal-tag" style="margin:4px 0; display:inline-block;">proposal</span> Re-price down and refund the difference — collides with the immutable-payments rule in CLAUDE.md (RESTRICT on UPDATE/DELETE), so this is a <b>refund record</b>, not an edit to the original payment.
+            </div>
+            <div>
+              <b style="color:var(--text-primary);">3. Multi-therapist bookings.</b> <code style="font-family:var(--font-data);">booking_therapists</code> is a junction; combos carry per-item staff in <code style="font-family:var(--font-data);">booking_combo_items</code>.<br>
+              <span class="proposal-tag" style="margin:4px 0; display:inline-block;">proposal</span> Per-line pricing — each line priced at that line's staff member's tier, and whether the line was requested or auto-assigned decides base vs. tier.
+            </div>
+          </div>
+        </div>
+        <div class="subcard" style="grid-column: span 2;">
+          <div class="subcard-top"><span class="subcard-label">Scale problem — resolved</span></div>
+          <div style="font-size:12px; line-height:1.6; color:var(--text-secondary);">
+            <b style="color:var(--text-primary);">196 services × 4+ tiers is not a usable grid as-is</b> — no category grouping, no search, no bulk-set. But Timely's own tier pricing (their Settings/ServiceEdit page) never shows that matrix: tier prices are set per service, on that service's own edit page, a handful of rows at a time. You're already there when you care about that service's price. The grid never needs to scale past one row of tiers, because it was never the UI — see <b>Service price section</b> above.<br><br>
+            Price range across those 196 services today: <b style="color:var(--text-primary);">NPR 150</b> – <b style="color:var(--text-primary);">NPR 100,000</b> (the top end is membership packages, not treatments).
+          </div>
+        </div>
+        <div class="subcard">
+          <div class="subcard-top"><span class="subcard-label">Branch dimension</span></div>
+          <div style="font-size:12px; line-height:1.6; color:var(--text-secondary);">
+            Price does not vary by branch today — <code style="font-family:var(--font-data);">branch_service_links</code> has no price column. Tiers are the first dimension of price variation. If per-branch pricing is ever wanted too, service × tier × branch is a <b>different schema</b> than service × tier — decide the shape now, not after tiers ship.
+          </div>
+        </div>
+        <div class="subcard" style="grid-column: span 2;">
+          <div class="subcard-top"><span class="subcard-label">Tiers vs. <code style="font-family:var(--font-data);">therapists.position</code></span><span class="subcard-route">open question</span></div>
+          <div style="font-size:12px; line-height:1.6; color:var(--text-secondary);">
+            <code style="font-family:var(--font-data);">position</code> is free text — 23 distinct values across 82 people in staging, 13 blank, with near-duplicates like "Brow And Lash Artist" / "Brow &amp; Lash Artist" (same two values flagged in the staff-access board). It's the closest thing to a tier today, and it's unusable as one in its current state.
+            <b style="color:var(--text-primary);">Open question:</b> do tiers replace <code style="font-family:var(--font-data);">position</code>, or sit beside it? Having both invites contradiction — a "Junior" tier assignment next to a "Senior Therapist" position label on the same person.
+          </div>
+        </div>
+        <div class="subcard">
+          <div class="subcard-top"><span class="subcard-label">Junior priced below base</span><span class="subcard-route">open question</span></div>
+          <div style="font-size:12px; line-height:1.6; color:var(--text-secondary);">
+            The pricing grid above puts Junior at <b style="color:var(--text-primary);">NPR 3,800</b> against a <b style="color:var(--text-primary);">NPR 4,200</b> base for the Hot Oil Massage. Under the decided model, naming the Junior costs <i>less</i> than "Any available" — which can also be assigned that same Junior. Requesting a specific person ends up cheaper than not caring, the inverse of what a "pay to choose" feature is supposed to incentivize.
+            <b style="color:var(--text-primary);">Open question:</b> should tier prices be allowed below base at all, and if so, what stops "Any available" from being the worst-value option on the menu?<br><br>
+            <b style="color:var(--text-primary);">Same family of problem:</b> Timely labels the base row "Unassigned" — the price for staff on no tier — not "Any available." The two usually land on the same number, but not always: if a customer requests an untiered person by name, is that base (nobody's tier applies) or a request-premium with no tier to price it from? We haven't picked.
+          </div>
+        </div>
+        <div class="subcard">
+          <div class="subcard-top"><span class="subcard-label">Price modes (Fixed / Variable / From)</span><span class="subcard-route">open question</span></div>
+          <div style="font-size:12px; line-height:1.6; color:var(--text-secondary);">
+            Timely's Price field is a "Fixed price" dropdown, implying other modes exist. Tier pricing as specced here assumes fixed pricing throughout — nothing on this board proposes variable or "from" pricing. <b style="color:var(--text-primary);">Open question:</b> does Zenly need non-fixed price modes at all, or is tiered-fixed enough? Not building toward modes we have no requirement for.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<div class="modal-overlay" id="del-modal">
+  <div class="modal-box">
+    <h4>⚠ Delete "<span id="del-tier-name"></span>"?</h4>
+    <ul id="del-consequences"></ul>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeDeleteModal()">Cancel</button>
+      <button class="btn" style="background:var(--error); color:#fff; border-color:var(--error);" onclick="confirmDeleteTier()">Delete tier</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<style>@keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.5;} }</style>
+
+<script>
+  // ---------------- seed data — real Nuad Thai Spa services + staff reused from staff-access.html ----------------
+  var SERVICES = [
+    { name: 'FOOT REFLEXOLOGY – 30min', base: 2400 },
+    { name: 'HEAD/BACK, NECK & SHOULDER – 30min', base: 2500 },
+    { name: 'HEAD MASSAGE – 30min', base: 2500 },
+    { name: 'FOOT REFLEXOLOGY – 45min', base: 3300 },
+    { name: 'HEAD/BACK, NECK & SHOULDER – 45min', base: 3400 },
+    { name: 'FOOT REFLEXOLOGY – 60min', base: 4100 },
+    { name: 'NUAD THAI TRADITIONAL HOT OIL MASSAGE – 60min', base: 4200 },
+    { name: 'PREGNANCY – Nuad Thai Traditional Hot Oil Massage 60min', base: 4300 }
+  ];
+  var BRANCHES = ['Lazimpat', 'Sanepa', 'Thamel', 'Bhaisepati', 'Guntabya'];
+
+  var tiers = [
+    { id: 't1', name: 'Junior' },
+    { id: 't2', name: 'Therapist' },
+    { id: 't3', name: 'Senior' },
+    { id: 't4', name: 'Master' }
+  ];
+
+  // Names reused from staff-access.html's seeded/named-match/unmatched lists so the
+  // two boards agree on who exists at Nuad Thai Spa.
+  var STAFF = {
+    'Sumnima Tharu': { tier: 'Junior', branch: 'Sanepa' },
+    'Junu Ale Magar': { tier: 'Junior', branch: 'Thamel' },
+    'Ganesh Bishunkhe': { tier: 'Therapist', branch: 'Thamel' },
+    'Poojan Nachhring Rai': { tier: 'Therapist', branch: 'Lazimpat' },
+    'Bikram Thapa Magar': { tier: 'Therapist', branch: 'Bhaisepati' },
+    'Ankita Yonjan': { tier: 'Senior', branch: 'Lazimpat' },
+    'Manisha Thing': { tier: 'Senior', branch: 'Sanepa' },
+    'Roshan Rai': { tier: 'Senior', branch: 'Guntabya' },
+    'Kamala Tamang': { tier: 'Master', branch: 'Lazimpat' },
+    'Trisha Acharya': { tier: 'Master', branch: 'Thamel' },
+    'Asmita Pariyar': { tier: null, branch: 'Bhaisepati' },
+    'Muskan Shrestha': { tier: null, branch: 'Sanepa' }
+  };
+
+  // prices[serviceIndex][tierId] = number | null (null = falls back to base)
+  var prices = {
+    0: { t1: null, t2: null, t3: 2800, t4: 3200 },
+    1: { t1: null, t2: null, t3: 2900, t4: 3300 },
+    2: { t1: null, t2: null, t3: null, t4: null },
+    3: { t1: 3000, t2: null, t3: 3700, t4: 4200 },
+    4: { t1: null, t2: null, t3: 3900, t4: 4500 },
+    5: { t1: null, t2: null, t3: 4600, t4: 5300 },
+    6: { t1: 3800, t2: 4200, t3: 5200, t4: 5800 },
+    7: { t1: null, t2: null, t3: null, t4: 5000 }
+  };
+
+  function fmtNPR(n) { return 'NPR ' + Number(n).toLocaleString('en-IN'); }
+  function staffOnTier(tierName) { return Object.keys(STAFF).filter(function(n) { return STAFF[n].tier === tierName; }); }
+  function unassignedStaff() { return Object.keys(STAFF).filter(function(n) { return !STAFF[n].tier; }); }
+  function tierPriceFor(serviceIdx, therapistName) {
+    var tierName = STAFF[therapistName] && STAFF[therapistName].tier;
+    if (!tierName) return SERVICES[serviceIdx].base;
+    var tier = tiers.filter(function(t){ return t.name === tierName; })[0];
+    if (!tier) return SERVICES[serviceIdx].base;
+    var override = prices[serviceIdx] && prices[serviceIdx][tier.id];
+    return override != null ? override : SERVICES[serviceIdx].base;
+  }
+
+  // ---------------- Panel 1 (live): tier manager ----------------
+  var openPopoverTierId = null;
+  function renderTiers() {
+    var wrap = document.getElementById('tier-rows');
+    wrap.innerHTML = tiers.map(function(t, idx) {
+      var count = staffOnTier(t.name).length;
+      return '<div class="tier-row" draggable="true" data-id="' + t.id + '" data-idx="' + idx + '" ' +
+        'ondragstart="onDragStart(event)" ondragover="onDragOver(event)" ondrop="onDrop(event)" ondragend="onDragEnd(event)">' +
+        '<span class="drag-handle">⠿⠿</span>' +
+        '<input class="tier-name-input" value="' + t.name + '" oninput="renameTier(\'' + t.id + '\', this.value)">' +
+        '<div style="position:relative;">' +
+          '<button class="count-pill" onclick="toggleTierPopover(event, \'' + t.id + '\')">👤 ' + count + '</button>' +
+          (openPopoverTierId === t.id ? renderPopover(t) : '') +
+        '</div>' +
+        '<button class="del-btn" title="Delete tier" onclick="openDeleteModal(\'' + t.id + '\')">🗑</button>' +
+      '</div>';
+    }).join('');
+  }
+  function renderPopover(t) {
+    var assigned = staffOnTier(t.name);
+    var unassigned = unassignedStaff();
+    return '<div class="popover">' +
+      '<div class="popover-title">' + assigned.length + ' staff on this tier</div>' +
+      assigned.map(function(n) { return '<label><input type="checkbox" checked onchange="toggleStaffTier(\'' + n + '\', \'' + t.name + '\', this.checked)">' + n + '</label>'; }).join('') +
+      '<div class="popover-title">' + unassigned.length + ' UNASSIGNED STAFF</div>' +
+      unassigned.map(function(n) { return '<label><input type="checkbox" onchange="toggleStaffTier(\'' + n + '\', \'' + t.name + '\', this.checked)">' + n + '</label>'; }).join('') +
+    '</div>';
+  }
+  function toggleTierPopover(e, tierId) { e.stopPropagation(); openPopoverTierId = openPopoverTierId === tierId ? null : tierId; renderTiers(); }
+  document.addEventListener('click', function() { if (openPopoverTierId) { openPopoverTierId = null; renderTiers(); } });
+  function toggleStaffTier(name, tierName, checked) { STAFF[name].tier = checked ? tierName : null; renderTiers(); }
+  function renameTier(id, val) { var t = tiers.filter(function(x){ return x.id === id; })[0]; if (t) t.name = val; }
+  function addTier() { tiers.push({ id: 't' + (tiers.length + 1) + '-new', name: 'New tier' }); renderTiers(); }
+  var dragSrcIdx = null;
+  function onDragStart(e) { dragSrcIdx = Number(e.currentTarget.getAttribute('data-idx')); e.currentTarget.classList.add('dragging'); }
+  function onDragOver(e) { e.preventDefault(); }
+  function onDrop(e) {
+    e.preventDefault();
+    var targetIdx = Number(e.currentTarget.getAttribute('data-idx'));
+    if (dragSrcIdx === null || targetIdx === dragSrcIdx) return;
+    var moved = tiers.splice(dragSrcIdx, 1)[0];
+    tiers.splice(targetIdx, 0, moved);
+    renderTiers();
+  }
+  function onDragEnd(e) { e.currentTarget.classList.remove('dragging'); dragSrcIdx = null; }
+
+  var pendingDeleteTierId = null;
+  function openDeleteModal(id) {
+    var t = tiers.filter(function(x){ return x.id === id; })[0];
+    if (!t) return;
+    pendingDeleteTierId = id;
+    document.getElementById('del-tier-name').textContent = t.name;
+    var staffCount = staffOnTier(t.name).length;
+    var priceCount = 0;
+    Object.keys(prices).forEach(function(svcIdx) { if (prices[svcIdx][id] != null) priceCount++; });
+    var items = [];
+    if (staffCount > 0) items.push(staffCount + ' staff member' + (staffCount === 1 ? '' : 's') + ' will be unassigned and fall back to Any available pricing');
+    if (priceCount > 0) items.push(priceCount + ' custom price' + (priceCount === 1 ? '' : 's') + ' across the pricing grid will be deleted, not archived');
+    if (items.length === 0) items.push('No staff or custom prices are attached — this tier is safe to delete.');
+    document.getElementById('del-consequences').innerHTML = items.map(function(i){ return '<li>' + i + '</li>'; }).join('');
+    document.getElementById('del-modal').classList.add('show');
+  }
+  function closeDeleteModal() { document.getElementById('del-modal').classList.remove('show'); pendingDeleteTierId = null; }
+  function confirmDeleteTier() {
+    var id = pendingDeleteTierId;
+    var t = tiers.filter(function(x){ return x.id === id; })[0];
+    if (t) {
+      staffOnTier(t.name).forEach(function(n) { STAFF[n].tier = null; });
+      Object.keys(prices).forEach(function(svcIdx) { delete prices[svcIdx][id]; });
+      tiers = tiers.filter(function(x){ return x.id !== id; });
+    }
+    closeDeleteModal();
+    renderTiers();
+    showToast('Tier deleted');
+  }
+
+  // ---------------- Panel 4: booking flow ----------------
+  var selectedTherapist = null; // null = Any available
+  var previewServiceIdx = 6; // NUAD THAI TRADITIONAL HOT OIL MASSAGE – 60min
+  function renderTherapistPanel() {
+    var panel = document.getElementById('therapist-panel');
+    var svc = SERVICES[previewServiceIdx];
+    var rows = '<div class="select-opt any-opt" onclick="selectTherapist(null)"><span class="nm">Any available</span><span class="px">' + fmtNPR(svc.base) + '</span></div>';
+    rows += Object.keys(STAFF).filter(function(n){ return STAFF[n].tier; }).map(function(n) {
+      var tierName = STAFF[n].tier;
+      var px = tierPriceFor(previewServiceIdx, n);
+      return '<div class="select-opt" onclick="selectTherapist(\'' + n + '\')"><span class="nm">' + n + '<span class="tier-tag">' + tierName + '</span></span><span class="px">' + fmtNPR(px) + '</span></div>';
+    }).join('');
+    panel.innerHTML = rows;
+  }
+  function toggleTherapistPanel() { document.getElementById('therapist-panel').classList.toggle('open'); }
+  function selectTherapist(name) {
+    selectedTherapist = name;
+    document.getElementById('therapist-selected-label').textContent = name || 'Any available';
+    document.getElementById('therapist-panel').classList.remove('open');
+    updatePreview();
+  }
+  function updatePreview() {
+    var svc = SERVICES[previewServiceIdx];
+    var price, selectionText;
+    if (selectedTherapist === null) {
+      price = svc.base;
+      selectionText = 'Any available therapist';
+    } else {
+      price = tierPriceFor(previewServiceIdx, selectedTherapist);
+      selectionText = selectedTherapist + ' (' + STAFF[selectedTherapist].tier + ') — requested';
+    }
+    document.getElementById('preview-selection').textContent = selectionText;
+    document.getElementById('preview-price').textContent = fmtNPR(price);
+  }
+
+  function showToast(msg) {
+    var el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(function() { el.classList.remove('show'); }, 2200);
+  }
+
+  renderTiers();
+  renderTherapistPanel();
+  updatePreview();
+
+  // ---------------- Panel 2: tier manager sub-card states ----------------
+  (function renderTierManagerPanel() {
+    var seniorTier = tiers.filter(function(t){ return t.name === 'Senior'; })[0];
+    var assigned = staffOnTier('Senior');
+    var unassigned = unassignedStaff();
+    var defs = [
+      {
+        label: 'Empty · no tiers yet',
+        route: 'first run',
+        html: '<div style="padding:18px 14px; text-align:center; color:var(--text-tertiary);">' +
+          '<div style="font-size:13px; font-weight:600; color:var(--text-primary); margin-bottom:4px;">No price tiers yet</div>' +
+          '<div style="font-size:11.5px; margin-bottom:10px;">Every booking charges base price until you create one.</div>' +
+          '<button class="btn btn-primary btn-sm">+ Add new</button></div>'
+      },
+      {
+        label: 'Staff-assignment popover',
+        route: assigned.length + ' assigned · ' + unassigned.length + ' unassigned',
+        html: '<div style="padding:10px 14px;"><div class="tier-row" style="margin-bottom:0;">' +
+          '<span class="drag-handle">⠿⠿</span><input class="tier-name-input" value="Senior" readonly>' +
+          '<div style="position:relative;"><button class="count-pill">👤 ' + assigned.length + '</button>' +
+          '<div class="popover" style="position:static; width:auto; box-shadow:none; border-color:var(--border); margin-top:6px;">' +
+          '<div class="popover-title">' + assigned.length + ' staff on this tier</div>' +
+          assigned.map(function(n){ return '<label><input type="checkbox" checked disabled>' + n + '</label>'; }).join('') +
+          '<div class="popover-title">' + unassigned.length + ' UNASSIGNED STAFF</div>' +
+          unassigned.map(function(n){ return '<label><input type="checkbox" disabled>' + n + '</label>'; }).join('') +
+          '</div></div><button class="del-btn">🗑</button></div></div>'
+      },
+      {
+        label: 'Delete with consequences',
+        route: 'tier has data',
+        html: '<div style="padding:16px;"><h4 style="margin:0 0 8px; font-size:14px; display:flex; align-items:center; gap:6px;">⚠ Delete "Senior"?</h4>' +
+          '<ul style="margin:0; padding-left:18px; font-size:12px; color:var(--text-secondary); line-height:1.6;">' +
+          '<li>' + assigned.length + ' staff members will be unassigned and fall back to Any available pricing</li>' +
+          '<li>3 custom prices across the pricing grid will be deleted, not archived</li></ul></div>'
+      }
+    ];
+    document.getElementById('panel-tiermanager').innerHTML = defs.map(function(d) {
+      return '<div class="subcard"><div class="subcard-top"><span class="subcard-label">' + d.label + '</span><span class="subcard-route">' + d.route + '</span></div><div class="subcard-body">' + d.html + '</div></div>';
+    }).join('');
+  })();
+
+  // ---------------- Panel 3: service price section sub-card states ----------------
+  // Modeled on src/pages/service-detail/index.jsx L365-417 — the info banner,
+  // the Basics SettingsRow, and the Price(NPR) field this tier UI replaces.
+  (function renderServicePriceSectionPanel() {
+    function priceRow(label, sub, val, isBase, isFallback, base) {
+      return '<div class="svc-price-row' + (isBase ? ' base-row' : '') + '">' +
+        '<span class="svc-tier-name">' + label + (sub ? '<span class="svc-tier-sub">' + sub + '</span>' : '') + '</span>' +
+        '<input class="svc-price-input' + (isFallback ? ' is-fallback' : '') + '" value="' + (isFallback ? '' : val) + '" placeholder="' + base + '">' +
+      '</div>';
+    }
+    function sectionHtml(svcIdx, opts) {
+      opts = opts || {};
+      var svc = SERVICES[svcIdx];
+      var rows = priceRow('Any available', opts.baseSub || '(base)', svc.base, true, false, svc.base);
+      rows += tiers.map(function(t) {
+        var val = prices[svcIdx] && prices[svcIdx][t.id] != null ? prices[svcIdx][t.id] : null;
+        return priceRow(t.name, null, val, false, val === null, svc.base);
+      }).join('');
+      return '<div class="svc-edit-mock">' +
+        (opts.banner !== false ? '<div class="svc-info-banner">ⓘ Price and duration changes only affect future bookings. Historical bookings are protected by snapshot fields.</div>' : '') +
+        '<div class="svc-field-label">Price — ' + svc.name + '</div>' +
+        '<a class="svc-edit-tiers-link">Edit price tiers</a>' +
+        rows +
+      '</div>';
+    }
+
+    var defs = [
+      {
+        label: 'All tiers priced',
+        route: SERVICES[6].name,
+        html: sectionHtml(6)
+      },
+      {
+        label: 'Some tiers unset (fallback)',
+        route: SERVICES[1].name,
+        html: sectionHtml(1, { banner: false })
+      },
+      {
+        label: 'Base row shown first',
+        route: 'role of this row',
+        html: '<div class="svc-edit-mock">' +
+          priceRow('Any available', '(base — untiered or unspecified)', SERVICES[0].base, true, false, SERVICES[0].base) +
+          priceRow('Junior', null, null, false, true, SERVICES[0].base) +
+          '<p style="font-size:11px; color:var(--text-tertiary); margin:8px 0 0; line-height:1.5;">Always the first row, labelled so its role is obvious — this is what "Any available" charges, not a leftover default.</p>' +
+        '</div>'
+      },
+      {
+        label: 'Edit price tiers link',
+        route: '→ tier manager',
+        html: '<div class="svc-edit-mock" style="text-align:center; padding:18px 14px;">' +
+          '<a class="svc-edit-tiers-link" style="margin:0 0 6px;">Edit price tiers</a>' +
+          '<p style="font-size:11px; color:var(--text-tertiary); margin:4px 0 0; line-height:1.5;">Routes back to the Tier manager panel — add/rename/delete tiers from here, prices from the service page.</p>' +
+        '</div>'
+      },
+      {
+        label: 'Rejected alternative',
+        route: 'not this',
+        html: '<div class="svc-edit-mock" style="font-size:11.5px; color:var(--text-secondary); line-height:1.6;">' +
+          '<span class="rejected-tag" style="margin-bottom:6px; display:inline-block;">not this</span><br>' +
+          'A central services × tiers matrix. Doesn\'t scale to 196 services, and the customer isn\'t where they\'d price it from — per-service editing meets them where they already are when they care about that service\'s price.' +
+        '</div>'
+      }
+    ];
+    document.getElementById('panel-pricinggrid').innerHTML = defs.map(function(d) {
+      return '<div class="subcard"><div class="subcard-top"><span class="subcard-label">' + d.label + '</span><span class="subcard-route">' + d.route + '</span></div><div class="subcard-body">' + d.html + '</div></div>';
+    }).join('');
+  })();
+</script>
+</body>
+</html>

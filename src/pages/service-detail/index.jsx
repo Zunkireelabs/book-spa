@@ -8,6 +8,7 @@ import CustomSelect from '../../components/ui/CustomSelect';
 import SettingsRow from '../staff-detail/components/SettingsRow';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
+import { useOrg } from '../../contexts/OrgContext';
 import { useIndustry } from '../../hooks/useIndustry';
 import {
   fetchServicesForManagement,
@@ -22,15 +23,29 @@ import {
   setServiceComboComponents,
   fetchServiceAddons,
   setServiceAddons,
+  fetchBranchesForManagement,
+  fetchServiceBranches,
+  setServiceBranches,
+  fetchPriceTiers,
+  fetchServiceTierPrices,
+  setServiceTierPrices,
 } from '../../services/api';
 
 const EMPTY_FORM = {
-  name: '', priceNpr: '', durationMinutes: '', description: '', imageUrl: '', category: 'Spa',
+  name: '', priceNpr: '', priceType: 'fixed', durationMinutes: '', description: '', imageUrl: '', category: 'Spa',
   isCouple: false, isCombo: false, offerEnabled: false, offerType: 'percent', offerValue: '',
   requiresTherapist: true,
   bookableOnline: true, isAddon: false,
   paddingEnabled: false, paddingBeforeMinutes: '0', paddingAfterMinutes: '0', paddingAfterType: 'padding',
 };
+
+const PRICE_TYPE_OPTIONS = [
+  { value: 'fixed', label: 'Fixed — one price for everyone' },
+  { value: 'free', label: 'Free — no charge' },
+  { value: 'calendar_only', label: 'Calendar only — hidden from online booking' },
+  { value: 'no_default', label: 'No default — whoever books it enters a price' },
+  { value: 'tiered', label: 'Tiered — depends on the assigned staff member' },
+];
 
 const formatNPR = (amount) => `NPR ${Number(amount).toLocaleString('en-IN')}`;
 
@@ -42,6 +57,7 @@ const ServiceDetailPage = () => {
   const { orgSlug, serviceId } = useParams();
   const { profile } = useAuth();
   const { branchId } = useBranch();
+  const { orgId } = useOrg();
   const { isBeauty } = useIndustry();
   const userRole = profile?.role || 'staff';
   const isEdit = !!serviceId;
@@ -56,6 +72,11 @@ const ServiceDetailPage = () => {
   const [restrictStaff, setRestrictStaff] = useState(false);
   const [staffSearchQuery, setStaffSearchQuery] = useState('');
 
+  const [allBranches, setAllBranches] = useState([]);
+  const [eligibleBranchIds, setEligibleBranchIds] = useState([]);
+  const [restrictBranches, setRestrictBranches] = useState(false);
+  const [branchSearchQuery, setBranchSearchQuery] = useState('');
+
   const [allServices, setAllServices] = useState([]);
   // comboComponents: [{ serviceId, defaultTiming: 'sequential'|'concurrent', defaultSameStaff: bool }]
   const [comboComponents, setComboComponents] = useState([]);
@@ -63,6 +84,10 @@ const ServiceDetailPage = () => {
 
   const [serviceAddonIds, setServiceAddonIds] = useState([]);
   const [addonSearchQuery, setAddonSearchQuery] = useState('');
+
+  const [priceTiers, setPriceTiers] = useState([]);
+  // { [tierId]: '160' } — a tier left out means "same as Unassigned", never 0.
+  const [tierPrices, setTierPrices] = useState({});
 
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [imageFile, setImageFile] = useState(null);
@@ -79,7 +104,11 @@ const ServiceDetailPage = () => {
   const loadTherapists = useCallback(async () => {
     if (!branchId) return;
     const result = await fetchTherapistsForManagement(branchId);
-    if (!result.error) setAllTherapists(result.data || []);
+    // Eligible Staff only makes sense for staff who actually perform services —
+    // fetchTherapistsForManagement returns every staff row (service staff and
+    // front-desk/admin alike) for the broader staff-management pages that share
+    // it; filter to service staff here, scoped to this one picker.
+    if (!result.error) setAllTherapists((result.data || []).filter(t => t.is_service_staff !== false));
   }, [branchId]);
 
   const loadAllServices = useCallback(async () => {
@@ -87,9 +116,22 @@ const ServiceDetailPage = () => {
     if (!result.error) setAllServices(result.data || []);
   }, []);
 
+  const loadBranches = useCallback(async () => {
+    if (!orgId) return;
+    const result = await fetchBranchesForManagement(orgId);
+    if (!result.error) setAllBranches(result.data || []);
+  }, [orgId]);
+
+  const loadPriceTiers = useCallback(async () => {
+    const result = await fetchPriceTiers();
+    if (!result.error) setPriceTiers(result.data || []);
+  }, []);
+
   useEffect(() => { loadCategories(); }, [loadCategories]);
   useEffect(() => { loadTherapists(); }, [loadTherapists]);
   useEffect(() => { loadAllServices(); }, [loadAllServices]);
+  useEffect(() => { loadBranches(); }, [loadBranches]);
+  useEffect(() => { loadPriceTiers(); }, [loadPriceTiers]);
 
   const loadService = useCallback(async () => {
     if (!isEdit) return;
@@ -98,11 +140,13 @@ const ServiceDetailPage = () => {
 
     // No fetchServiceById endpoint — fetchServicesForManagement() is the same org-wide
     // list the Service Management page already loads, so reusing it here needs no new API.
-    const [servicesResult, eligibleResult, comboResult, addonsResult] = await Promise.all([
+    const [servicesResult, eligibleResult, comboResult, addonsResult, branchScopeResult, tierPricesResult] = await Promise.all([
       fetchServicesForManagement(),
       fetchServiceTherapists(serviceId, branchId),
       fetchServiceComboComponents(serviceId),
       fetchServiceAddons(serviceId),
+      fetchServiceBranches(serviceId),
+      fetchServiceTierPrices(serviceId),
     ]);
 
     if (servicesResult.error) {
@@ -121,6 +165,7 @@ const ServiceDetailPage = () => {
     setFormData({
       name: service.name,
       priceNpr: String(service.price_npr),
+      priceType: service.price_type || 'fixed',
       durationMinutes: String(service.duration_minutes),
       description: service.description || '',
       imageUrl: service.image_url || '',
@@ -141,6 +186,10 @@ const ServiceDetailPage = () => {
     setImagePreview(service.image_url || null);
     setServiceAddonIds(addonsResult.data || []);
 
+    const tierPriceMap = {};
+    (tierPricesResult.data || []).forEach((row) => { tierPriceMap[row.price_tier_id] = String(row.price_npr); });
+    setTierPrices(tierPriceMap);
+
     // branchId filters server-side (migration-257/258 made the allow-list per-branch,
     // but storage is still org-wide) — a service restricted only at a different branch
     // comes back empty here, so the checkboxes reflect only what a save at this branch
@@ -152,6 +201,10 @@ const ServiceDetailPage = () => {
     setComboComponents(
       (comboResult.data || []).map((c) => ({ serviceId: c.serviceId, defaultTiming: c.defaultTiming, defaultSameStaff: c.defaultSameStaff, defaultSameRoom: c.defaultSameRoom }))
     );
+
+    const branchIds = branchScopeResult.data || [];
+    setEligibleBranchIds(branchIds);
+    setRestrictBranches(branchIds.length > 0);
 
     setPageLoading(false);
   }, [isEdit, serviceId, branchId]);
@@ -191,12 +244,17 @@ const ServiceDetailPage = () => {
 
   const goBack = () => navigate(`/${orgSlug}/dashboard?view=services`);
 
+  const priceNeedsAmount = ['fixed', 'calendar_only', 'tiered'].includes(formData.priceType);
+
   const handleSave = async () => {
-    const price = Number(formData.priceNpr);
+    const price = priceNeedsAmount ? Number(formData.priceNpr) : 0;
     const duration = Number(formData.durationMinutes);
 
     if (!formData.name.trim()) { setFormError('Service name is required.'); return; }
-    if (!price || price <= 0) { setFormError('Price must be a positive number.'); return; }
+    if (priceNeedsAmount && (!price || price <= 0)) {
+      setFormError(formData.priceType === 'tiered' ? 'The Unassigned price must be a positive number.' : 'Price must be a positive number.');
+      return;
+    }
     if (!duration || duration <= 0 || !Number.isInteger(duration)) { setFormError('Duration must be a positive whole number.'); return; }
     if (formData.isCombo && comboComponents.length === 0) { setFormError('Select at least one component service for this combo.'); return; }
 
@@ -227,6 +285,7 @@ const ServiceDetailPage = () => {
     const payload = {
       name: formData.name.trim(),
       priceNpr: price,
+      priceType: formData.priceType,
       durationMinutes: duration,
       description: formData.description.trim() || null,
       imageUrl: finalImageUrl,
@@ -280,6 +339,28 @@ const ServiceDetailPage = () => {
     const addonsResult = await setServiceAddons(targetId, serviceAddonIds);
     if (addonsResult.error) {
       setFormError(addonsResult.error.message || 'Service saved, but failed to save its add-ons.');
+      setSaving(false);
+      return;
+    }
+
+    // Always write the tier price set (even empty when price type isn't tiered
+    // anymore) — otherwise switching away from Tiered would leave stale rows
+    // that resurface if the service is switched back.
+    const tierPriceEntries = formData.priceType === 'tiered'
+      ? priceTiers
+          .filter((t) => tierPrices[t.id] !== undefined && tierPrices[t.id] !== '')
+          .map((t) => ({ priceTierId: t.id, priceNpr: tierPrices[t.id] }))
+      : [];
+    const tierPriceResult = await setServiceTierPrices(targetId, tierPriceEntries);
+    if (tierPriceResult.error) {
+      setFormError(tierPriceResult.error.message || 'Service saved, but failed to save its tier prices.');
+      setSaving(false);
+      return;
+    }
+
+    const branchScopeResult = await setServiceBranches(targetId, restrictBranches ? eligibleBranchIds : []);
+    if (branchScopeResult.error) {
+      setFormError(branchScopeResult.error.message || 'Service saved, but failed to save its branch scope.');
       setSaving(false);
       return;
     }
@@ -360,17 +441,31 @@ const ServiceDetailPage = () => {
                       />
                     </div>
 
+                    <div className="space-y-1">
+                      <label className="block font-body font-body-medium text-sm text-text-primary">Price type</label>
+                      <CustomSelect
+                        value={formData.priceType}
+                        onChange={(val) => setFormData({ ...formData, priceType: val })}
+                        options={PRICE_TYPE_OPTIONS}
+                        size="md"
+                      />
+                    </div>
+
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="block font-body font-body-medium text-sm text-text-primary">Price (NPR)</label>
-                        <Input
-                          type="number"
-                          value={formData.priceNpr}
-                          onChange={(e) => setFormData({ ...formData, priceNpr: e.target.value })}
-                          placeholder="2000"
-                          min="1"
-                        />
-                      </div>
+                      {priceNeedsAmount && (
+                        <div className="space-y-1">
+                          <label className="block font-body font-body-medium text-sm text-text-primary">
+                            {formData.priceType === 'tiered' ? 'Unassigned price (NPR)' : 'Price (NPR)'}
+                          </label>
+                          <Input
+                            type="number"
+                            value={formData.priceNpr}
+                            onChange={(e) => setFormData({ ...formData, priceNpr: e.target.value })}
+                            placeholder="2000"
+                            min="1"
+                          />
+                        </div>
+                      )}
                       <div className="space-y-1">
                         <label className="block font-body font-body-medium text-sm text-text-primary">Duration (min)</label>
                         <Input
@@ -382,6 +477,50 @@ const ServiceDetailPage = () => {
                         />
                       </div>
                     </div>
+
+                    {formData.priceType === 'free' && (
+                      <p className="font-caption text-xs text-text-tertiary">No charge for this service.</p>
+                    )}
+                    {formData.priceType === 'calendar_only' && (
+                      <p className="font-caption text-xs text-text-tertiary">Staff see this price on the calendar. Customers booking online never see it.</p>
+                    )}
+                    {formData.priceType === 'no_default' && (
+                      <p className="font-caption text-xs text-text-tertiary">No price is set. Whoever takes the booking enters one.</p>
+                    )}
+
+                    {formData.priceType === 'tiered' && (
+                      <div className="space-y-1">
+                        <label className="block font-body font-body-medium text-sm text-text-primary">Tier prices</label>
+                        <p className="font-caption text-xs text-text-tertiary mb-1">
+                          A tier left blank charges the Unassigned price above — never free.
+                        </p>
+                        {priceTiers.length === 0 ? (
+                          <p className="font-caption text-xs text-text-tertiary italic">
+                            No price tiers yet. Create one from the Price Tiers page, then come back here.
+                          </p>
+                        ) : (
+                          <div className="border border-border rounded-spa divide-y divide-border">
+                            <div className="flex items-center justify-between px-3 py-2 bg-background">
+                              <span className="font-body text-sm text-text-primary">Unassigned</span>
+                              <span className="font-data text-sm text-text-secondary">{formData.priceNpr || '0'}</span>
+                            </div>
+                            {priceTiers.map((tier) => (
+                              <div key={tier.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                                <span className="font-body text-sm text-text-primary">{tier.name}</span>
+                                <Input
+                                  type="number"
+                                  value={tierPrices[tier.id] ?? ''}
+                                  onChange={(e) => setTierPrices((prev) => ({ ...prev, [tier.id]: e.target.value }))}
+                                  placeholder={formData.priceNpr || '0'}
+                                  min="0"
+                                  className="max-w-[140px]"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div className="space-y-1">
                       <label className="block font-body font-body-medium text-sm text-text-primary">Description</label>
@@ -935,6 +1074,9 @@ const ServiceDetailPage = () => {
 
                     {restrictStaff && (
                       <div className="space-y-2">
+                        <p className="font-caption text-xs text-text-secondary">
+                          Checked staff can perform this service. Unchecked staff cannot.
+                        </p>
                         <Input
                           value={staffSearchQuery}
                           onChange={(e) => setStaffSearchQuery(e.target.value)}
@@ -976,6 +1118,73 @@ const ServiceDetailPage = () => {
                   </div>
                 </SettingsRow>
                 )}
+
+                <SettingsRow title="Branch Scope" description="Make this service available everywhere, or restrict it to specific branches.">
+                  <div className="space-y-2 p-3 bg-background rounded-spa border border-border max-w-xl">
+                    <div className="flex items-center justify-between">
+                      <span className="font-body font-body-medium text-sm text-text-primary">Restrict to specific branches?</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = !restrictBranches;
+                          setRestrictBranches(next);
+                          if (!next) {
+                            setEligibleBranchIds([]);
+                            setBranchSearchQuery('');
+                          }
+                        }}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
+                          restrictBranches ? 'bg-success' : 'bg-border'
+                        }`}
+                      >
+                        <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+                          restrictBranches ? 'translate-x-6' : 'translate-x-1'
+                        }`} />
+                      </button>
+                    </div>
+
+                    {restrictBranches && (
+                      <div className="space-y-2">
+                        <Input
+                          value={branchSearchQuery}
+                          onChange={(e) => setBranchSearchQuery(e.target.value)}
+                          placeholder="Search branches..."
+                        />
+                        <div className="border border-border rounded-spa bg-surface max-h-[220px] overflow-y-auto p-2 space-y-1">
+                          {(() => {
+                            const query = branchSearchQuery.toLowerCase();
+                            const filtered = query
+                              ? allBranches.filter((b) => b.name.toLowerCase().includes(query))
+                              : allBranches;
+                            if (allBranches.length === 0) {
+                              return <p className="text-xs text-text-secondary px-2 py-1">No branches found.</p>;
+                            }
+                            if (filtered.length === 0) {
+                              return <p className="text-xs text-text-secondary px-2 py-1">No branches match "{branchSearchQuery}".</p>;
+                            }
+                            return filtered.map((b) => (
+                              <label key={b.id} className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-primary/5 ${eligibleBranchIds.includes(b.id) ? 'bg-primary/5' : ''}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={eligibleBranchIds.includes(b.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setEligibleBranchIds((ids) => [...ids, b.id]);
+                                    } else {
+                                      setEligibleBranchIds((ids) => ids.filter((id) => id !== b.id));
+                                    }
+                                  }}
+                                  className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
+                                />
+                                <span className="font-body text-sm text-text-primary">{b.name}</span>
+                              </label>
+                            ));
+                          })()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </SettingsRow>
 
                 <SettingsRow title="Service Image" description="Shown on the customer booking portal.">
                   <div className="space-y-2">

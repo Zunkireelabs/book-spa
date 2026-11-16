@@ -6,6 +6,7 @@ import Icon from '../../../../components/AppIcon';
 import { getBookingStatusColors, UNPAID_DOT_COLOR } from '../../../../utils/bookingStatusColors';
 import { useBookingHover, HOVER_CARD_ID } from './BookingHoverCard';
 import { formatClockTime } from './timeFormat';
+import { isNoShow } from '../../../../services/bookingTransformers';
 import { OUTSIDE_HOURS_OUTLINE } from '../../../../services/availabilityShading';
 
 // Compact range: "2:30–3:15pm", or "11:30am–12:15pm" when the period differs; "14:30–15:15" in 24h mode
@@ -57,7 +58,7 @@ export function canDragBooking(booking) {
 }
 
 const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate, hideSensitive = false, use24h = false, outsideHours = null }) => {
-  const colors = getBookingStatusColors(booking.status);
+  const colors = getBookingStatusColors(isNoShow(booking) ? 'No Show' : booking.status);
   const isUnpaid = booking.paymentStatus === 'unpaid';
   const isPaid = booking.paymentStatus === 'paid';
   const isDraggable = canDragBooking(booking);

@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
-import { formatNPR } from '../../../services/bookingTransformers';
+import { useResolvedServicePricing } from '../../../hooks/useCustomerServicePricing';
 
 // Falls back to the icon tile when the URL is absent *or* fails to load — these are
 // admin-pasted URLs with nothing validating them, so a dead link is a normal state, not
 // an edge case, and a broken-image icon in the summary looks like a broken app.
-const VenueThumb = ({ orgName, logoUrl, heroImageUrl }) => {
+export const VenueThumb = ({ orgName, logoUrl, heroImageUrl }) => {
   const [failed, setFailed] = useState(false);
   const src = logoUrl || heroImageUrl;
   // A logo is typically a wide wordmark/non-square mark — object-cover crops those
@@ -50,8 +50,10 @@ const SummaryCard = ({
   showContinue = true,
   stickyTop = '1.5rem',
 }) => {
-  const priceOf = (s) => Number(s.effective_price_npr ?? s.price_npr ?? 0);
-  const total = selectedServices.reduce((sum, s) => sum + priceOf(s), 0);
+  const therapistId = selectedProfessional?.mode === 'specific' ? (selectedProfessional.therapist?.id || null) : null;
+  const pricingItems = selectedServices.map((s) => ({ key: s.id, service: s, therapistId }));
+  const { perItem, totalLabel } = useResolvedServicePricing(pricingItems);
+  const labelFor = (service) => perItem.find((p) => p.key === service.id)?.label ?? null;
 
   const withWhom = selectedProfessional?.mode === 'specific'
     ? selectedProfessional.therapist?.name
@@ -82,9 +84,11 @@ const SummaryCard = ({
               <div key={service.id}>
                 <div className="flex items-baseline justify-between gap-3">
                   <p className="font-medium text-sm text-[var(--zn-foreground)]">{service.name}</p>
-                  <p className="font-['Space_Mono'] tabular-nums text-sm text-[var(--zn-foreground)] shrink-0">
-                    {formatNPR(priceOf(service))}
-                  </p>
+                  {labelFor(service) != null && (
+                    <p className="font-['Space_Mono'] tabular-nums text-sm text-[var(--zn-foreground)] shrink-0">
+                      {labelFor(service)}
+                    </p>
+                  )}
                 </div>
                 <p className="text-sm text-[var(--zn-muted-foreground)] mt-0.5">
                   {service.duration_minutes} min{withWhom ? ` with ${withWhom}` : ''}
@@ -105,7 +109,7 @@ const SummaryCard = ({
           )}
         </div>
         <p className="font-['Space_Mono'] tabular-nums text-lg font-semibold text-[var(--zn-foreground)]">
-          {formatNPR(total)}
+          {totalLabel}
         </p>
       </div>
 

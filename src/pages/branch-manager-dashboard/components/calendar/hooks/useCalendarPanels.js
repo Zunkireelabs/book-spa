@@ -7,6 +7,7 @@ import {
   fetchBookingById,
   deleteBlock,
   updateBlock,
+  updateWaitlistEntry,
 } from '../../../../../services/api';
 import { transformBooking } from '../../../../../services/bookingTransformers';
 import { isOverallBranch } from '../../../../../services/api';
@@ -20,7 +21,7 @@ import { isCheckedOutBlockedSlot, DEFAULT_SLOT_MINUTES } from '../calendarSlots'
 // Panel routing for the calendar: which panel is open (booking details, quick-create, block / transfer forms), the
 // dirty-guard refs and open/switch/close helpers, the empty-slot / drag-to-create / new-booking entry points, the
 // rebook "pick and place" mode, and the create / block / transfer-cancel actions those panels trigger.
-export function useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, gridRef }) {
+export function useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, gridRef, canViewCustomerDetails = true }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { guard } = useAvailabilityGuard();
 
@@ -62,6 +63,10 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   const closeBlockPanels = useCallback(() => {
     setAddBlockSlot(null); setEditingBlock(null); setTransferModalTarget(null); setEditingTransferTherapist(null); setBlockRetarget(null);
   }, []);
+  // Which waitlist entry (if any) the open quick-create panel is converting; it flips to 'booked' only once the booking saves.
+  const [bookingWaitlistEntryId, setBookingWaitlistEntryId] = useState(null);
+  const [waitlistCollapsed, setWaitlistCollapsed] = useState(true);
+  const [waitlistRefreshToken, setWaitlistRefreshToken] = useState(0);
   const [servicesCache, setServicesCache] = useState(null);
   const [servicesLoading, setServicesLoading] = useState(false);
 
@@ -154,6 +159,26 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       setServicesLoading(false);
     }
   }, [servicesCache, servicesLoading, branchId, closeBlockPanels]);
+
+  // "Book in" from the waitlist panel: opens the normal quick-create form prefilled with what the person asked for. Staff still
+  // pick the real slot / time / staff. A restricted account (can_view_customer_details = false) only holds MASKED name/phone, so
+  // that text is never typed into a write: a linked customer is resolved by id server-side (knownCustomerId), and the panel hides
+  // "Book in" for a walk-in entry with no customer id.
+  const handleBookInFromWaitlist = useCallback((entry) => {
+    setBookingWaitlistEntryId(entry.id);
+    openQuickCreateForSlot({
+      day: entry.preferred_date || currentDate,
+      hour: entry.preferred_time ? parseInt(entry.preferred_time.slice(0, 2), 10) : undefined,
+      minute: entry.preferred_time ? parseInt(entry.preferred_time.slice(3, 5), 10) : undefined,
+      colType: entry.preferred_therapist_id ? 'therapist' : null,
+      colId: entry.preferred_therapist_id || null,
+      defaultServiceId: entry.service_id,
+      defaultCustomerName: entry.customer_name,
+      defaultCustomerPhone: canViewCustomerDetails && entry.customer_phone ? entry.customer_phone.replace(/^\+\d{1,3}/, '') : '',
+      defaultCustomerCountryCode: canViewCustomerDetails ? (entry.customer_phone?.match(/^\+\d{1,3}/)?.[0] || '+977') : '+977',
+      defaultCustomerId: entry.customer_id || null,
+    });
+  }, [openQuickCreateForSlot, currentDate, canViewCustomerDetails]);
 
   // Toolbar "New booking" / N: quick-create at the selected date, next free 10-min slot >= now (or the open time on other days), no column.
   const handleNewBooking = useCallback(() => {
@@ -362,6 +387,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
 
   const handleQuickCreateClose = useCallback(() => {
     setQuickCreateSlot(null);
+    setBookingWaitlistEntryId(null);
     setRetargetRequest(null);
     setDraftGhost(null);
   }, []);
@@ -397,10 +423,17 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     const r = await submitQuickCreate({ formData, branchId, guard });
     if (r.error) return r.error;
     showToast(r.toast.msg, r.toast.type);
+    // The booking exists for real: flip the waitlist entry to 'booked'. Best-effort, a failure here never undoes the booking.
+    if (bookingWaitlistEntryId && r.bookingId) {
+      const w = await updateWaitlistEntry({ id: bookingWaitlistEntryId, status: 'booked', bookingId: r.bookingId });
+      if (w.error) console.error('[Calendar] failed to flip waitlist entry to booked:', w.error.message);
+      setBookingWaitlistEntryId(null);
+      setWaitlistRefreshToken((v) => v + 1);
+    }
     setQuickCreateSlot(null);
     refreshCalendar();
     return null;
-  }, [branchId, refreshCalendar, guard]);
+  }, [branchId, refreshCalendar, guard, bookingWaitlistEntryId, showToast]);
 
   // ── Rebook "pick and place" handlers ───────────────────────
 
@@ -523,6 +556,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     transferModalTarget, setTransferModalTarget, editingTransferTherapist, setEditingTransferTherapist,
     blockPanelOpen, blockRetarget,
     servicesCache, servicesLoading, rebookSource, rebookFallback, rebookCardRef, reschedulePending,
+    bookingWaitlistEntryId, waitlistCollapsed, setWaitlistCollapsed, waitlistRefreshToken, handleBookInFromWaitlist,
     openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick,
     handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,

@@ -4,8 +4,10 @@ import Icon from '../AppIcon';
 import BrandMark from './BrandMark';
 import zennlyIcon from 'assets/brand/zennly-icon.png';
 import { useAuth } from 'contexts/AuthContext';
+import { useLock } from 'contexts/LockContext';
 import { useBranch } from 'contexts/BranchContext';
 import { useIndustry } from 'hooks/useIndustry';
+import { useOrg } from 'contexts/OrgContext';
 import { useAutoRefresh } from 'hooks/useAutoRefresh';
 import { fetchPendingApprovalCount } from 'services/api';
 import { useOptionalCommandPalette, SHORTCUT_LABEL } from 'components/CommandPalette/useCommandPalette';
@@ -16,6 +18,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const location = useLocation();
   const { orgSlug: urlOrgSlug } = useParams();
   const { profile, signOut } = useAuth();
+  const { lock } = useLock();
   const { branchName: contextBranchName, branchId, isOverall } = useBranch();
   const [pendingApprovals, setPendingApprovals] = useState(0);
   const { unreadCount: inboxUnread } = useNotifications();
@@ -435,6 +438,17 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                 </div>
               ));
             })()}
+
+            {/* Lock Screen */}
+            <button
+              onClick={() => { setMobileMoreOpen(false); lock(); }}
+              aria-label="Lock screen"
+              className="flex items-center gap-3 px-4 py-3 w-full text-text-primary hover:bg-background transition-colors border-t border-border"
+            >
+              <Icon name="Lock" size={20} className="flex-shrink-0" />
+              <span className="flex-1 text-left font-body font-body-medium text-sm">Lock Screen</span>
+              <Icon name="ChevronRight" size={16} className="flex-shrink-0" />
+            </button>
 
             {/* Logout */}
             <button

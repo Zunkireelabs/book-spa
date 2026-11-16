@@ -3,8 +3,10 @@ import Icon from '../../../components/AppIcon';
 import TimeBoxInput from '../../../components/ui/TimeBoxInput';
 import { dayWorkingMinutes, weekWorkingMinutes, formatMinutes } from '../../../utils/staffDay';
 
-// Storage/display only — see migration-275's header comment: deliberately
-// not wired into booking-slot availability/conflict checks.
+// Display only. These hours and breaks are shown on the staff calendar as
+// per-column shading (see calendar/CalendarGrid's roster overlay, resolved via
+// services/rosterSchedule), but they are still NOT read by booking-slot
+// availability or conflict checks — a booking can be made outside them.
 const WorkingHoursSection = ({ rows, onChange, readOnly = false, changedDays = [] }) => {
   const updateRow = (dayOfWeek, patch) => {
     onChange(rows.map(r => r.dayOfWeek === dayOfWeek ? { ...r, ...patch } : r));
@@ -15,14 +17,14 @@ const WorkingHoursSection = ({ rows, onChange, readOnly = false, changedDays = [
     updateRow(row.dayOfWeek, {
       isDayOff: !nowWorking,
       ...(nowWorking
-        ? { startTime: row.startTime || '09:00', endTime: row.endTime || '17:00' }
+        ? { startTime: row.startTime || '10:00', endTime: row.endTime || '18:00' }
         : { breaks: [] }),
     });
   };
 
   const addBreak = (row) => {
-    const start = row.startTime || '09:00';
-    const end = row.endTime || '17:00';
+    const start = row.startTime || '10:00';
+    const end = row.endTime || '18:00';
     const existing = row.breaks || [];
     const lastEnd = existing.length > 0 ? existing[existing.length - 1].endTime : null;
 

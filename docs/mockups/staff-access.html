@@ -1,0 +1,1314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zenly — Staff Access (mockup board)</title>
+<style>
+  :root {
+    --primary: #2D5A27;
+    --primary-light: #2D5A2714;
+    --secondary: #8B4513;
+    --accent: #DAA520;
+    --background: #FAFAF9;
+    --surface: #FFFFFF;
+    --border: #E1E3E5;
+    --success: #10B981;
+    --warning: #D97706;
+    --warning-light: #D9770618;
+    --error: #DC2626;
+    --text-primary: #1F2421;
+    --text-secondary: #5B6460;
+    --text-tertiary: #8A938E;
+    --shadow-resting: 0 1px 3px rgba(0,0,0,.1), 0 1px 2px rgba(0,0,0,.06);
+    --shadow-elevated: 0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.06);
+    --shadow-modal: 0 10px 15px rgba(0,0,0,.1), 0 4px 6px rgba(0,0,0,.05);
+    --radius: 8px;
+    --radius-lg: 12px;
+    --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --font-heading: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --font-accent: Georgia, 'Times New Roman', serif;
+    --font-data: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+    --canvas: #DEDEDA;
+    --sidebar-bg: #EBEBEB;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column;
+  }
+  .ic { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+  .mockup-banner {
+    background: #1F2421;
+    color: #FAFAF9;
+    font-size: 12.5px;
+    padding: 8px 20px;
+    text-align: center;
+    font-family: var(--font-data);
+    letter-spacing: .02em;
+    flex-shrink: 0;
+  }
+  .mockup-banner strong { color: var(--accent); }
+
+  /* ============ BOARD CANVAS ============ */
+  .board-canvas { flex: 1; min-height: 0; overflow: auto; background: var(--canvas); background-image: radial-gradient(#cfcfca 1px, transparent 1px); background-size: 18px 18px; }
+  .board-track {
+    display: grid;
+    grid-template-columns: repeat(3, 900px);
+    gap: 46px 48px;
+    padding: 40px;
+    width: max-content;
+  }
+  .panel { display: flex; flex-direction: column; gap: 10px; }
+  .panel-caption {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--font-data); font-size: 12px; color: var(--text-secondary);
+    letter-spacing: .01em;
+  }
+  .panel-caption .cap-text b { color: var(--text-primary); }
+  .panel-caption .cap-icons { display: flex; gap: 10px; color: var(--text-tertiary); }
+  .panel-caption .cap-icons .ic { width: 15px; height: 15px; cursor: default; }
+  .panel-card {
+    background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-elevated);
+    border: 1px solid var(--border); padding: 22px; overflow: hidden;
+  }
+  .panel-card-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .panel-card-head h2 { margin: 0; font-size: 18px; font-family: var(--font-heading); }
+  .panel-card-head .rule { font-size: 12.5px; color: var(--text-tertiary); }
+
+  /* Sub-card spec grid (reference format) */
+  .subcard-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .subcard-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .subcard-grid.cols-1 { grid-template-columns: 1fr; }
+  .subcard {
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--background);
+    padding: 12px 14px 14px;
+  }
+  .subcard-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
+  .subcard-label { font-family: var(--font-data); font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-tertiary); }
+  .subcard-route { font-family: var(--font-data); font-size: 10.5px; color: var(--text-tertiary); background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+  .subcard-body { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .subcard-note { font-size: 11.5px; color: var(--text-tertiary); margin-top: 8px; line-height: 1.5; }
+  .subcard-note b { color: var(--text-secondary); }
+
+  /* ============ SHARED APP-UI COMPONENTS (reused by the live screen AND the static states) ============ */
+  .btn {
+    font-family: var(--font-body); font-size: 13.5px; font-weight: 600;
+    border-radius: var(--radius); padding: 9px 16px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text-primary);
+    transition: filter .12s ease, transform .05s ease;
+  }
+  .btn:hover { filter: brightness(0.97); }
+  .btn:active { transform: scale(.98); }
+  .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-ghost { background: transparent; border-color: transparent; color: var(--text-secondary); }
+  .btn-sm { padding: 6px 12px; font-size: 12.5px; }
+
+  .stat-row {
+    display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px;
+    font-family: var(--font-data); font-size: 12.5px; color: var(--text-secondary);
+  }
+  .stat-row span b { color: var(--text-primary); font-family: var(--font-data); }
+
+  .section-head {
+    display: flex; align-items: baseline; justify-content: space-between; margin: 28px 0 10px;
+  }
+  .section-head h2 { font-size: 14.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary); margin: 0; font-weight: 700; }
+  .section-head .count { font-family: var(--font-data); font-size: 12.5px; color: var(--text-tertiary); }
+
+  .list-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-resting); }
+  .list-scroll { max-height: 440px; overflow-y: auto; }
+  .row {
+    display: grid; grid-template-columns: 40px 1.6fr 1fr 1fr 1.4fr 110px;
+    gap: 12px; align-items: center; padding: 11px 16px; border-bottom: 1px solid var(--border);
+    cursor: pointer; font-size: 13.5px;
+  }
+  .row:last-child { border-bottom: none; }
+  .row:hover { background: #2D5A2708; }
+  .avatar {
+    width: 32px; height: 32px; border-radius: 50%; background: var(--secondary); color: #fff;
+    display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
+    font-family: var(--font-data); flex-shrink: 0;
+  }
+  .avatar.muted { background: var(--text-tertiary); }
+  .name-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .name-cell .nm { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub { color: var(--text-tertiary); font-size: 12px; }
+  .branch-chip { font-size: 11.5px; color: var(--text-secondary); font-family: var(--font-data); }
+  .status-cell { min-width: 0; }
+  .status-linked { color: var(--text-primary); }
+  .status-linked .email { font-size: 12px; color: var(--text-secondary); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .role-badge {
+    display: inline-block; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+    padding: 2px 7px; border-radius: 5px; margin-top: 3px;
+  }
+  .role-staff { background: #2D5A2718; color: var(--primary); }
+  .role-manager { background: #DAA52022; color: #8a6b10; }
+  .role-admin { background: #8B451318; color: var(--secondary); }
+  .role-admin_viewer { background: #E1E3E5; color: var(--text-secondary); }
+  .active-ts { color: var(--text-tertiary); font-size: 11.5px; font-style: italic; }
+  .no-login-text { color: var(--text-tertiary); font-size: 12.5px; }
+  .example-chip {
+    display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+    background: var(--accent); color: #4a3a07; padding: 1px 6px; border-radius: 4px; margin-left: 6px; vertical-align: middle;
+  }
+  .support-tag { color: var(--text-tertiary); font-size: 12px; font-style: italic; }
+  .filter-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .filter-tab {
+    font-size: 12.5px; font-weight: 600; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text-secondary); cursor: pointer;
+  }
+  .filter-tab.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+  .unmatched-row {
+    display: grid; grid-template-columns: 40px 1.9fr 0.8fr 1fr 1.2fr 130px;
+    gap: 12px; align-items: center; padding: 11px 16px; border-bottom: 1px solid var(--border); font-size: 13.5px;
+  }
+  .unmatched-row:last-child { border-bottom: none; }
+  .warn-note { font-size: 12px; color: var(--warning); display: flex; align-items: center; gap: 6px; }
+
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.35); display: none; align-items: center; justify-content: center; z-index: 90;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal-box {
+    background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-modal);
+    padding: 22px; width: 460px; max-width: 92vw; max-height: 80vh; display: flex; flex-direction: column;
+  }
+  .modal-box h4 { margin: 0 0 4px; font-size: 16px; }
+  .modal-box .modal-sub { font-size: 12.5px; color: var(--text-secondary); margin: 0 0 14px; }
+  .modal-search {
+    width: 100%; border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 12px; font-size: 13.5px;
+    margin-bottom: 10px; font-family: var(--font-body);
+  }
+  .modal-search:focus { outline: 2px solid var(--primary); outline-offset: 1px; }
+  .modal-list { overflow-y: auto; flex: 1; border-top: 1px solid var(--border); }
+  .pick-row {
+    display: flex; align-items: center; justify-content: space-between; padding: 9px 4px; border-bottom: 1px solid var(--border);
+    font-size: 13px; cursor: pointer;
+  }
+  .pick-row:hover { background: var(--primary-light); }
+  .pick-row.disabled { cursor: not-allowed; opacity: .55; }
+  .pick-row.disabled:hover { background: transparent; }
+  .pick-row .pname { font-weight: 600; }
+  .pick-row .pmeta { color: var(--text-tertiary); font-size: 11.5px; }
+  .pick-row .already-tag { font-size: 10.5px; color: var(--text-tertiary); font-style: italic; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
+  .ambiguous-banner { background: var(--warning-light); border: 1px solid #D9770640; border-radius: 8px; padding: 10px 12px; font-size: 12px; color: var(--text-primary); margin-bottom: 10px; }
+
+  #screen-detail { display: none; }
+  .detail-header {
+    position: sticky; top: 0; z-index: 10; background: var(--surface);
+    border-bottom: 1px solid var(--border); padding: 16px 24px; margin: -28px -20px 24px;
+    display: flex; align-items: center; justify-content: space-between; box-shadow: var(--shadow-resting);
+  }
+  .detail-header-left { display: flex; align-items: center; gap: 14px; }
+  .back-link { color: var(--text-secondary); font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+  .back-link:hover { color: var(--primary); }
+  .detail-title { font-size: 19px; font-weight: 700; }
+  .detail-title .role-badge { vertical-align: middle; margin-left: 8px; margin-top: 0; }
+  .detail-actions { display: flex; gap: 10px; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 22px; margin-bottom: 18px; box-shadow: var(--shadow-resting);
+  }
+  .card h3 { margin: 0 0 4px; font-size: 15.5px; }
+  .card .desc { color: var(--text-secondary); font-size: 13px; margin: 0 0 16px; line-height: 1.55; max-width: 560px; }
+
+  .segmented { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .segmented button {
+    border: none; background: var(--surface); padding: 9px 16px; font-size: 13px; font-weight: 600;
+    color: var(--text-secondary); cursor: pointer; border-right: 1px solid var(--border);
+  }
+  .segmented button:last-child { border-right: none; }
+  .segmented button.active { background: var(--primary); color: #fff; }
+  .helper-text { font-size: 12.5px; color: var(--text-tertiary); margin-top: 10px; font-style: italic; }
+
+  .field-label { font-size: 12.5px; font-weight: 700; color: var(--text-primary); margin: 16px 0 6px; display: block; }
+  .text-input {
+    width: 100%; max-width: 360px; border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 9px 12px; font-size: 13.5px; font-family: var(--font-body); color: var(--text-primary); background: var(--background);
+  }
+  .text-input:focus { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+  .role-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .role-option {
+    border: 1.5px solid var(--border); border-radius: var(--radius); padding: 12px 14px; cursor: pointer;
+    transition: border-color .12s ease, background .12s ease;
+  }
+  .role-option:hover { border-color: var(--primary); }
+  .role-option.selected { border-color: var(--primary); background: var(--primary-light); }
+  .role-option .rname { font-weight: 700; font-size: 13.5px; text-transform: capitalize; }
+  .role-option .rdesc { font-size: 11.8px; color: var(--text-secondary); margin-top: 5px; line-height: 1.45; }
+
+  .radio-row, .check-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; font-size: 13.5px; cursor: pointer; }
+  .radio-row input, .check-row input { margin-top: 2px; accent-color: var(--primary); width: 16px; height: 16px; }
+  .radio-row .opt-sub, .check-row .opt-sub { color: var(--text-tertiary); font-size: 12px; margin-top: 2px; display: block; }
+  .locked-note { font-size: 11.5px; color: var(--text-tertiary); font-style: italic; margin-left: 4px; }
+  .branch-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 20px; margin-top: 8px; margin-left: 26px; }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--text-primary); color: #fff; padding: 12px 22px; border-radius: var(--radius);
+    font-size: 13.5px; box-shadow: var(--shadow-modal); opacity: 0; pointer-events: none; transition: all .25s ease;
+    z-index: 1200;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-thumb { background: #D8DAD7; border-radius: 6px; }
+
+  /* ============ APP SHELL REPLICA (Panel 1 only) — see StaffSidebar.jsx / branch-manager-dashboard/index.jsx ============ */
+  .shell { display: flex; height: 780px; width: 1300px; margin: 0 auto; border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--border); }
+  .shell-sidebar {
+    width: 240px; flex-shrink: 0; background: var(--sidebar-bg); display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  .shell-sidebar-head { height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; flex-shrink: 0; }
+  .shell-brand { font-family: var(--font-accent); font-weight: 700; font-size: 19px; color: var(--primary); letter-spacing: -.01em; }
+  .shell-sidebar-head button { background: none; border: none; padding: 8px; border-radius: 6px; color: #8A938E; cursor: default; }
+  .shell-nav { flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 4px; }
+  .shell-nav-item, .shell-nav-group-btn {
+    display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 6px; font-size: 13.5px; font-weight: 500;
+    color: #6B7280; text-decoration: none; cursor: default; background: none; border: none; width: 100%; text-align: left; font-family: var(--font-body);
+  }
+  .shell-nav-item:hover, .shell-nav-group-btn:hover { background: var(--background); color: #111827; }
+  .shell-nav-group { display: flex; flex-direction: column; }
+  .shell-nav-group-row { display: flex; align-items: center; }
+  .shell-nav-group-row .shell-nav-group-btn { flex: 1; }
+  .shell-nav-group-row .chev-btn { padding: 8px 10px; border-radius: 6px; background: none; border: none; color: #6B7280; cursor: default; }
+  .shell-nav-group-row.active .shell-nav-group-btn,
+  .shell-nav-item.active { background: var(--background); color: #111827; font-weight: 600; }
+  .chev-btn .ic { transition: transform .15s; }
+  .chev-btn.open .ic { transform: rotate(180deg); }
+  .shell-nav-children { position: relative; margin-top: 2px; padding-left: 38px; display: flex; flex-direction: column; }
+  .shell-nav-child { padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #6B7280; cursor: default; }
+  .shell-nav-child.active { background: var(--background); color: #111827; font-weight: 600; }
+  .shell-sidebar-foot { padding: 12px; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .shell-sidebar-foot .dot { width: 14px; height: 14px; border-radius: 50%; background: #DC2626; flex-shrink: 0; }
+  .shell-sidebar-foot span { font-size: 11px; color: #9CA3AF; }
+  .shell-sidebar-foot b { font-size: 11px; color: #4B5563; font-weight: 600; }
+
+  .shell-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--background); }
+  .shell-header { flex-shrink: 0; background: var(--sidebar-bg); padding: 10px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .shell-header-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .pill-platform-admin { font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #FCE7F3; color: #BE185D; white-space: nowrap; font-weight: 500; }
+  .shell-branch { display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: var(--background); border: 1px solid var(--border); border-radius: var(--radius); font-size: 13px; color: var(--text-primary); font-weight: 500; }
+  .shell-branch .ic { width: 14px; height: 14px; color: var(--text-secondary); }
+  .shell-divider { width: 1px; height: 18px; background: var(--border); }
+  .shell-datetime { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+  .shell-header-right { display: flex; align-items: center; gap: 10px; }
+  .pill-live { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 999px; background: var(--background); border: 1px solid var(--border); font-size: 11.5px; font-weight: 600; color: var(--text-secondary); }
+  .pill-live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); position: relative; }
+  .pill-live .dot::after { content: ''; position: absolute; inset: -3px; border-radius: 50%; background: var(--success); opacity: .35; animation: ping 1.6s infinite; }
+  @keyframes ping { 0%{transform:scale(1);opacity:.35;} 70%{transform:scale(2.2);opacity:0;} 100%{opacity:0;} }
+  .pill-role-admin { font-size: 11px; padding: 3px 9px; border-radius: 5px; background: #FCE7F3; color: #BE185D; font-weight: 500; }
+  .assistant-btn { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px; background: linear-gradient(90deg,#a855f7,#ec4899); color: #fff; font-size: 12.5px; font-weight: 600; border: none; cursor: default; }
+  .bell-btn { padding: 7px; border-radius: 999px; background: none; border: none; color: var(--text-secondary); cursor: default; position: relative; }
+  .profile-chip { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: var(--radius); cursor: default; }
+  .profile-chip:hover { background: var(--background); }
+  .profile-avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--primary-light); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; font-family: var(--font-data); }
+  .profile-name-wrap { display: flex; flex-direction: column; line-height: 1.25; }
+  .profile-name-wrap .pn { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+  .profile-name-wrap .pr { font-size: 11px; color: var(--text-secondary); }
+
+  .shell-content { flex: 1; overflow-y: auto; }
+  .shell-content .app-shell { max-width: none; margin: 0; padding: 28px 20px 60px; }
+
+  @media (max-width: 1360px) {
+    .board-track { grid-template-columns: repeat(3, 820px); }
+  }
+</style>
+</head>
+<body>
+
+<div class="mockup-banner">⚠ NON-FUNCTIONAL DESIGN MOCKUP — Zenly Staff Access · drafted 2026-11-13 · no data leaves this page, nothing here is wired to Supabase</div>
+
+<!-- ============ SVG ICON SPRITE ============ -->
+<svg style="display:none" aria-hidden="true">
+  <defs>
+    <symbol id="i-dashboard" viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></symbol>
+    <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><rect x="8.5" y="2" width="7" height="4" rx="1"/><line x1="8" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="14" y2="15"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4"/><path d="M3 20c0-4 2.8-6.2 6-6.2s6 2.2 6 6.2"/><circle cx="18" cy="9" r="2.6"/><path d="M16.3 20c.2-2.6 1.6-4.2 3.8-4.7"/></symbol>
+    <symbol id="i-barchart" viewBox="0 0 24 24"><line x1="5" y1="20" x2="5" y2="13"/><line x1="12" y1="20" x2="12" y2="7"/><line x1="19" y1="20" x2="19" y2="4"/></symbol>
+    <symbol id="i-wallet" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10.5h18"/><circle cx="16.8" cy="14.5" r="1.1" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-bag" viewBox="0 0 24 24"><path d="M7.5 8L9 4h6l1.5 4"/><rect x="5" y="8" width="14" height="12.5" rx="2"/></symbol>
+    <symbol id="i-card" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/><line x1="3" y1="10" x2="21" y2="10"/></symbol>
+    <symbol id="i-ticket" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2.5"/><line x1="12" y1="6.5" x2="12" y2="17.5" stroke-dasharray="2.2 2.2"/></symbol>
+    <symbol id="i-megaphone" viewBox="0 0 24 24"><path d="M3 10v4h4l10 5V5L7 10H3z"/><path d="M14 12.5a2.4 2.4 0 000-5"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M3 11.2l18-7.2-7.2 18-2.4-7.6-8.4-3.2z"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M21 12h-3M6 12H3M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1M18.4 18.4l-2.1-2.1M7.7 7.7L5.6 5.6"/></symbol>
+    <symbol id="i-chevdown" viewBox="0 0 24 24"><path d="M5 8l7 7 7-7"/></symbol>
+    <symbol id="i-chevleft" viewBox="0 0 24 24"><path d="M14.5 5l-7 7 7 7"/></symbol>
+    <symbol id="i-building" viewBox="0 0 24 24"><rect x="4" y="3" width="12" height="18" rx="1"/><rect x="16" y="9" width="4.5" height="12" rx="1"/><circle cx="7.5" cy="7" r="0.7" fill="currentColor" stroke="none"/><circle cx="12.5" cy="7" r="0.7" fill="currentColor" stroke="none"/><circle cx="7.5" cy="12" r="0.7" fill="currentColor" stroke="none"/><circle cx="12.5" cy="12" r="0.7" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9.5a6 6 0 1112 0c0 5 2 6.2 2 6.2H4s2-1.2 2-6.2z"/><path d="M10 18.5a2 2 0 004 0"/></symbol>
+    <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3l1.3 3.7L17 8l-3.7 1.3L12 13l-1.3-3.7L7 8l3.7-1.3L12 3z"/><path d="M19 14l.6 1.8 1.8.6-1.8.6L19 19l-.6-1.8-1.8-.6 1.8-.6L19 14z"/></symbol>
+    <symbol id="i-warning" viewBox="0 0 24 24"><path d="M12 3.2l9.3 16H2.7l9.3-16z"/><line x1="12" y1="10" x2="12" y2="14.2"/><circle cx="12" cy="17" r="0.7" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8 10.5V7.3a4 4 0 018 0v3.2"/></symbol>
+    <symbol id="i-linkbreak" viewBox="0 0 24 24"><path d="M9.5 14.5l5-5"/><path d="M8.3 8.3L6.6 6.6a3 3 0 114.2-4.2l1.7 1.7"/><path d="M15.7 15.7l1.7 1.7a3 3 0 11-4.2 4.2l-1.7-1.7"/></symbol>
+    <symbol id="i-empty" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><rect x="8.5" y="2" width="7" height="4" rx="1"/><line x1="8.5" y1="12" x2="15.5" y2="12" stroke-dasharray="1.6 2"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></symbol>
+  </defs>
+</svg>
+
+<div class="board-canvas">
+<div class="board-track">
+
+  <!-- ============ PANEL 1 — FULL SCREEN (inside the real app shell) ============ -->
+  <div class="panel" style="grid-column: 1 / span 3;">
+    <div class="panel-caption">
+      <span class="cap-text"><b>STAFF ACCESS</b> · Full screen · P1 · new</span>
+      <span class="cap-icons"><svg class="ic"><use href="#i-expand"/></svg><svg class="ic"><use href="#i-download"/></svg></span>
+    </div>
+    <div class="panel-card" style="padding:0; width:max-content; margin:0;">
+      <div class="shell">
+        <!-- Sidebar replica — see src/components/ui/StaffSidebar.jsx -->
+        <aside class="shell-sidebar">
+          <div class="shell-sidebar-head">
+            <span class="shell-brand">zennly</span>
+            <button aria-hidden="true"><svg class="ic" style="width:15px;height:15px;"><use href="#i-chevleft"/></svg></button>
+          </div>
+          <nav class="shell-nav">
+            <a class="shell-nav-item"><svg class="ic"><use href="#i-dashboard"/></svg>Dashboard</a>
+            <div class="shell-nav-group">
+              <div class="shell-nav-group-row">
+                <button class="shell-nav-group-btn"><svg class="ic"><use href="#i-clipboard"/></svg>Operations</button>
+                <button class="chev-btn"><svg class="ic" style="width:15px;height:15px;"><use href="#i-chevdown"/></svg></button>
+              </div>
+            </div>
+            <a class="shell-nav-item"><svg class="ic"><use href="#i-users"/></svg>Customers</a>
+            <div class="shell-nav-group">
+              <div class="shell-nav-group-row">
+                <button class="shell-nav-group-btn"><svg class="ic"><use href="#i-barchart"/></svg>Reports</button>
+                <button class="chev-btn"><svg class="ic" style="width:15px;height:15px;"><use href="#i-chevdown"/></svg></button>
+              </div>
+            </div>
+            <div class="shell-nav-group">
+              <div class="shell-nav-group-row">
+                <button class="shell-nav-group-btn"><svg class="ic"><use href="#i-users"/></svg>Staff</button>
+                <button class="chev-btn"><svg class="ic" style="width:15px;height:15px;"><use href="#i-chevdown"/></svg></button>
+              </div>
+            </div>
+            <a class="shell-nav-item"><svg class="ic"><use href="#i-wallet"/></svg>Payroll</a>
+            <a class="shell-nav-item"><svg class="ic"><use href="#i-bag"/></svg>Products</a>
+            <div class="shell-nav-group">
+              <div class="shell-nav-group-row">
+                <button class="shell-nav-group-btn"><svg class="ic"><use href="#i-card"/></svg>Memberships</button>
+                <button class="chev-btn"><svg class="ic" style="width:15px;height:15px;"><use href="#i-chevdown"/></svg></button>
+              </div>
+            </div>
+            <div class="shell-nav-group">
+              <div class="shell-nav-group-row">
+                <button class="shell-nav-group-btn"><svg class="ic"><use href="#i-ticket"/></svg>Vouchers</button>
+                <button class="chev-btn"><svg class="ic" style="width:15px;height:15px;"><use href="#i-chevdown"/></svg></button>
+              </div>
+            </div>
+            <a class="shell-nav-item"><svg class="ic"><use href="#i-megaphone"/></svg>Campaigns</a>
+            <a class="shell-nav-item"><svg class="ic"><use href="#i-send"/></svg>Outreach</a>
+            <!-- Setup — expanded, since Staff access lives here -->
+            <div class="shell-nav-group">
+              <div class="shell-nav-group-row active">
+                <button class="shell-nav-group-btn" style="font-weight:600;color:#111827;"><svg class="ic"><use href="#i-gear"/></svg>Setup</button>
+                <button class="chev-btn open"><svg class="ic" style="width:15px;height:15px;"><use href="#i-chevdown"/></svg></button>
+              </div>
+              <div class="shell-nav-children">
+                <div class="shell-nav-child active">Staff access</div>
+                <div class="shell-nav-child">Rooms</div>
+                <div class="shell-nav-child">Services</div>
+                <div class="shell-nav-child">Categories</div>
+                <div class="shell-nav-child">Payment Methods</div>
+                <div class="shell-nav-child">Booking Settings</div>
+                <div class="shell-nav-child">Provider Profile</div>
+                <div class="shell-nav-child">Locations</div>
+                <div class="shell-nav-child">Audit Log</div>
+              </div>
+            </div>
+          </nav>
+          <div class="shell-sidebar-foot">
+            <span>A Product of</span>
+            <span class="dot"></span>
+            <b>zunkireelabs</b>
+          </div>
+        </aside>
+
+        <div class="shell-main">
+          <!-- Header replica — see branch-manager-dashboard/index.jsx L458-620 + BranchSwitcher.jsx -->
+          <header class="shell-header">
+            <div class="shell-header-left">
+              <span class="pill-platform-admin">Platform Admin</span>
+              <svg class="ic" style="color:var(--text-secondary);"><use href="#i-building"/></svg>
+              <span class="shell-branch">Lazimpat <svg class="ic" style="width:13px;height:13px;"><use href="#i-chevdown"/></svg></span>
+              <span class="shell-divider"></span>
+              <span class="shell-datetime">Fri 13 Nov · 12:04 PM</span>
+            </div>
+            <div class="shell-header-right">
+              <span class="pill-live"><span class="dot"></span>Live</span>
+              <span class="pill-role-admin">Admin</span>
+              <button class="assistant-btn"><svg class="ic" style="width:15px;height:15px;"><use href="#i-sparkles"/></svg>Assistant</button>
+              <button class="bell-btn"><svg class="ic"><use href="#i-bell"/></svg></button>
+              <div class="profile-chip">
+                <div class="profile-avatar">ST</div>
+                <div class="profile-name-wrap"><span class="pn">Subash Tamang</span><span class="pr">Admin</span></div>
+                <svg class="ic" style="width:14px;height:14px;color:var(--text-tertiary);"><use href="#i-chevdown"/></svg>
+              </div>
+            </div>
+          </header>
+
+          <!-- Content — the actual functional mockup screen -->
+          <div class="shell-content">
+            <div class="app-shell">
+
+              <!-- ============ SCREEN A — LIST ============ -->
+              <div id="screen-list">
+                <div class="crumb" style="color:var(--text-tertiary); font-size:13px; margin-bottom:4px;">Setup · Your business</div>
+                <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:18px; flex-wrap:wrap; gap:10px;">
+                  <h1 style="font-family:var(--font-heading); font-weight:700; font-size:26px; margin:0;">Staff access</h1>
+                  <div style="display:flex; gap:10px;">
+                    <a class="btn btn-primary" href="price-tiers.html">Add price tiers</a>
+                  </div>
+                </div>
+
+                <!-- MOCKUP ONLY: "Staff" below is hardcoded for this mockup. The real implementation
+                     must pull the label from useIndustry().staffLabel / staffLabelPlural (OrgContext)
+                     instead of hardcoding "Staff" — Zenly is multi-industry (cleaning, salon, beauty
+                     orgs already exist in staging) and a hardcoded "Staff" just recreates the same
+                     spa-specific-label bug this pass fixed, one word later. -->
+
+                <div class="section-head">
+                  <h2>Staff</h2>
+                  <span class="count" id="therapist-count"></span>
+                </div>
+                <div class="filter-tabs" id="filter-tabs">
+                  <button class="filter-tab active" data-filter="all" onclick="setFilter('all')">All</button>
+                  <button class="filter-tab" data-filter="service" onclick="setFilter('service')">Service staff</button>
+                  <button class="filter-tab" data-filter="support" onclick="setFilter('support')">Support staff</button>
+                </div>
+                <div class="list-wrap">
+                  <div class="list-scroll" id="therapist-list"></div>
+                </div>
+
+                <div class="section-head">
+                  <h2>Accounts with no staff record</h2>
+                  <span class="count" id="unmatched-count"></span>
+                </div>
+                <div class="list-wrap">
+                  <div id="unmatched-list"></div>
+                </div>
+              </div>
+
+              <!-- ============ SCREEN B — DETAIL ============ -->
+              <div id="screen-detail">
+                <div class="detail-header">
+                  <div class="detail-header-left">
+                    <span class="back-link" onclick="showList()">← Staff access</span>
+                    <div>
+                      <div class="detail-title" id="detail-name">—</div>
+                    </div>
+                  </div>
+                  <div class="detail-actions">
+                    <button class="btn" onclick="showList()">Cancel</button>
+                    <button class="btn btn-primary" onclick="saveDetail()">Save</button>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <h3>Login access</h3>
+                  <p class="desc">Controls whether this person can sign in to Zenly at all, and how.</p>
+                  <div class="segmented" id="login-segmented">
+                    <button data-val="email" onclick="setLoginAccess('email')">Email access</button>
+                    <button data-val="pin" onclick="setLoginAccess('pin')">Only PIN access</button>
+                    <button data-val="none" onclick="setLoginAccess('none')">No login access</button>
+                  </div>
+                  <div id="login-helper" class="helper-text"></div>
+                  <div id="email-field-wrap" style="display:none;">
+                    <label class="field-label">Email address</label>
+                    <input type="email" class="text-input" id="email-field" placeholder="name@branch.zennly.io">
+                    <!-- MOCKUP ONLY: no email is actually sent by this prototype. -->
+                    <div class="helper-text" style="margin-top:6px;">An invite will be sent with their PIN and a link to set a password.</div>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <h3>Role</h3>
+                  <p class="desc">Determines what this account can do — not which branch it can see (that's set below).</p>
+                  <div class="role-grid" id="role-grid">
+                    <div class="role-option" data-role="staff" onclick="setRole('staff')">
+                      <div class="rname">Staff</div>
+                      <div class="rdesc">Front-line bookings &amp; check-in. Can direct-apply a discount up to 50% with no approval step.</div>
+                    </div>
+                    <div class="role-option" data-role="manager" onclick="setRole('manager')">
+                      <div class="rname">Manager</div>
+                      <div class="rdesc">Runs one branch day-to-day. Direct-apply discounts up to 100%; approves staff discount requests.</div>
+                    </div>
+                    <div class="role-option" data-role="admin" onclick="setRole('admin')">
+                      <div class="rname">Admin</div>
+                      <div class="rdesc">Full control across every branch in the org. Direct-apply discounts up to 100%.</div>
+                    </div>
+                    <div class="role-option" data-role="admin_viewer" onclick="setRole('admin_viewer')">
+                      <div class="rname">Admin viewer</div>
+                      <div class="rdesc">Read-only across every branch — sees all reports and data, can't edit bookings, payments or settings.</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <h3>Locations</h3>
+                  <p class="desc" id="locations-desc">Set which branches this person can access.</p>
+                  <label class="radio-row">
+                    <input type="radio" name="loc" value="all" onchange="setLocationMode('all')">
+                    <div><div>All branches</div></div>
+                  </label>
+                  <label class="radio-row">
+                    <input type="radio" name="loc" value="selected" onchange="setLocationMode('selected')">
+                    <div>
+                      <div>Selected branches</div>
+                      <span class="opt-sub">Staff can always access their rostered home branch, even unticked.</span>
+                    </div>
+                  </label>
+                  <div class="branch-grid" id="branch-grid"></div>
+                </div>
+
+                <div class="card">
+                  <h3>Calendar visibility</h3>
+                  <p class="desc">Staff can always see their own calendar. This controls visibility into everyone else's.</p>
+                  <label class="radio-row">
+                    <input type="radio" name="cal" value="own" onchange="setCalendar('own')">
+                    <div><div>Own calendar</div></div>
+                  </label>
+                  <label class="radio-row">
+                    <input type="radio" name="cal" value="own_view" onchange="setCalendar('own_view')">
+                    <div><div>Own calendar (view only)</div></div>
+                  </label>
+                  <label class="radio-row">
+                    <input type="radio" name="cal" value="all" onchange="setCalendar('all')">
+                    <div><div>All calendars</div></div>
+                  </label>
+                  <label class="radio-row">
+                    <input type="radio" name="cal" value="all_view" onchange="setCalendar('all_view')">
+                    <div><div>All calendars (view only)</div></div>
+                  </label>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PANEL 2 — ROW STATES ============ -->
+  <div class="panel">
+    <div class="panel-caption">
+      <span class="cap-text"><b>STAFF ACCESS</b> · Row states · P1 · new</span>
+      <span class="cap-icons"><svg class="ic"><use href="#i-expand"/></svg><svg class="ic"><use href="#i-download"/></svg></span>
+    </div>
+    <div class="panel-card">
+      <div class="panel-card-head"><h2>Row states</h2><span class="rule">Five conditions a row can be in. Same list, different data shape.</span></div>
+      <div class="subcard-grid cols-1" id="panel-rowstates"></div>
+    </div>
+  </div>
+
+  <!-- ============ PANEL 3 — GRANT DETAIL ============ -->
+  <div class="panel" style="grid-column: span 2;">
+    <div class="panel-caption">
+      <span class="cap-text"><b>STAFF ACCESS</b> · Grant detail · P1 · new</span>
+      <span class="cap-icons"><svg class="ic"><use href="#i-expand"/></svg><svg class="ic"><use href="#i-download"/></svg></span>
+    </div>
+    <div class="panel-card">
+      <div class="panel-card-head"><h2>Grant detail</h2><span class="rule">Login access drives a helper line, not a confirm dialog. Role, locations and calendar are independent of it.</span></div>
+      <div class="subcard-grid cols-3">
+        <div class="subcard">
+          <div class="subcard-top"><span class="subcard-label">Login · Email access</span><span class="subcard-route">full login</span></div>
+          <div class="subcard-body" style="padding:12px;">
+            <div class="segmented" style="font-size:11px;"><button class="active" style="padding:6px 9px; font-size:11px;">Email</button><button style="padding:6px 9px; font-size:11px;">PIN</button><button style="padding:6px 9px; font-size:11px;">None</button></div>
+            <div class="helper-text" style="margin-top:8px;">Can sign in from any device with email + password, and PIN to switch quickly at a shared terminal.</div>
+          </div>
+        </div>
+        <div class="subcard">
+          <div class="subcard-top"><span class="subcard-label">Login · Only PIN access</span><span class="subcard-route">terminal only</span></div>
+          <div class="subcard-body" style="padding:12px;">
+            <div class="segmented" style="font-size:11px;"><button style="padding:6px 9px; font-size:11px;">Email</button><button class="active" style="padding:6px 9px; font-size:11px;">PIN</button><button style="padding:6px 9px; font-size:11px;">None</button></div>
+            <div class="helper-text" style="margin-top:8px;">Can only sign in via PIN at a terminal already logged in to this org — no email/password login exists.</div>
+          </div>
+        </div>
+        <div class="subcard">
+          <div class="subcard-top"><span class="subcard-label">Login · No access</span><span class="subcard-route">no login</span></div>
+          <div class="subcard-body" style="padding:12px;">
+            <div class="segmented" style="font-size:11px;"><button style="padding:6px 9px; font-size:11px;">Email</button><button style="padding:6px 9px; font-size:11px;">PIN</button><button class="active" style="padding:6px 9px; font-size:11px;">None</button></div>
+            <div class="helper-text" style="margin-top:8px;">Cannot sign in at all. Still schedulable on the calendar as staff — this only affects login.</div>
+          </div>
+        </div>
+        <div class="subcard" style="grid-column: span 2;">
+          <div class="subcard-top"><span class="subcard-label">Role · 4 options</span><span class="subcard-route">discount ceilings</span></div>
+          <div class="subcard-body" style="padding:12px;">
+            <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:7px;">
+              <div class="role-option selected" style="padding:8px 9px;"><div class="rname" style="font-size:11.5px;">Staff</div><div class="rdesc" style="font-size:10px;">Direct-apply up to 50%, no approval.</div></div>
+              <div class="role-option" style="padding:8px 9px;"><div class="rname" style="font-size:11.5px;">Manager</div><div class="rdesc" style="font-size:10px;">Direct-apply up to 100%; approves staff requests.</div></div>
+              <div class="role-option" style="padding:8px 9px;"><div class="rname" style="font-size:11.5px;">Admin</div><div class="rdesc" style="font-size:10px;">Full control, every branch. 100%.</div></div>
+              <div class="role-option" style="padding:8px 9px;"><div class="rname" style="font-size:11.5px;">Admin viewer</div><div class="rdesc" style="font-size:10px;">Read-only, every branch.</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="subcard">
+          <div class="subcard-top"><span class="subcard-label">Locations</span><span class="subcard-route">home branch locked</span></div>
+          <div class="subcard-body" style="padding:12px; font-size:12px;">
+            <label class="check-row" style="padding:4px 0;"><input type="checkbox" checked disabled><div>Lazimpat <span class="locked-note">(rostered)</span></div></label>
+            <label class="check-row" style="padding:4px 0;"><input type="checkbox"><div>Sanepa</div></label>
+            <label class="check-row" style="padding:4px 0;"><input type="checkbox"><div>Thamel</div></label>
+          </div>
+        </div>
+        <div class="subcard" style="grid-column: span 3;">
+          <div class="subcard-top"><span class="subcard-label">Calendar visibility · 4 options</span><span class="subcard-route">own vs all × edit vs view</span></div>
+          <div class="subcard-body" style="padding:12px; font-size:12px; display:grid; grid-template-columns:repeat(4,1fr); gap:6px;">
+            <label class="radio-row" style="padding:4px 0;"><input type="radio" name="dv-cal" checked><div>Own calendar</div></label>
+            <label class="radio-row" style="padding:4px 0;"><input type="radio" name="dv-cal"><div>Own (view only)</div></label>
+            <label class="radio-row" style="padding:4px 0;"><input type="radio" name="dv-cal"><div>All calendars</div></label>
+            <label class="radio-row" style="padding:4px 0;"><input type="radio" name="dv-cal"><div>All (view only)</div></label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PANEL 4 — LINK PICKER ============ -->
+  <div class="panel">
+    <div class="panel-caption">
+      <span class="cap-text"><b>STAFF ACCESS</b> · Link picker · P2 · new</span>
+      <span class="cap-icons"><svg class="ic"><use href="#i-expand"/></svg><svg class="ic"><use href="#i-download"/></svg></span>
+    </div>
+    <div class="panel-card">
+      <div class="panel-card-head"><h2>Link picker</h2><span class="rule">The inverse of "Give access" — picks an existing staff row for a login that already exists.</span></div>
+      <div class="subcard-grid cols-1" id="panel-linkpicker"></div>
+    </div>
+  </div>
+
+  <!-- ============ PANEL 5 — EMPTY / LOADING / ERROR ============ -->
+  <div class="panel" style="grid-column: span 2;">
+    <div class="panel-caption">
+      <span class="cap-text"><b>STAFF ACCESS</b> · Empty, loading, error states · P1 · new</span>
+      <span class="cap-icons"><svg class="ic"><use href="#i-expand"/></svg><svg class="ic"><use href="#i-download"/></svg></span>
+    </div>
+    <div class="panel-card">
+      <div class="panel-card-head"><h2>Empty, loading and error states</h2><span class="rule">Icon, one line of what happened, one line of what to do, one action. Plain English.</span></div>
+      <div class="subcard-grid cols-3">
+        <div class="subcard" style="text-align:center; padding:22px 14px;">
+          <div class="subcard-top" style="text-align:left;"><span class="subcard-label">Empty · No staff yet</span><span class="subcard-route">/staff-access</span></div>
+          <svg class="ic" style="width:30px;height:30px;color:var(--text-tertiary); margin:10px auto 4px;"><use href="#i-empty"/></svg>
+          <div style="font-weight:700; font-size:14px; margin-top:4px;">No staff records for this org yet</div>
+          <div style="font-size:11.5px; color:var(--text-secondary); margin:4px 0 12px;">Add your first staff member from the Staff page to start granting login access.</div>
+          <button class="btn btn-primary btn-sm">Go to Staff</button>
+        </div>
+        <div class="subcard" style="text-align:center; padding:22px 14px;">
+          <div class="subcard-top" style="text-align:left;"><span class="subcard-label">Loading · Page skeleton</span><span class="subcard-route">any list page</span></div>
+          <div style="margin:14px 0;">
+            <div style="height:30px; background:#ECECE9; border-radius:6px; margin-bottom:8px; animation:pulse 1.4s ease-in-out infinite;"></div>
+            <div style="height:30px; background:#ECECE9; border-radius:6px; margin-bottom:8px; animation:pulse 1.4s ease-in-out infinite .15s;"></div>
+            <div style="height:30px; background:#ECECE9; border-radius:6px; animation:pulse 1.4s ease-in-out infinite .3s;"></div>
+          </div>
+          <div class="subcard-note">Skeleton shows after 300 ms. Layout never jumps when data arrives.</div>
+        </div>
+        <div class="subcard" style="text-align:center; padding:22px 14px;">
+          <div class="subcard-top" style="text-align:left;"><span class="subcard-label">Error · Failed to load</span><span class="subcard-route">server error</span></div>
+          <svg class="ic" style="width:30px;height:30px;color:var(--error); margin:10px auto 4px;"><use href="#i-warning"/></svg>
+          <div style="font-weight:700; font-size:14px; margin-top:4px;">Couldn't load staff access</div>
+          <div style="font-size:11.5px; color:var(--text-secondary); margin:4px 0 12px;">Your data is unaffected. Try again, and if it keeps happening share the reference below.</div>
+          <button class="btn btn-sm">Try again</button>
+          <div style="font-family:var(--font-data); font-size:10px; color:var(--text-tertiary); margin-top:8px;">Ref 7C2A-91F4</div>
+        </div>
+        <div class="subcard" style="text-align:center; padding:22px 14px;">
+          <div class="subcard-top" style="text-align:left;"><span class="subcard-label">Permission denied</span><span class="subcard-route">403</span></div>
+          <svg class="ic" style="width:30px;height:30px;color:var(--text-tertiary); margin:10px auto 4px;"><use href="#i-lock"/></svg>
+          <div style="font-weight:700; font-size:14px; margin-top:4px;">You don't have access to Thamel</div>
+          <div style="font-size:11.5px; color:var(--text-secondary); margin:4px 0 12px;">Managers only see staff access for their own branch. Ask an admin for Overall access.</div>
+          <button class="btn btn-sm">Back to my branch</button>
+        </div>
+        <div class="subcard" style="text-align:center; padding:22px 14px;">
+          <div class="subcard-top" style="text-align:left;"><span class="subcard-label">Link failed</span><span class="subcard-route">409 conflict</span></div>
+          <svg class="ic" style="width:30px;height:30px;color:var(--error); margin:10px auto 4px;"><use href="#i-linkbreak"/></svg>
+          <div style="font-weight:700; font-size:14px; margin-top:4px;">That staff row got linked already</div>
+          <div style="font-size:11.5px; color:var(--text-secondary); margin:4px 0 12px;">Someone else linked Sushila Rai while you had the picker open. Pick a different row.</div>
+          <button class="btn btn-sm">Re-open picker</button>
+        </div>
+        <div class="subcard" style="text-align:center; padding:22px 14px;">
+          <div class="subcard-top" style="text-align:left;"><span class="subcard-label">Save failed</span><span class="subcard-route">network</span></div>
+          <svg class="ic" style="width:30px;height:30px;color:var(--error); margin:10px auto 4px;"><use href="#i-warning"/></svg>
+          <div style="font-weight:700; font-size:14px; margin-top:4px;">Couldn't save this grant</div>
+          <div style="font-size:11.5px; color:var(--text-secondary); margin:4px 0 12px;">Check your connection. Nothing was changed — the previous access level is still active.</div>
+          <button class="btn btn-sm">Retry save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PANEL 6 — RULES & CONSTRAINTS ============ -->
+  <div class="panel" style="grid-column: 1 / span 3;">
+    <div class="panel-caption">
+      <span class="cap-text"><b>STAFF ACCESS</b> · Rules &amp; constraints · P1 · new</span>
+      <span class="cap-icons"><svg class="ic"><use href="#i-expand"/></svg><svg class="ic"><use href="#i-download"/></svg></span>
+    </div>
+    <div class="panel-card">
+      <div class="panel-card-head"><h2>Rules &amp; constraints</h2><span class="rule">Pure spec — no UI. What an engineer needs before touching the write path.</span></div>
+      <div class="subcard-grid cols-3">
+        <div class="subcard" style="grid-column: span 2;">
+          <div class="subcard-top"><span class="subcard-label">Two tables, no FK</span></div>
+          <div style="font-size:12px; line-height:1.6; color:var(--text-secondary);">
+            Zenly keeps two separate tables today — <code style="font-family:var(--font-data); color:var(--text-primary);">therapists</code> (the staff who actually deliver services, scheduled on the calendar) and <code style="font-family:var(--font-data); color:var(--text-primary);">users</code> (login accounts). They have never been linked by any foreign key, and no staff member currently shares an email with any login — so the system can't automatically tell "this login" and "this staff member" are the same person. Name matching is a display-time heuristic, not a stored fact — of the 6 accounts whose name matches a staff record, 2 match <i>more than one</i> staff row; the "Link to staff" picker (panel 4) surfaces that ambiguity rather than silently guessing.<br><br>
+            <b style="color:var(--text-primary);">Granting access creates that link for the first time</b> — it does not already exist in the data today. The six linked rows shown as <b>EXAMPLE</b> in panel 2's row-states breakdown are illustrative only, to show what a linked row will look like once this ships; the real linked count right now is zero.
+          </div>
+        </div>
+        <div class="subcard">
+          <div class="subcard-top"><span class="subcard-label">The numbers (org-scoped)</span></div>
+          <div style="font-size:12px; line-height:1.6; color:var(--text-secondary);">
+            <b style="color:var(--text-primary);">Staff access is org-scoped</b> — every figure below is Nuad Thai Spa's alone, not a cross-tenant total (staging holds five orgs; the other four are much smaller). Of the 16 accounts with no staff record, 6 share a name with one; the other 10 are owners, office admins, demo logins, and people whose staff row may exist under a different spelling.
+          </div>
+          <div class="stat-row" style="margin-top:8px; flex-direction:column; gap:4px;">
+            <span>Staff: <b>63</b> (61 active)</span>
+            <span>Login accounts: <b>16</b></span>
+            <span>Already linked: <b>0</b> today (6 shown as examples)</span>
+            <span>Service staff without login: <b>46</b></span>
+            <span>Support staff, login not usually needed: <b>15</b></span>
+            <span>Accounts with no staff record: <b>16</b></span>
+          </div>
+        </div>
+        <div class="subcard">
+          <div class="subcard-top"><span class="subcard-label">What "grant" writes</span></div>
+          <div style="font-size:12px; line-height:1.6; color:var(--text-secondary);">
+            Creates the first link between a <code style="font-family:var(--font-data);">users</code> row and a <code style="font-family:var(--font-data);">therapists</code> row. Exact column (a direct FK vs. a join table) is <b>not decided yet</b> — see open questions. "Link to staff" is the inverse of "Give access" — it attaches an existing login to an existing staff record, for a login that already exists, rather than creating one.<br>
+            Never moves or duplicates bookings, payments, or calendar history — those stay owned by the therapist id they already reference.<br><br>
+            Every one of the 16 login accounts already has a 4-digit PIN set, which is why "Only PIN access" is viable as a login mode today, not a future dependency.
+          </div>
+        </div>
+        <div class="subcard">
+          <div class="subcard-top"><span class="subcard-label">Home branch rule</span></div>
+          <div style="font-size:12px; line-height:1.6; color:var(--text-secondary);">
+            Staff can always access their rostered home branch, even under "Selected branches" with the box unticked. This is a floor, not a toggle — it cannot be removed from the UI.
+          </div>
+        </div>
+        <div class="subcard" style="grid-column: span 2;">
+          <div class="subcard-top"><span class="subcard-label">Discount ceilings by role</span><span class="subcard-route">DISCOUNT_LIMITS, api.js</span></div>
+          <table style="width:100%; border-collapse:collapse; font-size:12px;">
+            <tr style="color:var(--text-tertiary); text-align:left;"><th style="font-weight:600; padding:4px 0;">Role</th><th style="font-weight:600;">Max discount</th><th style="font-weight:600;">Notes</th></tr>
+            <tr style="border-top:1px solid var(--border);"><td style="padding:6px 0;">Staff</td><td>50%, direct-apply</td><td style="color:var(--text-tertiary);">Temporary — raised from 15% on 2026-08-31, no approval step while in effect.</td></tr>
+            <tr style="border-top:1px solid var(--border);"><td style="padding:6px 0;">Manager</td><td>100%, direct-apply</td><td style="color:var(--text-tertiary);">Also approves staff discount requests.</td></tr>
+            <tr style="border-top:1px solid var(--border);"><td style="padding:6px 0;">Admin</td><td>100%, direct-apply</td><td style="color:var(--text-tertiary);">—</td></tr>
+          </table>
+        </div>
+        <div class="subcard">
+          <div class="subcard-top"><span class="subcard-label">Open questions</span></div>
+          <ul style="font-size:12px; line-height:1.6; color:var(--text-secondary); margin:0; padding-left:16px;">
+            <li>Does granting access backfill <code style="font-family:var(--font-data);">user_branches</code> for every branch already visible via other staff there, or does the manager tick each box by hand?</li>
+            <li>Admin viewer is read-only — does "Only PIN access" make operational sense for that role, or should it be hidden for it?</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<div class="modal-overlay" id="link-modal">
+  <div class="modal-box">
+    <h4>Link "<span id="link-modal-username"></span>" to a staff member</h4>
+    <p class="modal-sub">Search the 63 staff records to find the person this login belongs to. A staff member already linked to another account can't be picked.</p>
+    <input class="modal-search" id="link-search" placeholder="Search by name…" oninput="renderLinkPicker()">
+    <div id="link-ambiguous-banner" class="ambiguous-banner" style="display:none;"></div>
+    <div class="modal-list" id="link-picker-list"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeLinkModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<style>@keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.5;} }</style>
+
+<script>
+  // ---------- seed data ----------
+  var BRANCHES = ['Lazimpat', 'Sanepa', 'Thamel', 'Bhaisepati', 'Guntabya'];
+
+  var FIRST = ['Ankita','Manisha','Ganesh','Asmita','Ashmi','Kamala','Sarita','Bipana','Nirmala','Suresh',
+    'Pabitra','Dipendra','Rekha','Shristi','Anjali','Rajan','Puja','Sunita','Bimala','Kritika',
+    'Sabina','Roshani','Deepa','Laxmi','Rabina','Bikash','Sapana','Mina','Sushila','Prakash',
+    'Sushma','Nabin','Sarmila','Januka','Pabina','Smriti','Durga','Bishnu','Sanjita','Sabita'];
+  var LAST = ['Yonjan','Thing','Bishunkhe','Pariyar','Tamang','Gurung','Magar','Rai','Shrestha','Lama',
+    'Thapa','Karki','Giri','Bhujel','Lopchan','Rana','Sunuwar','Waiba','Pakhrin','Dong'];
+
+  var therapists = [];
+  var tid = 1;
+  function makeName() {
+    var f = FIRST[tid % FIRST.length];
+    var l = LAST[(tid * 7) % LAST.length];
+    return f + ' ' + l;
+  }
+  // seed the explicitly-named illustrative "linked (example)" staff first — invented
+  // names, deliberately distinct from the real-match names below so the two devices
+  // (illustrative linked state vs. real unmatched-account matching) don't collide.
+  var SEEDED = ['Ankita Yonjan','Manisha Thing','Ganesh Bishunkhe','Asmita Pariyar','Ashmi Thing Tamang','Kamala Tamang'];
+  var positions = ['Therapist','Senior Therapist','Massage Therapist','Junior Therapist','Brow And Lash Artist','Brow & Lash Artist'];
+
+  // Real Nuad Thai Spa therapist rows used to demo the name-matching / ambiguous-match
+  // picker (see "Accounts with no therapist record" below). Sushila Rai and Trisha
+  // Acharya are each duplicated in the live staging therapists table under different
+  // positions — the same data-quality problem as the Kamala Tamang merge done on
+  // production this week. bookings gives the picker enough context to tell them apart.
+  var NAMED_MATCH_ROWS = [
+    { name: 'Muskan Shrestha', position: 'Therapist', bookings: 71 },
+    { name: 'Poojan Nachhring Rai', position: 'Therapist', bookings: 64 },
+    { name: 'Sumnima Tharu', position: 'Senior Therapist', bookings: 88 },
+    { name: 'Roshan Rai', position: 'Therapist', bookings: 55 },
+    { name: 'Sushila Rai', position: 'Therapist', bookings: 92 },
+    { name: 'Sushila Rai', position: 'Manager', bookings: 3 },
+    { name: 'Trisha Acharya', position: 'Therapist', bookings: 58 },
+    { name: 'Trisha Acharya', position: 'GRE', bookings: 2 }
+  ];
+
+  // Nuad Thai Spa's 61 active therapists split 46 service staff / 15 support staff
+  // (is_service_staff = false — kitchen/grounds/maintenance roles that never appear
+  // on a calendar lane). Positions below are representative, not an exact staging
+  // dump. The real linked count is zero (see callout), so all 46 service staff are,
+  // in reality, without a login — the 6 illustrative EXAMPLE rows below are a display
+  // overlay on 6 of those 46, not additional people, and must never be subtracted
+  // from this 46 in an arithmetic statement about reality.
+  var SUPPORT_POSITIONS = ['Chef','Gardener','Driver','Maintenance Head',
+    'Housekeeping','Housekeeping','Housekeeping','Housekeeping',
+    'Waiter','Waiter','Waiter','Waiter','Waiter','Waiter','Waiter'];
+  var BLANK_POSITION_INDEXES = [11, 28];
+
+  var ACTIVE_COUNT = 61; // Nuad Thai Spa: 63 therapists, 61 active, 2 inactive (not shown)
+  var SUPPORT_START = ACTIVE_COUNT - SUPPORT_POSITIONS.length; // last 15 rows are support staff
+
+  for (var i = 0; i < ACTIVE_COUNT; i++) {
+    tid++;
+    var branch = BRANCHES[i % BRANCHES.length];
+    var isSupport = i >= SUPPORT_START;
+    var linked = i < 6; // first 6 therapists are the illustrative "dual-role linked" examples
+    var namedMatchIdx = (!linked && !isSupport) ? (i - 6) : -1; // slot the 8 named rows right after the 6 examples
+    var name, pos;
+    if (linked) {
+      name = SEEDED[i];
+      pos = positions[i % positions.length];
+    } else if (namedMatchIdx >= 0 && namedMatchIdx < NAMED_MATCH_ROWS.length) {
+      name = NAMED_MATCH_ROWS[namedMatchIdx].name;
+      pos = NAMED_MATCH_ROWS[namedMatchIdx].position;
+    } else {
+      name = makeName();
+      pos = isSupport ? SUPPORT_POSITIONS[i - SUPPORT_START] : positions[i % positions.length];
+    }
+    if (!isSupport && namedMatchIdx < 0 && BLANK_POSITION_INDEXES.indexOf(i) !== -1) pos = '';
+    therapists.push({
+      id: i + 1,
+      name: name,
+      branch: branch,
+      position: pos,
+      bookings: (namedMatchIdx >= 0 && namedMatchIdx < NAMED_MATCH_ROWS.length) ? NAMED_MATCH_ROWS[namedMatchIdx].bookings : null,
+      isSupport: isSupport,
+      linked: linked,
+      isExample: linked, // the linked rows are illustrative, not real — see callout
+      user: linked ? {
+        email: name.toLowerCase().replace(/[^a-z ]/g,'').trim().replace(/\s+/g,'.') + '@zennly.io',
+        role: ['manager','admin','manager','staff','manager','admin'][i],
+        lastActive: ['active today 9:12am','active today 2:40pm','active yesterday','active today 11:05am','active today 4:52pm','active 2 days ago'][i]
+      } : null,
+      loginAccess: linked ? 'email' : 'none',
+      locationMode: 'selected',
+      calendar: 'own'
+    });
+  }
+
+  var currentFilter = 'all';
+  function setFilter(f) {
+    currentFilter = f;
+    document.querySelectorAll('.filter-tab').forEach(function(b) {
+      b.classList.toggle('active', b.getAttribute('data-filter') === f);
+    });
+    renderList();
+  }
+
+  // The real 16 Nuad Thai Spa login accounts. Six share a name with a therapist
+  // record (Muskan Shrestha, Poojan Nachhring Rai, Sumnima Tharu, Roshan Rai,
+  // Sushila Rai, Trisha Acharya) — the last two are ambiguous, matching two
+  // therapist rows each. The other ten (including Junu Ale Magar and Swastika
+  // Tharu, whose therapist row may exist under a different spelling) are
+  // genuinely account-only: admins, demo logins, people who don't deliver services.
+  var UNMATCHED_NAMES = ['Muskan Shrestha','Poojan Nachhring Rai','Sumnima Tharu','Roshan Rai',
+    'Sushila Rai','Trisha Acharya',
+    'Junu Ale Magar','Swastika Tharu','Bikram Thapa Magar','Sarita Gautam',
+    'Dilip Shahi','Ritika Shrestha','Naresh Tamang','Pramila Rai','Demo Account','Owner Account'];
+  var UNMATCHED_ROLES = ['staff','staff','staff','manager','manager','manager',
+    'staff','staff','staff','manager',
+    'manager','admin','admin','admin','admin_viewer','admin_viewer'];
+  // null = no name match · {type:'single', therapistId} = one clean match ·
+  // {type:'ambiguous', therapistIds:[...]} = matches more than one therapist row
+  function findByName(name) { return therapists.filter(function(t){ return t.name === name; }); }
+  var unmatched = UNMATCHED_NAMES.map(function(n, i) {
+    var matches = findByName(n);
+    var suggested = null;
+    if (matches.length === 1) suggested = { type: 'single', therapistId: matches[0].id };
+    else if (matches.length > 1) suggested = { type: 'ambiguous', therapistIds: matches.map(function(m){ return m.id; }) };
+    return {
+      name: n,
+      email: n.toLowerCase().replace(/[^a-z ]/g,'').trim().replace(/\s+/g,'.') + '@zennly.io',
+      role: UNMATCHED_ROLES[i],
+      lastActive: 'active ' + ['today','yesterday','2 days ago','today','3 days ago'][i % 5],
+      suggested: suggested
+    };
+  });
+
+  var activeTherapistId = null;
+
+  function roleBadgeHtml(role) {
+    var label = role.replace('_',' ');
+    return '<span class="role-badge role-' + role + '">' + label + '</span>';
+  }
+
+  function renderList() {
+    var listEl = document.getElementById('therapist-list');
+    document.getElementById('therapist-count').textContent = therapists.length + ' shown · 61 active, 2 inactive not shown';
+    var visible = therapists.filter(function(t) {
+      if (currentFilter === 'service') return !t.isSupport;
+      if (currentFilter === 'support') return t.isSupport;
+      return true;
+    });
+    listEl.innerHTML = visible.map(function(t) { return rowHtml(t, { showExample: false }); }).join('');
+
+    var uEl = document.getElementById('unmatched-list');
+    document.getElementById('unmatched-count').textContent = unmatched.length + ' accounts';
+    uEl.innerHTML = unmatched.map(function(u, idx) { return unmatchedRowHtml(u, idx); }).join('');
+  }
+
+  function rowHtml(t, opts) {
+    opts = opts || {};
+    var showExample = opts.showExample !== false;
+    var initials = t.name.split(' ').map(function(p){return p[0];}).slice(0,2).join('').toUpperCase();
+    var statusHtml;
+    if (t.linked) {
+      statusHtml = '<div class="status-cell status-linked">' +
+        '<span class="email">' + t.user.email + ((t.isExample && showExample) ? '<span class="example-chip">example</span>' : '') + '</span>' +
+        roleBadgeHtml(t.user.role) +
+        '</div>';
+    } else if (t.isSupport) {
+      statusHtml = '<div class="support-tag">Support staff — login not usually needed</div>';
+    } else {
+      statusHtml = '<div class="no-login-text">No login</div>';
+    }
+    var rightCell;
+    if (t.linked) {
+      rightCell = '<div style="text-align:right;"><span class="active-ts">' + t.user.lastActive + '</span></div>';
+    } else if (t.isSupport) {
+      rightCell = '<div style="text-align:right;"></div>';
+    } else {
+      rightCell = '<div style="text-align:right;"><button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); giveAccess(' + t.id + ')">Give access</button></div>';
+    }
+    var posLabel = t.position ? t.position : '<span style="font-style:italic; color:var(--text-tertiary);">— (blank in source data)</span>';
+    return '<div class="row" onclick="openDetail(' + t.id + ')">' +
+      '<div class="avatar' + (t.linked ? '' : ' muted') + '">' + initials + '</div>' +
+      '<div class="name-cell"><div><div class="nm">' + t.name + '</div><div class="sub">' + posLabel + '</div></div></div>' +
+      '<div class="branch-chip">' + t.branch + '</div>' +
+      '<div></div>' +
+      statusHtml +
+      rightCell +
+    '</div>';
+  }
+
+  function unmatchedRowHtml(u, idx) {
+    var initials = u.name.split(' ').map(function(p){return p[0];}).slice(0,2).join('').toUpperCase();
+    var noteHtml;
+    if (u.suggested && u.suggested.type === 'ambiguous') {
+      noteHtml = '<div class="warn-note" title="Matches more than one staff row">⚠ 2 possible matches</div>';
+    } else if (u.suggested && u.suggested.type === 'single') {
+      var m = findTherapist(u.suggested.therapistId);
+      noteHtml = '<div class="warn-note" style="color:var(--text-secondary);" title="Name matches a staff record">~ possible match: ' + m.name + '</div>';
+    } else {
+      noteHtml = '<div class="warn-note">⚠ no staff record</div>';
+    }
+    return '<div class="unmatched-row">' +
+      '<div class="avatar muted">' + initials + '</div>' +
+      '<div class="name-cell"><div><div class="nm">' + u.name + '</div><div class="sub">' + u.email + '</div></div></div>' +
+      '<div>' + roleBadgeHtml(u.role) + '</div>' +
+      '<div class="active-ts">' + u.lastActive + '</div>' +
+      noteHtml +
+      '<div style="text-align:right;"><button class="btn btn-sm" onclick="openLinkModal(' + idx + ')">Link to staff</button></div>' +
+    '</div>';
+  }
+
+  // ---------- "Link to staff" picker (the inverse of "Give access") ----------
+  var linkModalUserIdx = null;
+  function openLinkModal(idx) {
+    linkModalUserIdx = idx;
+    document.getElementById('link-modal-username').textContent = unmatched[idx].name;
+    document.getElementById('link-search').value = '';
+    document.getElementById('link-modal').classList.add('show');
+    renderLinkPicker();
+  }
+  function closeLinkModal() {
+    document.getElementById('link-modal').classList.remove('show');
+    linkModalUserIdx = null;
+  }
+  function renderLinkPicker() {
+    var q = document.getElementById('link-search').value.trim().toLowerCase();
+    var list = document.getElementById('link-picker-list');
+    var u = unmatched[linkModalUserIdx];
+    var banner = document.getElementById('link-ambiguous-banner');
+
+    if (u.suggested && u.suggested.type === 'ambiguous') {
+      var cands = u.suggested.therapistIds.map(findTherapist);
+      banner.style.display = 'block';
+      banner.innerHTML = '⚠ "<b>' + u.name + '</b>" matches <b>' + cands.length + '</b> staff rows with different positions (' +
+        cands.map(function(c){ return c.position; }).join(', ') + '). This looks like a <b>duplicate staff record</b> for one person, ' +
+        'not two people who happen to share a name — the same pattern as the Kamala Tamang production merge this week. ' +
+        'Picking one below is a stopgap; merging the duplicate records is probably the real fix.';
+    } else {
+      banner.style.display = 'none';
+      banner.innerHTML = '';
+    }
+
+    var suggestedIds = u.suggested ? (u.suggested.type === 'ambiguous' ? u.suggested.therapistIds : [u.suggested.therapistId]) : [];
+    var matches = therapists.filter(function(t) { return !q || t.name.toLowerCase().indexOf(q) !== -1; });
+    matches.sort(function(a, b) {
+      var aS = suggestedIds.indexOf(a.id) !== -1 ? 1 : 0;
+      var bS = suggestedIds.indexOf(b.id) !== -1 ? 1 : 0;
+      return bS - aS;
+    });
+    if (matches.length === 0) {
+      list.innerHTML = '<div style="padding:14px 4px; color:var(--text-tertiary); font-size:13px;">No staff match "' + q + '".</div>';
+      return;
+    }
+    list.innerHTML = matches.map(function(t) { return pickRowHtml(t, suggestedIds, { showExample: false }); }).join('');
+  }
+  function pickRowHtml(t, suggestedIds, opts) {
+    opts = opts || {};
+    var showExample = opts.showExample !== false;
+    var taken = t.linked;
+    var isSuggested = suggestedIds.indexOf(t.id) !== -1;
+    var metaBits = [t.branch, t.position || 'position not set'];
+    if (t.bookings != null) metaBits.push(t.bookings + ' bookings');
+    return '<div class="pick-row' + (taken ? ' disabled' : '') + '" ' +
+      (taken ? '' : 'onclick="confirmLink(' + t.id + ')"') + '>' +
+      '<div><div class="pname">' + t.name + (isSuggested ? '<span class="example-chip" style="background:var(--primary); color:#fff;">suggested</span>' : '') + '</div>' +
+      '<div class="pmeta">' + metaBits.join(' · ') + '</div></div>' +
+      (taken ? '<span class="already-tag">already linked' + ((t.isExample && showExample) ? ' (example)' : '') + '</span>' : '') +
+    '</div>';
+  }
+  function confirmLink(therapistId) {
+    var t = findTherapist(therapistId);
+    var u = unmatched[linkModalUserIdx];
+    if (t && u) showToast('Linked ' + u.name + ' to ' + t.name);
+    closeLinkModal();
+  }
+
+  function giveAccess(id) {
+    openDetail(id);
+    setLoginAccess('pin');
+  }
+
+  function openDetail(id) {
+    var t = therapists.filter(function(x){ return x.id === id; })[0];
+    if (!t) return;
+    activeTherapistId = id;
+    document.getElementById('detail-name').innerHTML = t.name +
+      (t.linked ? roleBadgeHtml(t.user.role) : '<span class="role-badge" style="background:#E1E3E5;color:var(--text-secondary);">no account yet</span>');
+    setLoginAccess(t.loginAccess, true);
+    if (t.linked) {
+      document.getElementById('email-field').value = t.user.email;
+      setRole(t.user.role, true);
+    } else {
+      document.getElementById('email-field').value = '';
+      setRole('staff', true);
+    }
+    renderBranchGrid(t.branch);
+    document.querySelector('input[name="loc"][value="' + t.locationMode + '"]').checked = true;
+    document.querySelector('input[name="cal"][value="' + t.calendar + '"]').checked = true;
+    document.getElementById('locations-desc').textContent = 'Set which branches ' + t.name + ' can access.';
+    document.getElementById('screen-list').style.display = 'none';
+    document.getElementById('screen-detail').style.display = 'block';
+    document.querySelector('.shell-content').scrollTo(0,0);
+  }
+
+  function renderBranchGrid(homeBranch) {
+    var grid = document.getElementById('branch-grid');
+    grid.innerHTML = BRANCHES.map(function(b) {
+      var isHome = b === homeBranch;
+      return '<label class="check-row">' +
+        '<input type="checkbox" ' + (isHome ? 'checked disabled' : '') + '>' +
+        '<div>' + b + (isHome ? ' <span class="locked-note">(rostered)</span>' : '') + '</div>' +
+      '</label>';
+    }).join('');
+  }
+
+  function setLoginAccess(val, silent) {
+    document.querySelectorAll('#login-segmented button').forEach(function(b) {
+      b.classList.toggle('active', b.getAttribute('data-val') === val);
+    });
+    var helper = document.getElementById('login-helper');
+    var emailWrap = document.getElementById('email-field-wrap');
+    if (val === 'email') {
+      helper.textContent = 'Can sign in from any device with their email + password, and use their PIN to switch quickly at a shared terminal.';
+      emailWrap.style.display = 'block';
+    } else if (val === 'pin') {
+      helper.textContent = 'Can only sign in via PIN at a terminal already logged in to this org — no email/password login exists for this account.';
+      emailWrap.style.display = 'none';
+    } else {
+      helper.textContent = 'Cannot sign in at all. Still schedulable on the calendar as staff — this only affects login.';
+      emailWrap.style.display = 'none';
+    }
+    if (!silent && activeTherapistId) {
+      findTherapist(activeTherapistId).loginAccess = val;
+    }
+  }
+
+  function setRole(role, silent) {
+    document.querySelectorAll('.role-option').forEach(function(el) {
+      el.classList.toggle('selected', el.getAttribute('data-role') === role);
+    });
+  }
+
+  function setLocationMode(mode) {
+    if (activeTherapistId) findTherapist(activeTherapistId).locationMode = mode;
+  }
+  function setCalendar(mode) {
+    if (activeTherapistId) findTherapist(activeTherapistId).calendar = mode;
+  }
+
+  function findTherapist(id) {
+    return therapists.filter(function(x){ return x.id === id; })[0];
+  }
+
+  function showList() {
+    document.getElementById('screen-detail').style.display = 'none';
+    document.getElementById('screen-list').style.display = 'block';
+    activeTherapistId = null;
+    document.querySelector('.shell-content').scrollTo(0,0);
+  }
+
+  function saveDetail() {
+    var t = findTherapist(activeTherapistId);
+    if (t) {
+      var activeSeg = document.querySelector('#login-segmented button.active');
+      var access = activeSeg ? activeSeg.getAttribute('data-val') : 'none';
+      t.loginAccess = access;
+      if (access !== 'none') {
+        var activeRole = document.querySelector('.role-option.selected');
+        var role = activeRole ? activeRole.getAttribute('data-role') : 'staff';
+        if (!t.linked) {
+          t.linked = true;
+          t.user = {
+            email: document.getElementById('email-field').value || (t.name.toLowerCase().replace(/[^a-z ]/g,'').trim().replace(/\s+/g,'.') + '@zennly.io'),
+            role: role,
+            lastActive: 'just now'
+          };
+        } else {
+          t.user.role = role;
+          if (access === 'email') t.user.email = document.getElementById('email-field').value || t.user.email;
+        }
+      } else {
+        t.linked = false;
+        t.user = null;
+      }
+    }
+    showToast('Saved');
+    renderList();
+    showList();
+  }
+
+  function showToast(msg) {
+    var el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(function() { el.classList.remove('show'); }, 2200);
+  }
+
+  renderList();
+
+  // ---------- Panel 2: row states (reuses real seeded rows so the numbers can't drift) ----------
+  (function renderRowStatesPanel() {
+    var exampleRow = therapists[0]; // linked, example
+    // bookings == null picks an invented-name row, not one of the NAMED_MATCH_ROWS
+    // that also appear in the unmatched list — keeps this distinct from the
+    // "possible match" example below instead of reusing the same person twice.
+    var giveAccessRow = therapists.filter(function(t){ return !t.linked && !t.isSupport && t.bookings == null; })[0];
+    var supportRow = therapists[SUPPORT_START];
+    var ambiguousUser = unmatched.filter(function(u){ return u.suggested && u.suggested.type === 'ambiguous'; })[0];
+    var singleMatchUser = unmatched.filter(function(u){ return u.suggested && u.suggested.type === 'single'; })[0];
+    var ambiguousIdx = unmatched.indexOf(ambiguousUser);
+    var singleIdx = unmatched.indexOf(singleMatchUser);
+
+    var defs = [
+      { label: 'Linked · example', route: 'EXAMPLE', html: rowHtml(exampleRow) },
+      { label: 'No login · give access', route: 'service staff', html: rowHtml(giveAccessRow) },
+      { label: 'Support staff · no button', route: 'not schedulable to login', html: rowHtml(supportRow) },
+      { label: 'Unmatched · ambiguous', route: '2 matches', html: unmatchedRowHtml(ambiguousUser, ambiguousIdx) },
+      { label: 'Unmatched · possible match', route: '1 match', html: unmatchedRowHtml(singleMatchUser, singleIdx) }
+    ];
+    var el = document.getElementById('panel-rowstates');
+    el.innerHTML = defs.map(function(d) {
+      return '<div class="subcard">' +
+        '<div class="subcard-top"><span class="subcard-label">' + d.label + '</span><span class="subcard-route">' + d.route + '</span></div>' +
+        '<div class="subcard-body">' + d.html + '</div>' +
+      '</div>';
+    }).join('');
+  })();
+
+  // ---------- Panel 4: link picker variants ----------
+  (function renderLinkPickerPanel() {
+    var singleMatchUser = unmatched.filter(function(u){ return u.suggested && u.suggested.type === 'single'; })[0];
+    var ambiguousUser = unmatched.filter(function(u){ return u.suggested && u.suggested.type === 'ambiguous'; })[0];
+    var noMatchUser = unmatched.filter(function(u){ return !u.suggested; })[0];
+    var suggestedIdsSingle = [singleMatchUser.suggested.therapistId];
+    var suggestedIdsAmbig = ambiguousUser.suggested.therapistIds;
+    var exampleLinked = therapists[0];
+
+    var ambigCands = ambiguousUser.suggested.therapistIds.map(findTherapist);
+    var ambigBanner = '<div class="ambiguous-banner">⚠ "<b>' + ambiguousUser.name + '</b>" matches <b>' + ambigCands.length +
+      '</b> staff rows with different positions (' + ambigCands.map(function(c){ return c.position; }).join(', ') +
+      '). This looks like a <b>duplicate staff record</b> for one person — the same pattern as the Kamala Tamang production merge this week.</div>';
+
+    var defs = [
+      {
+        label: 'Clean · single match',
+        route: singleMatchUser.name,
+        body: '<div class="modal-list" style="border-top:none;">' +
+          therapists.filter(function(t){ return [singleMatchUser.suggested.therapistId].concat(
+            therapists.filter(function(x){return !x.linked && !x.isSupport;}).slice(0,1).map(function(x){return x.id;})
+          ).indexOf(t.id) !== -1; }).map(function(t){ return pickRowHtml(t, suggestedIdsSingle); }).join('') +
+        '</div>'
+      },
+      {
+        label: 'Ambiguous · 2 matches',
+        route: ambiguousUser.name,
+        body: ambigBanner + '<div class="modal-list" style="border-top:none;">' +
+          ambigCands.map(function(t){ return pickRowHtml(t, suggestedIdsAmbig); }).join('') +
+        '</div>'
+      },
+      {
+        label: 'No match found',
+        route: 'empty search',
+        body: '<div style="padding:14px 4px; color:var(--text-tertiary); font-size:13px;">No staff match "zzz".</div>'
+      },
+      {
+        label: 'Already linked · unpickable',
+        route: exampleLinked.name,
+        body: '<div class="modal-list" style="border-top:none;">' + pickRowHtml(exampleLinked, []) + '</div>'
+      }
+    ];
+    var el = document.getElementById('panel-linkpicker');
+    el.innerHTML = defs.map(function(d) {
+      return '<div class="subcard">' +
+        '<div class="subcard-top"><span class="subcard-label">' + d.label + '</span><span class="subcard-route">' + d.route + '</span></div>' +
+        '<div class="subcard-body" style="padding:8px 10px;">' + d.body + '</div>' +
+      '</div>';
+    }).join('');
+  })();
+</script>
+</body>
+</html>

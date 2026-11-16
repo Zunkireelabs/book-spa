@@ -1,3 +1,4 @@
+import { isNoShow } from '../../../../services/bookingTransformers';
 import React, { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import Icon from '../../../../components/AppIcon';
@@ -165,7 +166,7 @@ function Avatars({ names }) {
 }
 
 export function BookingHoverContent({ booking, draggable }) {
-  const colors = getBookingStatusColors(booking.status);
+  const colors = getBookingStatusColors(isNoShow(booking) ? 'No Show' : booking.status);
   const isPaid = booking.paymentStatus === 'paid';
   const isPartial = booking.paymentStatus === 'partial';
   const range = compactRange(booking.startTime, booking.endTime);
@@ -197,9 +198,9 @@ export function BookingHoverContent({ booking, draggable }) {
 
       <div className="border-t border-border pt-2 !mt-3 space-y-2">
         <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
-          {amount != null && <span className="font-semibold tabular-nums text-text-primary">{npr(amount)}</span>}
+          {booking.pricesWithheld ? <span className="font-semibold tabular-nums text-text-primary">NPR •••</span> : amount != null && <span className="font-semibold tabular-nums text-text-primary">{npr(amount)}</span>}
           <span className="px-2 py-0.5 rounded-full text-[11px] font-medium" style={{ backgroundColor: pill.fill, color: pill.text }}>{pill.label}</span>
-          {booking.discountAmount > 0 && <span className="text-xs text-text-tertiary tabular-nums">−{npr(booking.discountAmount)} discount</span>}
+          {booking.discountAmount > 0 && !booking.pricesWithheld && <span className="text-xs text-text-tertiary tabular-nums">−{npr(booking.discountAmount)} discount</span>}
           {prev?.amount > 0 && <span className="text-xs tabular-nums" style={{ color: AMBER.text }}>· Prev. due {npr(prev.amount)}</span>}
         </div>
         {phone && (

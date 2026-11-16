@@ -29,7 +29,7 @@ const STATUS_STYLES = {
   'no show': 'bg-gray-100 text-gray-500',
 };
 
-const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignTherapist, onRecordPayment, onGroupPaymentRecorded, onApplyDiscount, userRole = 'staff', onRefresh, dateRange = 'today' }) => {
+const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignTherapist, onRecordPayment, onGroupPaymentRecorded, onApplyDiscount, userRole = 'staff', canViewCustomerDetails = true, onRefresh, dateRange = 'today' }) => {
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [showActionModal, setShowActionModal] = useState(false);
 
@@ -416,6 +416,7 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
         onGroupPaymentRecorded={handleGroupPaymentRecordedWrapper}
         onApplyDiscount={onApplyDiscount}
         userRole={userRole}
+        canViewCustomerDetails={canViewCustomerDetails}
         onViewBooking={handleViewBooking}
       />
     </>

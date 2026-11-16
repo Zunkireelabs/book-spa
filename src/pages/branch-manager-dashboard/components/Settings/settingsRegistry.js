@@ -16,9 +16,12 @@ export const SETTINGS = [
   // `location: true` -> the title uses the industry's location label (Rooms / ...); `needsRooms` -> only when the industry uses rooms.
   { id: 'rooms', view: 'rooms', title: 'Rooms', location: true, needsRooms: true, description: 'Rooms customers are booked into.', icon: 'DoorOpen', category: 'spa', roles: MGR_ADMIN, overallHidden: true, keywords: 'locations' },
   { id: 'services', view: 'services', title: 'Services', description: 'Services, prices and durations.', icon: 'Sparkles', category: 'spa', roles: MGR_ADMIN, overallHidden: true, keywords: 'treatments prices' },
+  { id: 'price-tiers', view: 'price-tiers', title: 'Price Tiers', description: 'Staff price levels for tiered services.', icon: 'Tags', category: 'spa', roles: STAFF_UP, overallHidden: true, keywords: 'tiers senior junior pricing' },
+  { id: 'locations', view: 'locations', title: 'Locations', description: 'Your branches: add, edit and set them up.', icon: 'MapPin', category: 'spa', roles: ['admin'], keywords: 'branches outlets sites' },
   { id: 'categories', view: 'categories', title: 'Categories', description: 'Groups that organise your services.', icon: 'Tags', category: 'spa', roles: MGR_ADMIN, overallHidden: true, keywords: 'groups' },
 
   { id: 'payment-methods', view: 'payment-methods', title: 'Payment Methods', description: 'How customers can pay at the desk.', icon: 'CreditCard', category: 'payments', roles: ['admin'], overallHidden: true, keywords: 'cash card pay methods' },
+  { id: 'billing', view: 'billing', title: 'Billing', description: 'VAT, invoice numbering and billing details.', icon: 'Receipt', category: 'payments', roles: ['admin'], keywords: 'vat invoice tax pan' },
   ...(CUSTOMER_REFERRALS_ENABLED ? [
     { id: 'reward-catalog', view: 'reward-catalog', title: 'Reward Catalog', description: 'Rewards staff can pick when logging a referral.', icon: 'Gift', category: 'payments', roles: ['manager', 'admin'] },
   ] : []),
@@ -29,6 +32,7 @@ export const SETTINGS = [
   { id: 'provider-profile', view: 'provider-profile', title: 'Provider Profile', description: 'Your spa profile and images shown to customers.', icon: 'Image', category: 'booking', roles: ['admin'], overallHidden: true, keywords: 'logo photos about' },
 
   { id: 'attendance-settings', view: 'attendance-settings', title: 'Attendance', description: 'How this branch tracks attendance.', icon: 'Clock', category: 'booking', roles: MGR_ADMIN, overallHidden: true, keywords: 'late grace check out shift' },
+  { id: 'staff-access', view: 'staff-access', title: 'Staff access', description: 'Who can sign in, with which role and permissions.', icon: 'KeyRound', category: 'account', roles: STAFF_UP, keywords: 'login pin permissions users roles' },
   { id: 'notifications', view: 'notifications', title: 'Notifications', description: 'What interrupts you: pop-ups, sound and desktop alerts.', icon: 'Bell', category: 'account', roles: STAFF_UP, keywords: 'alerts pop-up sound inbox' },
   { id: 'audit', view: 'audit', title: 'Audit Log', description: 'Every change made in this spa, and who made it.', icon: 'History', category: 'account', roles: STAFF_UP, keywords: 'history log changes who' },
 ];
