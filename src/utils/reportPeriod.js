@@ -1,6 +1,6 @@
 // Period math for the Reports frame (ZNLY-159): the chosen range, the equal-length range right before it, and the ▲/▼ between two values.
 // Pure. Dates are YYYY-MM-DD in local (Nepal) time, built with periodPresets' toISO so a date never shifts across midnight.
-import { toISO, getPeriodRange } from './periodPresets';
+import { toISO } from './periodPresets';
 
 export const REPORT_PERIODS = [
   { id: 'last7', label: 'Last 7 days' },
@@ -34,7 +34,7 @@ export function getReportRange(periodId = DEFAULT_REPORT_PERIOD, today = new Dat
   let to = toISO(today);
   let from;
   if (period.id === 'custom') { from = custom.from; to = custom.to; }
-  else if (period.id === 'month') from = getPeriodRange('monthly').startDate;
+  else if (period.id === 'month') from = `${to.slice(0, 7)}-01`; // the 1st of the month of `today` (not the real clock)
   else from = addDays(to, -(Number(period.id.replace('last', '')) - 1));
   const days = daysInclusive(from, to);
   return { id: period.id, from, to, prev: previousPeriod(from, to), days, label: period.label, vsLabel: `vs previous ${days}` };
