@@ -33,7 +33,7 @@ const TAB_DEFS = [
 ];
 const EMPTY_TAB = {
   all: ['No customers yet', 'Customers are added automatically when bookings are made.'],
-  'in-spa': ['Nobody is in the spa right now', 'Customers with a service in progress appear here.'],
+  'in-spa': ['Nobody is in a service right now', 'Customers with a service in progress appear here.'],
   upcoming: ['No upcoming bookings', 'Customers with a future booking appear here.'],
   owes: ['Nobody owes anything', 'Customers with an unpaid visit appear here.'],
   members: ['No members yet', 'Customers with an active membership appear here.'],

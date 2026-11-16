@@ -690,7 +690,7 @@ const BookingsViewPanel = ({ branchId }) => {
 
   const emptyCopy = anyFilter ? ['No bookings match', 'Try a different search or clear a filter.']
     : { all: ['No bookings in this period', multiDay ? 'Bookings made for these dates appear here.' : 'Bookings made for this day appear here.'],
-      done: ['Nothing completed yet', 'Completed visits appear here.'], spa: ['Nobody is in the spa right now', 'Visits that have started appear here.'],
+      done: ['Nothing completed yet', 'Completed visits appear here.'], spa: ['Nobody is in a service right now', 'Visits that have started appear here.'],
       come: ['Nothing still to come', 'Pending and confirmed bookings that haven\'t started appear here.'], unpaid: ['Nothing unpaid', 'Visits with a balance to collect appear here.'],
       void: ['No cancellations or no-shows', 'Cancelled and no-show bookings appear here.'] }[viewChip];
   const clearAll = () => { setSearchText(''); patch({ q: '', th: '', sv: '', rm: '', bv: '', nf: '' }); };

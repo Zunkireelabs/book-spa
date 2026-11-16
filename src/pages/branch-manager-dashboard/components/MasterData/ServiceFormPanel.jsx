@@ -19,7 +19,7 @@ const ServiceFormPanel = ({ service, categories, allTherapists, branchId, isBeau
   const editing = !!target;
   const original = useMemo(() => ({
     name: service?.name || '',
-    category: service?.category || categories[0]?.name || 'Spa',
+    category: service?.category || categories[0]?.name || 'General',
     priceNpr: service ? String(service.price_npr) : '',
     durationMinutes: service ? String(service.duration_minutes) : '',
     description: service?.description || '',

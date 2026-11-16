@@ -32,7 +32,7 @@ import {
 } from '../../services/api';
 
 const EMPTY_FORM = {
-  name: '', priceNpr: '', priceType: 'fixed', durationMinutes: '', description: '', imageUrl: '', category: 'Spa',
+  name: '', priceNpr: '', priceType: 'fixed', durationMinutes: '', description: '', imageUrl: '', category: '',
   isCouple: false, isCombo: false, offerEnabled: false, offerType: 'percent', offerValue: '',
   requiresTherapist: true,
   bookableOnline: true, isAddon: false,
@@ -169,7 +169,7 @@ const ServiceDetailPage = () => {
       durationMinutes: String(service.duration_minutes),
       description: service.description || '',
       imageUrl: service.image_url || '',
-      category: service.category || 'Spa',
+      category: service.category || '',
       isCouple: !!service.is_couple,
       isCombo: !!service.is_combo,
       offerEnabled: !!service.offer_enabled,

@@ -10680,7 +10680,7 @@ export async function createService({ name, priceNpr, priceType, durationMinutes
         duration_minutes: durationMinutes,
         description: description || null,
         image_url: imageUrl || null,
-        category: category || 'Spa',
+        category: category || 'General',
         is_couple: !!isCouple,
         is_combo: !!isCombo,
         is_active: true,
