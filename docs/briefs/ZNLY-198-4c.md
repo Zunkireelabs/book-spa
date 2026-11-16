@@ -57,6 +57,13 @@ internal ids such as category `'spa'` can stay). Report the list of strings chan
 Find why an admin can't read rates on the team member panel after the merge; fix it if it is a merge regression; staff must
 still not read rates. If it is only local seed data, say so and change nothing.
 
+## 8. ZNLY-215: managers grant Staff only, at their own branches (owner decision 16 Nov)
+A manager may give or edit login access only for Staff-role people whose home branch is one the manager manages, and may
+only grant the Staff role. Manager, Admin and Admin viewer roles, and access for people at other branches, are admin only.
+Enforce it in the database (replace the stage mig 321 rule) and in the UI (`grantableRolesFor`; the Access section is
+read-only for people the manager can't edit). **Tests:** manager → Staff at own branch OK; manager → Manager refused;
+manager → someone at another branch refused; admin can do all.
+
 ## Gates (I re-run each one)
 `npm run build`; `npm test` (full, once per ticket at the end); `scripts/qc-4a.sh` stays ALL PASSED; `scripts/qc-4c.sh`
 (new) ALL PASSED. Migrations from 380 up, each self-recording. Money tickets also need Nuad Thai-shaped data in the SQL tests.
