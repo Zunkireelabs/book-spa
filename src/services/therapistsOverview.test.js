@@ -126,8 +126,10 @@ describe('buildTherapistsOverview', () => {
     const hidden = buildTherapistsOverview(mkRaw(), { date: DATE, nowTime: '12:00', canSeeRates: false });
     expect(hidden.therapists.every((t) => t.rates === null)).toBe(true);
   });
-  it('flags unreadable rates for a caller who sees no compensation rows at all', () => {
-    expect(buildTherapistsOverview(mkRaw({ compRows: [] }), { date: DATE, nowTime: '12:00', canSeeRates: true }).ratesReadable).toBe(false);
+  it('an admin with no pay rows yet is not told rates are unavailable (ZNLY-217)', () => {
+    const none = buildTherapistsOverview(mkRaw({ compRows: [] }), { date: DATE, nowTime: '12:00', canSeeRates: true });
+    expect(none.ratesReadable).toBe(true);
+    expect(none.therapists.every((t) => t.rates === null)).toBe(true);
     expect(ov.ratesReadable).toBe(true);
   });
   it('a roster date change for the day beats the weekly row', () => {

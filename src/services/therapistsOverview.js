@@ -155,8 +155,10 @@ export function buildTherapistsOverview(raw, { date, nowTime, canSeeRates = fals
     totalServices: access.total,
     bookingsToday: bookingIds.size,
     therapists,
-    // Only admin / admin_viewer ask for rates (RLS: no one else can read staff_compensation).
-    ratesReadable: !canSeeRates || (raw.compRows || []).length > 0 || (raw.therapists || []).length === 0,
+    // Only admin / admin_viewer ask for rates, and RLS lets exactly those two read staff_compensation (test: supabase/tests/znly-217.sql), so for
+    // them "no rows" means "no pay set up yet", never "not allowed" (ZNLY-217: it used to guess from an empty result and told admins of
+    // a tenant with no pay rows that rates were unavailable to their role).
+    ratesReadable: true,
   };
 }
 
