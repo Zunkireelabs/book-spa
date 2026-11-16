@@ -221,8 +221,8 @@ it is right for both: labels, features on or off, and no spa-only wording.
 | Id | Gap | Severity | Why |
 |---|---|---|---|
 | G-1 | **Our UI branch lacks three things that are live on main:** group booking (B7), Locations pages, per-branch service scope UI (ZNLY-186). Plus everything only on stage: staff access, price tiers, waitlist, VAT invoices, PIN lock screen | **P0** | If the integration drops any of them, production tenants lose features on 19 Nov. The conflict merge must carry each one; the QC checklist must list each by name |
-| G-2 | Settings group is labelled **"Spa"**, and the provider profile and audit log copy say "your spa" / "this spa" | P1 | Wrong for Sami's (beauty) and any non-spa tenant. Should come from the industry or say "Business" |
-| G-3 | The PIN lock screen (863820d, 13 Nov) is **not in PR #462's description** and has no ticket | P2 | Unreviewed scope. It needs a ticket and acceptance checks, because a lock screen can lock staff out |
+| G-2 (ZNLY-209) | Settings group is labelled **"Spa"**, and the provider profile and audit log copy say "your spa" / "this spa" | P1 | Wrong for Sami's (beauty) and any non-spa tenant. Should come from the industry or say "Business" |
+| G-3 (ZNLY-210) | The PIN lock screen (863820d, 13 Nov) is **not in PR #462's description** and has no ticket | P2 | Unreviewed scope. It needs a ticket and acceptance checks, because a lock screen can lock staff out |
 | G-5 | `CUSTOMER_REFERRALS` is on in staging and off in production | P2 | Staging QA would test screens production never shows. QA must run with prod flags |
 
 ## Not verified

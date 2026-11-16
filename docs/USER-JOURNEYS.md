@@ -176,12 +176,12 @@ Sitemap gaps G-1 to G-5 are in `docs/SITEMAP.md` §9. New ones from the journeys
 | G-6 | Our availability migrations overwrite stage's public availability RPCs | **P0** | ZNLY-204 |
 | G-7 | Two login ↔ {staff} link columns | **P0** | ZNLY-205 |
 | G-8 | Client data in the public repo's history | **P0** (privacy) | ZNLY-203 |
-| G-9 | Notifications search builds a PostgREST `or()` filter from raw input | P2 | to file |
-| G-10 | Cancelled / No Show are terminal only in the API, not the DB | P2 | to file |
-| G-11 | Discount role limits are API-only | P2 | to file |
-| G-12 | Single-booking `recordPayment`: read-then-insert with no row lock, so a double submit can over-collect | **P1** | to file |
-| G-13 | VAT invoice ignores product sales at checkout (combined effect of our products and Anish's invoices) | **P1** | to file |
-| G-14 | Reschedule doesn't re-price tiered bookings | **P1** | to file |
+| G-9 | Notifications search builds a PostgREST `or()` filter from raw input | P2 | ZNLY-211 |
+| G-10 | Cancelled / No Show are terminal only in the API, not the DB | P2 | ZNLY-211 |
+| G-11 | Discount role limits are API-only | P2 | ZNLY-211 |
+| G-12 | Single-booking `recordPayment`: read-then-insert with no row lock, so a double submit can over-collect | **P1** | ZNLY-206 |
+| G-13 | VAT invoice ignores product sales at checkout (combined effect of our products and Anish's invoices) | **P1** | ZNLY-207 |
+| G-14 | Reschedule doesn't re-price tiered bookings | **P1** | ZNLY-208 |
 | G-15 | Fresh local DB can't bootstrap; `bookings.client_request_id` has no migration | P2 | ZNLY-200 |
 | G-16 | `login_access` = `none` for users created outside Staff access (cosmetic today, confusing in the panel) | P3 | folded into ZNLY-205 |
 

@@ -22,6 +22,11 @@ Change it only when the owner decides something new, and date the change.
    product follows after go-live.
 7. **Global, not tenant-specific:** every screen must work for every industry and every tenant on production.
 
+8. **Client online booking is moving out of the app** (owner, 2026-11-16): it will live on **zennly.io**, the
+   marketplace Anish is building, and connect to the app later. The app (app.zennly.io) stays the business side.
+   The public booking database functions are still fixed now (ZNLY-204), because the marketplace will use them.
+9. **The Settings "Spa" group is renamed "Business" for every tenant** (owner, 2026-11-16).
+
 ## What "our design" is today (from the code, for reference)
 
 - **Tokens** (`tailwind.config.js`): primary `#2D5A27` (forest green), background `#FAFAFB`, surface `#FFFFFF`,
@@ -40,7 +45,6 @@ Change it only when the owner decides something new, and date the change.
 - After each UI step the owner tests it in the local app, then OKs the commit.
 - New UI from Anish's features is built from the existing building blocks above, not new look-alike components.
 
-## Open (owner to decide; not blocking Thursday)
+## Open (owner to decide)
 
-- Whether the Settings "Spa" group becomes "Business" for every tenant or follows the industry (sitemap G-2;
-  the lead recommends "Business").
+- Where staff access lives in the UI (ZNLY-205): proposed as an **Access** section on each team member's profile.
