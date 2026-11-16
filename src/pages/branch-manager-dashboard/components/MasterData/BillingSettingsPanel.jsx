@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
-import Input from '../../../../components/ui/Input';
-import CustomSelect from '../../../../components/ui/CustomSelect';
+import ConfirmDialog from '../../../../components/ui/ConfirmDialog';
+import { Field, TextInput, SelectField, SwitchRow, InlineError } from '../../../../components/ui/PanelFormKit';
 import { fetchBillingSettings, updateBillingSetting } from '../../../../services/api';
 import { useOrg } from '../../../../contexts/OrgContext';
 
@@ -117,170 +117,120 @@ const BillingSettingsPanel = ({ readOnly = false }) => {
     );
   }
 
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+  const missing = [
+    !form.legalName.trim() && 'legal name',
+    (!form.pan || PAN_PATTERN.test(form.pan) === false) && 'PAN',
+    !form.address.trim() && 'address',
+    !form.taxMode && 'tax mode',
+  ].filter(Boolean);
+  const dirty = JSON.stringify(form) !== JSON.stringify(original);
+  const SectionHead = ({ children }) => (
+    <h3 className="text-[11.5px] font-body font-body-medium uppercase tracking-[0.05em] text-text-secondary">{children}</h3>
+  );
+
   return (
-    <div className="space-y-6 max-w-2xl">
-      <div>
-        <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Billing</h3>
-        <p className="font-body text-sm text-text-secondary">
-          Company identity and tax treatment printed on every invoice. Required before any invoice can be issued.
-        </p>
-      </div>
+    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] gap-6 items-start">
+      <div className="bg-surface border border-border rounded-spa-lg p-5 sm:p-[22px] space-y-5 min-w-0">
+        <InlineError message={error} />
+        {savedMsg && !error && (
+          <div role="status" className="flex items-center gap-2 px-3 py-2 rounded-spa bg-success/10 border border-success/20 text-success text-[13px]">
+            <Icon name="CheckCircle" size={14} />
+            <span>{savedMsg}</span>
+          </div>
+        )}
 
-      {error && (
-        <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
-          <Icon name="AlertCircle" size={16} />
-          <span>{error}</span>
-        </div>
-      )}
-      {savedMsg && !error && (
-        <div className="flex items-center gap-2 p-3 bg-success/10 border border-success/20 rounded-spa text-success text-sm">
-          <Icon name="CheckCircle" size={16} />
-          <span>{savedMsg}</span>
-        </div>
-      )}
-
-      {/* Master switch — off by default. Everything below exists to set this
-          up correctly; it stays reachable even while off so there's a way to
-          turn it on. */}
-      <label className="flex items-center justify-between p-4 border border-border rounded-spa-lg cursor-pointer hover:bg-background">
-        <div className="pr-4">
-          <span className="font-body font-body-medium text-sm text-text-primary">Enable billing (tax invoices)</span>
-          <p className="font-caption text-xs text-text-secondary">
-            Off by default. Turn this on once the company details and tax mode below are correct — staff can't print an invoice until then.
-          </p>
-        </div>
-        <button
-          type="button"
+        <SwitchRow
+          id="billing-enabled"
+          label="Enable billing (tax invoices)"
+          description="Off by default. Turn it on once the details below are complete. Staff cannot print an invoice before then."
+          checked={!!form.billingEnabled}
           disabled={readOnly}
-          onClick={() => setForm((f) => ({ ...f, billingEnabled: !f.billingEnabled }))}
-          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full spa-transition-fast ${
-            form.billingEnabled ? 'bg-success' : 'bg-border'
-          }`}
+          onChange={(v) => setForm((f) => ({ ...f, billingEnabled: v }))}
+        />
+
+        {!form.billingEnabled && missing.length > 0 && (
+          <p className="-mt-2 text-xs text-text-secondary">To turn billing on, fill in: {missing.join(', ')}</p>
+        )}
+
+        <SectionHead>Company</SectionHead>
+        <Field id="billing-legal" label="Legal name" hint="May differ from the display name. Appears on every invoice.">
+          <TextInput id="billing-legal" value={form.legalName} disabled={readOnly} onChange={set('legalName')} placeholder={original.orgName ? `e.g. ${original.orgName} Pvt. Ltd.` : 'e.g. Your Business Pvt. Ltd.'} />
+        </Field>
+        <Field id="billing-pan" label="PAN / VAT number" error={panError}>
+          <TextInput
+            id="billing-pan"
+            inputMode="numeric"
+            value={form.pan}
+            disabled={readOnly}
+            error={!!panError}
+            onChange={(e) => setForm((f) => ({ ...f, pan: e.target.value.replace(/\D/g, '').slice(0, 9) }))}
+            placeholder="9-digit PAN"
+          />
+        </Field>
+        <Field id="billing-address" label="Registered address">
+          <TextInput id="billing-address" value={form.address} disabled={readOnly} onChange={set('address')} placeholder="Company address. Each branch's own address prints under it." />
+        </Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field id="billing-phone" label="Phone"><TextInput id="billing-phone" value={form.phone} disabled={readOnly} onChange={set('phone')} /></Field>
+          <Field id="billing-email" label="Email"><TextInput id="billing-email" type="email" value={form.email} disabled={readOnly} onChange={set('email')} /></Field>
+        </div>
+
+        <SectionHead>Tax</SectionHead>
+        <Field
+          label="Tax mode"
+          hint="No default: invoices cannot be issued until this is chosen. Options: prices include VAT (shown separately, total unchanged) or no VAT."
         >
-          <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
-            form.billingEnabled ? 'translate-x-6' : 'translate-x-1'
-          }`} />
-        </button>
-      </label>
+          <SelectField
+            value={form.taxMode}
+            onChange={(val) => setForm((f) => ({ ...f, taxMode: val }))}
+            options={form.taxMode === 'addon' ? [...TAX_MODE_OPTIONS, LEGACY_ADDON_OPTION] : TAX_MODE_OPTIONS}
+            placeholder="Choose a tax mode"
+            disabled={readOnly}
+          />
+        </Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field id="billing-vat" label="VAT rate (%)"><TextInput id="billing-vat" type="number" min="0" max="100" value={form.vatRate} disabled={readOnly} onChange={set('vatRate')} /></Field>
+          <Field id="billing-prefix" label={<>Invoice number prefix <span className="text-text-tertiary font-normal">(optional)</span></>}>
+            <TextInput id="billing-prefix" value={form.invoicePrefix} disabled={readOnly} onChange={set('invoicePrefix')} placeholder="Defaults to the fiscal year" />
+          </Field>
+        </div>
+        <Field id="billing-footer" label={<>Footer text <span className="text-text-tertiary font-normal">(optional)</span></>}>
+          <TextInput id="billing-footer" value={form.footerText} disabled={readOnly} onChange={set('footerText')} placeholder="e.g. Thank you for visiting. See you again soon!" />
+        </Field>
 
-      {!form.billingEnabled && (
-        <p className="font-caption text-xs text-text-tertiary -mt-2">
-          The fields below are what "Enable billing" checks before it can be turned on — set them up, then flip the switch above.
-        </p>
-      )}
-
-      {/* Live preview — the one thing that makes a typo obvious on screen
-          instead of on a printed tax document. */}
-      <div className="bg-background border border-border rounded-spa-lg p-5">
-        <p className="font-caption text-xs uppercase tracking-wide text-text-tertiary mb-2">Invoice header preview</p>
-        <div className="bg-surface border border-border rounded-spa p-4 font-data text-sm">
-          <div className="font-body-medium text-base text-text-primary">{form.legalName || original.orgName || 'Company legal name'}</div>
-          {form.address && <div className="text-text-secondary">{form.address}</div>}
-          <div className="text-text-secondary">
-            {form.phone && <span>{form.phone}</span>}
-            {form.phone && form.email && <span> · </span>}
-            {form.email && <span>{form.email}</span>}
+        {!readOnly && (
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="ghost" size="sm" disabled={!dirty || saving} onClick={() => { setForm(original); setError(null); setSavedMsg(null); }}>Cancel</Button>
+            <Button variant="primary" size="sm" onClick={handleSaveClick} loading={saving}>Save billing</Button>
           </div>
-          <div className={form.pan ? (panError ? 'text-error' : 'text-text-secondary') : 'text-text-tertiary italic'}>
-            PAN: {form.pan || 'not set'}
+        )}
+      </div>
+
+      <div className="space-y-5 min-w-0">
+        <div>
+          <div className="bg-surface border border-border rounded-spa-lg p-4 text-[12.5px] leading-relaxed text-text-secondary" aria-label="Invoice header preview">
+            <div className="text-sm font-body-semibold text-text-primary">{form.legalName || original.orgName || '[Legal name]'}</div>
+            <div>{form.address || '[Registered address]'}</div>
+            <div>{form.phone || '[Phone]'} · {form.email || '[Email]'}</div>
+            <div className={panError ? 'text-error' : ''}>PAN: {form.pan || '[PAN]'}</div>
           </div>
         </div>
       </div>
-
-      <div className="space-y-1">
-        <label className="block font-body font-body-medium text-sm text-text-primary">Company legal name</label>
-        <p className="font-caption text-xs text-text-tertiary mb-1">May differ from the org's display name (e.g. "Pvt. Ltd." suffix). Appears on every invoice.</p>
-        <Input value={form.legalName} disabled={readOnly} onChange={(e) => setForm((f) => ({ ...f, legalName: e.target.value }))} placeholder={original.orgName || 'e.g. Your Business Pvt. Ltd.'} />
-      </div>
-
-      <div className="space-y-1">
-        <label className="block font-body font-body-medium text-sm text-text-primary">PAN / VAT number <span className="text-text-tertiary font-normal">(appears on every invoice)</span></label>
-        <Input
-          value={form.pan}
-          disabled={readOnly}
-          onChange={(e) => setForm((f) => ({ ...f, pan: e.target.value.replace(/\D/g, '').slice(0, 9) }))}
-          placeholder="9-digit PAN"
-          className={panError ? 'border-error' : ''}
-        />
-        {panError && <p className="font-caption text-xs text-error">{panError}</p>}
-      </div>
-
-      <div className="space-y-1">
-        <label className="block font-body font-body-medium text-sm text-text-primary">Registered address</label>
-        <Input value={form.address} disabled={readOnly} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} placeholder="Company-level address — each branch's own address is printed too" />
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <label className="block font-body font-body-medium text-sm text-text-primary">Phone</label>
-          <Input value={form.phone} disabled={readOnly} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
-        </div>
-        <div className="space-y-1">
-          <label className="block font-body font-body-medium text-sm text-text-primary">Email</label>
-          <Input type="email" value={form.email} disabled={readOnly} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
-        </div>
-      </div>
-
-      <div className="space-y-1">
-        <label className="block font-body font-body-medium text-sm text-text-primary">Tax mode</label>
-        <p className="font-caption text-xs text-text-tertiary mb-1">
-          How VAT applies to your prices. Invoices cannot be issued until this is chosen — there is no default. Add VAT on top will come later; prices include VAT or no VAT.
-        </p>
-        <CustomSelect
-          value={form.taxMode}
-          onChange={(val) => setForm((f) => ({ ...f, taxMode: val }))}
-          options={form.taxMode === 'addon' ? [...TAX_MODE_OPTIONS, LEGACY_ADDON_OPTION] : TAX_MODE_OPTIONS}
-          placeholder="Choose a tax mode"
-          size="md"
-          disabled={readOnly}
-        />
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <label className="block font-body font-body-medium text-sm text-text-primary">VAT rate (%)</label>
-          <Input type="number" min="0" max="100" value={form.vatRate} disabled={readOnly} onChange={(e) => setForm((f) => ({ ...f, vatRate: e.target.value }))} />
-        </div>
-        <div className="space-y-1">
-          <label className="block font-body font-body-medium text-sm text-text-primary">Invoice number prefix <span className="text-text-tertiary font-normal">(optional)</span></label>
-          <Input value={form.invoicePrefix} disabled={readOnly} onChange={(e) => setForm((f) => ({ ...f, invoicePrefix: e.target.value }))} placeholder="Defaults to the fiscal year, e.g. 2083/84" />
-        </div>
-      </div>
-
-      <div className="space-y-1">
-        <label className="block font-body font-body-medium text-sm text-text-primary">Footer text <span className="text-text-tertiary font-normal">(optional)</span></label>
-        <textarea
-          value={form.footerText}
-          disabled={readOnly}
-          onChange={(e) => setForm((f) => ({ ...f, footerText: e.target.value }))}
-          rows={2}
-          placeholder="e.g. Thank you for visiting — see you again soon!"
-          className="w-full rounded-spa border border-border px-3 py-2 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary resize-none"
-        />
-      </div>
-
-      {!readOnly && (
-        <Button variant="primary" onClick={handleSaveClick} loading={saving}>Save billing settings</Button>
-      )}
 
       {confirmTaxModeChange && (
-        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => setConfirmTaxModeChange(false)}>
-          <div className="bg-surface rounded-spa-lg shadow-spa-modal w-full max-w-sm p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-warning/10 flex items-center justify-center">
-                <Icon name="AlertTriangle" size={20} className="text-warning" />
-              </div>
-              <h3 className="font-heading font-heading-semibold text-text-primary">Change tax mode?</h3>
-            </div>
-            <p className="font-body text-sm text-text-secondary">
-              Every invoice issued from now on will use the new tax treatment. Invoices already issued keep the mode that applied when they were printed.
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setConfirmTaxModeChange(false)}>Cancel</Button>
-              <Button variant="warning" size="sm" onClick={() => { setConfirmTaxModeChange(false); doSave(); }} loading={saving}>Change it</Button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Change tax mode?"
+          message="Every invoice issued from now on will use the new tax treatment. Invoices already issued keep the mode that applied when they were printed."
+          confirmLabel="Change it"
+          cancelLabel="Cancel"
+          requireReason={false}
+          tone="warning"
+          confirmVariant="primary"
+          isSubmitting={saving}
+          onClose={() => setConfirmTaxModeChange(false)}
+          onConfirm={() => { setConfirmTaxModeChange(false); doSave(); }}
+        />
       )}
     </div>
   );

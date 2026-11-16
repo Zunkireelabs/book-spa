@@ -21,7 +21,7 @@ export const SETTINGS = [
   { id: 'categories', view: 'categories', title: 'Categories', description: 'Groups that organise your services.', icon: 'Tags', category: 'spa', roles: MGR_ADMIN, overallHidden: true, keywords: 'groups' },
 
   { id: 'payment-methods', view: 'payment-methods', title: 'Payment Methods', description: 'How customers can pay at the desk.', icon: 'CreditCard', category: 'payments', roles: ['admin'], overallHidden: true, keywords: 'cash card pay methods' },
-  { id: 'billing', view: 'billing', title: 'Billing', description: 'VAT, invoice numbering and billing details.', icon: 'Receipt', category: 'payments', roles: ['admin'], keywords: 'vat invoice tax pan' },
+  { id: 'billing', view: 'billing', title: 'Billing', description: 'Company identity and tax treatment printed on every invoice. Required before any invoice can be issued.', icon: 'Receipt', category: 'payments', roles: ['admin'], keywords: 'vat invoice tax pan' },
   ...(CUSTOMER_REFERRALS_ENABLED ? [
     { id: 'reward-catalog', view: 'reward-catalog', title: 'Reward Catalog', description: 'Rewards staff can pick when logging a referral.', icon: 'Gift', category: 'payments', roles: ['manager', 'admin'] },
   ] : []),

@@ -20412,6 +20412,31 @@ export async function fetchInvoiceByBookingId(bookingId) {
   }
 }
 
+// Everything the Print invoice dialog shows before anything is issued: the booking's customer, the invoice if one already exists, and how
+// many times it has been printed (0 means the next print is the Original). Read-only; issuing and printing stay in the RPCs below.
+export async function fetchInvoiceDialogInfo(bookingId) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const [{ data: booking, error: bErr }, { data: invoice, error: iErr }] = await Promise.all([
+      supabase.from('bookings').select('booking_number, customer_name, customer_phone').eq('id', bookingId).maybeSingle(),
+      supabase.from('invoices').select('id, invoice_number, buyer_name, buyer_phone, buyer_pan').eq('booking_id', bookingId).maybeSingle(),
+    ]);
+    if (bErr) throw bErr;
+    if (iErr) throw iErr;
+    let printCount = 0;
+    if (invoice) {
+      const { count, error: pErr } = await supabase.from('invoice_prints').select('id', { count: 'exact', head: true }).eq('invoice_id', invoice.id);
+      if (pErr) throw pErr;
+      printCount = count || 0;
+    }
+    return { data: { booking, invoice, printCount }, error: null };
+  } catch (error) {
+    console.error('[API] fetchInvoiceDialogInfo error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // Which of these bookings already has an invoice — one query for the whole
 // set, not one per row. Lets a list (CustomerSalesTab) keep the "Print
 // invoice" entry point visible for a booking that was invoiced before billing
