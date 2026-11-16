@@ -15,7 +15,10 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
-import Input from '../../../../components/ui/Input';
+import SidePanel from '../../../../components/ui/SidePanel';
+import ConfirmDialog from '../../../../components/ui/ConfirmDialog';
+import { TextInput } from '../../../../components/ui/PanelFormKit';
+import { useIndustry } from '../../../../hooks/useIndustry';
 import {
   fetchPriceTiers,
   createPriceTier,
@@ -27,7 +30,9 @@ import {
   assignTherapistTier,
 } from '../../../../services/api';
 
-const SortableTierRow = ({ tier, staffCount, onRename, onOpenAssign, onDelete, readOnly }) => {
+const ICON_BTN = 'w-[34px] h-[34px] rounded-spa border border-border bg-surface inline-flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-background';
+
+const SortableTierRow = ({ tier, staffCount, staffWord, onRename, onOpenAssign, onDelete, readOnly }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tier.id, disabled: readOnly });
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(tier.name);
@@ -42,38 +47,35 @@ const SortableTierRow = ({ tier, staffCount, onRename, onOpenAssign, onDelete, r
   };
 
   return (
-    <div ref={setNodeRef} style={style} className="flex items-center gap-3 px-4 py-3 border-b border-border last:border-b-0 bg-surface">
+    <div ref={setNodeRef} style={style} className="flex items-center gap-2.5 px-3.5 py-2.5 border-b border-border last:border-b-0 bg-surface" data-tier-row>
       {!readOnly && (
-        <button {...attributes} {...listeners} className="p-1 rounded cursor-grab active:cursor-grabbing text-text-secondary hover:text-text-primary hover:bg-background">
+        <button type="button" {...attributes} {...listeners} aria-label={`Drag to reorder ${tier.name}`} className="p-1 -ml-1 rounded cursor-grab active:cursor-grabbing text-text-tertiary hover:text-text-primary">
           <Icon name="GripVertical" size={16} />
         </button>
       )}
       {editing ? (
         <input
           autoFocus
+          aria-label={`Rename ${tier.name}`}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onBlur={commitRename}
           onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') { setValue(tier.name); setEditing(false); } }}
-          className="flex-1 px-2 py-1 text-sm border border-primary rounded bg-background focus:outline-none"
+          className="flex-1 h-9 px-2.5 text-[13.5px] border border-primary rounded-spa bg-surface focus:outline-none"
         />
       ) : (
-        <span className="flex-1 font-body font-body-medium text-sm text-text-primary">{tier.name}</span>
+        <span className="flex-1 min-w-0 truncate font-body font-body-medium text-[13.5px] text-text-primary">{tier.name}</span>
       )}
-      <button
-        onClick={() => onOpenAssign(tier)}
-        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs font-body-medium hover:bg-primary/20"
-        title={readOnly ? 'View staff in this tier' : 'Assign staff to this tier'}
-      >
-        <Icon name="Users" size={13} />
-        {staffCount}
+      <span className="inline-flex items-center h-[22px] px-[9px] rounded-full bg-[#F3F4F1] text-[12px] text-[#3A3A3C] whitespace-nowrap">{staffCount} {staffCount === 1 ? staffWord.one : staffWord.many}</span>
+      <button type="button" onClick={() => onOpenAssign(tier)} className="h-[34px] px-3 rounded-spa border border-border bg-surface text-[13px] font-medium text-text-primary hover:bg-background">
+        {readOnly ? 'View' : 'Assign'}
       </button>
       {!readOnly && (
         <>
-          <button onClick={() => setEditing(true)} className="p-1.5 rounded hover:bg-background text-text-secondary hover:text-text-primary" title="Rename">
+          <button type="button" onClick={() => setEditing(true)} className={ICON_BTN} aria-label={`Rename ${tier.name}`} title="Rename">
             <Icon name="Pencil" size={14} />
           </button>
-          <button onClick={() => onDelete(tier)} className="p-1.5 rounded hover:bg-error/10 text-text-secondary hover:text-error" title="Delete">
+          <button type="button" onClick={() => onDelete(tier)} className={`${ICON_BTN} hover:!text-error hover:!bg-error/10`} aria-label={`Delete ${tier.name}`} title="Delete">
             <Icon name="Trash2" size={14} />
           </button>
         </>
@@ -83,6 +85,8 @@ const SortableTierRow = ({ tier, staffCount, onRename, onOpenAssign, onDelete, r
 };
 
 const PriceTiersPanel = ({ readOnly = false }) => {
+  const { staffLabel, staffLabelPlural } = useIndustry();
+  const staffWord = { one: staffLabel.toLowerCase(), many: staffLabelPlural.toLowerCase() };
   const [tiers, setTiers] = useState([]);
   const [therapists, setTherapists] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -207,31 +211,41 @@ const PriceTiersPanel = ({ readOnly = false }) => {
     );
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Price tiers</h3>
-          <p className="font-body text-sm text-text-secondary">
-            Named staff groups a service can price differently — independent of job position.
-          </p>
-        </div>
-      </div>
+  const impactSentence = confirmDelete && (
+    <>
+      {confirmDelete.staffCount > 0 && <>{confirmDelete.staffCount} {confirmDelete.staffCount === 1 ? staffWord.one : staffWord.many} will have no tier and charge the standard price. </>}
+      {confirmDelete.servicePriceCount > 0 && <>{confirmDelete.servicePriceCount} service price{confirmDelete.servicePriceCount === 1 ? '' : 's'} set for this tier will be removed. </>}
+      {confirmDelete.staffCount === 0 && confirmDelete.servicePriceCount === 0 && <>Nothing else is affected. </>}
+      Appointments already booked keep their price.
+    </>
+  );
 
+  return (
+    <div className="space-y-4 max-w-3xl">
       {error && (
-        <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
+        <div role="alert" className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-[13px]">
           <Icon name="AlertCircle" size={16} />
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="ml-auto"><Icon name="X" size={14} /></button>
+          <span>Couldn't save the change. Nothing was changed. <span className="text-text-tertiary">({error})</span></span>
+          <button type="button" onClick={() => { setError(null); load(); }} className="ml-auto underline font-medium">Try again</button>
         </div>
       )}
 
-      <div className="bg-surface border border-border rounded-spa overflow-hidden">
-        {tiers.length === 0 ? (
-          <div className="px-4 py-8 text-center text-text-secondary font-body text-sm">
-            No price tiers yet. Add one below.
+      {tiers.length === 0 ? (
+        <div className="bg-surface border border-border rounded-spa-lg p-[18px] space-y-2" data-tiers-empty>
+          <p className="font-heading font-heading-semibold text-[14px] text-text-primary">No price tiers yet</p>
+          <p className="text-[12.5px] text-text-secondary leading-relaxed">Use tiers when the same service costs more with a senior {staffWord.one}. Skip them if every service has one price.</p>
+          {!readOnly && (
+            <div className="flex gap-2 max-w-sm pt-1">
+              <TextInput value={newTierName} onChange={(e) => setNewTierName(e.target.value)} placeholder="Tier name (e.g. Senior)" aria-label="New tier name" />
+              <Button variant="primary" size="sm" onClick={handleCreate} loading={creating}>Add the first tier</Button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="bg-surface border border-border rounded-spa-lg overflow-hidden">
+          <div className="px-3.5 pt-3.5 pb-1">
+            <p className="mt-0.5 text-[12.5px] text-text-secondary">Named groups of {staffWord.many} that a service can price differently. Not the same as job title.</p>
           </div>
-        ) : (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={tiers.map((t) => t.id)} strategy={verticalListSortingStrategy}>
               {tiers.map((tier) => (
@@ -239,6 +253,7 @@ const PriceTiersPanel = ({ readOnly = false }) => {
                   key={tier.id}
                   tier={tier}
                   staffCount={staffCountByTier[tier.id] || 0}
+                  staffWord={staffWord}
                   onRename={handleRename}
                   onOpenAssign={(t) => { setAssignTier(t); setAssignSearch(''); }}
                   onDelete={openDeleteConfirm}
@@ -247,74 +262,51 @@ const PriceTiersPanel = ({ readOnly = false }) => {
               ))}
             </SortableContext>
           </DndContext>
+          {!readOnly && (
+            <div className="flex gap-2 px-3.5 py-2.5 bg-background border-t border-border">
+              <TextInput value={newTierName} onChange={(e) => setNewTierName(e.target.value)} placeholder="New tier name" aria-label="New tier name" onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }} />
+              <Button variant="primary" size="sm" onClick={handleCreate} loading={creating} className="flex-shrink-0">Add tier</Button>
+            </div>
+          )}
+        </div>
+      )}
+      {tiers.length > 0 && !readOnly && <p className="text-[12px] text-text-secondary">Drag to reorder: the order is also the order in each service's price list.</p>}
+      {readOnly && <p className="text-[12.5px] text-text-secondary" data-tiers-readonly>You can see the tiers, counts and who is in each tier. Only an admin can assign, rename, delete or add.</p>}
+
+      {/* Assign team members: a docked side panel (B2.2 #2). Changes save at once. */}
+      <SidePanel isOpen={!!assignTier} title={assignTier ? assignTier.name : ''} onClose={() => setAssignTier(null)}
+        footer={<div className="flex justify-end"><Button variant="primary" size="sm" onClick={() => setAssignTier(null)}>Done</Button></div>}>
+        {assignTier && (
+          <div className="px-5 py-4 space-y-3">
+            <TextInput value={assignSearch} onChange={(e) => setAssignSearch(e.target.value)} placeholder={`Search ${staffWord.many}`} aria-label={`Search ${staffWord.many}`} />
+            <div className="border border-border rounded-spa-lg">
+              {assignMatches.map((t) => {
+                const currentName = tiers.find((x) => x.id === t.price_tier_id)?.name;
+                return (
+                  <label key={t.id} className="flex items-center gap-2.5 px-3 py-2 border-b border-[#F0F0EE] last:border-b-0 cursor-pointer text-[13px]">
+                    <input type="checkbox" className="accent-primary w-4 h-4" checked={t.price_tier_id === assignTier.id} disabled={readOnly || assigning === t.id} onChange={() => handleToggleAssign(t)} />
+                    <span className="flex-1 min-w-0 truncate">{t.name}</span>
+                    <span className={`inline-flex items-center h-[22px] px-[9px] rounded-full text-[12px] ${t.price_tier_id === assignTier.id ? 'bg-[#E6EFE4] text-primary' : 'bg-[#F3F4F1] text-[#3A3A3C]'} ${currentName ? '' : 'text-text-tertiary'}`}>{currentName || 'No tier'}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-[12px] text-text-secondary">A {staffWord.one} has one tier. Ticking someone moves them out of their current tier. Changes save at once.</p>
+          </div>
         )}
-      </div>
+      </SidePanel>
 
-      {!readOnly && (
-        <div className="flex gap-2 max-w-sm">
-          <Input value={newTierName} onChange={(e) => setNewTierName(e.target.value)} placeholder="New tier name (e.g. Senior)" />
-          <Button variant="primary" size="sm" iconName="Plus" onClick={handleCreate} loading={creating}>Add tier</Button>
-        </div>
-      )}
-
-      {/* Staff assignment popover */}
-      {assignTier && (
-        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => setAssignTier(null)}>
-          <div className="bg-surface rounded-spa-lg shadow-spa-modal w-full max-w-md p-6 space-y-3 max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <h4 className="font-heading font-heading-semibold text-base text-text-primary">Assign staff to "{assignTier.name}"</h4>
-            <p className="font-body text-xs text-text-secondary">One tier per person — checking someone here moves them out of any other tier.</p>
-            <Input value={assignSearch} onChange={(e) => setAssignSearch(e.target.value)} placeholder="Search staff..." />
-            <div className="flex-1 overflow-y-auto border-t border-border -mx-6 px-6">
-              {assignMatches.map((t) => (
-                <label key={t.id} className="flex items-center gap-3 py-2.5 border-b border-border last:border-b-0 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={t.price_tier_id === assignTier.id}
-                    disabled={readOnly || assigning === t.id}
-                    onChange={() => handleToggleAssign(t)}
-                  />
-                  <div className="flex-1">
-                    <div className="font-body-medium text-sm text-text-primary">{t.name}</div>
-                    <div className="text-xs text-text-tertiary">
-                      {t.position || '—'}
-                      {t.price_tier_id && t.price_tier_id !== assignTier.id && (
-                        <span className="ml-1 italic">· currently {tiers.find((x) => x.id === t.price_tier_id)?.name || 'another tier'}</span>
-                      )}
-                    </div>
-                  </div>
-                </label>
-              ))}
-            </div>
-            <div className="flex justify-end pt-2">
-              <Button variant="ghost" size="sm" onClick={() => setAssignTier(null)}>Done</Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete confirmation */}
       {confirmDelete && (
-        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !deleting && setConfirmDelete(null)}>
-          <div className="bg-surface rounded-spa-lg shadow-spa-modal w-full max-w-sm p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-error/10 flex items-center justify-center">
-                <Icon name="Trash2" size={20} className="text-error" />
-              </div>
-              <div>
-                <h3 className="font-heading font-heading-semibold text-text-primary">Delete "{confirmDelete.tier.name}"?</h3>
-              </div>
-            </div>
-            <p className="font-body text-sm text-text-secondary">
-              {confirmDelete.staffCount > 0 && <>{confirmDelete.staffCount} staff member{confirmDelete.staffCount === 1 ? '' : 's'} will be un-tiered (back to charging the Unassigned rate). </>}
-              {confirmDelete.servicePriceCount > 0 && <>{confirmDelete.servicePriceCount} service price{confirmDelete.servicePriceCount === 1 ? '' : 's'} set for this tier will be removed.</>}
-              {confirmDelete.staffCount === 0 && confirmDelete.servicePriceCount === 0 && 'Nothing else is affected.'}
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)} disabled={deleting}>Cancel</Button>
-              <Button variant="danger" size="sm" onClick={handleDelete} loading={deleting}>Delete</Button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title={`Delete "${confirmDelete.tier.name}"?`}
+          message={impactSentence}
+          confirmLabel="Delete tier"
+          cancelLabel="Cancel"
+          requireReason={false}
+          isSubmitting={deleting}
+          onClose={() => !deleting && setConfirmDelete(null)}
+          onConfirm={handleDelete}
+        />
       )}
     </div>
   );

@@ -9,6 +9,7 @@ import { formatMinutes, timeToMinutes, DB_DOW_LABELS } from '../../../../utils/s
 import { subLine } from '../../../../services/therapistsOverview';
 import { TodayCell } from './therapistBits';
 import StaffAccessSection from './StaffAccessSection';
+import PriceTierRow from './PriceTierRow';
 import TransferPill from '../../../../components/ui/TransferPill';
 import { describeTransfer, transferState } from '../../../../utils/transferText';
 import { homeServiceNameSet, servicesBookableHere } from '../../../../utils/visitorServices';
@@ -202,6 +203,8 @@ const TherapistPeekPanel = ({ t, branchName, totalServices, canSeeRates, ratesRe
             </div>
           )}
         </section>
+
+        {!visitor && <PriceTierRow therapistId={t.id} />}
 
         {!visitor && <StaffAccessSection therapistId={t.id} personName={t.name} onEditingChange={setEditingAccess} />}
 

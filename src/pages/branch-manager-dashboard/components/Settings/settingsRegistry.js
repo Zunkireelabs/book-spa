@@ -16,7 +16,7 @@ export const SETTINGS = [
   // `location: true` -> the title uses the industry's location label (Rooms / ...); `needsRooms` -> only when the industry uses rooms.
   { id: 'rooms', view: 'rooms', title: 'Rooms', location: true, needsRooms: true, description: 'Rooms customers are booked into.', icon: 'DoorOpen', category: 'spa', roles: MGR_ADMIN, overallHidden: true, keywords: 'locations' },
   { id: 'services', view: 'services', title: 'Services', description: 'Services, prices and durations.', icon: 'Sparkles', category: 'spa', roles: MGR_ADMIN, overallHidden: true, keywords: 'treatments prices' },
-  { id: 'price-tiers', view: 'price-tiers', title: 'Price Tiers', description: 'Staff price levels for tiered services.', icon: 'Tags', category: 'spa', roles: STAFF_UP, overallHidden: true, keywords: 'tiers senior junior pricing' },
+  { id: 'price-tiers', view: 'price-tiers', title: 'Price Tiers', description: 'Named groups of staff that a service can price differently.', icon: 'Tags', category: 'spa', roles: STAFF_UP, overallHidden: true, keywords: 'tiers senior junior pricing' },
   { id: 'locations', view: 'locations', title: 'Locations', description: 'Your branches: add, edit and set them up.', icon: 'MapPin', category: 'spa', roles: ['admin'], keywords: 'branches outlets sites' },
   { id: 'categories', view: 'categories', title: 'Categories', description: 'Groups that organise your services.', icon: 'Tags', category: 'spa', roles: MGR_ADMIN, overallHidden: true, keywords: 'groups' },
 
