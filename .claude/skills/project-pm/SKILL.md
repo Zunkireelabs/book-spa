@@ -49,7 +49,13 @@ session.**
 | "what's mine?" | My open tickets + new @mentions/comments for me |
 | "start ZNLY-n" / starts any work | Search → reuse or create → In Progress + assign → read the brief |
 | PR opened / merged to stage / merged to main | In Review / On Stage / Done + one-line comment |
-| "sync" | Regenerate `tasks/TRACKER.md` from Plane; flag gaps |
+| "sync" | Run `plane-tracker.py` (one shell call, see "Which path" below); then add judgement notes |
+
+**Which path (OPS-141/142).** Quick question or one write → Plane MCP. A known, repeated job
+(tracker sync) → the script, one shell call instead of a chain of MCP turns (about 90% fewer tokens).
+A big job needing judgement → a separate fresh session or subagent, summary back. Ids come from
+`plane.md`; never re-list them. Machine setup (once): `INSTALL.md`. Script missing or not signed in?
+Say so and fall back to MCP; never hunt for a copy.
 
 **Non-negotiables:** search before creating (no duplicates); never delete, cancel instead; one
 ticket per call; only comment on other people's tickets; Plane → tracker, never tracker → Plane;

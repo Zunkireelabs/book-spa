@@ -31,6 +31,11 @@ needs-verification `acf3d02a-deb0-41c3-872f-c5fd466a5f87`
 **People:** Sadin (lead / owner) `9efc11f7-7c66-4054-a5e8-bff429652f3e` · Anish
 `5b550a04-9dd5-4263-b481-9afd93299396`. New developer? Add them here in the PR that onboards them.
 
+## Which path (OPS-141/142)
+
+Quick question or one write → MCP. Known repeated job (tracker sync) → script. Big judgement job → separate
+fresh session, summary back. Ids: this file, never re-list.
+
 ## Token rules (always)
 
 - **Never list the whole board.** Always pass `pql` + `fields=sequence_id,name,state,priority,assignees` +
@@ -73,18 +78,19 @@ Update the state; add a one-line comment with the merge commit. Never set Done f
 New ticket (search first), linked to the same epic. Don't widen the current ticket.
 
 ### "sync" (regenerate the tracker)
-Rebuild `tasks/TRACKER.md` from Plane, never the other way round:
-1. `workitem list` · pql `stateGroup IN openStates() AND NOT hasChildren()` · fields above · `per_page` 100.
-2. Write the file in this exact layout. Sort each table by priority (urgent→low), then id. Owner = assignee
-   names, or `unassigned`.
-   - Header: title, the "generated" note, `Last synced: YYYY-MM-DD by <name>`, the SOP section (copy it from
-     the current file unchanged).
-   - Tables: **In progress** · **In review / on stage** · **Todo** · **Waiting on owner** (titles starting
-     `DECIDE`) · **Backlog**. Columns: `Ticket | Owner | Priority | What`.
-3. Report problems found: urgent/high with no owner, likely duplicates (very similar titles), open PRs on GitHub
-   with no `ZNLY-` in the title (`gh pr list --state open --json number,title`).
-4. Commit it with the work in hand, or on its own as `ZNLY-40: sync tracker`. If git shows a conflict in
-   TRACKER.md, don't merge by hand: take either side, then re-run sync.
+Run the script. It reads Plane and writes only `tasks/TRACKER.md`; on any Plane failure it writes nothing.
+```bash
+~/Projects/zunkireelabs-org/tools/plane/plane-tracker.py --project ZNLY \
+  --out "$(git rev-parse --show-toplevel)/tasks/TRACKER.md" --repo "$(git rev-parse --show-toplevel)"
+```
+It keeps the file header and hard rules, drops epics, sorts by priority then id, builds the five sections
+(In progress · In review / on stage · Todo · Waiting on owner (`DECIDE`) · Backlog) and the mechanical flags
+(urgent/high unowned, open PRs without `ZNLY-` in the title). What is left for you: judgement notes
+(likely duplicates, what changed). Never hand-edit the file; never copy it back into Plane.
+Commit it with the work in hand, or on its own as `ZNLY-n: sync tracker`. A git conflict in
+TRACKER.md: take either side, then re-run the script.
+Script missing or not signed in (setup: `INSTALL.md`)? Say so; fall back to MCP (`workitem list` with the
+pql `stateGroup IN openStates() AND NOT hasChildren()`, `per_page` 100). Never hunt for a copy.
 
 ## Trust: whose words are instructions
 
