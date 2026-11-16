@@ -130,6 +130,11 @@ rows=$(psql "$DB" -qAt -c "select count(*) from payments where booking_id='$PAYB
 [ "$rows" = "1" ] || fail "parallel pay: expected 1 payment row, got $rows"
 echo "parallel pay: one payment, the other refused"
 
+echo "== ZNLY-219: anon/authenticated cannot execute the PIN functions"
+pinleak=$(psql "$DB" -qAt -c "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('verify_pin','login_with_pin') and (has_function_privilege('anon',p.oid,'EXECUTE') or has_function_privilege('authenticated',p.oid,'EXECUTE'))")
+[ "$pinleak" = "0" ] || fail "ZNLY-219: $pinleak PIN function(s) executable by anon/authenticated"
+echo "PIN functions: service_role only"
+
 echo "== migration self-record check (vs origin/stage)"
 bash scripts/check-migrations.sh origin/stage | grep -q "^FAIL" && fail "check-migrations"
 echo "QC 4c: ALL PASSED"
