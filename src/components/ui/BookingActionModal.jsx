@@ -385,14 +385,14 @@ const BookingActionModal = ({
   }, [showPaymentModal, branchId]);
 
   useEffect(() => {
-    if (orgSettings?.billing_enabled === true) return; // button already shown; skip the lookup
+    // ZNLY-207: also needed with billing on, to warn before a refund of an invoiced booking
     if (booking?.paymentStatus !== 'paid' || !booking?.bookingId) return;
     let cancelled = false;
     fetchInvoiceByBookingId(booking.bookingId).then(({ data }) => {
       if (!cancelled) setHasExistingInvoice(!!data);
     });
     return () => { cancelled = true; };
-  }, [orgSettings?.billing_enabled, booking?.bookingId, booking?.paymentStatus]);
+  }, [booking?.bookingId, booking?.paymentStatus]);
 
   // Pre-select current therapists/room when booking changes or assign tab opens
   useEffect(() => {
@@ -3790,7 +3790,7 @@ const BookingActionModal = ({
       {visitProductRefund && (
         <ConfirmDialog
           title="Refund this product?"
-          message={`${visitProductRefund.name} × ${visitProductRefund.quantity} (NPR ${Number(visitProductRefund.total).toLocaleString('en-IN')}) will be refunded and the stock put back.`}
+          message={`${visitProductRefund.name} × ${visitProductRefund.quantity} (NPR ${Number(visitProductRefund.total).toLocaleString('en-IN')}) will be refunded and the stock put back.${hasExistingInvoice ? ' An invoice was issued for this booking: it stays as it is, and no credit note is made.' : ''}`}
           confirmLabel="Refund"
           reasonOptional
           reasonLabel="Note"
@@ -3828,7 +3828,7 @@ const BookingActionModal = ({
       {pendingStatus && pendingStatus !== 'no show' && (
         <ConfirmDialog
           title="Cancel Booking"
-          message="This will cancel the booking. This cannot be undone."
+          message={`This will cancel the booking. This cannot be undone.${hasExistingInvoice ? ' An invoice was issued for this booking: it stays as it is, and no credit note is made.' : ''}`}
           confirmLabel="Cancel Booking"
           reasonOptions={cancelReasonOptions}
           isSubmitting={isLoading}
