@@ -387,11 +387,11 @@ const BranchStaffDashboard = () => {
     const result = await assignTherapist({ bookingId, therapistIds: ids });
 
     if (result.error) {
-      showError(result.error.message || 'Failed to assign therapist.');
+      showError(result.error.message || 'Failed to assign team member.');
       return;
     }
 
-    showSuccess('Therapist assigned successfully');
+    showSuccess('Team member assigned successfully');
     await loadData();
   };
 

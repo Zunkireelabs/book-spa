@@ -84,7 +84,7 @@ const Customer = ({ c, open, onToggle, first, today, periodText, onNeedsClosing,
             )}
           </div>
           <div>
-            <div className="text-[12px] font-semibold text-text-primary mb-1.5">What else {c.name.split(' ')[0]} did at the spa</div>
+            <div className="text-[12px] font-semibold text-text-primary mb-1.5">What else {c.name.split(' ')[0]} did here</div>
             <div className="space-y-1 text-[12px] text-text-secondary leading-snug">
               {elsewhere(c, first).map((l) => <p key={l.k}>{l.k}: <b className="text-text-primary font-medium">{l.v}</b></p>)}
               {c.customer_id && <button type="button" onClick={() => onCustomer(c.customer_id)} className="text-primary hover:underline mt-1">Full history on the customer page →</button>}
@@ -149,7 +149,7 @@ const CustomersTab = ({ state, therapistName, range, onNeedsClosing = null, onMo
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <Tile label="Served" line={t.served.line}><Big>{t.served.value}</Big><Small>of {t.served.of} booked</Small></Tile>
         <Tile label="Booked again" line={t.again.line}><Big>{t.again.value}</Big><Small>· {t.again.of}</Small></Tile>
-        <Tile label="New to the spa" line="first visit at the spa was in this period"><Big>{t.newToSpa.value}</Big><Small>of {t.newToSpa.of} served</Small></Tile>
+        <Tile label="New customers" line="first visit was in this period"><Big>{t.newToSpa.value}</Big><Small>of {t.newToSpa.of} served</Small></Tile>
         <Tile label="Owed" line={t.owed.top ? <>{t.owed.top.name}, since {shortDate(t.owed.top.by.completed.map((b) => b.date).sort()[0])} · {onMoneyOwed && <button type="button" onClick={onMoneyOwed} className="text-primary hover:underline">Money owed</button>}</> : 'nothing owed'}>
           <Big>NPR {n0(t.owed.total)}</Big><Small>· {t.owed.customers} customer{t.owed.customers === 1 ? '' : 's'}</Small>
         </Tile>

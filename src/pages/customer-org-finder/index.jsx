@@ -21,7 +21,7 @@ const CustomerOrgFinder = () => {
 
     const slug = orgInput.trim().toLowerCase().replace(/\s+/g, '-');
     if (!slug) {
-      setError('Please enter the spa/salon name');
+      setError('Please enter the business name');
       return;
     }
 
@@ -52,10 +52,10 @@ const CustomerOrgFinder = () => {
           <BrandMark className="h-16 w-auto mb-6" />
 
           <h1 className="text-[28px] font-semibold text-text-primary mb-2 text-center tracking-tight">
-            Find your spa
+            Find your business
           </h1>
           <p className="text-[15px] text-text-secondary mb-8 text-center">
-            Enter the name of the spa or salon you'd like to book with
+            Enter the name of the business you'd like to book with
           </p>
 
           <div className="w-full">

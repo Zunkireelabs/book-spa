@@ -877,7 +877,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     type="text"
                     value={therapistSearch}
                     onChange={(e) => setTherapistSearch(e.target.value)}
-                    placeholder="Search therapists..."
+                    placeholder={`Search ${staffLabel.toLowerCase()}s...`}
                     className="w-full pl-7 pr-3 py-1.5 bg-surface border border-border rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                   />
                 </div>
@@ -1366,13 +1366,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     value={p.therapistId}
                     onChange={(val) => setPerson(idx, { therapistId: val })}
                     options={[
-                      { value: '', label: 'No therapist' },
+                      { value: '', label: `No ${staffLabel.toLowerCase()}` },
                       ...(therapists || []).map((t) => ({
                         value: t.id,
                         label: t.full_name || t.name,
                       })),
                     ]}
-                    placeholder="Therapist (optional)"
+                    placeholder={`${staffLabel} (optional)`}
                     size="md"
                     searchable
                   />

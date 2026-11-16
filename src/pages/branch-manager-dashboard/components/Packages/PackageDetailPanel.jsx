@@ -61,7 +61,7 @@ const PackageDetailPanel = ({ packageId, today: todayProp, readOnly = false, can
   const live = pkg ? isLive(pkg, today) : false;
   const phone = pkg ? phoneOf(pkg) : '';
   const firstName = pkg ? String(pkg.guestName || '').trim().split(/\s+/)[0] : '';
-  const messageUrl = pkg && !readOnly ? buildWhatsAppUrl(phone, `Hi ${firstName}, this is ${orgName || 'the spa'} about your ${pkg.packageTypeName} package: ${pkg.sessionsRemaining} of ${pkg.sessionsTotal} sessions left, valid until ${longDate(pkg.expiryDate)}.`) : null;
+  const messageUrl = pkg && !readOnly ? buildWhatsAppUrl(phone, `Hi ${firstName}, this is ${orgName || 'our team'} about your ${pkg.packageTypeName} package: ${pkg.sessionsRemaining} of ${pkg.sessionsTotal} sessions left, valid until ${longDate(pkg.expiryDate)}.`) : null;
   const profileUrl = pkg?.customerId ? `/${orgSlug}/customers/${pkg.customerId}` : null;
   const overflow = pkg && isAdmin && !readOnly ? [{ key: 'correct', label: 'Correct sessions', icon: 'Pencil', run: () => setView('correct') }] : [];
 

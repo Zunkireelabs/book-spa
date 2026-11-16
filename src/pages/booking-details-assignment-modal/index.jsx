@@ -141,7 +141,7 @@ const BookingDetailsAssignmentModal = () => {
       overrideReason,
     }));
     if (result.error) {
-      showToast(result.error.message || 'Failed to assign therapist.', 'error');
+      showToast(result.error.message || 'Failed to assign team member.', 'error');
       return;
     }
     if (result.data?.warning) {

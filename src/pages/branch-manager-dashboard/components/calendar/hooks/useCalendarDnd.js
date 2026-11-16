@@ -294,7 +294,7 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
 
     if (columnMode === 'therapist' && isCrossColumn) {
       if (isCheckedOutBlockedSlot(calendarData?.checkedOutByTherapistAndDate, effectiveTargetColId, newDate, hour, minute)) {
-        showToast('This therapist has already checked out for the day and is not bookable after their check-out time.', 'error');
+        showToast('This team member has already checked out for the day and is not bookable after their check-out time.', 'error');
         return;
       }
     }
@@ -444,11 +444,11 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
           const newIds = currentTherapistIds.map(id => id === sourceColId ? targetColId : id);
           const result = await guard((overrideReason) => assignTherapist({ bookingId, therapistIds: newIds, overrideReason }));
           if (result.error) {
-            showToast(result.error.message || 'Failed to reassign therapist.', 'error');
+            showToast(result.error.message || 'Failed to reassign team member.', 'error');
           } else if (result.data?.warning) {
             showToast(`Assignment partially saved: ${result.data.warning}`, 'error');
           } else {
-            showToast(`Reassigned from ${colNameMap[sourceColId] || 'therapist'} to ${targetColName}`, 'success');
+            showToast(`Reassigned from ${colNameMap[sourceColId] || 'team member'} to ${targetColName}`, 'success');
           }
         }
         refreshCalendar();

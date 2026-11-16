@@ -149,7 +149,7 @@ const CompensationPanel = ({ branchId, readOnly = false }) => {
           </tbody>
         </table>
       )}
-      {staff && staff.length === 0 && !loadError && <EmptyBlock icon="Users" title="No active team members" hint="Add people under Therapists first." />}
+      {staff && staff.length === 0 && !loadError && <EmptyBlock icon="Users" title="No active team members" hint="Add people under Team first." />}
       <p className="mt-4 text-[12.5px] text-[#515152] bg-[#F7F7F5] rounded-lg px-3 py-2.5 max-w-[640px] flex gap-2"><Icon name="Info" size={14} className="mt-0.5 flex-none text-[#8A8A90]" /><span>Product commission is a share of what the team member <b className="font-medium">sold</b>, after refunds, for products marked <b className="font-medium">Earns commission</b>. It is separate from treatment commission, which stays as it is today.</span></p>
     </div>
   );

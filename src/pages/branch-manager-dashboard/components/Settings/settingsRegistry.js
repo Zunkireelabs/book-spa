@@ -6,7 +6,7 @@ const STAFF_UP = ['manager', 'admin', 'admin_viewer'];
 const MGR_ADMIN = ['manager', 'admin']; // master-data pages: admin_viewer cannot read them (RLS), so they are not offered
 
 export const SETTINGS_CATEGORIES = [
-  { id: 'spa', label: 'Spa' },
+  { id: 'spa', label: 'Business' },
   { id: 'payments', label: 'Payments' },
   { id: 'booking', label: 'Booking & profile' },
   { id: 'account', label: 'Account' },
@@ -29,11 +29,11 @@ export const SETTINGS = [
   { id: 'booking-settings', view: 'booking-settings', title: 'Booking Settings', description: 'Online booking rules and availability.', icon: 'Settings', category: 'booking', roles: ['admin'], overallHidden: true, keywords: 'online rules hours' },
   { id: 'calendar-settings', view: 'calendar-settings', title: 'Calendar Settings', description: 'Calendar hours, full-day view and display options.', icon: 'CalendarCog', category: 'booking', roles: ['admin'], overallHidden: true, keywords: 'calendar hours grid start end full day' },
   { id: 'closed-dates', view: 'closed-dates', title: 'Closed Dates', description: 'Days the branch is closed (holidays and special closures).', icon: 'CalendarOff', category: 'booking', roles: ['admin'], overallHidden: true, keywords: 'holiday closed days off' },
-  { id: 'provider-profile', view: 'provider-profile', title: 'Provider Profile', description: 'Your spa profile and images shown to customers.', icon: 'Image', category: 'booking', roles: ['admin'], overallHidden: true, keywords: 'logo photos about' },
+  { id: 'provider-profile', view: 'provider-profile', title: 'Business Profile', description: 'Your business profile and images shown to customers.', icon: 'Image', category: 'booking', roles: ['admin'], overallHidden: true, keywords: 'logo photos about' },
 
   { id: 'attendance-settings', view: 'attendance-settings', title: 'Attendance', description: 'How this branch tracks attendance.', icon: 'Clock', category: 'booking', roles: MGR_ADMIN, overallHidden: true, keywords: 'late grace check out shift' },
   { id: 'notifications', view: 'notifications', title: 'Notifications', description: 'What interrupts you: pop-ups, sound and desktop alerts.', icon: 'Bell', category: 'account', roles: STAFF_UP, keywords: 'alerts pop-up sound inbox' },
-  { id: 'audit', view: 'audit', title: 'Audit Log', description: 'Every change made in this spa, and who made it.', icon: 'History', category: 'account', roles: STAFF_UP, keywords: 'history log changes who' },
+  { id: 'audit', view: 'audit', title: 'Audit Log', description: 'Every change made in your business, and who made it.', icon: 'History', category: 'account', roles: STAFF_UP, keywords: 'history log changes who' },
 ];
 
 export const SETTINGS_VIEWS = new Set(SETTINGS.map((s) => s.view));

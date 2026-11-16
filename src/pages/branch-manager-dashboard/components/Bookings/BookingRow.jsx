@@ -8,7 +8,7 @@ import { formatLate, groupInfo } from '../../../../utils/bookingsList';
 
 export const COLUMN_DEFS = [
   { id: 'service', label: 'Service' },
-  { id: 'therapist', label: 'Therapist' },
+  { id: 'therapist', label: 'Team member' },
   { id: 'amount', label: 'Amount' },
 ];
 

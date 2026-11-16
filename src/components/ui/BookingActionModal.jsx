@@ -249,7 +249,7 @@ const BookingActionModal = ({
   onRescheduleStart,
 }) => {
   const { branchId } = useBranch();
-  const { paymentMethods, orgSettings, staffLabel } = useOrg();
+  const { paymentMethods, orgSettings, staffLabel, staffLabelPlural } = useOrg();
   const cancelReasonOptions = orgSettings?.cancellation_reasons?.length
     ? orgSettings.cancellation_reasons
     : CANCEL_REASON_OPTIONS;
@@ -1654,7 +1654,7 @@ const BookingActionModal = ({
   // Equal-fit tab bar for the panel: never scrolls horizontally.
   const panelTabs = [
     { id: 'details', label: 'Details', icon: 'FileText' },
-    { id: 'assign', label: 'Therapists', icon: 'UserCheck' },
+    { id: 'assign', label: `${staffLabelPlural || 'Team'}`, icon: 'UserCheck' },
     { id: 'discount', label: 'Discount', icon: 'Percent' },
     { id: 'payment', label: 'Payment', icon: 'CreditCard' },
   ];
@@ -2236,7 +2236,7 @@ const BookingActionModal = ({
                         onChange={(e) => { setEditForm(f => ({ ...f, referredBy: e.target.value })); setReferredByOpen(true); }}
                         onFocus={() => setReferredByOpen(true)}
                         onBlur={() => setTimeout(() => setReferredByOpen(false), 150)}
-                        placeholder="Type a name or pick a therapist…"
+                        placeholder={`Type a name or pick a ${(staffLabel || 'team member').toLowerCase()}…`}
                         className={inputClasses}
                       />
                       {referredByOpen && (() => {
@@ -2404,7 +2404,7 @@ const BookingActionModal = ({
                     </p>
                   )}
                   {therapists.length === 0 ? (
-                    <p className="font-body font-body-normal text-sm text-text-secondary">No therapists available.</p>
+                    <p className="font-body font-body-normal text-sm text-text-secondary">No {(staffLabelPlural || 'team members').toLowerCase()} available.</p>
                   ) : (
                     <div>
                       <div className="relative mb-2">
@@ -2413,7 +2413,7 @@ const BookingActionModal = ({
                           type="text"
                           value={therapistSearch}
                           onChange={(e) => setTherapistSearch(e.target.value)}
-                          placeholder="Search therapists..."
+                          placeholder={`Search ${(staffLabelPlural || 'team members').toLowerCase()}...`}
                           className="w-full pl-8 pr-3 py-2 bg-background border border-border rounded-spa text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                         />
                       </div>
@@ -2601,7 +2601,7 @@ const BookingActionModal = ({
                   <textarea
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Add any special instructions for the therapist..."
+                    placeholder={`Add any special instructions for the ${(staffLabel || 'team member').toLowerCase()}...`}
                     rows={3}
                     disabled={isAssignmentBlocked}
                     className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none disabled:opacity-60 disabled:cursor-not-allowed"

@@ -190,7 +190,7 @@ const BillingSettingsPanel = ({ readOnly = false }) => {
       <div className="space-y-1">
         <label className="block font-body font-body-medium text-sm text-text-primary">Company legal name</label>
         <p className="font-caption text-xs text-text-tertiary mb-1">May differ from the org's display name (e.g. "Pvt. Ltd." suffix). Appears on every invoice.</p>
-        <Input value={form.legalName} disabled={readOnly} onChange={(e) => setForm((f) => ({ ...f, legalName: e.target.value }))} placeholder={original.orgName || 'e.g. Nuad Thai Spa Pvt. Ltd.'} />
+        <Input value={form.legalName} disabled={readOnly} onChange={(e) => setForm((f) => ({ ...f, legalName: e.target.value }))} placeholder={original.orgName || 'e.g. Your Business Pvt. Ltd.'} />
       </div>
 
       <div className="space-y-1">

@@ -151,7 +151,7 @@ const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || 'there'
 export const whatsLeft = (v) => (isCoupon(v) ? `${Number(v.percentOff)}% off one visit` : `${npr(remainingOf(v))} left`);
 /** One WhatsApp text for both people; `to` = 'for' | 'buyer'. */
 export function reminderText(v, { to = 'for', orgName, bookUrl }) {
-  const org = orgName || 'the spa';
+  const org = orgName || 'our business';
   const tail = `has ${whatsLeft(v)} and is valid until ${longDate(v.expiryDate)}.${bookUrl ? ` Book here: ${bookUrl}` : ''}`;
   if (to === 'buyer') return `Hi ${firstName(v.buyerName)}, the ${org} voucher you gave ${v.guestName} (${v.voucherCode}) ${tail}`;
   return `Hi ${firstName(v.guestName)}, your ${org} voucher ${v.voucherCode} ${tail}`;

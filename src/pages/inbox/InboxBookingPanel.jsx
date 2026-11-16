@@ -81,8 +81,8 @@ const InboxBookingPanel = ({ bookingId, onClose, onChanged }) => {
     const r = await guard((overrideReason) => assignTherapist({
       bookingId: id, therapistIds: ids, roomId: roomId !== undefined ? (roomId || null) : undefined, therapistRoomOverrides, companionName, companionPhone, overrideReason,
     }));
-    if (r.error) { showToast(friendlyError(r.error, 'Failed to assign therapist.'), 'error'); return; }
-    showToast('Therapist assigned successfully');
+    if (r.error) { showToast(friendlyError(r.error, 'Failed to assign team member.'), 'error'); return; }
+    showToast('Team member assigned successfully');
     await after(id);
   };
   const handleRecordPayment = async (id, opts) => {

@@ -100,7 +100,7 @@ export function useBookingActions({ showToast, refreshCalendar, selectedBooking,
     if (result.error) {
       showToast(result.error.message || 'Failed to resize.', 'error');
     } else if (isPartOfSelection) {
-      showToast(`Resized ${booking.therapistName || 'therapist'} independently to ${newStartTime} – ${newEndTime}`, 'success');
+      showToast(`Resized ${booking.therapistName || 'team member'} independently to ${newStartTime} – ${newEndTime}`, 'success');
     } else {
       showToast(`Resized to ${newStartTime} – ${newEndTime}`, 'success');
     }

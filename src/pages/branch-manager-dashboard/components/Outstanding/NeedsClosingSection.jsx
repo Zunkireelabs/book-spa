@@ -102,7 +102,7 @@ const NeedsClosingSection = ({ branchId, from, to, collapsible = false, therapis
           {collapsible ? (
             <table className="w-full border-collapse">
               <thead><tr>
-                <th className={`${th} text-left sticky top-0`}>Customer</th><th className={`${th} text-left sticky top-0`}>Date</th><th className={`${th} text-left sticky top-0`}>Service · therapist</th>
+                <th className={`${th} text-left sticky top-0`}>Customer</th><th className={`${th} text-left sticky top-0`}>Date</th><th className={`${th} text-left sticky top-0`}>Service · team member</th>
                 <th className={`${th} text-right sticky top-0`}>At stake</th><th className={`${th} sticky top-0`} />
               </tr></thead>
               <tbody>
@@ -124,7 +124,7 @@ const NeedsClosingSection = ({ branchId, from, to, collapsible = false, therapis
             <thead>
               <tr className="bg-background border-b border-border text-left font-body font-body-medium text-xs text-text-secondary">
                 <th className="px-4 py-2.5">Date</th><th className="px-4 py-2.5">Customer</th><th className="px-4 py-2.5">Service</th>
-                <th className="px-4 py-2.5">Therapist</th><th className="px-4 py-2.5 text-right">At stake</th><th className="px-4 py-2.5" />
+                <th className="px-4 py-2.5">Team member</th><th className="px-4 py-2.5 text-right">At stake</th><th className="px-4 py-2.5" />
               </tr>
             </thead>
             <tbody>

@@ -86,7 +86,7 @@ const MembershipDetailPanel = ({ membershipId, isAdmin = false, readOnly = false
   const canBook = !!m && !readOnly && !isOverall && m.status === 'active';
   const phone = m?.customerPhone || '';
   const firstName = m ? String(m.customerName || '').trim().split(/\s+/)[0] : '';
-  const messageUrl = m && !readOnly ? buildWhatsAppUrl(phone, `Hi ${firstName}, this is ${orgName || 'the spa'} about your ${m.tierName || 'membership'}: ${npr(m.balance)} in your wallet${m.expiryDate ? `, valid until ${longDate(m.expiryDate)}` : ''}.`) : null;
+  const messageUrl = m && !readOnly ? buildWhatsAppUrl(phone, `Hi ${firstName}, this is ${orgName || 'our team'} about your ${m.tierName || 'membership'}: ${npr(m.balance)} in your wallet${m.expiryDate ? `, valid until ${longDate(m.expiryDate)}` : ''}.`) : null;
   const profileUrl = m?.customerId ? `/${orgSlug}/customers/${m.customerId}` : null;
   const menu = readOnly || !m ? [] : [
     { key: 'renew', label: 'Renew', icon: 'RefreshCw', run: () => setView('renew') },

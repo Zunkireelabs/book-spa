@@ -4,7 +4,7 @@ import { shortDate, dayRange } from './therapistInnerView';
 
 const BOOKED = ['completed', 'not_closed', 'upcoming'];
 const num = (n) => Number(n || 0).toLocaleString('en-IN');
-export const TYPE_LABEL = { new: 'New to spa', returning: 'Returning', not_served: 'Not served yet' };
+export const TYPE_LABEL = { new: 'New to us', returning: 'Returning', not_served: 'Not served yet' };
 
 /** One row's derived flags and counts. */
 export function decorate(c) {

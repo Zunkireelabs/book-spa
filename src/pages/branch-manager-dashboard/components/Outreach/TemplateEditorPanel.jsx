@@ -346,7 +346,7 @@ const TemplateEditorPanel = () => {
               type="text"
               value={form.subject}
               onChange={(e) => setForm((prev) => ({ ...prev, subject: e.target.value }))}
-              placeholder={`We miss you at ${orgName || 'our spa'}!`}
+              placeholder={`We miss you at ${orgName || 'our business'}!`}
               className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
             />
           </div>

@@ -150,7 +150,7 @@ const EditBlockModal = ({
   const validate = () => {
     if (!date || !startTime) { setError('Select a date and start time.'); return false; }
     if (!(Number(durationMinutes) > 0)) { setError('Enter a valid duration.'); return false; }
-    if (assigneeType === 'therapist' && !therapistId) { setError('Select a therapist.'); return false; }
+    if (assigneeType === 'therapist' && !therapistId) { setError('Select a team member.'); return false; }
     return true;
   };
 
@@ -247,7 +247,7 @@ const EditBlockModal = ({
 
   const reason = !date ? 'Pick a date' : !startTime ? 'Pick a start time'
     : !(Number(durationMinutes) > 0) ? 'Enter a duration'
-    : assigneeType === 'therapist' && !therapistId ? 'Select a therapist' : '';
+    : assigneeType === 'therapist' && !therapistId ? 'Select a team member' : '';
 
   return (
     <>
@@ -288,15 +288,15 @@ const EditBlockModal = ({
             {activeTab === 'details' && (
               <>
                 <Segmented
-                  options={[['therapist', 'Therapist'], ['location', 'Whole location']]}
+                  options={[['therapist', 'Team member'], ['location', 'Whole location']]}
                   value={assigneeType}
                   onChange={setAssigneeType}
                 />
 
                 {assigneeType === 'therapist' && (
-                  <Field label="Therapist" required>
+                  <Field label="Team member" required>
                     <SelectField
-                      placeholder="Select therapist..."
+                      placeholder="Select team member..."
                       options={(therapists || []).map((t) => ({ value: t.id, label: t.name }))}
                       value={therapistId}
                       onChange={setTherapistId}

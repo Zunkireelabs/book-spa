@@ -226,7 +226,7 @@ const ProviderProfilePanel = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Provider Profile</h3>
+        <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Business Profile</h3>
         <p className="font-body text-sm text-text-secondary">
           About, amenities, and branding for the profile-page-style customer booking layout.
         </p>

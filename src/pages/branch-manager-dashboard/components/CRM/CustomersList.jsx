@@ -25,7 +25,7 @@ const LAST_VISIT_OPTIONS = [
 ];
 const TAB_DEFS = [
   { id: 'all', label: 'All' },
-  { id: 'in-spa', label: 'In spa now', dot: true },
+  { id: 'in-spa', label: 'In service now', dot: true },
   { id: 'upcoming', label: 'Upcoming' },
   { id: 'owes', label: 'Owes money' },
   { id: 'members', label: 'Members' },
@@ -398,7 +398,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
   );
   const chips = (
     <>
-      <FilterChip label="Therapist" value={filters.therapist} options={therapistOptions} onChange={setFilter('therapist')} selectedLabel={therapistOptions.find((o) => o.id === filters.therapist)?.label} />
+      <FilterChip label="Team member" value={filters.therapist} options={therapistOptions} onChange={setFilter('therapist')} selectedLabel={therapistOptions.find((o) => o.id === filters.therapist)?.label} />
       <FilterChip label="Service" value={filters.service} options={serviceOptions} onChange={setFilter('service')} selectedLabel={filters.service} />
       {noMember && (
         <span className="h-7 rounded-full inline-flex items-center text-[12.5px] font-medium border border-border bg-[#FAFAF9] text-text-primary">

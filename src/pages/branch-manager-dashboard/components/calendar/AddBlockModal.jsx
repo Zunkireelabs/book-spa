@@ -154,7 +154,7 @@ const AddBlockModal = ({
 
   const reason = !date ? 'Pick a date' : !startTime ? 'Pick a start time'
     : !(Number(durationMinutes) > 0) ? 'Enter a duration'
-    : assigneeType === 'therapist' && !therapistId ? 'Select a therapist' : '';
+    : assigneeType === 'therapist' && !therapistId ? 'Select a team member' : '';
 
   const moveOverride = moveConfirm ? (
     <div role="alertdialog" aria-label="Move block" className="flex items-center gap-3">
@@ -187,15 +187,15 @@ const AddBlockModal = ({
         {activeTab === 'details' && (
           <>
             <Segmented
-              options={[['therapist', 'Therapist'], ['location', 'Whole location']]}
+              options={[['therapist', 'Team member'], ['location', 'Whole location']]}
               value={assigneeType}
               onChange={setAssigneeType}
             />
 
             {assigneeType === 'therapist' && (
-              <Field label="Therapist" required>
+              <Field label="Team member" required>
                 <SelectField
-                  placeholder="Select therapist..."
+                  placeholder="Select team member..."
                   options={(therapists || []).map((t) => ({ value: t.id, label: t.name }))}
                   value={therapistId}
                   onChange={setTherapistId}

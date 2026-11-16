@@ -135,7 +135,7 @@ export function nowLineIndex(rows, nowHM) {
 export const VIEWS = [
   { id: 'all', label: 'All' },
   { id: 'done', label: 'Done', color: '#22C55E' },
-  { id: 'spa', label: 'In spa now', color: '#6366F1' },
+  { id: 'spa', label: 'In service now', color: '#6366F1' },
   { id: 'come', label: 'To come', color: '#3B82F6' },
   { id: 'unpaid', label: 'Unpaid', color: '#F59E0B' },
   { id: 'void', label: 'Cancelled & no-show', color: '#DC2626' },
@@ -216,7 +216,7 @@ export function matchesFilters(b, { therapist, service, room }) {
 export const SORTS = {
   time: { label: 'Time' },
   customer: { label: 'Customer' },
-  therapist: { label: 'Therapist' },
+  therapist: { label: 'Team member' },
   amount: { label: 'Amount' },
 };
 

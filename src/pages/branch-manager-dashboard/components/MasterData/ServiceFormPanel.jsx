@@ -197,7 +197,7 @@ const ServiceFormPanel = ({ service, categories, allTherapists, branchId, isBeau
         {!isBeauty && (
           <SwitchRow
             id="svc-couple-switch" label="Couple service" checked={form.isCouple} onChange={(v) => set({ isCouple: v })}
-            description="Priced for two. Shows the companion room/name/phone option when 2 therapists are assigned, and is left out of the calendar's group-booking service pickers."
+            description="Priced for two. Shows the companion room/name/phone option when 2 team members are assigned, and is left out of the calendar's group-booking service pickers."
           />
         )}
 

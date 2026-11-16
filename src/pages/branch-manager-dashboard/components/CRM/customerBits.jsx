@@ -7,7 +7,7 @@ export const StarIcon = ({ size = 13 }) => (
 );
 export const InSpaTag = () => (
   <span className="h-5 rounded-full pl-1.5 pr-[7px] text-[11.5px] font-medium inline-flex items-center gap-[5px] whitespace-nowrap bg-[#EEF0FF] text-[#4F46E5]">
-    <i className="w-1.5 h-1.5 rounded-full bg-[#4F46E5] shadow-[0_0_0_3px_rgba(79,70,229,.16)]" />In spa
+    <i className="w-1.5 h-1.5 rounded-full bg-[#4F46E5] shadow-[0_0_0_3px_rgba(79,70,229,.16)]" />In service
   </span>
 );
 

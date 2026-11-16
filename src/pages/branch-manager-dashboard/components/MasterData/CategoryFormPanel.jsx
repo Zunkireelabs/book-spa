@@ -64,7 +64,7 @@ const CategoryFormPanel = ({ category, onClose, onSaved }) => {
       <FormBody>
         <InlineError message={serverError} />
         <Field label="Category name" required id="cat-name" error={errors.name} hint={editing ? 'Renaming a category updates all services using it.' : undefined}>
-          <TextInput {...controlA11y('cat-name', errors.name)} error={!!errors.name} value={form.name} onChange={(e) => { set({ name: e.target.value }); clear('name'); }} placeholder="e.g. Spa, Salon, Wellness" />
+          <TextInput {...controlA11y('cat-name', errors.name)} error={!!errors.name} value={form.name} onChange={(e) => { set({ name: e.target.value }); clear('name'); }} placeholder="e.g. Massage, Hair, Wellness" />
         </Field>
         <Field label="Description" id="cat-description">
           <textarea

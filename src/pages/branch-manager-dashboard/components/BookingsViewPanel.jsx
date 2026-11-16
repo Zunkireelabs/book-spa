@@ -355,8 +355,8 @@ const BookingsViewPanel = ({ branchId }) => {
     const result = await guard((overrideReason) => assignTherapist({
       bookingId, therapistIds: ids, roomId: roomId !== undefined ? (roomId || null) : undefined, therapistRoomOverrides, companionName, companionPhone, overrideReason,
     }));
-    if (result.error) { showToast(friendlyError(result.error, 'Failed to assign therapist.'), 'error'); return; }
-    showToast('Therapist assigned successfully');
+    if (result.error) { showToast(friendlyError(result.error, 'Failed to assign team member.'), 'error'); return; }
+    showToast('Team member assigned successfully');
     await load();
     await refreshSelected(bookingId);
   };
@@ -397,7 +397,7 @@ const BookingsViewPanel = ({ branchId }) => {
   };
 
   const exportCsv = () => {
-    const head = ['Date', 'Time', 'Booking', 'Customer', 'Phone', 'Service', 'Therapist', 'Room', 'Status', 'Price', 'Paid', 'Due'];
+    const head = ['Date', 'Time', 'Booking', 'Customer', 'Phone', 'Service', 'Team member', 'Room', 'Status', 'Price', 'Paid', 'Due'];
     const lines = visible.map((b) => {
       const m = moneyOf(b, ctx);
       return [b.date, b.time, b.id, b.customerName, b.customerPhone, b.service, (b.therapists || []).map((t) => t.name).join(' + '), b.roomName, b.status, m.price, m.paid, m.due].map(csvEscape).join(',');
@@ -518,7 +518,7 @@ const BookingsViewPanel = ({ branchId }) => {
   );
   const chips = (
     <>
-      <FilterChip label="Therapist" value={filters.therapist} options={therapistOptions} onChange={setFilter('th')} selectedLabel={therapistOptions.find((o) => o.id === filters.therapist)?.label} />
+      <FilterChip label="Team member" value={filters.therapist} options={therapistOptions} onChange={setFilter('th')} selectedLabel={therapistOptions.find((o) => o.id === filters.therapist)?.label} />
       <FilterChip label="Service" value={filters.service} options={serviceOptions} onChange={setFilter('sv')} selectedLabel={serviceOptions.find((o) => o.id === filters.service)?.label} />
       <FilterChip label="Room" value={filters.room} options={roomOptions} onChange={setFilter('rm')} selectedLabel={roomOptions.find((o) => o.id === filters.room)?.label} />
     </>
@@ -730,7 +730,7 @@ const BookingsViewPanel = ({ branchId }) => {
                     <th className={`${th} text-left pl-2`}>Time</th>
                     <th className={`${th} text-left`}>Customer</th>
                     {isMd && columns.service && <th className={`${th} text-left`}>Service</th>}
-                    {isLg && columns.therapist && <th className={`${th} text-left`}>Therapist</th>}
+                    {isLg && columns.therapist && <th className={`${th} text-left`}>Team member</th>}
                     {isSm && <th className={`${th} text-left`}>Status</th>}
                     {isSm && columns.amount && <th className={`${th} text-right pr-4`}>Amount</th>}
                     <th className={th} />

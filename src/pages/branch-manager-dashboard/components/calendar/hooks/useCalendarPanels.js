@@ -204,7 +204,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   const handleDragCreate = useCallback((slotInfo) => {
     if (rebookSource) return;
     if (slotInfo.colType === 'therapist' && isCheckedOutBlockedSlot(calendarData?.checkedOutByTherapistAndDate, slotInfo.colId, slotInfo.day, slotInfo.hour, slotInfo.minute)) {
-      showToast('This therapist has already checked out for the day and is not bookable after their check-out time.', 'error');
+      showToast('This team member has already checked out for the day and is not bookable after their check-out time.', 'error');
       return;
     }
     // Starting inside a block is already prevented (blocks swallow the press); a range that runs into one opens with the warning.
@@ -235,7 +235,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
 
     if (slotInfo.colType === 'therapist') {
       if (isCheckedOutBlockedSlot(calendarData?.checkedOutByTherapistAndDate, slotInfo.colId, slotInfo.day, slotInfo.hour, slotInfo.minute)) {
-        showToast('This therapist has already checked out for the day and is not bookable after their check-out time.', 'error');
+        showToast('This team member has already checked out for the day and is not bookable after their check-out time.', 'error');
         return;
       }
     }
