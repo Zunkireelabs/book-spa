@@ -67,7 +67,7 @@ export function dayPhase(hm, { open, close } = {}) {
   return 'live';
 }
 
-/** True when one of the bookings is assigned to this login's linked therapist (users.therapist_id, ZNLY-150). */
+/** True when one of the bookings is assigned to this login's linked therapist (therapists.user_id, ZNLY-150 / migration-377). */
 export function hasOwnBookingsToday(bookings, therapistId) {
   if (!therapistId) return false;
   return (bookings || []).some((b) => {

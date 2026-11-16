@@ -5,12 +5,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // pinAuth.js here only pulls in the service function, same pattern as
 // membershipBackdateDayLock.test.js.
 const verifyOtpMock = vi.fn();
+const signOutMock = vi.fn();
+// users.login_access lookup after the session exists (login off blocks PIN sign-in too)
+let loginAccessRow = { login_access: 'email' };
+const maybeSingleMock = vi.fn(async () => ({ data: loginAccessRow, error: null }));
 
 vi.mock('../lib/supabase', () => ({
   supabase: {
     auth: {
       verifyOtp: (...args) => verifyOtpMock(...args),
+      signOut: (...args) => signOutMock(...args),
     },
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: () => maybeSingleMock() }) }) }),
   },
 }));
 
@@ -19,6 +25,8 @@ const { loginWithPin } = await import('./pinAuth');
 describe('loginWithPin', () => {
   beforeEach(() => {
     verifyOtpMock.mockReset();
+    signOutMock.mockReset();
+    loginAccessRow = { login_access: 'email' };
     global.fetch = vi.fn();
     import.meta.env.VITE_SUPABASE_URL = 'https://example.supabase.co';
     import.meta.env.VITE_SUPABASE_ANON_KEY = 'anon-key';
@@ -107,5 +115,28 @@ describe('loginWithPin', () => {
     expect(result).toEqual({ success: false, error: 'still bad' });
     expect(global.fetch).toHaveBeenCalledTimes(2);
     expect(verifyOtpMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a PIN sign-in when the login is off, and drops the session', async () => {
+    global.fetch.mockResolvedValue({ json: async () => ({ success: true, email_otp: '123456' }) });
+    verifyOtpMock.mockResolvedValue({ data: { session: { access_token: 'tok' }, user: { id: 'u1' } }, error: null });
+    loginAccessRow = { login_access: 'none' };
+
+    const result = await loginWithPin('staff@zenly.app', '1234', 'nuad-thai-spa');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/turned off/);
+    expect(signOutMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows a PIN sign-in for a login with no value (created outside Staff access)', async () => {
+    global.fetch.mockResolvedValue({ json: async () => ({ success: true, email_otp: '123456' }) });
+    verifyOtpMock.mockResolvedValue({ data: { session: { access_token: 'tok' }, user: { id: 'u1' } }, error: null });
+    loginAccessRow = { login_access: null };
+
+    const result = await loginWithPin('staff@zenly.app', '1234', 'nuad-thai-spa');
+
+    expect(result.success).toBe(true);
+    expect(signOutMock).not.toHaveBeenCalled();
   });
 });

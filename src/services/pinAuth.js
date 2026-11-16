@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { isLoginAllowed, LOGIN_OFF_MESSAGE } from './loginAccess';
 
 // Request a fresh OTP from the pin-login Edge Function.
 // (service role key stays server-side, never exposed to browser)
@@ -57,6 +58,13 @@ export async function loginWithPin(email, pin, orgSlug) {
     });
 
     if (!otpError && otpData?.session) {
+      // Login off (Staff access) blocks PIN sign-in too. The Edge Function cannot be changed from this repo, so the check is made
+      // here, right after the session exists; a lookup failure lets the sign-in through (never lock someone out on a blip).
+      const { data: accessRow } = await supabase.from('users').select('login_access').eq('id', otpData.user?.id).maybeSingle();
+      if (!isLoginAllowed(accessRow)) {
+        await supabase.auth.signOut();
+        return { success: false, error: LOGIN_OFF_MESSAGE };
+      }
       return { success: true, session: otpData.session, user: otpData.user };
     }
     lastError = otpError?.message || 'Session creation failed.';

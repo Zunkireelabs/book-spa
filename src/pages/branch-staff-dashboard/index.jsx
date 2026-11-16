@@ -23,7 +23,7 @@ import TodayInsightsPanel from '../branch-manager-dashboard/components/TodayInsi
 import ProductsPage from '../branch-manager-dashboard/components/Products/ProductsPage';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
-import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, recordTip, applyDiscount } from '../../services/api';
+import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, recordTip, applyDiscount, fetchMyTherapistId } from '../../services/api';
 import { transformBookings, toDbStatus, isNoShow } from '../../services/bookingTransformers';
 import { supabase } from '../../lib/supabase';
 import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED, PRODUCTS_ENABLED } from '../../lib/featureFlags';
@@ -32,6 +32,13 @@ import { getTodayISO, toISO } from '../../utils/periodPresets';
 const BranchStaffDashboard = () => {
   const { profile, user } = useAuth();
   const { branchId, branchName, loading: branchLoading } = useBranch();
+  // The therapist this login is (therapists.user_id, migration-377), for the "My day" view.
+  const [myTherapistId, setMyTherapistId] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchMyTherapistId(profile?.id).then(({ data }) => { if (!cancelled) setMyTherapistId(data); });
+    return () => { cancelled = true; };
+  }, [profile?.id]);
   const [searchParams, setSearchParams] = useSearchParams();
   const viewMode = searchParams.get('view') || 'calendar'; // staff land on the calendar; the sidebar's Dashboard link is ?view=dashboard
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -560,7 +567,7 @@ const BranchStaffDashboard = () => {
       }
     >
       {viewMode === 'dashboard' ? (
-        <DashboardHome hasBookingsToday={hasOwnBookingsToday(bookings, profile?.therapist_id)} />
+        <DashboardHome hasBookingsToday={hasOwnBookingsToday(bookings, myTherapistId)} />
       ) : viewMode === 'calendar' ? (
         <OperationalCalendar branchId={branchId} />
       ) : areaForView ? (

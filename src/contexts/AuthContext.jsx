@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { supabase, retryingFetch } from '../lib/supabase';
 import { identify, reset, setGroup } from '../lib/analytics';
 import { isTransientStatus, ServiceUnavailableError } from '../lib/supabaseRetry';
+import { isLoginAllowed, LOGIN_OFF_MESSAGE } from '../services/loginAccess';
 
 // Ceiling on how long the profile fetch may run before we give up and treat it
 // as "service unavailable" rather than leaving the app on a spinner forever.
@@ -176,6 +177,12 @@ export const AuthProvider = ({ children }) => {
         data.session.access_token
       );
 
+      // Login off (Staff access) blocks sign-in: drop the session that was just created and say why.
+      if (!isLoginAllowed(userProfile)) {
+        await supabase.auth.signOut();
+        throw new Error(LOGIN_OFF_MESSAGE);
+      }
+
       setUser(data.user);
       setProfile(userProfile);
       setAuthUnavailable(false);
@@ -246,6 +253,13 @@ export const AuthProvider = ({ children }) => {
     setLoading(true);
     try {
       const p = await fetchProfile(userId);
+      // A session that is still open when an admin turns the login off ends here (page refresh / return visit).
+      if (p && !isLoginAllowed(p)) {
+        await supabase.auth.signOut();
+        setProfile(null);
+        setUser(null);
+        return null;
+      }
       setProfile(p);
       setAuthUnavailable(false);
       return p;

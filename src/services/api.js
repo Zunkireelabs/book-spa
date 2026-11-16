@@ -674,19 +674,38 @@ export async function fetchSetupState({ branchId }) {
   }
 }
 
-// The org's logins for the Therapists "Login" field: RLS scopes it to the caller's org. therapist_id is the person each is linked to.
+// The org's logins for the Therapists "Login" field: RLS scopes it to the caller's org. therapist_id is the person each is linked to,
+// read from therapists.user_id (the one link, migration-377).
 export async function fetchOrgLogins() {
   try {
-    const { data, error } = await supabase.from('users').select('id, full_name, email, role, therapist_id').in('role', ['staff', 'manager', 'admin']).order('full_name');
-    if (error) throw error;
-    return { data: data || [], error: null };
+    const [usersRes, linksRes] = await Promise.all([
+      supabase.from('users').select('id, full_name, email, role').in('role', ['staff', 'manager', 'admin']).order('full_name'),
+      supabase.from('therapists').select('id, user_id').not('user_id', 'is', null),
+    ]);
+    if (usersRes.error) throw usersRes.error;
+    if (linksRes.error) throw linksRes.error;
+    const therapistOf = new Map((linksRes.data || []).map((t) => [t.user_id, t.id]));
+    return { data: (usersRes.data || []).map((u) => ({ ...u, therapist_id: therapistOf.get(u.id) || null })), error: null };
   } catch (error) {
     console.error('[API] fetchOrgLogins error:', error.message);
     return { data: [], error };
   }
 }
 
-// Link a login to the person they work as (users.therapist_id, ZNLY-150). Manager/admin only; null unlinks. The RPC is the only write path.
+// The therapist this login is (therapists.user_id, migration-377), or null. Used by the staff "My day" view.
+export async function fetchMyTherapistId(userId) {
+  try {
+    if (!userId) return { data: null, error: null };
+    const { data, error } = await supabase.from('therapists').select('id').eq('user_id', userId).limit(1).maybeSingle();
+    if (error) throw error;
+    return { data: data?.id || null, error: null };
+  } catch (error) {
+    console.error('[API] fetchMyTherapistId error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Link a login to the person they work as (therapists.user_id since migration-377). Manager/admin only; null unlinks. The RPC is the only write path.
 export async function setUserTherapist({ userId, therapistId = null }) {
   try {
     const { error } = await supabase.rpc('set_user_therapist', { p_user_id: userId, p_therapist_id: therapistId });
