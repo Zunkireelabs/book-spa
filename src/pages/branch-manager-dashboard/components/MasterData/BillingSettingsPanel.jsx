@@ -4,6 +4,7 @@ import Button from '../../../../components/ui/Button';
 import Input from '../../../../components/ui/Input';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import { fetchBillingSettings, updateBillingSetting } from '../../../../services/api';
+import { useOrg } from '../../../../contexts/OrgContext';
 
 // Named by behaviour, not by the ambiguous "included/excluded/extra" the
 // request used — see migration-329. Deliberately no default selection
@@ -24,6 +25,7 @@ const EMPTY = {
 };
 
 const BillingSettingsPanel = ({ readOnly = false }) => {
+  const { refreshOrg } = useOrg();
   const [form, setForm] = useState(EMPTY);
   const [original, setOriginal] = useState(EMPTY);
   const [loading, setLoading] = useState(true);
@@ -82,6 +84,13 @@ const BillingSettingsPanel = ({ readOnly = false }) => {
     setSaving(false);
     setSavedMsg('Billing settings saved.');
     await load();
+    // OrgContext caches organizations.settings for the whole app, and the
+    // invoice entry points (BookingActionModal's "Print invoice",
+    // CustomerSalesTab's receipt icon) gate on billing_enabled from that
+    // cache. Reloading only this panel's own copy left those reading a
+    // stale false, so enabling billing appeared to do nothing until a full
+    // page reload. Refresh the shared copy too.
+    await refreshOrg();
   };
 
   const handleSaveClick = () => {
