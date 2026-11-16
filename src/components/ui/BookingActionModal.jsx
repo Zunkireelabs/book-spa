@@ -110,6 +110,10 @@ const BookingActionModal = ({
   branchHours,
   defaultNewBookingMode,
   userRole = 'staff',
+  // Printing an invoice hands the customer their own name/phone on paper —
+  // an account with customer details hidden must not get that affordance,
+  // same gate as issue_invoice() itself (migration-334).
+  canViewCustomerDetails = true,
   // Optional: when provided, a small "view" affordance appears on each Related-
   // services/Other-unpaid-bookings row, letting staff jump straight to THAT
   // booking's own management dialog instead of only being able to select it for
@@ -2897,7 +2901,7 @@ const BookingActionModal = ({
                         <Icon name="CheckCircle" size={14} className="text-success flex-shrink-0" />
                         <span className="font-body font-body-normal text-xs sm:text-sm text-success">Payment has been recorded.</span>
                       </div>
-                      {(orgSettings?.billing_enabled === true || hasExistingInvoice) && (
+                      {canViewCustomerDetails && (orgSettings?.billing_enabled === true || hasExistingInvoice) && (
                         <button
                           type="button"
                           onClick={() => setShowInvoiceModal(true)}

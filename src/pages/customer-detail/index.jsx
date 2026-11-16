@@ -63,6 +63,7 @@ const CustomerDetailPage = () => {
   const { orgSlug, customerId } = useParams();
   const { profile } = useAuth();
   const userRole = profile?.role || 'staff';
+  const canViewCustomerDetails = userRole === 'manager' || userRole === 'admin' || profile?.can_view_customer_details !== false;
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState('summary');
@@ -208,7 +209,7 @@ const CustomerDetailPage = () => {
               {activeTab === 'summary' && <CustomerSummaryTab data={data} onNavigateTab={setActiveTab} />}
               {activeTab === 'visitHistory' && <CustomerVisitHistoryTab data={data} />}
               {activeTab === 'appointments' && <CustomerAppointmentsTab data={data} />}
-              {activeTab === 'sales' && <CustomerSalesTab data={data} />}
+              {activeTab === 'sales' && <CustomerSalesTab data={data} canViewCustomerDetails={canViewCustomerDetails} />}
               {activeTab === 'notes' && <CustomerNotesTab customer={data.customer} onSaved={loadProfile} />}
               {activeTab === 'packages' && <CustomerPackagesTab customerId={data.customer.id} />}
               {activeTab === 'membership' && <CustomerMembershipTab membership={data.membership} />}

@@ -512,6 +512,7 @@ const OperationalCalendar = ({ branchId }) => {
         onRecordPayment={handleRecordPayment}
         onGroupPaymentRecorded={handleGroupPaymentRecorded}
         userRole={profile?.role || 'staff'}
+        canViewCustomerDetails={profile?.role === 'manager' || profile?.role === 'admin' || profile?.can_view_customer_details !== false}
         onViewBooking={handleViewBooking}
       />
 

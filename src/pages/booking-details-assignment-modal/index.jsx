@@ -256,6 +256,7 @@ const BookingDetailsAssignmentModal = () => {
         onEditBooking={handleEditBooking}
         onCreateBooking={handleCreateBooking}
         userRole={userRole}
+        canViewCustomerDetails={userRole === 'manager' || userRole === 'admin' || profile?.can_view_customer_details !== false}
         onViewBooking={handleViewBooking}
       />
 

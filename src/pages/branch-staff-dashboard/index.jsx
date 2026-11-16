@@ -687,6 +687,7 @@ const BranchStaffDashboard = () => {
                       onGroupPaymentRecorded={handleGroupPaymentRecorded}
                       onApplyDiscount={handleApplyDiscount}
                       userRole={profile?.role || 'staff'}
+                      canViewCustomerDetails={profile?.role === 'manager' || profile?.role === 'admin' || profile?.can_view_customer_details !== false}
                       onRefresh={loadData}
                       dateRange={filters.dateRange}
                     />

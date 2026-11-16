@@ -265,6 +265,7 @@ const BookingsViewPanel = ({ branchId }) => {
                 onRefresh={loadData}
                 dateRange={filters.dateRange}
                 userRole={profile?.role || 'staff'}
+                canViewCustomerDetails={profile?.role === 'manager' || profile?.role === 'admin' || profile?.can_view_customer_details !== false}
               />
             )}
           </div>

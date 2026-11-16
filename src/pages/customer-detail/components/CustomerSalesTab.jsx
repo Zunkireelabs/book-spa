@@ -11,7 +11,7 @@ function formatNPR(amount) {
 
 // "Sales" = receipts — paid bookings only, distinct from Appointments
 // (every booking regardless of payment status).
-const CustomerSalesTab = ({ data }) => {
+const CustomerSalesTab = ({ data, canViewCustomerDetails = true }) => {
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   const { orgSettings } = useOrg();
@@ -25,6 +25,7 @@ const CustomerSalesTab = ({ data }) => {
   const sales = data.history.filter(b => b.paymentStatus === 'paid');
 
   useEffect(() => {
+    if (!canViewCustomerDetails) return; // button never shows for this account; skip the lookup
     if (billingEnabled) return; // button already shown for every sale; skip the lookup
     const ids = sales.map((b) => b.bookingId).filter(Boolean);
     if (ids.length === 0) return;
@@ -72,7 +73,7 @@ const CustomerSalesTab = ({ data }) => {
                   <span className="text-[10px] font-caption text-text-tertiary">−{formatNPR(b.discountAmount)} discount</span>
                 )}
               </div>
-              {(billingEnabled || invoicedBookingIds.has(b.bookingId)) && b.bookingId && (
+              {canViewCustomerDetails && (billingEnabled || invoicedBookingIds.has(b.bookingId)) && b.bookingId && (
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); setInvoiceBookingId(b.bookingId); }}
