@@ -5,7 +5,7 @@ import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import StaffSidebar from '../../components/ui/StaffSidebar';
 import SettingsRow from '../staff-detail/components/SettingsRow';
-import BranchHoursEditor from './components/BranchHoursEditor';
+import BranchHoursEditor, { closesBeforeOpens } from './components/BranchHoursEditor';
 import LocationPhotoField from './components/LocationPhotoField';
 import { useAuth } from '../../contexts/AuthContext';
 import { useOrg } from '../../contexts/OrgContext';
@@ -105,6 +105,13 @@ const LocationDetailPage = () => {
   const handleSave = async () => {
     if (!formData.name.trim()) {
       setFormError('Location name is required.');
+      return;
+    }
+
+    // B7: refuse before anything is written (hours used to be checked last, after the location was already saved).
+    const badDay = hours.find(closesBeforeOpens);
+    if (badDay) {
+      setFormError(`${badDay.dayLabel}: closes before it opens.`);
       return;
     }
 

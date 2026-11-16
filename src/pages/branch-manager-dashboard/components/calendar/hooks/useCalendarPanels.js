@@ -13,6 +13,7 @@ import { transformBooking } from '../../../../../services/bookingTransformers';
 import { isOverallBranch } from '../../../../../services/api';
 import { findBlockOverlap, describeBlockOverlap } from '../../../../../utils/blockOverlap';
 import { toKathmanduParts, formatTimeFromSlot } from '../calendarDates';
+import { useBranch } from '../../../../../contexts/BranchContext';
 import { useAvailabilityGuard } from '../../../../../contexts/AvailabilityOverrideContext';
 import { friendlyError, isNetworkError, NETWORK_CHECK_CALENDAR_COPY } from '../../../../../utils/friendlyError';
 import { submitQuickCreate } from '../quickCreateSubmit';
@@ -24,6 +25,8 @@ import { isCheckedOutBlockedSlot, DEFAULT_SLOT_MINUTES } from '../calendarSlots'
 export function useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, gridRef, canViewCustomerDetails = true }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { guard } = useAvailabilityGuard();
+  const { branches } = useBranch();
+  const activeBranch = (branches || []).find((b) => b.id === branchId);
 
   // Modal state
   const [selectedBooking, setSelectedBooking] = useState(null);
@@ -150,6 +153,11 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   const openQuickCreateForSlot = useCallback(async (slotInfo) => {
     // Overall (all branches) is read-only for bookings: there is no single branch to create in. Every create path ends here.
     if (isOverallBranch(branchId)) return;
+    // B7: an inactive location takes no new appointments (the database refuses too, migration-385); it stays viewable.
+    if (activeBranch && activeBranch.is_active === false) {
+      showToast('This location is inactive, so it cannot take new appointments. Reactivate it in Settings → Locations.', 'error');
+      return;
+    }
     closeBlockPanels();
     setQuickCreateSlot(slotInfo);
     if (!servicesCache && !servicesLoading) {
@@ -158,7 +166,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       if (result.data) setServicesCache(result.data);
       setServicesLoading(false);
     }
-  }, [servicesCache, servicesLoading, branchId, closeBlockPanels]);
+  }, [servicesCache, servicesLoading, branchId, closeBlockPanels, activeBranch, showToast]);
 
   // "Book in" from the waitlist panel: opens the normal quick-create form prefilled with what the person asked for. Staff still
   // pick the real slot / time / staff. A restricted account (can_view_customer_details = false) only holds MASKED name/phone, so

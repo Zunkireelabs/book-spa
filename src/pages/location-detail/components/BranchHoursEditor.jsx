@@ -4,6 +4,9 @@ import TimeBoxInput from '../../../components/ui/TimeBoxInput';
 
 // No breaks concept here — branch_working_hours (migration-308) has no sibling breaks
 // table, unlike therapist_working_hours. Toggle-per-day + two time inputs only.
+// B7: on an open day the closing time must be after the opening time (the database refuses it too: chk_branch_working_hours_times).
+export const closesBeforeOpens = (row) => !row.isDayOff && !!row.startTime && !!row.endTime && row.endTime <= row.startTime;
+
 const BranchHoursEditor = ({ rows, onChange }) => {
   const updateRow = (dayOfWeek, patch) => {
     onChange(rows.map(r => (r.dayOfWeek === dayOfWeek ? { ...r, ...patch } : r)));
@@ -36,6 +39,7 @@ const BranchHoursEditor = ({ rows, onChange }) => {
                 <TimeBoxInput value={row.startTime} onChange={(v) => updateRow(row.dayOfWeek, { startTime: v })} />
                 <span className="font-caption text-xs text-text-tertiary">to</span>
                 <TimeBoxInput value={row.endTime} onChange={(v) => updateRow(row.dayOfWeek, { endTime: v })} />
+                {closesBeforeOpens(row) && <span role="alert" className="font-caption text-xs text-error" data-hours-error>Closes before it opens</span>}
               </div>
             ) : (
               <span className="font-caption text-sm text-text-tertiary">Closed</span>

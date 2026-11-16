@@ -18,7 +18,7 @@ export const friendlyError = (err, fallback = 'Something went wrong. Please try 
   if (!raw.trim()) return fallback;
   if (NETWORK.test(raw)) return NETWORK_ERROR_COPY;
   if (err?.name === 'TypeError') return fallback;
-  const msg = raw.replace(/^\s*[a-z][a-z0-9_]*:\s+/, '').trim();
+  const msg = raw.replace(/^\s*(?:[a-z][a-z0-9_]*|[A-Z][A-Z0-9_]{2,}):\s+/, '').trim();   // 'fn_name: ' and 'ERROR_CODE: ' (LOCATION_INACTIVE, DAY_LOCKED) prefixes
   if (!msg) return fallback;
   return msg.charAt(0).toUpperCase() + msg.slice(1);
 };
