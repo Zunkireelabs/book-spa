@@ -53,8 +53,29 @@ apply_range() {  # apply_range FROM TO
     run -1 -f /tmp/qc-4c-mig.sql || fail "$(basename "$f")"
   done
 }
-echo "== all migrations"
-apply_range 3 9999
+echo "== migrations 3..375, pre-377 fixtures, 376..379, then the 4a SQL test (Parts A, B, B2)"
+apply_range 3 375
+run -f supabase/tests/znly-205-pre377-setup.sql || fail "pre-377 fixtures"
+apply_range 376 379
+C_LINE=$(grep -n "Part C: remove the ZZ205 fixtures" supabase/tests/znly-204-205.sql | cut -d: -f1)
+B_LINE=$(grep -n "Part B: RPCs, rules" supabase/tests/znly-204-205.sql | cut -d: -f1)
+head -$((C_LINE-1)) supabase/tests/znly-204-205.sql > /tmp/qc-4c-204-AB.sql                         # \set + Part A + Part B + Part B2
+{ echo '\set ON_ERROR_STOP on'; sed -n "${B_LINE},$((C_LINE-1))p" supabase/tests/znly-204-205.sql; } > /tmp/qc-4c-204-B.sql   # Part B + B2 only (re-run later)
+sed -n "${C_LINE},\$p" supabase/tests/znly-204-205.sql > /tmp/qc-4c-204-C.sql                       # Part C cleanup
+{ echo '\set ON_ERROR_STOP on'; cat /tmp/qc-4c-204-C.sql; } > /tmp/qc-4c-204-C2.sql
+psql "$DB" -v ON_ERROR_STOP=1 -f /tmp/qc-4c-204-AB.sql >/tmp/qc-4c-204a.log 2>&1 || { grep -E "ERROR|DETAIL" /tmp/qc-4c-204a.log | head -3; fail "znly-204-205 (at 379)"; }
+echo "4a assertions at 379: ok"
+echo "== migrations 380.."
+apply_range 380 9999
+echo "== the 204 RPC assertions again AFTER all migrations (a later CREATE OR REPLACE must not drop a guard)"
+psql "$DB" -v ON_ERROR_STOP=1 -f /tmp/qc-4c-204-B.sql >/tmp/qc-4c-204b.log 2>&1 || { grep -E "ERROR|DETAIL" /tmp/qc-4c-204b.log | head -3; fail "znly-204-205 Part B after 385"; }
+echo "4a assertions after 385: ok"
+psql "$DB" -v ON_ERROR_STOP=1 -f /tmp/qc-4c-204-C2.sql >/tmp/qc-4c-204c.log 2>&1 || fail "znly-204-205 Part C cleanup"
+for f in public_check_slot_availability public_check_branch_bookings_range public_check_therapist_bookings_range public_get_bookable_therapists public_get_service_eligible_gender_headcount; do
+  g=$(psql "$DB" -qAt -c "select count(*) from pg_proc w join pg_proc i on i.proname='_'||w.proname||'_impl' and i.pronamespace=w.pronamespace where w.pronamespace='public'::regnamespace and w.proname='$f' and w.prosrc ~ '_${f}_impl' and w.prosrc ~ 'is_active'")
+  [ "$g" = "1" ] || fail "$f no longer calls its _impl behind the inactive-location guard (a later CREATE OR REPLACE dropped it?)"
+done
+echo "inactive-location guard still in all five public readers"
 
 # Parallel check helper: two psql sessions at once. $1 = sql file template run with -v k=<n>
 echo "== ZNLY-206 SQL test (supabase/tests/znly-206.sql)"
