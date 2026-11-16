@@ -5,7 +5,7 @@ const atNepal = (date, time) => new Date(`${date}T${String(time || '00:00').slic
 const OPEN = ['Pending', 'Confirmed', 'In-Progress'];
 
 // The one "needs someone" rule. Each booking falls in exactly one kind, checked in this order. The SQL twin is
-// _dashboard_need_kind() in migration-334 (get_dashboard branches[].needs): same order, same tests. Change both together.
+// _dashboard_need_kind() in migration-368 (get_dashboard branches[].needs): same order, same tests. Change both together.
 export const NEED_KINDS = ['discount', 'owed', 'not_closed', 'unconfirmed', 'unassigned'];
 export const UNCONFIRMED_AFTER_MIN = 120;
 

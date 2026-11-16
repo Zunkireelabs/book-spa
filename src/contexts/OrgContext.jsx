@@ -112,7 +112,7 @@ export const OrgProvider = ({ children }) => {
     // Industry default categories
     defaultCategories: industry?.default_categories || [],
 
-    // Products (migration-311): the page title ('Products' / 'Supplies'), starter categories, and whether items are sold by default
+    // Products (migration-345): the page title ('Products' / 'Supplies'), starter categories, and whether items are sold by default
     productLabel: industry?.product_label || 'Products',
     defaultProductCategories: industry?.default_product_categories || [],
     productsSoldByDefault: industry?.products_sold_by_default !== false,

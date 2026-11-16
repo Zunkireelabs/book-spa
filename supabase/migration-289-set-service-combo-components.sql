@@ -1,5 +1,19 @@
 -- Migration 289: set_service_combo_components — atomic replace RPC
 --
+-- ledger-collision-ack: version 289 is ALSO used by migration-289-revoke-public-search-booking.sql
+-- (PR #415), and that is what the PRODUCTION ledger records under 289. Because migrate-apply
+-- skips by version, THIS file will be skipped on any database where 289 is already recorded.
+--
+-- That is safe here: migration-296-set-service-combo-components-room.sql does CREATE OR REPLACE
+-- on the identical (uuid, jsonb) signature and fully supersedes this file — it adds
+-- default_same_room, which this version has no concept of. A fresh database reaches the correct
+-- end state from 296 alone.
+--
+-- DO NOT renumber this file to a higher number to "fix" the collision. Migrations apply in
+-- version order, so any number above 296 would re-apply this older definition AFTER 296 and
+-- silently drop default_same_room support. There is no free slot below 296 either — 282-298
+-- are contiguous.
+--
 -- combo_package_components (migration-288) only had a direct-write RLS policy
 -- (manager/admin FOR ALL) — fine for a single-row edit, but replacing a combo's
 -- whole component list from the UI is a delete-then-insert; without a single

@@ -1164,7 +1164,7 @@ const PaymentModal = ({
     setCheckedAddOns((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   };
 
-  // ── Payment QR (migration-303): a static merchant QR per method. Optional and UI-only: a fetch or image failure
+  // ── Payment QR (migration-337): a static merchant QR per method. Optional and UI-only: a fetch or image failure
   // just means the row behaves like any other method, and confirmation is a gate, never part of the payload. ──
   const [qrMap, setQrMap] = useState({});
   const [qrBroken, setQrBroken] = useState(() => new Set()); // methods whose QR image failed to load

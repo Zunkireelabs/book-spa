@@ -46,7 +46,7 @@ export const useIndustry = () => {
     // Default categories for this industry
     defaultCategories,
 
-    // Products wording and defaults (migration-311)
+    // Products wording and defaults (migration-345)
     productLabel,
     defaultProductCategories,
     productsSoldByDefault,

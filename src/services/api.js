@@ -13,7 +13,7 @@ import { leafMethods, qrMethodDiff, validateQrFile } from '../utils/paymentQr';
 import { parseAvailabilityError, createEnforcementCache } from './availability';
 import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrphanTransferWindow } from './therapistBranchWindow';
 
-// Staff-availability rule (ZNLY-100, migration-319): the guard raises OFF_SHIFT / ON_BREAK / ON_LEAVE / BLOCKED /
+// Staff-availability rule (ZNLY-100, migration-353): the guard raises OFF_SHIFT / ON_BREAK / ON_LEAVE / BLOCKED /
 // OTHER_BRANCH / OVERLAP / OVERRIDE_NOT_ALLOWED. Every booking writer maps it to { code, message, overridable, detail }
 // through here, and takes an optional `overrideReason` (manager/admin only; the DB re-checks the role).
 const availabilityFailure = (err) => {
@@ -333,7 +333,7 @@ export async function fetchBranchAvailabilityWindow(branchId, startDate, endDate
         p_branch_id: branchId,
         p_start_date: startDate,
         p_end_date: endDate,
-        // staff availability (migration-320): with both, the tenant's "no_staff" start times come back too
+        // staff availability (migration-354): with both, the tenant's "no_staff" start times come back too
         ...(serviceId && durationMinutes ? { p_service_id: serviceId, p_duration_minutes: durationMinutes } : {}),
       }),
     ]);
@@ -371,7 +371,7 @@ export async function fetchTherapistAvailabilityWindow(orgSlug, branchId, startD
 }
 
 // The rule's own per-therapist, per-day shifts for the calendar's visible range (therapist_shifts_for_range). Best-effort:
-// the calendar still renders without shading if this fails (e.g. a database without migration-320).
+// the calendar still renders without shading if this fails (e.g. a database without migration-354).
 export async function fetchShiftsForRange({ branchId, startDate, endDate }) {
   try {
     const { data, error } = await supabase.rpc('therapist_shifts_for_range', { p_branch_id: branchId, p_from_date: startDate, p_to_date: endDate });
@@ -383,7 +383,7 @@ export async function fetchShiftsForRange({ branchId, startDate, endDate }) {
   }
 }
 
-// Rule-based suggestions for the dashboard (get_dashboard_insights, migration-336). Numbers only; src/lib/insightText.js words them.
+// Rule-based suggestions for the dashboard (get_dashboard_insights, migration-370). Numbers only; src/lib/insightText.js words them.
 export async function fetchDashboardInsights({ branchIds, date = null }) {
   try {
     const { data, error } = await supabase.rpc('get_dashboard_insights', { p_branch_ids: branchIds, p_date: date });
@@ -422,7 +422,7 @@ export async function draftInsightMessages({ rule, customerIds }) {
   }
 }
 
-// The whole dashboard in one call (get_dashboard, migration-334): pulse, floor, week, branches (with per-kind `needs`), money,
+// The whole dashboard in one call (get_dashboard, migration-368): pulse, floor, week, branches (with per-kind `needs`), money,
 // tomorrow, my_day. branchIds are cut to the caller's tenant/branches server-side; money is null for staff. `date` defaults to today.
 export async function fetchDashboard({ branchIds, date = null }) {
   try {
@@ -435,7 +435,7 @@ export async function fetchDashboard({ branchIds, date = null }) {
   }
 }
 
-// Business health numbers in one call (get_report_business_health, migration-337): current, previous (equal-length period right before),
+// Business health numbers in one call (get_report_business_health, migration-371): current, previous (equal-length period right before),
 // by_day, by_method, branches[]. Manager/admin/admin_viewer only; branchIds are cut to the caller's branches server-side.
 export async function fetchBusinessHealth({ branchIds, from, to }) {
   try {
@@ -448,7 +448,7 @@ export async function fetchBusinessHealth({ branchIds, from, to }) {
   }
 }
 
-// Therapist performance in one call (get_report_therapist_performance, migration-339): current + previous period (per-therapist rows and a team
+// Therapist performance in one call (get_report_therapist_performance, migration-373): current + previous period (per-therapist rows and a team
 // total that equals Business health), weekly sales, and one block per branch. Manager/admin/admin_viewer only; branchIds are cut to the caller's branches server-side.
 export async function fetchTherapistPerformance({ branchIds, from, to }) {
   try {
@@ -461,7 +461,7 @@ export async function fetchTherapistPerformance({ branchIds, from, to }) {
   }
 }
 
-// The Customers tab of a therapist's inner page (get_therapist_customers, migration-340): one row per customer with the bookings they had with this therapist
+// The Customers tab of a therapist's inner page (get_therapist_customers, migration-374): one row per customer with the bookings they had with this therapist
 // in the period, sales, owed, "booked again" (339's rule, with whom), first visit, next booking and customer type. Manager/admin/admin_viewer only.
 export async function fetchTherapistCustomers({ therapistId, branchIds, from, to }) {
   try {
@@ -474,7 +474,7 @@ export async function fetchTherapistCustomers({ therapistId, branchIds, from, to
   }
 }
 
-// Money owed in one call (get_report_money_owed, migration-338): rows, totals, age buckets, the total 30 days earlier, rollups by customer / branch /
+// Money owed in one call (get_report_money_owed, migration-372): rows, totals, age buckets, the total 30 days earlier, rollups by customer / branch /
 // staff. `asOf` null = now. Manager/admin/admin_viewer only; branchIds are cut to the caller's branches server-side.
 export async function fetchMoneyOwed({ branchIds, asOf = null }) {
   try {
@@ -573,8 +573,8 @@ export async function setUserTherapist({ userId, therapistId = null }) {
   }
 }
 
-// Upcoming open bookings a PROPOSED change would strand (availability_affected_bookings, migration-321). Read-only; the change
-// shapes are built in services/availabilityConflicts.js. Fails open: a database without migration-321 returns no rows so the
+// Upcoming open bookings a PROPOSED change would strand (availability_affected_bookings, migration-355). Read-only; the change
+// shapes are built in services/availabilityConflicts.js. Fails open: a database without migration-355 returns no rows so the
 // save still goes through (the rule itself is enforced by the database guard, this is only the early warning).
 export async function fetchAffectedBookings({ therapistId, change }) {
   try {
@@ -599,7 +599,7 @@ export async function fetchAvailabilityRolloutCheck(orgId) {
   }
 }
 
-// Admin only, per tenant (migration-323: organizations has no UPDATE policy, so this goes through a SECURITY DEFINER function).
+// Admin only, per tenant (migration-357: organizations has no UPDATE policy, so this goes through a SECURITY DEFINER function).
 export async function setEnforceStaffAvailability({ enabled }) {
   try {
     const { data, error } = await supabase.rpc('set_enforce_staff_availability', { p_value: !!enabled });
@@ -612,7 +612,7 @@ export async function setEnforceStaffAvailability({ enabled }) {
 }
 
 // Everything the live availability pre-check needs for one branch + date, in three reads and no write:
-// the rule's own shifts (therapist_shifts_for_range, migration-320: weekly/roster hours, breaks, leave, blocks,
+// the rule's own shifts (therapist_shifts_for_range, migration-354: weekly/roster hours, breaks, leave, blocks,
 // transfer windows) plus the day's bookings (own and companion) to detect overlaps.
 // -> { data: { therapists: [{ id, name, shiftDay, bookings: [{ id, startMin, endMin, number }] }] }, error }
 export async function fetchAvailabilityDay({ branchId, date }) {
@@ -802,7 +802,7 @@ export async function fetchRenderedVisitTherapists(customerIds) {
 }
 
 /**
- * Team-level "seen": the first staff member to open/handle a booking acknowledges it for everyone (migration-301). Fire and forget —
+ * Team-level "seen": the first staff member to open/handle a booking acknowledges it for everyone (migration-335). Fire and forget —
  * callers don't wait on it. Read-only roles and other orgs are refused by the RPC itself.
  */
 export async function acknowledgeBooking(bookingId) {
@@ -871,7 +871,7 @@ function classifyPaymentMode(mode) {
 }
 
 // Products sold on [date] (Nepal day) at a branch, net of refunds (a refunded sale is left out entirely, like Today's Insights), with how
-// each sale was paid from product_sale_payments (migration-312). Wallet modes (the membership wallet) are a deduction, not new money in
+// each sale was paid from product_sale_payments (migration-346). Wallet modes (the membership wallet) are a deduction, not new money in
 // the drawer, so they are counted in `gross` but not in `total` / the cash-card-other buckets — same policy as vouchers.
 //   { count, gross, total, breakdown: { cash, card, fonepay }, byMode: { 'Cash': 2300, ... } }
 export async function getProductSalesForDate(branchId, date) {
@@ -996,7 +996,7 @@ export async function updateOrgPaymentMethods(methods) {
   return { data, error: null };
 }
 
-// --- Payment QR codes (migration-303) ---
+// --- Payment QR codes (migration-337) ---
 // One static merchant QR per leaf payment method for the whole org (branch_id NULL; per-branch rows are reserved for
 // later). The image lives in the private `payment-qr` bucket at {org_id}/org/{uuid}.{ext}; only an org admin can write
 // (RLS), every org user can read via short-lived signed URLs. A QR is optional: readers must never block a payment.
@@ -3487,7 +3487,7 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
       discount_approved_by: isWithinLimit ? user.id : null,
       discount_requested_by: isWithinLimit ? null : user.id,
       discount_requested_to: isWithinLimit ? null : requestedTo,
-      member_discount: null, // V22: a manual discount replaces any member discount (migration-309)
+      member_discount: null, // V22: a manual discount replaces any member discount (migration-343)
     };
 
     // A discount applied while already-collected — reflect the new balance
@@ -3912,7 +3912,7 @@ export async function fetchUnreadNotificationCount() {
 }
 
 /**
- * The current user's pop-up/sound prefs per category and their global switches (migration-331).
+ * The current user's pop-up/sound prefs per category and their global switches (migration-365).
  * Missing rows mean "use the defaults" (src/lib/notificationRules.js).
  */
 export async function fetchNotificationPrefs() {
@@ -4605,7 +4605,7 @@ export async function getTodayInsights(branchId, from, to) {
     }
 
     // 3. Gift vouchers claimed in range (redemption ledger). is_legacy claims
-    // (migration-310's review closing an old voucher "used before the app
+    // (migration-344's review closing an old voucher "used before the app
     // tracked it") aren't a redemption in this range, so they're left out.
     let claimsQuery = supabase
       .from('voucher_claims')
@@ -4632,7 +4632,7 @@ export async function getTodayInsights(branchId, from, to) {
     if (issuedError) throw issuedError;
     const voucherDistributed = {
       count: (issued || []).length,
-      // total_amount_issued is the voucher's value since migration-310.
+      // total_amount_issued is the voucher's value since migration-344.
       value: (issued || []).reduce((sum, v) => sum + Number(v.total_amount_issued), 0),
       freeCount: (issued || []).filter((v) => v.issue_kind === 'free').length,
     };
@@ -4723,7 +4723,7 @@ export async function getTodayInsights(branchId, from, to) {
     // into totalSales/modeTotals. Timestamp-based (created_at) like
     // memberships (5/5b) rather than a plain date column, same Nepal-
     // midnight boundary logic.
-    // Per-method rows come from product_sale_payments (migration-312); the membership wallet is a deduction, not money in, so it is in
+    // Per-method rows come from product_sale_payments (migration-346); the membership wallet is a deduction, not money in, so it is in
     // `value` (what was sold) but not in totalSales / the method bars — same as daily close.
     let productSalesQuery = supabase
       .from('product_sales')
@@ -8147,7 +8147,7 @@ export async function fetchRosterOverrides({ branchId, startDate, endDate }) {
         startTime: row.start_time,
         endTime: row.end_time,
         isDayOff: row.is_day_off,
-        // breaks of that date change (migration-316); the calendar reads the same rows through the shift RPC
+        // breaks of that date change (migration-350); the calendar reads the same rows through the shift RPC
         breaks: (row.staff_roster_override_breaks || [])
           .slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
           .map((b) => ({ name: b.name || '', startTime: String(b.start_time).slice(0, 5), endTime: String(b.end_time).slice(0, 5) })),
@@ -9218,7 +9218,7 @@ export async function uploadServiceImage(file) {
     // Generate unique filename
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
-    // Org-prefixed so storage RLS (migration-304) only lets this org's admins/managers write it.
+    // Org-prefixed so storage RLS (migration-338) only lets this org's admins/managers write it.
     if (!profile.org_id) return { url: null, error: { code: 'NO_ORG', message: 'Your account is not linked to an organization.' } };
     const filePath = `${profile.org_id}/services/${fileName}`;
 
@@ -9310,7 +9310,7 @@ export async function uploadStaffPhoto(file) {
 
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
-    // Org-prefixed so storage RLS (migration-304) only lets this org's admins/managers write it.
+    // Org-prefixed so storage RLS (migration-338) only lets this org's admins/managers write it.
     if (!profile.org_id) return { url: null, error: { code: 'NO_ORG', message: 'Your account is not linked to an organization.' } };
     const filePath = `${profile.org_id}/staff/${fileName}`;
 
@@ -9334,7 +9334,7 @@ export async function uploadStaffPhoto(file) {
   }
 }
 
-// Customer photos/documents live in the PRIVATE `customer-files` bucket (migration-305) at
+// Customer photos/documents live in the PRIVATE `customer-files` bucket (migration-339) at
 // {org_id}/{branch_id}/customers/{customer_id}/{photos|documents}/{uuid}.{ext}. Rows store that storage_path, and the read
 // functions put a short-lived signed URL into the same photo_url / file_url field the UI reads. Legacy rows (migration-280,
 // public URL in photo_url/file_url, storage_path NULL) are returned unchanged.
@@ -9371,7 +9371,7 @@ const removeCustomerFiles = async (paths) => {
   if (error) console.error('[API] customer file removal error:', error.message);
 };
 
-// Customer photo gallery (migration-280, storage moved by migration-305) — manager/admin upload/delete, staff can read
+// Customer photo gallery (migration-280, storage moved by migration-339) — manager/admin upload/delete, staff can read
 // within their branch, admin within their org. Path-prefixed per customer, since a customer can have multiple photos.
 export async function uploadCustomerPhoto(customerId, branchId, file) {
   try {
@@ -10741,7 +10741,7 @@ export async function deleteCustomer(customerId) {
 
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
-    // Admin-only, own org (migration-306's DELETE policy).
+    // Admin-only, own org (migration-340's DELETE policy).
     if (profile.role !== 'admin') {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only an admin can delete customers.' } };
     }
@@ -11428,7 +11428,7 @@ export async function fetchAttendance({ branchId, date }) {
         checkOutTime: formatTimeKathmandu(att?.check_out_time),
         notes: att?.notes || null,
         workedAtBranchId: att?.worked_at_branch_id || null,
-        offStart: att?.off_start ? String(att.off_start).slice(0, 5) : null,   // half day: exact off times (migration-316)
+        offStart: att?.off_start ? String(att.off_start).slice(0, 5) : null,   // half day: exact off times (migration-350)
         offEnd: att?.off_end ? String(att.off_end).slice(0, 5) : null,
       };
     });
@@ -11440,7 +11440,7 @@ export async function fetchAttendance({ branchId, date }) {
   }
 }
 
-// Today's visitors at a branch with their check-in/out (mig 328). Times come back as 'HH:MM'.
+// Today's visitors at a branch with their check-in/out (mig 362). Times come back as 'HH:MM'.
 export async function fetchVisitingAttendanceToday({ branchId }) {
   try {
     const { data, error } = await supabase.rpc('visiting_attendance_today', { p_branch_id: branchId });
@@ -11481,7 +11481,7 @@ export async function markVisitorAttendance({ therapistId, branchId, checkInTime
   }
 }
 
-// ── Attendance redesign (V34a/V34b, migration 330): every write goes through save_attendance / delete_attendance /
+// ── Attendance redesign (V34a/V34b, migration 364): every write goes through save_attendance / delete_attendance /
 // mark_visitor_attendance, so the reason rule and the change history can't be skipped. ──
 const attendanceRpcError = (error) => {
   const msg = error?.message || '';
@@ -13103,7 +13103,7 @@ const nepalMonthOf = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone
 //              max(month of the refund, month of the sale + 1)). A refund made before the run was finalized is simply not in `earned`.
 // Returns { earned: { [therapistId]: NPR }, refunded: { [therapistId]: NPR } } (amounts, before the rate).
 // Home-on-the-date payroll (ZNLY-118 / ZNLY-125): the branch that was a person's HOME on the booking's date pays, wherever the booking
-// happened. RLS hides other branches' rows from that manager, so they come through payroll_home_* (mig 328).
+// happened. RLS hides other branches' rows from that manager, so they come through payroll_home_* (mig 362).
 // Returns every paid booking this branch pays for in the month (at home and at other branches). Overall reads everything directly.
 export async function fetchHomePayrollBookings({ branchId, firstDay, lastDay }) {
   if (isOverallBranch(branchId)) {
@@ -13155,7 +13155,7 @@ export async function computeProductCommissionBase({ branchId, periodMonth, ther
   const to = nepalMonthStart(nextPeriodMonth(periodMonth));
 
   // Sales this branch pays for: made by a person whose home on the sale's date was this branch, wherever the sale happened
-  // (payroll_home_product_sales, mig 328). Overall (all branches) reads product_sales directly.
+  // (payroll_home_product_sales, mig 362). Overall (all branches) reads product_sales directly.
   let earnedRows0 = [];
   let homeSales = [];
   if (isOverallBranch(branchId)) {
@@ -13992,7 +13992,7 @@ export async function fetchMemberDiscountContext(bookingIds) {
   }
 }
 
-// Save (or remove) the member discount on one booking — apply_member_discount() (migration-309) checks membership, tier rate,
+// Save (or remove) the member discount on one booking — apply_member_discount() (migration-343) checks membership, tier rate,
 // branch access and the paid cap server-side; the rate never comes from the client.
 export async function applyMemberDiscount({ bookingId, remove = false }) {
   try {
@@ -14367,7 +14367,7 @@ export async function adjustMembership({ membershipId, amount, notes, branchId =
 // VOUCHERS (migration-071) — manager/admin only, RLS-enforced.
 // ============================================================
 
-// One voucher as the Vouchers page uses it (V23). Since migration-310 total_amount_issued is the VALUE and amount_paid what
+// One voucher as the Vouchers page uses it (V23). Since migration-344 total_amount_issued is the VALUE and amount_paid what
 // was collected. vouchers has two FKs to customers (For and Bought by), so each embed names its FK.
 const VOUCHER_ROW_SELECT = `
   id, voucher_code, issued_date, expiry_date, guest_name, guest_info, customer_id,
@@ -14514,7 +14514,7 @@ export async function issueVoucher({
 
     // Whether an empty tenders array is valid depends on what is paid (value
     // minus discount; nothing for a free voucher). That's the RPC's call to
-    // make (issue_voucher, migration-310): it knows the resolved price,
+    // make (issue_voucher, migration-344): it knows the resolved price,
     // this wrapper doesn't (actualPrice can be null here, falling back to
     // the voucher type's standard_price server-side). Don't duplicate/guess
     // that check here — let the RPC be the single source of truth.
@@ -14545,7 +14545,7 @@ export async function issueVoucher({
       p_buyer_customer_id: buyerCustomerId,
     });
     if (error) {
-      // Cosmetic only — the RPC (issue_voucher, migration-310) is still the
+      // Cosmetic only — the RPC (issue_voucher, migration-344) is still the
       // sole authority on whether tenders are actually required (depends on
       // the resolved price); this just swaps its raw "issue_voucher: ..."
       // exception text for the friendlier client-facing wording that used to
@@ -15065,7 +15065,7 @@ export async function setVoucherTypeActive({ id, isActive }) {
   }
 }
 
-// migration-310 RPCs. Each checks the role and org itself; these wrappers only map arguments.
+// migration-344 RPCs. Each checks the role and org itself; these wrappers only map arguments.
 export async function extendVoucher({ voucherId, newExpiry, reason }) {
   return voucherRpc('extend_voucher', { p_voucher_id: voucherId, p_new_expiry: newExpiry, p_reason: reason }, 'voucher_extended');
 }
@@ -15093,7 +15093,7 @@ export async function undoLegacyCheck({ voucherId }) {
   return voucherRpc('undo_legacy_check', { p_voucher_id: voucherId }, 'voucher_legacy_check_undone');
 }
 
-// Unlinked vouchers whose phone equals exactly one customer's (migration-310): Map voucherId → { customerId, customerName }.
+// Unlinked vouchers whose phone equals exactly one customer's (migration-344): Map voucherId → { customerId, customerName }.
 export async function fetchVoucherCustomerMatches() {
   try {
     const { data, error } = await supabase.rpc('voucher_customer_matches');
@@ -16441,7 +16441,7 @@ export async function uploadProductImage(file) {
 
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
-    // Org-prefixed so storage RLS (migration-304) only lets this org's admins/managers write it.
+    // Org-prefixed so storage RLS (migration-338) only lets this org's admins/managers write it.
     if (!profile.org_id) return { url: null, error: { code: 'NO_ORG', message: 'Your account is not linked to an organization.' } };
     const filePath = `${profile.org_id}/products/${fileName}`;
 
@@ -16465,7 +16465,7 @@ export async function uploadProductImage(file) {
   }
 }
 
-// ── Products + inventory (V25, migration-311) ───────────────────────────────────────────────────
+// ── Products + inventory (V25, migration-345) ───────────────────────────────────────────────────
 // Stock is per size (variant) per branch. Every stock change goes through an RPC that also writes one append-only
 // product_stock_movements row; nothing here writes quantities directly. Cost lives in product_variant_costs, which only
 // managers / admins / viewers can read, so `includeCosts` is only sent for them.
@@ -16688,7 +16688,7 @@ export async function sellProduct({ variantId, quantity, paymentMode, branchId, 
   }
 }
 
-// ── Products at checkout (V26, migration-312) ───────────────────────────────────────────────────
+// ── Products at checkout (V26, migration-346) ───────────────────────────────────────────────────
 
 /**
  * What the checkout product picker needs for one branch: items that are for sale (active, sell_at_checkout) with their sizes, price and
@@ -17408,7 +17408,7 @@ export async function uploadCampaignBanner(file) {
 
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
-    // Org-prefixed so storage RLS (migration-304) only lets this org's admins/managers write it.
+    // Org-prefixed so storage RLS (migration-338) only lets this org's admins/managers write it.
     if (!profile.org_id) return { url: null, error: { code: 'NO_ORG', message: 'Your account is not linked to an organization.' } };
     const filePath = `${profile.org_id}/campaigns/${fileName}`;
 

@@ -1,6 +1,6 @@
 // ✦ suggestions under a report (ZNLY-159, rules v1). Pure, so it is unit-tested. Wording is always a suggestion ("may", "could"), never a fact,
 // and every number in `why` is one the report already holds. Nothing is invented: a rule that lacks its data does not fire.
-// Input is the get_report_business_health result (migration-337). Each item: { rule, score, headline, detail, why, source, view }.
+// Input is the get_report_business_health result (migration-371). Each item: { rule, score, headline, detail, why, source, view }.
 // `view` is the report an "Open ..." button would go to; the UI hides the button when that report is not openable (still `soon`).
 
 import { durationText } from 'utils/durationText';
@@ -100,7 +100,7 @@ export function businessHealthInsights(data, { staffLabel = 'staff', periodLabel
 const BUSY_LOW = 0.4;
 
 /**
- * Two rules over get_report_therapist_performance (migration-339), at most one item each:
+ * Two rules over get_report_therapist_performance (migration-373), at most one item each:
  *  low_busy  therapists with working hours who were busy under 40% of them.
  *  no_show   the therapist whose no-show rate is at least 2x the team's with at least 2 no-shows.
  * Wording stays a suggestion; `why` lists the exact figures.
@@ -157,7 +157,7 @@ const day = (iso) => { const [, m, d] = iso.split('-').map(Number); return `${d}
 const addDaysISO = (iso, n) => { const d = new Date(`${iso}T00:00:00`); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
 /**
- * Balances about to pass 30 days (they turn 31 days old within the next 14 days). One item, or []. `data` is get_report_money_owed (migration-338).
+ * Balances about to pass 30 days (they turn 31 days old within the next 14 days). One item, or []. `data` is get_report_money_owed (migration-372).
  * Wording is a suggestion; `why` lists the exact rows. `rows` is what a "Remind all N" button would remind.
  */
 export function moneyOwedInsights(data, { periodLabel = 'As of now' } = {}) {

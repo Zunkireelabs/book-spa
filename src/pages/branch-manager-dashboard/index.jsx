@@ -182,7 +182,7 @@ const BranchManagerDashboard = () => {
           const isToday = newBooking.date === today;
 
           // Add every new booking to the header notification feed (deduped by id). Online bookings (created_by IS NULL) already
-          // arrive as a persisted new_online_booking notification (migration-301), so they are not added a second time here.
+          // arrive as a persisted new_online_booking notification (migration-335), so they are not added a second time here.
           if (newBooking.created_by != null) setNotifications((prev) =>
             prev.some((n) => n.id === newBooking.id)
               ? prev

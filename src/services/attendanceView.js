@@ -1,5 +1,5 @@
 // Pure logic for the Attendance page (ZNLY-123 / V34b): what state a person's day is in, who needs attention, what a bulk "Mark
-// present" may do, what a change costs in pay (the SAME formula as Payroll), and when a reason is required (mirrors migration 330).
+// present" may do, what a change costs in pay (the SAME formula as Payroll), and when a reason is required (mirrors migration 364).
 // Times are 'HH:MM' (Kathmandu); dates 'YYYY-MM-DD'.
 
 export const LEAVE_STATUSES = ['Annual Leave', 'Sick Leave', 'Leave'];

@@ -272,7 +272,7 @@ const AttendancePanel = ({ branchId }) => {
 
   const visitorRows = useMemo(() => visitors.map((v) => {
     const parts = (iso) => ({ date: new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' }), hm: new Date(iso).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', hour12: false }).slice(0, 5) });
-    // The window is clipped to this branch's opening hours (same as availability, mig 329); "all day" when it covers them.
+    // The window is clipped to this branch's opening hours (same as availability, mig 363); "all day" when it covers them.
     const win = v.windowFrom && v.windowTo ? clipVisitWindow({ fromParts: parts(v.windowFrom), toParts: parts(v.windowTo), date: selectedDate, openTime: settings.openTime, closeTime: settings.closeTime }) : null;
     const shift = win ? { start: win.start, end: win.end } : null;
     const d = deriveRow({ person: { status: v.checkInTime ? 'Present' : '', checkIn: v.checkInTime || '', checkOut: v.checkOutTime || '' }, date: selectedDate, today, nowMin, shift, settings, visitor: true });

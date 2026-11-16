@@ -1,5 +1,5 @@
 // "Falls outside" check (ZNLY-100, V29c2): before a manager changes hours, adds a block, marks leave or transfers a
-// staff member out, availability_affected_bookings (migration-321) lists the upcoming bookings the change would strand.
+// staff member out, availability_affected_bookings (migration-355) lists the upcoming bookings the change would strand.
 // This module is the pure half: build the change payload, turn rows into display lines, and the half-day rules.
 // Bookings are never moved or cancelled by any of this; the manager only gets to see them before saving.
 import { hhmmToMinutes, minutesToHHMM } from './availability';
@@ -67,7 +67,7 @@ export const transferChange = ({ fromTs, toTs, toBranchId }) => (
 );
 
 // ---- half-day --------------------------------------------------------------------------------------------------------
-// Mirrors the split rule in therapist_shift_for (migration-317): the half boundary is the start of the longest break,
+// Mirrors the split rule in therapist_shift_for (migration-351): the half boundary is the start of the longest break,
 // else the shift midpoint rounded down to 30 minutes, clamped inside the shift. 1st half = shift start..split, 2nd = split..shift end.
 // shift: { start: 'HH:MM', end: 'HH:MM', breaks: [{ start_min, end_min }] } (the RPC row). Returns { start, end } 'HH:MM' or null.
 export function defaultHalfDayOff({ status, shift }) {

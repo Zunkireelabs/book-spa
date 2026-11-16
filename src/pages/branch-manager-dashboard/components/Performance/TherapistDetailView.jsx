@@ -47,7 +47,7 @@ const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, per
   }, [branchId, therapistId, range.from, range.to]);
   useEffect(() => { load(); }, [load]);
 
-  // The Customers tab's rows (mig 340), loaded here so the tab badge and the Overview footer use the same "booked" count.
+  // The Customers tab's rows (mig 374), loaded here so the tab badge and the Overview footer use the same "booked" count.
   const { branches, isOverall } = useBranch();
   const scopeIds = useMemo(() => (isOverall ? branches.map((b) => b.id) : [branchId]).filter(Boolean), [isOverall, branches, branchId]);
   const scopeKey = scopeIds.join(',');

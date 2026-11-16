@@ -1,10 +1,10 @@
 // Member discount at checkout (V22): which bookings a membership tier's `discount_rules` apply to, and for how much.
-// Pure — the server (apply_member_discount, migration-309) repeats the same rules and is the one that saves anything.
+// Pure — the server (apply_member_discount, migration-343) repeats the same rules and is the one that saves anything.
 import { categoryLabel } from './membershipsView';
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 
-/** "Body Scrub" / "body-scrub" / " Spa " → "body_scrub" / "spa". The same rule as the SQL in migration-309. */
+/** "Body Scrub" / "body-scrub" / " Spa " → "body_scrub" / "spa". The same rule as the SQL in migration-343. */
 export const categoryKey = (text) => String(text ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
 
 /** The tier's % for a category key, 1–100, or null. */

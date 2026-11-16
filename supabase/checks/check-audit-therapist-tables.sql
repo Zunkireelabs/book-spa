@@ -1,4 +1,4 @@
--- SQL checks for migration-314 (LOCAL DB only; everything rolls back). Run:
+-- SQL checks for migration-348 (LOCAL DB only; everything rolls back). Run:
 --   psql "postgresql://postgres:postgres@127.0.0.1:56422/postgres" -v ON_ERROR_STOP=1 -f supabase/checks/check-audit-therapist-tables.sql
 -- Needs the local users from supabase/seed.sql + temp_ss/seed/local-demo-seed.sql (admin/manager/staff/viewer @local.test).
 \set ON_ERROR_STOP on

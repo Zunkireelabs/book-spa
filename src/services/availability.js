@@ -1,6 +1,6 @@
 // Staff-availability rule (ZNLY-100): error mapping + a data-driven pre-check over the rows
-// therapist_shifts_for_range (migration-320) returns. The database is the only place the rule is enforced
-// (check_therapist_booking_guards, migration-319); this module only turns its stable error codes into
+// therapist_shifts_for_range (migration-354) returns. The database is the only place the rule is enforced
+// (check_therapist_booking_guards, migration-353); this module only turns its stable error codes into
 // messages and shows the same verdict early, while a form is being filled in.
 
 export const AVAILABILITY_CODES = ['OFF_SHIFT', 'ON_BREAK', 'ON_LEAVE', 'BLOCKED', 'OTHER_BRANCH', 'OVERLAP', 'OVERRIDE_NOT_ALLOWED'];

@@ -163,7 +163,7 @@ export function transformBooking(dbBooking) {
     // created_by is NULL only for customer self-bookings from the public flow (migration-159), so it marks "Online" rows.
     createdBy: dbBooking.created_by ?? null,
     createdAt: dbBooking.created_at || null,
-    // Team-level "seen" (migration-301): NULL on an online booking = nobody has opened it yet.
+    // Team-level "seen" (migration-335): NULL on an online booking = nobody has opened it yet.
     acknowledgedAt: dbBooking.acknowledged_at || null,
     acknowledgedBy: dbBooking.acknowledged_by || null,
     specialRequests: dbBooking.special_requests || null,

@@ -1,4 +1,4 @@
-// Words for the Insights ✦ (get_dashboard_insights, migration-336). The server returns numbers only; the sentence is built here so
+// Words for the Insights ✦ (get_dashboard_insights, migration-370). The server returns numbers only; the sentence is built here so
 // industry words come from useIndustry (`labels.staff` / `labels.staffPlural`), never from SQL. Pure.
 import { npr } from './dashboardMoney';
 

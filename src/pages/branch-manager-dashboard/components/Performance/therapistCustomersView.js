@@ -1,4 +1,4 @@
-// Pure view-model for the therapist inner page's Customers tab (ZNLY-172): rows of get_therapist_customers (migration 340) in, groups / pills / tiles /
+// Pure view-model for the therapist inner page's Customers tab (ZNLY-172): rows of get_therapist_customers (migration 374) in, groups / pills / tiles /
 // ✦ suggestions / sentences / CSV out. Unit-tested; no React. Owner rule: no number may be readable two ways, so a row carries labels, not visit counts.
 import { shortDate, dayRange } from './therapistInnerView';
 

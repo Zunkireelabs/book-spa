@@ -10,7 +10,7 @@ const row = (date, status, inT, outT, o = {}) => ({ date, status, check_in_time:
 const day = (att, d) => att.days.find((x) => x.date === d);
 
 describe('netShiftMinutes', () => {
-  it('end − start − breaks − off, same as migration 339', () => {
+  it('end − start − breaks − off, same as migration 373', () => {
     expect(netShiftMinutes(shift('2026-10-15', { off: [{ start_min: 600, end_min: 660 }] }))).toBe(480);
     expect(netShiftMinutes(shift('2026-10-15', { breaks: [{ start_min: 780, end_min: 840 }], off: [{ start_min: 600, end_min: 630 }] }))).toBe(450);
     expect(netShiftMinutes(shift('2026-10-15', { end_time: '23:59:59' }))).toBe(900); // 24:00 end

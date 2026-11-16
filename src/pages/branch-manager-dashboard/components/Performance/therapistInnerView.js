@@ -1,5 +1,5 @@
 // Pure view-model for the therapist inner page (ZNLY-170): the report row + the overview numbers in, bars / tiles / outcome lists / CSV out.
-// Unit-tested; no React. Every number here comes from the same source as the report row (migration 339) so the page matches ZNLY-169.
+// Unit-tested; no React. Every number here comes from the same source as the report row (migration 373) so the page matches ZNLY-169.
 import { computeDelta, addDays } from 'utils/reportPeriod';
 import { durationText } from 'utils/durationText';
 import { WEIGHTS } from '../Reports/therapistPerformanceView';
@@ -224,7 +224,7 @@ const hhmm = (min) => (min == null ? null : `${String(Math.floor(min / 60)).padS
 const nepalDate = (ms) => new Date(ms + NPT_OFFSET_MIN * 60000).toISOString().slice(0, 10);
 const rangeMin = (arr) => (Array.isArray(arr) ? arr : []).reduce((sum, y) => sum + (Number(y.end_min) - Number(y.start_min) || 0), 0);
 
-/** Net shift minutes = end − start − breaks − off (the same formula as migration 339's `wrk`). */
+/** Net shift minutes = end − start − breaks − off (the same formula as migration 373's `wrk`). */
 export function netShiftMinutes(s) {
   if (!s || !s.works || !s.start_time || !s.end_time || s.source === 'none') return 0;
   return Math.max(0, secToMin(s.end_time) - secToMin(s.start_time) - rangeMin(s.breaks) - rangeMin(s.off));
@@ -315,7 +315,7 @@ export function attendanceDays({ shifts = [], rows = [], from, to, now = Date.no
     noCheckin: noCheckin.length,
     noCheckinDates: noCheckin,
     noCheckinText: rangesText(noCheckin),
-    // Known days = marked rostered days + (switch OFF) the no-check-in days; Attendance % = presentDays ÷ knownDays everywhere (mig 341 = same rule).
+    // Known days = marked rostered days + (switch OFF) the no-check-in days; Attendance % = presentDays ÷ knownDays everywhere (mig 375 = same rule).
     knownDays: sofar.filter((d) => d.marked).length + noCheckin.length,
     presentDays: sofar.filter((d) => d.kind === 'present' || d.kind === 'half').length + noCheckin.length,
     markedPresent: sofar.filter((d) => d.kind === 'present' || d.kind === 'half').length,

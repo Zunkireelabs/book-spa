@@ -3,7 +3,7 @@ import Icon from '../AppIcon';
 import { fetchAuditLogs } from '../../services/api';
 
 // Booking history (managers/admins; audit_logs is not readable by staff). Shows the staff-availability override rows
-// written by migration-319's guard: what was skipped, the reason the manager gave, who and when (panel C, right).
+// written by migration-353's guard: what was skipped, the reason the manager gave, who and when (panel C, right).
 const when = (iso) => {
   try {
     return new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kathmandu' });

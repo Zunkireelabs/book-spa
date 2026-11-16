@@ -9,7 +9,7 @@ import { useMinWidth, useSlashFocus, useStickyBlock, thClass, SearchBox, MiniBut
 import { KindTag } from './voucherBits';
 
 // Review mode (V23, `?view=vouchers&review=1`): the one-off check of free vouchers and coupons given before values were kept
-// (migration-310 flagged the ones still in date with needs_check). Each row: Already used (closes it with a legacy claim for the
+// (migration-344 flagged the ones still in date with needs_check). Each row: Already used (closes it with a legacy claim for the
 // full value, never counted as redeemed) or Still valid (clears the flag). Both can be undone the same day. Rows checked in this
 // visit stay listed so they can be undone; "X of N checked" counts them.
 const VoucherReview = ({ vouchers, today, stickyTop, onDone, onChanged, notify, onOpen }) => {

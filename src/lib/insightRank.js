@@ -1,4 +1,4 @@
-// Which Insights show where, and in what order. The server (get_dashboard_insights, migration-336) already scores each item;
+// Which Insights show where, and in what order. The server (get_dashboard_insights, migration-370) already scores each item;
 // this decides what a view may show and caps it. Pure, so it is unit-tested.
 
 export const INSIGHT_RULE_ORDER = [

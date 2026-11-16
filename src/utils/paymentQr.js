@@ -1,4 +1,4 @@
-// Pure helpers for per-method payment QR codes (migration-303). A QR belongs to a LEAF payment method: the exact
+// Pure helpers for per-method payment QR codes (migration-337). A QR belongs to a LEAF payment method: the exact
 // value a checkout row holds in `paymentMode` and that is written to payments.payment_mode. No I/O here.
 
 export const QR_MAX_BYTES = 1024 * 1024;

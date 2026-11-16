@@ -1,4 +1,4 @@
--- SQL checks for migration-315 (LOCAL DB only; rolls back). Run:
+-- SQL checks for migration-349 (LOCAL DB only; rolls back). Run:
 --   psql "postgresql://postgres:postgres@127.0.0.1:56422/postgres" -v ON_ERROR_STOP=1 -f supabase/checks/check-admin-viewer-working-hours.sql
 \set ON_ERROR_STOP on
 BEGIN;

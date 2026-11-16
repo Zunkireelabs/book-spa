@@ -1,4 +1,4 @@
-// Checkout with products (V26): the pure rules for who pays what. The database (checkout_booking_with_products, migration-312)
+// Checkout with products (V26): the pure rules for who pays what. The database (checkout_booking_with_products, migration-346)
 // enforces the same rules, so this module is for the screen: the amount due split, what the entered methods cover, and whether
 // "Leave as due" is allowed. No React, no Supabase. Amounts are NPR numbers; everything is rounded to 2 decimals.
 //

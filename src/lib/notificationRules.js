@@ -3,7 +3,7 @@
 
 export const CATEGORIES = ['bookings', 'approvals', 'team', 'stock', 'guests'];
 
-// JS mirror of public.notification_category_for (migration 331). Keep the two in step.
+// JS mirror of public.notification_category_for (migration 365). Keep the two in step.
 const CATEGORY_BY_TYPE = {
   new_online_booking: 'bookings',
   booking_cancelled_by_guest: 'bookings',

@@ -1,6 +1,6 @@
 // The one "owed" rule for the dashboard (Business Unpaid column, brief, waiting row, Branch Needs action / Loose ends, Front desk Collect).
 // Owed = Completed and payment_status <> 'paid' with balance = final_amount - sum(payments) > 0, ANY date. Always show the balance, never final_amount.
-// The SQL twin is get_dashboard's branches[].unpaid (migration-334): same rule, same balance. Change both together.
+// The SQL twin is get_dashboard's branches[].unpaid (migration-368): same rule, same balance. Change both together.
 
 export const npr = (n) => (n == null ? '—' : `NPR ${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`);
 

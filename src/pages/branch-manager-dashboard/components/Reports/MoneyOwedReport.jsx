@@ -16,7 +16,7 @@ import { num } from './businessHealthView';
 import { buildOwedTiles, ageBars, isEmptyOwed, statusLabel, dayLabel, TABS, owedExportRows, responsibleOf, UNASSIGNED } from './moneyOwedView';
 
 const DEFINITIONS = [
-  { term: 'Owed', text: 'Completed bookings with payment not "paid" and balance = final amount − payments − refunds > 0, any date. Same rule as the dashboard (dashboardMoney.js + mig 334).' },
+  { term: 'Owed', text: 'Completed bookings with payment not "paid" and balance = final amount − payments − refunds > 0, any date. Same rule as the dashboard (dashboardMoney.js + mig 368).' },
   { term: 'Packages', text: 'final amount − paid amount > 0.' },
   { term: 'Age', text: 'days since the booking date, Nepal time.' },
   { term: 'vs 30 days ago', text: "the same rule run as of that date (payments made after it don't count)." },

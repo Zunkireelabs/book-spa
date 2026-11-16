@@ -518,7 +518,7 @@ export async function saveTherapistServices({ therapistId, serviceIds }) {
 
 /**
  * History feed. { items: [{ id, at, actorName, category, text }], since }.
- * `since` = when migration 314 was applied (history is recorded from then on; nothing is back-filled), or null.
+ * `since` = when migration 348 was applied (history is recorded from then on; nothing is back-filled), or null.
  * Pay events never come back for staff / admin_viewer (checked here, in get_therapist_activity and in audit_logs RLS).
  */
 /**

@@ -507,7 +507,7 @@ const BookingActionModal = ({
   }, [isOpen, booking?.bookingId, booking?.paymentStatus, booking?.amountPaid, loadVisitProducts]);
 
   // Load who created this booking when the modal opens
-  // Opening an unopened online booking acknowledges it for the whole team (migration-301). Fire and forget: never blocks the UI,
+  // Opening an unopened online booking acknowledges it for the whole team (migration-335). Fire and forget: never blocks the UI,
   // read-only roles don't call it, and the RPC itself only ever sets it once.
   const acknowledgedRef = useRef(null);
   useEffect(() => {

@@ -80,7 +80,7 @@ export function effectiveHoursForDate(dateStr, weeklyRows = [], overrides = []) 
 const hhmm = (t) => (t ? String(t).slice(0, 5) : null);
 
 /**
- * One therapist_shifts_for_range row (the staff-availability rule, migration-320) -> the hours object the "today" surfaces read.
+ * One therapist_shifts_for_range row (the staff-availability rule, migration-354) -> the hours object the "today" surfaces read.
  * THE one place "what are this person's hours on that date" comes from: weekly row, roster date change, branch-hours clamp and
  * breaks are all already resolved in the database. `source`: 'override' (roster date change) | 'weekly' | 'none' (nothing set:
  * open, but only inside branch hours -> `openNoHours`). A missing row (no access / RPC unavailable) is `missing`.
