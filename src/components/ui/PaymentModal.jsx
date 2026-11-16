@@ -893,7 +893,9 @@ const PaymentModal = ({
     const memberError = await saveMemberChanges();
     if (memberError) { setError(memberError); return; }
 
+    if (!attemptKeyRef.current) attemptKeyRef.current = crypto.randomUUID();
     const result = await onConfirm({
+      idempotencyKey: attemptKeyRef.current,
       tenders: primaryTenders,
       additionalAllocations,
       dueHolderName: leftover > 0 ? dueHolderName.trim() : '',
@@ -942,6 +944,7 @@ const PaymentModal = ({
   const dialogRef = useRef(null);
   const firstAmountRef = useRef(null);
   const submittingRef = useRef(false);
+  const attemptKeyRef = useRef(null); // ZNLY-206: one key per checkout attempt, so a retry after a dropped connection cannot pay twice
 
   const fmt = (n) => Number(n || 0).toLocaleString('en-IN');
   const svcName = (b) => (typeof b.service === 'string' ? b.service : b.service?.name) || b.serviceName || b.service_name_snapshot || 'Service';
@@ -949,7 +952,8 @@ const PaymentModal = ({
   const guestPhone = bookingRowInfo?.customer_phone || booking.customerPhone || '';
   const tierName = membership?.tierName || null;
   const bookingNumber = booking.booking_number || booking.id;
-  const busy = !!isSubmitting;
+  const [localBusy, setLocalBusy] = useState(false); // ZNLY-206: Pay is off from the click until the answer, whatever the parent does
+  const busy = !!isSubmitting || localBusy;
 
   const leafLabel = (value) => {
     for (const item of PAYMENT_TREE) {
@@ -1229,8 +1233,8 @@ const PaymentModal = ({
 
   const doSubmit = async () => {
     if (!canSubmit || submittingRef.current) return;
-    submittingRef.current = true;
-    try { await handleSubmit(); } finally { submittingRef.current = false; }
+    submittingRef.current = true; setLocalBusy(true);
+    try { await handleSubmit(); } finally { submittingRef.current = false; setLocalBusy(false); }
   };
 
   const requestClose = () => {

@@ -1391,12 +1391,31 @@ export async function updateOrgBranding({ logoUrl, heroImageUrl }) {
   return { data, error: null };
 }
 
+// ZNLY-206: every single-booking payment row goes through ONE database function (record_booking_payment, migration-380): it locks the
+// booking, works out what is still owed in the database, refuses a tender above it and ignores a retry with the same key.
+// `key` is per checkout attempt; one attempt that needs several calls derives a stable sub-key per call (suffix 0 = the first).
+function subKey(key, n) {
+  return n === 0 ? key : key.slice(0, -4) + (n + 4096).toString(16).slice(-4);
+}
+async function writeBookingPayment(bookingId, rows, key, notes) {
+  const { data, error } = await supabase.rpc('record_booking_payment', {
+    p_booking_id: bookingId, p_rows: rows, p_idempotency_key: key, p_notes: notes || null,
+  });
+  if (error) {
+    const m = /^(OVERPAYMENT|ALREADY_PAID|DAY_LOCKED|INVALID_PAYMENT_MODE|INVALID_PAYMENT_STATE|BOOKING_NOT_FOUND|INVALID_AMOUNT):\s*(.*)$/s.exec(error.message || '');
+    if (m) { const e = new Error(m[2] || m[1]); e.code = m[1]; throw e; }
+    throw error;
+  }
+  return data?.payment_ids || [];
+}
+
 // Record one or more payment tenders against a booking. Supports split payments
 // (e.g. part cash + part card) and leaving a remaining balance as a due, which is
 // attributed to a free-typed responsible person (dueHolderName).
 //   recordPayment({ bookingId, tenders: [{ amount, paymentMode }], dueHolderName, notes })
 // Backward-compatible single full payment: { bookingId, paymentMode, notes }.
-export async function recordPayment({ bookingId, tenders, paymentMode, dueHolderName, notes }) {
+export async function recordPayment({ bookingId, tenders, paymentMode, dueHolderName, notes, idempotencyKey }) {
+  const attemptKey = idempotencyKey || crypto.randomUUID();
   try {
     // 1. Fetch booking
     const { data: booking, error: fetchError } = await supabase
@@ -1448,16 +1467,10 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       // Settle it with a zero-amount row (same trigger-driven path applyDiscount's
       // auto-settle uses) instead of blocking a bundled payment that includes a
       // real balance on another booking.
-      const { error: settleError } = await supabase
-        .from('payments')
-        .insert({
-          booking_id: bookingId,
-          amount: 0,
-          payment_mode: (Array.isArray(tenders) && tenders[0]?.paymentMode) || paymentMode || 'No Charge',
-          recorded_by: user.id,
-          notes: notes || 'Auto-settled — no balance due',
-        });
-      if (settleError) throw settleError;
+      await writeBookingPayment(bookingId, [{
+        amount: 0,
+        payment_mode: (Array.isArray(tenders) && tenders[0]?.paymentMode) || paymentMode || 'No Charge',
+      }], attemptKey, notes || 'Auto-settled — no balance due');
       return { data: { success: true, settledWithoutPayment: true }, error: null };
     }
 
@@ -1581,19 +1594,9 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
     const insertedIds = [];
 
     if (otherTenders.length > 0) {
-      const insertRows = otherTenders.map((t, i) => ({
-        booking_id: bookingId,
-        amount: t.amount,
-        payment_mode: t.paymentMode,
-        recorded_by: user.id,
-        notes: i === 0 ? (notes || null) : null,
-      }));
-      const { data: inserted, error: insertError } = await supabase
-        .from('payments')
-        .insert(insertRows)
-        .select('id');
-      if (insertError) throw insertError;
-      insertedIds.push(...(inserted || []).map((r) => r.id));
+      const ids = await writeBookingPayment(
+        bookingId, otherTenders.map((t) => ({ amount: t.amount, payment_mode: t.paymentMode })), subKey(attemptKey, 0), notes);
+      insertedIds.push(...ids);
     }
 
     if (membershipTenders.length > 0) {
@@ -1692,19 +1695,10 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
         });
         if (redeemError) throw redeemError;
 
-        const { data: paymentRow, error: insertError } = await supabase
-          .from('payments')
-          .insert({
-            booking_id: bookingId,
-            amount: sessionPackageAmounts[i],
-            payment_mode: 'SessionPackage',
-            recorded_by: user.id,
-            notes: (!priorTendersExist && i === 0) ? (notes || null) : null,
-          })
-          .select('id')
-          .single();
-        if (insertError) throw insertError;
-        if (paymentRow?.id) insertedIds.push(paymentRow.id);
+        const ids = await writeBookingPayment(
+          bookingId, [{ amount: sessionPackageAmounts[i], payment_mode: 'SessionPackage' }], subKey(attemptKey, i + 1),
+          (!priorTendersExist && i === 0) ? notes : null);
+        insertedIds.push(...ids);
       }
     }
 
@@ -3858,16 +3852,8 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
     // Insert a zero-amount payment row so the existing SUM-based trigger
     // (update_booking_payment_status) recomputes payment_status to 'paid'.
     if (updated.discount_status === 'approved' && Number(updated.final_amount) <= 0 && booking.payment_status !== 'paid') {
-      const { error: settleError } = await supabase
-        .from('payments')
-        .insert({
-          booking_id: bookingId,
-          amount: 0,
-          payment_mode: 'No Charge',
-          recorded_by: user.id,
-          notes: 'Auto-settled — 100% discount leaves no balance due',
-        });
-      if (settleError) throw settleError;
+      await writeBookingPayment(bookingId, [{ amount: 0, payment_mode: 'No Charge' }], crypto.randomUUID(),
+        'Auto-settled — 100% discount leaves no balance due');
     }
 
     capture(updated.discount_status === 'pending' ? 'staff_discount_requested' : 'staff_discount_applied', {
