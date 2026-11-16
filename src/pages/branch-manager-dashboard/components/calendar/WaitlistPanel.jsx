@@ -5,7 +5,7 @@ import CustomSelect from '../../../../components/ui/CustomSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
 import TimeBoxInput from '../../../../components/ui/TimeBoxInput';
-import { fetchWaitlist, addToWaitlist, updateWaitlistEntry, removeFromWaitlist } from '../../../../services/api';
+import { fetchWaitlist, addToWaitlist, updateWaitlistEntry, removeFromWaitlist, isOverallBranch } from '../../../../services/api';
 import { to12h } from '../../../../services/bookingTransformers';
 
 const SORT_OPTIONS = [
@@ -307,9 +307,15 @@ const WaitlistPanel = ({ branchId, services = [], therapists = [], collapsed, on
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto p-3 space-y-3">
+          {/* Same BRANCH_REQUIRED posture as the book-in button and as
+              addToWaitlist itself: an entry is a durable row and needs a
+              branch somebody chose. Gated here rather than letting the admin
+              fill the whole form and hit the server's refusal at save. */}
           <button
-            onClick={() => { setEditingEntry(null); setFormOpen(true); }}
-            className="w-full py-2 rounded-spa border border-border text-sm font-body-medium text-text-primary hover:bg-background"
+            onClick={() => { if (!isOverallBranch(branchId)) { setEditingEntry(null); setFormOpen(true); } }}
+            disabled={isOverallBranch(branchId)}
+            title={isOverallBranch(branchId) ? 'Select a specific branch to add someone to the waitlist' : undefined}
+            className="w-full py-2 rounded-spa border border-border text-sm font-body-medium text-text-primary hover:bg-background disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
           >
             Add to waitlist
           </button>
@@ -343,9 +349,10 @@ const WaitlistPanel = ({ branchId, services = [], therapists = [], collapsed, on
                   <div className="flex items-center gap-1 flex-shrink-0">
                     {(canViewCustomerDetails || entry.customer_id) && (
                       <button
-                        onClick={() => onBookIn(entry)}
-                        className="p-1.5 rounded border border-border hover:bg-primary/5 text-text-secondary hover:text-primary"
-                        title="Book this person in"
+                        onClick={() => !isOverallBranch(branchId) && onBookIn(entry)}
+                        disabled={isOverallBranch(branchId)}
+                        className="p-1.5 rounded border border-border hover:bg-primary/5 text-text-secondary hover:text-primary disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-secondary"
+                        title={isOverallBranch(branchId) ? 'Select a specific branch to book this person in' : 'Book this person in'}
                       >
                         <Icon name="CalendarPlus" size={15} />
                       </button>

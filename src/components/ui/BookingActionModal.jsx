@@ -10,7 +10,7 @@ import PaymentModeCorrectionModal from './PaymentModeCorrectionModal';
 import PaymentMethodSelector from './PaymentMethodSelector';
 import TimeBoxInput from './TimeBoxInput';
 import InvoicePrintModal from './InvoicePrintModal';
-import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, recordTip, getCustomerFirstBookingFlag, adminCorrectBooking, adminDeleteBooking, correctPaymentAmount, correctPaymentMode } from '../../services/api';
+import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, recordTip, getCustomerFirstBookingFlag, adminCorrectBooking, adminDeleteBooking, correctPaymentAmount, correctPaymentMode, fetchInvoiceByBookingId } from '../../services/api';
 import { excludeRelatedFromPreviousDue, toDbStatus } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
@@ -142,6 +142,11 @@ const BookingActionModal = ({
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  // Keeps "Print invoice" reachable for a booking invoiced before billing was
+  // later disabled — the invoice data isn't orphaned, only this button would
+  // be if it hid unconditionally on the toggle. See CustomerSalesTab for the
+  // batched equivalent over a list; this is a single booking.
+  const [hasExistingInvoice, setHasExistingInvoice] = useState(false);
   // Admin correction — inline mode replacing the tab bar/content with an
   // edit-everything form (no separate popup modal). `showAdminCorrection`
   // toggles the mode; the rest is the form's own local state.
@@ -245,6 +250,16 @@ const BookingActionModal = ({
     });
     return () => { cancelled = true; };
   }, [showPaymentModal, branchId]);
+
+  useEffect(() => {
+    if (orgSettings?.billing_enabled === true) return; // button already shown; skip the lookup
+    if (booking?.paymentStatus !== 'paid' || !booking?.bookingId) return;
+    let cancelled = false;
+    fetchInvoiceByBookingId(booking.bookingId).then(({ data }) => {
+      if (!cancelled) setHasExistingInvoice(!!data);
+    });
+    return () => { cancelled = true; };
+  }, [orgSettings?.billing_enabled, booking?.bookingId, booking?.paymentStatus]);
 
   // Pre-select current therapists/room when booking changes or assign tab opens
   useEffect(() => {
@@ -2882,7 +2897,7 @@ const BookingActionModal = ({
                         <Icon name="CheckCircle" size={14} className="text-success flex-shrink-0" />
                         <span className="font-body font-body-normal text-xs sm:text-sm text-success">Payment has been recorded.</span>
                       </div>
-                      {orgSettings?.billing_enabled === true && (
+                      {(orgSettings?.billing_enabled === true || hasExistingInvoice) && (
                         <button
                           type="button"
                           onClick={() => setShowInvoiceModal(true)}

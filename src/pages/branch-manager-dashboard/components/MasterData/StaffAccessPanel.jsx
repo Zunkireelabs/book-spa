@@ -313,7 +313,7 @@ const StaffAccessPanel = ({ branchId, readOnly = false }) => {
   if (view === 'detail' && activeTherapist && form) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center justify-between sticky top-0 bg-surface z-10 -mx-1 px-1 py-2 border-b border-border">
+        <div className="flex items-center justify-between sticky top-0 bg-surface z-sticky-filter -mx-1 px-1 py-2 border-b border-border">
           <div className="flex items-center gap-3">
             <button onClick={backToList} className="flex items-center gap-1 text-text-secondary hover:text-primary text-sm">
               <Icon name="ChevronLeft" size={16} /> Staff access

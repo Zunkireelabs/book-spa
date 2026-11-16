@@ -5318,31 +5318,25 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     if (authError) return { data: null, error: authError };
     const vis = await resolveVisibility(profile);
 
-    // Resolve which booking ids this caller may see BEFORE the main bookings
-    // query, so a staff member restricted to "own bookings" never has other
-    // therapists' rows (names, times, customer info) leave the database in
-    // the first place — filtering client-side after the fact would still
-    // have sent them over the wire. Checked via booking_therapists, not
-    // bookings.therapist_id: a combo booking can have several therapists,
-    // and that junction (kept in sync by migration-252's trigger) is the
-    // one place that's true for both single- and multi-therapist bookings.
-    let ownBookingIds = null;
-    if (vis.ownBookingsOnly) {
-      if (!vis.therapistId) {
-        // No linked therapist row — fail closed, not open.
-        return {
-          data: { branchHours: { openTime: '09:00:00', closeTime: '21:00:00', timezone: 'Asia/Kathmandu' }, therapists: [], rooms: [], bookings: [], checkedOutByTherapistAndDate: {} },
-          error: null,
-        };
-      }
-      const links = await fetchAllPages((opts) =>
-        supabase
-          .from('booking_therapists')
-          .select('booking_id', opts)
-          .eq('therapist_id', vis.therapistId)
-          .order('booking_id')
-      );
-      ownBookingIds = [...new Set(links.map((l) => l.booking_id))];
+    // "Own bookings only" is enforced by migration-322's RESTRICTIVE RLS
+    // policy on `bookings` itself now — every SELECT below already comes back
+    // pre-filtered to this therapist's own rows server-side. This used to
+    // also fetch an all-time ownBookingIds list from booking_therapists and
+    // .in('id', ownBookingIds) the main query, but that .in() grows with the
+    // therapist's entire history and PostgREST rejects a bare .in() above
+    // ~500-700 ids with an undetailed 400 (see the pagination note at
+    // fetchAllPages, :1345) — a therapist with a year of bookings got a blank
+    // calendar. RLS doesn't have that limit; removing the client-side filter
+    // removes the bug along with the now-redundant code.
+    //
+    // The fail-closed early return stays: RLS also fails closed for an
+    // unlinked restricted account, but this avoids a pointless round trip
+    // and keeps the intent legible here.
+    if (vis.ownBookingsOnly && !vis.therapistId) {
+      return {
+        data: { branchHours: { openTime: '09:00:00', closeTime: '21:00:00', timezone: 'Asia/Kathmandu' }, therapists: [], rooms: [], bookings: [], checkedOutByTherapistAndDate: {} },
+        error: null,
+      };
     }
 
     // 1. Fetch branch hours + timezone
@@ -5571,7 +5565,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     // when withheld, rather than fetched and blanked after — once a column
     // never leaves the database, there's nothing for devtools to recover.
     let bookings = [];
-    if (!vis.ownBookingsOnly || ownBookingIds.length > 0) {
+    {
       const bookingFields = [
         'id', 'booking_number', 'customer_id', 'customer_name',
         'customer_phone',   // fetched always; masked below when withheld — see maskPhone
@@ -5597,7 +5591,9 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .lte('date', endDate)
         .not('status', 'in', '("Cancelled","No Show")')
         .order('start_time');
-      if (vis.ownBookingsOnly) bookingsQuery = bookingsQuery.in('id', ownBookingIds);
+      // No client-side own-bookings filter needed — migration-322's
+      // RESTRICTIVE RLS policy already scopes this SELECT to the caller's
+      // own bookings when vis.ownBookingsOnly is true.
 
       const { data: bookingsData, error: bookingsError } = await bookingsQuery;
       if (bookingsError) throw bookingsError;
@@ -17958,19 +17954,26 @@ export async function fetchWaitlist(branchId, { sort = 'oldest' } = {}) {
     if (authError) return { data: null, error: authError };
     const vis = await resolveVisibility(profile);
 
-    const resolvedBranchId = resolveBranchId(branchId);
+    // Overall sentinel must not route through resolveBranchId — it would
+    // silently coerce to a hardcoded default branch (same trap withBranch's
+    // own comment warns about). The write path (addToWaitlist) requires a
+    // concrete branch since a waitlist entry outlives the request; a read
+    // can safely go org-wide for Overall the same way withBranch already
+    // does everywhere else, since RLS is org-scoped regardless.
     const rows = await fetchAllPages((opts) =>
-      supabase
-        .from('waitlist_entries')
-        .select(`
-          id, customer_id, customer_name, customer_phone, service_id,
-          preferred_date, preferred_time, preferred_therapist_id, notes,
-          status, booking_id, created_at,
-          service:services(id, name),
-          therapist:therapists(id, name)
-        `, opts)
-        .eq('branch_id', resolvedBranchId)
-        .eq('status', 'waiting')
+      withBranch(
+        supabase
+          .from('waitlist_entries')
+          .select(`
+            id, customer_id, customer_name, customer_phone, service_id,
+            preferred_date, preferred_time, preferred_therapist_id, notes,
+            status, booking_id, created_at,
+            service:services(id, name),
+            therapist:therapists(id, name)
+          `, opts)
+          .eq('status', 'waiting'),
+        branchId
+      )
         .order('created_at', { ascending: sort !== 'newest' })
         .order('id')
     );
@@ -18203,6 +18206,29 @@ export async function fetchInvoiceByBookingId(bookingId) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] fetchInvoiceByBookingId error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Which of these bookings already has an invoice — one query for the whole
+// set, not one per row. Lets a list (CustomerSalesTab) keep the "Print
+// invoice" entry point visible for a booking that was invoiced before billing
+// got disabled, without an N+1 lookup across every paid booking in the list.
+export async function fetchInvoiceExistenceForBookingIds(bookingIds) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const ids = [...new Set((bookingIds || []).filter(Boolean))];
+    if (ids.length === 0) return { data: new Set(), error: null };
+
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('booking_id')
+      .in('booking_id', ids);
+    if (error) throw error;
+    return { data: new Set((data || []).map((r) => r.booking_id)), error: null };
+  } catch (error) {
+    console.error('[API] fetchInvoiceExistenceForBookingIds error:', error.message);
     return { data: null, error };
   }
 }
