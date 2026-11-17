@@ -1,0 +1,6 @@
+# Only the live collector needs this. The map, status tracking, demo and tests use the standard library alone.
+# Homebrew Python refuses system-wide installs, so use a private environment in this folder:
+#   python3 -m venv .venv && .venv/bin/python -m pip install -r requirements.txt
+#   .venv/bin/python -m playwright install chromium
+# then run everything with  .venv/bin/python -m gmaps ...
+playwright>=1.45

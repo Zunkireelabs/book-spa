@@ -1,0 +1,19 @@
+{
+  "city": "Kathmandu Valley",
+  "queries": ["salon", "beauty parlour", "spa", "barbershop", "nail studio", "makeup artist", "gym"],
+  "cell_m": 600,
+  "areas": [
+    {"name": "Thamel",      "lat": 27.7154, "lng": 85.3123, "radius_m": 900,  "pilot": true},
+    {"name": "Lazimpat",    "lat": 27.7195, "lng": 85.3270, "radius_m": 780,  "pilot": true},
+    {"name": "Baluwatar",   "lat": 27.7290, "lng": 85.3290, "radius_m": 700,  "pilot": true},
+    {"name": "Sanepa",      "lat": 27.6862, "lng": 85.3092, "radius_m": 760,  "pilot": true},
+    {"name": "Patan",       "lat": 27.6644, "lng": 85.3188, "radius_m": 1100},
+    {"name": "Baneshwor",   "lat": 27.6915, "lng": 85.3436, "radius_m": 950},
+    {"name": "Boudha",      "lat": 27.7215, "lng": 85.3620, "radius_m": 900},
+    {"name": "Chabahil",    "lat": 27.7195, "lng": 85.3500, "radius_m": 800},
+    {"name": "Koteshwor",   "lat": 27.6780, "lng": 85.3560, "radius_m": 900},
+    {"name": "Maharajgunj", "lat": 27.7370, "lng": 85.3300, "radius_m": 850},
+    {"name": "Kalanki",     "lat": 27.6935, "lng": 85.2810, "radius_m": 900},
+    {"name": "Bhaktapur",   "lat": 27.6710, "lng": 85.4298, "radius_m": 1200}
+  ]
+}

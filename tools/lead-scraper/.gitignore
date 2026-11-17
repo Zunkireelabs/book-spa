@@ -1,0 +1,14 @@
+# Real business data stays local: never commit it.
+*.db
+*.db-journal
+*.db.bak*
+*.csv
+*.xlsx
+*.log
+cache/
+out/
+.venv/
+__pycache__/
+.env
+gmaps-scraper/reference/
+.DS_Store

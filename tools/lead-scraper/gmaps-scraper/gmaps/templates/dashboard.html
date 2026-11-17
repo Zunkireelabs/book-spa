@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leads dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap">
+<style>
+:root{ --ink:#14201C; --muted:#66716D; --faint:#97A09C; --line:#E6EAE8; --soft:#F3F5F4; --bg:#FAFAF9; --card:#fff;
+       --green:#12805C; --green-bg:#E4F2EC; --amber:#B7791F; --amber-bg:#FBF1DC; --red:#C8472F; --red-bg:#FBE9E5; --grey:#6B7370; --grey-bg:#EEF0EF; }
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg); color:var(--ink); font:400 14px/1.5 "DM Sans",system-ui,sans-serif; -webkit-font-smoothing:antialiased}
+
+
+.shell{display:grid; grid-template-columns:244px minmax(0,1fr); min-height:100vh}
+.side{position:sticky; top:0; height:100vh; background:#fff; border-right:1px solid var(--line); padding:18px 12px; display:flex; flex-direction:column; overflow-y:auto}
+.brand{display:flex; align-items:center; gap:10px; font-weight:700; font-size:16.5px; letter-spacing:-.01em; padding:4px 10px 14px}
+.brand i{width:26px; height:26px; border-radius:8px; background:var(--ink); display:grid; place-items:center; flex:none}
+.grp{font-size:11.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--faint); padding:18px 10px 6px}
+.menu{display:flex; flex-direction:column; gap:2px}
+.tab{display:flex; align-items:center; gap:11px; width:100%; padding:9px 10px; border-radius:10px; border:0; background:none; font:600 14px "DM Sans",sans-serif; color:var(--muted); cursor:pointer; text-decoration:none; text-align:left}
+.tab svg{flex:none; opacity:.85}
+.tab:hover{background:var(--soft); color:var(--ink)}
+.tab[aria-selected="true"], .tab.on{background:var(--ink); color:#fff}
+.tab .n{margin-left:auto; font:500 12px "DM Mono",monospace; background:var(--soft); color:var(--muted); border-radius:999px; padding:1px 9px}
+.tab[aria-selected="true"] .n{background:rgb(255 255 255/.18); color:#fff}
+.sidefoot{margin-top:auto; padding:14px 10px 2px; color:var(--faint); font-size:12px; line-height:1.5}
+.main{padding:26px 30px 60px; min-width:0}
+.title h1{margin:0; font-size:24px; font-weight:700; letter-spacing:-.02em}
+.title p{margin:3px 0 0; color:var(--muted); font-size:13.5px}
+.run{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:16px; padding:12px 16px; border-radius:12px; background:var(--green-bg); color:#0B5D43; font-weight:500}
+.run.idle{background:var(--grey-bg); color:var(--grey)}
+.run b{font-weight:700}
+.run .dot{width:9px; height:9px; border-radius:50%; background:var(--green)}
+.run.idle .dot{background:var(--faint)}
+.run code{font:500 12.5px "DM Mono",monospace; background:rgb(255 255 255/.7); padding:2px 7px; border-radius:6px}
+
+
+.bar{display:flex; flex-wrap:wrap; gap:10px 12px; align-items:center; margin-top:16px}
+.seg{display:flex; gap:2px; background:#fff; border:1px solid var(--line); border-radius:12px; padding:3px}
+.seg button{font:600 13px "DM Sans",sans-serif; border:0; background:none; color:var(--muted); padding:8px 13px; border-radius:9px; cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink); color:#fff}
+.sp{flex:1}
+.in{font:500 13.5px "DM Sans",sans-serif; border:1px solid var(--line); background:#fff; border-radius:10px; padding:9px 12px; color:var(--ink); min-width:0}
+.in:focus{outline:2px solid var(--green); outline-offset:1px}
+input.in[type=search]{width:230px}
+label.chk{display:flex; align-items:center; gap:7px; font-weight:500; font-size:13.5px; color:var(--ink2,#3a4642); cursor:pointer}
+.btn{font:600 13.5px "DM Sans",sans-serif; border:0; border-radius:10px; padding:10px 18px; cursor:pointer; background:var(--ink); color:#fff}
+
+.card{margin-top:12px; background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden}
+.scroll{overflow:auto; max-height:calc(100vh - 330px); min-height:200px}
+table{border-collapse:separate; border-spacing:0; width:100%; min-width:760px}
+th{position:sticky; top:0; background:#FBFCFB; text-align:left; font-weight:600; font-size:13px; padding:11px 14px; border-bottom:1px solid var(--line); white-space:nowrap; cursor:pointer; z-index:1; user-select:none}
+th .fill{font:500 11px "DM Mono",monospace; margin-left:7px; padding:1px 7px; border-radius:999px; background:var(--green-bg); color:var(--green)}
+th .fill.mid{background:var(--amber-bg); color:var(--amber)}
+th .fill.low{background:var(--red-bg); color:var(--red)}
+th .key{display:block; font:400 11.5px "DM Mono",monospace; color:var(--faint); margin-top:1px}
+th .arr{color:var(--muted); margin-left:4px}
+td{padding:11px 14px; border-bottom:1px solid var(--line); vertical-align:middle; max-width:300px}
+tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:#FAFBFA}
+td.num{text-align:right; font-variant-numeric:tabular-nums}
+td.id{color:var(--faint); font:400 12px "DM Mono",monospace}
+.nm{font-weight:600}
+.sub{color:var(--muted); font-size:12.5px}
+.mono{font:500 13px "DM Mono",monospace}
+td a{color:#0B5D43; font-weight:500; text-decoration:none}
+td a:hover{text-decoration:underline}
+.cut{display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.none{color:#C3CAC7}
+.wa{display:inline-block; background:var(--green); color:#fff!important; border-radius:999px; padding:3px 11px; font-size:12.5px}
+select.st{font:600 12.5px "DM Sans",sans-serif; border:0; border-radius:999px; padding:5px 26px 5px 11px; cursor:pointer; appearance:none; -webkit-appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2314201C' stroke-width='1.5'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 10px center; text-transform:capitalize}
+.st.new{background-color:var(--red-bg); color:var(--red)}
+.st.contacted,.st.replied,.st.demo{background-color:var(--amber-bg); color:var(--amber)}
+.st.customer{background-color:var(--green-bg); color:var(--green)}
+.st.no{background-color:var(--grey-bg); color:var(--grey)}
+
+.foot{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 16px; border-top:1px solid var(--line); color:var(--muted); font-size:13px; flex-wrap:wrap}
+.foot button{font:600 13px "DM Sans",sans-serif; border:1px solid var(--line); background:#fff; border-radius:9px; padding:6px 12px; cursor:pointer}
+.foot button:disabled{opacity:.4; cursor:default}
+.empty{padding:46px 20px; text-align:center; color:var(--muted)}
+.empty b{display:block; color:var(--ink); font-size:15px; margin-bottom:6px}
+.empty code{font:500 12.5px "DM Mono",monospace; background:var(--soft); padding:3px 8px; border-radius:6px}
+pre.json{margin:0; padding:16px; font:400 12.5px/1.55 "DM Mono",monospace; overflow:auto; max-height:calc(100vh - 330px); color:#2c3a35}
+
+.card.bare{background:none; border:0; border-radius:0; overflow:visible}
+.ov{display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:16px}
+.s4{grid-column:span 4}.s5{grid-column:span 5}.s7{grid-column:span 7}.s8{grid-column:span 8}
+.panel{background:#fff; border:1px solid var(--line); border-radius:14px; padding:18px 20px 20px; min-width:0}
+.ph{display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:16px}
+.panel h3{margin:0; font-size:14.5px; font-weight:600}
+.panel .sub{color:var(--muted); font-size:12.5px; margin-top:2px}
+.tg{font:600 12px "DM Sans",sans-serif; border:1px solid var(--line); background:#fff; border-radius:8px; padding:4px 11px; cursor:pointer; color:var(--muted); flex:none}
+.tg:hover{color:var(--ink); border-color:#cfd6d3}
+.hero .lab{color:var(--muted); font-size:13px; font-weight:500}
+.hero .big{font-size:60px; line-height:1; font-weight:700; letter-spacing:-.03em; margin:8px 0 4px}
+.hero .of{color:var(--muted); font-size:13.5px}
+.tiles{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:18px}
+.tile{background:var(--soft); border-radius:10px; padding:11px 13px}
+.tile span{display:block; color:var(--muted); font-size:12px; font-weight:500}
+.tile b{font-size:22px; font-weight:700; letter-spacing:-.01em}
+.tile b small{font-size:12.5px; color:var(--muted); font-weight:500}
+.fr,.ar{display:grid; grid-template-columns:96px minmax(0,1fr); gap:12px; align-items:center; padding:5px 0; border-radius:8px}
+.ar{cursor:pointer}
+.ar:hover{background:var(--soft)}
+.fl{font-size:13px; font-weight:500; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.fbar{display:flex; align-items:center; gap:0; min-width:0}
+.fbar i{display:block; height:18px; border-radius:0 4px 4px 0; flex:none; min-width:0}
+.fbar i + i{margin-left:2px}
+.fbar i:first-child{border-radius:0}
+.fbar i:last-of-type{border-radius:0 4px 4px 0}
+.fbar b{margin-left:10px; font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap}
+.fbar small{margin-left:7px; font-size:12px; color:var(--muted); white-space:nowrap}
+.key{display:flex; gap:16px; flex-wrap:wrap; margin:-4px 0 12px; font-size:12.5px; color:var(--muted)}
+.key span{display:flex; align-items:center; gap:7px}
+.key i{width:10px; height:10px; border-radius:3px; display:block}
+.more{color:var(--muted); font-size:12.5px; margin-top:8px}
+.act{position:relative; height:150px; margin-left:30px}
+.act .gl{position:absolute; left:0; right:0; height:0; border-top:1px solid #EDF0EE}
+.act .gl span{position:absolute; left:-30px; top:-8px; width:24px; text-align:right; font-size:11.5px; color:var(--faint); font-variant-numeric:tabular-nums}
+.act .cols{position:absolute; inset:0; display:flex; align-items:flex-end}
+.act .col{flex:1; height:100%; display:flex; align-items:flex-end; justify-content:center; position:relative}
+.act .col i{display:block; width:62%; max-width:22px; border-radius:4px 4px 0 0; background:#2C8869; min-height:0}
+.act .col em{position:absolute; left:0; right:0; text-align:center; font:600 11.5px "DM Sans",sans-serif; font-style:normal; color:var(--ink)}
+.act .col:hover{background:rgb(20 32 28/.04)}
+.xl{display:flex; margin:6px 0 0 30px}
+.xl span{flex:1; text-align:center; font-size:11px; color:var(--faint); white-space:nowrap}
+.mt{display:grid; grid-template-columns:110px minmax(0,1fr) 44px; gap:12px; align-items:center; padding:7px 0}
+.mt .trk{height:8px; border-radius:4px; background:#DCEFE6; overflow:hidden}
+.mt .trk i{display:block; height:100%; background:#2C8869; border-radius:4px}
+.mt span{font-size:13px; font-weight:500}
+.mt b{font-size:13px; text-align:right; font-variant-numeric:tabular-nums}
+table.mini{width:100%; min-width:0; border-collapse:collapse}
+table.mini th{position:static; cursor:default; background:none; padding:7px 8px; font-size:12px; color:var(--muted); border-bottom:1px solid var(--line)}
+table.mini td{padding:8px; font-size:13px; border-bottom:1px solid #F0F2F1; max-width:none}
+table.mini td.n{text-align:right; font-variant-numeric:tabular-nums}
+table.mini tr:last-child td{border-bottom:0}
+.go{font:600 12px "DM Sans",sans-serif; border:1px solid var(--line); background:#fff; border-radius:999px; padding:4px 11px; cursor:pointer; color:var(--ink)}
+.go:hover{background:var(--ink); color:#fff; border-color:var(--ink)}
+.empty-s{padding:26px 10px; color:var(--muted); text-align:center; font-size:13.5px}
+.tip{position:fixed; z-index:50; background:var(--ink); color:#fff; padding:7px 11px; border-radius:8px; font-size:12.5px; font-weight:500; pointer-events:none; opacity:0; transform:translate(-50%,-125%); max-width:280px}
+.tip.on{opacity:1}
+@media (max-width:1000px){ .s4,.s5,.s7,.s8{grid-column:span 12} }
+.fld{margin-bottom:16px}
+.fld>label,.lbl{display:block; font-size:12.5px; font-weight:600; color:var(--muted); margin-bottom:6px}
+.fld .in,textarea.in{width:100%}
+textarea.in{font:500 13px/1.5 "DM Mono",monospace; resize:vertical; padding:11px 12px}
+.chips2{display:flex; flex-wrap:wrap; gap:8px}
+.chk2{display:flex; align-items:center; gap:7px; padding:7px 13px; border:1px solid var(--line); border-radius:999px; font-weight:500; font-size:13.5px; cursor:pointer; background:#fff}
+.chk2:has(input:checked){border-color:var(--ink); background:var(--soft)}
+.btns{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:6px}
+.btn.ghost{background:#fff; color:var(--ink); border:1px solid var(--line)}
+.btn[disabled]{opacity:.45; cursor:default}
+.plan{background:var(--soft); border-radius:10px; padding:10px 13px; font-size:13px; margin-bottom:16px}
+.warn{background:var(--amber-bg); color:#7A4F10; border-radius:10px; padding:10px 13px; font-size:12.5px; margin-top:14px; line-height:1.5}
+.warn code,.plan code{font:500 12px "DM Mono",monospace; background:rgb(255 255 255/.7); padding:1px 6px; border-radius:5px}
+.newp{border:1px dashed #cfd6d3; border-radius:12px; padding:14px; margin-bottom:16px; background:#FCFDFC}
+.row2{display:flex; gap:8px}
+.row2 .in{flex:1}
+.pickrow{display:block; width:100%; text-align:left; border:1px solid var(--line); background:#fff; border-radius:9px; padding:8px 11px; margin-top:6px; font:500 13px "DM Sans",sans-serif; cursor:pointer; color:var(--ink)}
+.pickrow:hover,.pickrow.on{border-color:var(--ink)}
+.pill{display:inline-flex; align-items:center; gap:8px; font-weight:600; font-size:13px; padding:5px 12px; border-radius:999px; background:var(--grey-bg); color:var(--grey)}
+.pill.running,.pill.done{background:var(--green-bg); color:var(--green)}
+.pill.stopped,.pill.blocked{background:var(--amber-bg); color:var(--amber)}
+.pill.error{background:var(--red-bg); color:var(--red)}
+.spin{width:10px; height:10px; border-radius:50%; border:2px solid currentColor; border-top-color:transparent; animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+pre.log{background:#101816; color:#CFE3DA; border-radius:10px; padding:12px 14px; font:400 12px/1.6 "DM Mono",monospace; max-height:300px; overflow:auto; white-space:pre-wrap; margin:12px 0 0}
+.steps{margin:0; padding-left:20px; color:var(--ink); line-height:1.6}
+.steps li{margin-bottom:10px}
+.steps b{font-weight:600}
+.err{color:var(--red); font-size:13px; white-space:pre-wrap; margin-top:10px}
+.toast{position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:var(--ink); color:#fff; padding:10px 18px; border-radius:999px; font-weight:600; font-size:13.5px; opacity:0; pointer-events:none; transition:opacity .2s}
+.toast.on{opacity:1}
+.toast.err{background:var(--red)}
+@media (max-width:900px){
+  .shell{grid-template-columns:minmax(0,1fr)}
+  .side{position:static; height:auto; flex-direction:row; align-items:center; gap:6px; padding:10px; border-right:0; border-bottom:1px solid var(--line); overflow-x:auto}
+  .brand,.grp,.sidefoot{display:none}
+  .menu{flex-direction:row; gap:6px}
+  .tab{width:auto; white-space:nowrap}
+  .main{padding:18px 16px 50px}
+}
+@media (max-width:700px){ input.in[type=search]{width:100%} .sp{display:none} }
+@media (prefers-reduced-motion:reduce){ .toast{transition:none} }
+</style>
+</head>
+<body>
+<div class="shell">
+<aside class="side" aria-label="Sections">
+  <div class="brand"><i><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.4"/></svg></i>Zennly leads</div>
+  <a class="tab" href="/"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4 3 6.5v13L9 17m0-13 6 2.5M9 4v13m6-10.5L21 4v13l-6 2.5m0-13v13"/></svg>Map</a>
+  <nav class="menu" id="tabs" role="tablist" aria-label="Lists"></nav>
+  <div class="sidefoot">Changes you make here are saved to the database straight away.</div>
+</aside>
+
+<main class="main">
+  <div class="title"><h1 id="ttl">Overview</h1><p id="ttlsub"></p></div>
+
+  <div class="run" id="run"></div>
+
+  <div class="bar" id="bar">
+    <div class="seg" id="views"></div>
+    <div class="seg" id="mode">
+      <button data-m="table" aria-pressed="true">Table</button>
+      <button data-m="json" aria-pressed="false">JSON</button>
+    </div>
+    <span class="sp"></span>
+    <input class="in" type="search" id="q" placeholder="Search name, phone, address" aria-label="Search">
+    <select class="in" id="area" aria-label="Area"></select>
+    <select class="in" id="cat" aria-label="Business type"></select>
+    <label class="chk"><input type="checkbox" id="phoneOnly"> Has phone</label>
+    <button class="btn" id="export" type="button">Export CSV</button>
+  </div>
+
+  <div class="card"><div id="out"></div><div class="foot" id="foot"></div></div>
+</main>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+var DATA=/*__DATA__*/null;
+var TOKEN="__TOKEN__";
+
+(function(){
+var PAGE=50;
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+function safeUrl(u){ return /^https?:\/\//i.test(u||'')?u:null; }
+function short(u){ return String(u).replace(/^https?:\/\/(www\.)?/,'').replace(/\/$/,''); }
+function fmtDate(s){ return s?String(s).slice(0,16).replace('T',' '):''; }
+
+/* ---- the lists: ours, to contact, in progress, all, runs ---- */
+var TABS=[
+  {id:'overview', label:'Overview', hint:'summary and charts', overview:true},
+  {id:'find',    label:'Find places', hint:'search for businesses', page:true},
+  {id:'zennly',  label:'Zennly customers', hint:'connect your customers', page:true},
+  {id:'ours',     label:'Ours',        hint:'Zennly customers',            test:function(l){return l.status==='customer'},
+   empty:['No customers in the list yet.','Import yours: <code>python3 -m gmaps import-customers customers.csv</code>']},
+  {id:'todo',     label:'To contact',  hint:'found by the runs, not yet contacted', test:function(l){return l.status==='new'},
+   empty:['Nothing waiting.','Find more: <code>python3 -m gmaps collect --area Lazimpat --dry-run</code>']},
+  {id:'progress', label:'In progress', hint:'contacted, replied or demo',  test:function(l){return {contacted:1,replied:1,demo:1}[l.status]},
+   empty:['Nobody contacted yet.','Change a status in the table, or run <code>python3 -m gmaps mark ID contacted</code>']},
+  {id:'all',      label:'All leads',   hint:'everything',                  test:function(){return true}, empty:['No leads yet.','']},
+  {id:'runs',     label:'Runs',        hint:'search history',              runs:true}
+];
+
+/* ---- columns ---- */
+var C={
+  id:{l:'ID',k:'id',cls:'id'},
+  name:{l:'Business',k:'name',r:function(l){return '<span class="nm cut">'+esc(l.name)+'</span>'}},
+  cat:{l:'Type',k:'cat'},
+  area:{l:'Area',k:'area'},
+  status:{l:'Status',k:'status',r:function(l){
+    return '<select class="st '+esc(l.status)+'" data-id="'+l.id+'" aria-label="Status of '+esc(l.name)+'">'
+      +DATA.statuses.map(function(s){return '<option value="'+s+'"'+(s===l.status?' selected':'')+'>'+s+'</option>'}).join('')+'</select>'}},
+  phone:{l:'Phone',k:'phone',r:function(l){return l.phone?'<span class="mono">'+esc(l.phone)+'</span>':'<span class="none">-</span>'}},
+  wa:{l:'WhatsApp',k:'wa',r:function(l){return l.wa?'<a class="wa" href="'+esc(l.wa)+'" target="_blank" rel="noopener">Message</a>':'<span class="none">-</span>'}},
+  email:{l:'Email',k:'email'},
+  website:{l:'Website',k:'website',r:function(l){var u=safeUrl(l.website); return u?'<a class="cut" href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(short(u))+'</a>':'<span class="none">-</span>'}},
+  address:{l:'Address',k:'address',r:function(l){return l.address?'<span class="cut" title="'+esc(l.address)+'">'+esc(l.address)+'</span>':'<span class="none">-</span>'}},
+  maps:{l:'Maps',k:'maps',r:function(l){var u=safeUrl(l.maps); return u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">Open</a>':'<span class="none">-</span>'}},
+  rating:{l:'Rating',k:'rating',num:1},
+  reviews:{l:'Reviews',k:'reviews',num:1},
+  score:{l:'Score',k:'score',num:1},
+  platform:{l:'Uses software',k:'platform'},
+  page:{l:'Zennly page',k:'page',r:function(l){var u=safeUrl(l.page); return u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">View</a>':''}},
+  last_touch:{l:'Last touch',k:'last_touch',r:function(l){return esc(fmtDate(l.last_touch))}},
+  note:{l:'Note',k:'note'},
+  lat:{l:'Lat',k:'lat',num:1}, lng:{l:'Lng',k:'lng',num:1},
+  first_seen:{l:'Found on',k:'first_seen',r:function(l){return esc(fmtDate(l.first_seen))}}
+};
+var VIEWS=[
+  {id:'overview', label:'Overview',     cols:['id','name','cat','area','status','rating','reviews','phone']},
+  {id:'contact',  label:'Contact info', cols:['name','phone','wa','email','website','address','maps']},
+  {id:'rating',   label:'Rating',       cols:['name','rating','reviews','score','platform','page']},
+  {id:'all',      label:'All fields',   cols:['id','name','cat','area','status','phone','wa','email','website','address','maps','rating','reviews','score','platform','page','last_touch','note','lat','lng','first_seen']}
+];
+var S={tab:'overview',view:'overview',mode:'table',q:'',area:'',cat:'',phoneOnly:false,page:0,sort:null,dir:1};
+var h=(location.hash||'').slice(1); if(TABS.some(function(t){return t.id===h})) S.tab=h;
+
+/* ---- run strip ---- */
+(function(){
+  var r=DATA.runs.filter(function(x){return x.kind==='Google Maps search'})[0], el=document.getElementById('run');
+  if(r){ el.innerHTML='<span class="dot"></span><b>Last search</b> '+esc(r.name)+' <span>'+esc(fmtDate(r.at))+'</span><span>'+r.searches+' searches</span><span>'+r.found+' places seen</span>'; }
+  else { el.className='run idle'; el.innerHTML='<span class="dot"></span><b>No Google Maps search yet.</b> Plan one with <code>python3 -m gmaps collect --area Lazimpat --dry-run</code>'; }
+})();
+
+/* ---- filters / data ---- */
+function uniq(k){ var s={}; DATA.leads.forEach(function(l){ if(l[k]) s[l[k]]=1; }); return Object.keys(s).sort(); }
+function fillSelect(id,label,vals){ document.getElementById(id).innerHTML='<option value="">'+label+'</option>'+vals.map(function(v){return '<option>'+esc(v)+'</option>'}).join(''); }
+fillSelect('area','All areas',uniq('area')); fillSelect('cat','All types',uniq('cat'));
+
+function tabDef(){ return TABS.filter(function(t){return t.id===S.tab})[0]; }
+function rows(){
+  var t=tabDef(), q=S.q.toLowerCase();
+  var r=DATA.leads.filter(function(l){
+    if(!t.test(l)) return false;
+    if(S.area && l.area!==S.area) return false;
+    if(S.cat && l.cat!==S.cat) return false;
+    if(S.phoneOnly && !l.phone) return false;
+    if(q && ((l.name||'')+' '+(l.phone||'')+' '+(l.address||'')+' '+(l.email||'')).toLowerCase().indexOf(q)<0) return false;
+    return true;
+  });
+  if(S.sort){ var k=S.sort; r=r.slice().sort(function(a,b){
+    var x=a[k], y=b[k]; if(x==null&&y==null) return 0; if(x==null) return 1; if(y==null) return -1;
+    return (x<y?-1:x>y?1:0)*S.dir; }); }
+  return r;
+}
+function counts(){ var c={}; TABS.forEach(function(t){ if(t.test) c[t.id]=DATA.leads.filter(t.test).length; }); c.runs=DATA.runs.length; return c; }
+
+/* ---- overview ---- */
+var GREEN='#2C8869', GRAY='#AEB8B3', RAMP=['#6FBB9E','#4AA282','#2C8869','#176C52','#0A4F3B'];   /* RAMP passes validate_palette.js --ordinal on white */
+var TBL={};
+function pct(a,b){ return b?Math.round(a/b*100):0; }
+function stats(){
+  var L=DATA.leads, n=L.length;
+  function c(f){ return L.filter(f).length; }
+  var reached=c(function(l){return l.status!=='new'});
+  return { n:n, reached:reached, replied:c(function(l){return {replied:1,demo:1,customer:1}[l.status]}),
+    demo:c(function(l){return l.status==='demo'||l.status==='customer'}), customer:c(function(l){return l.status==='customer'}),
+    phone:c(function(l){return l.phone}), website:c(function(l){return l.website}), email:c(function(l){return l.email}),
+    coords:c(function(l){return l.lat!=null}) };
+}
+function table(head,rowsHtml,lefts){ lefts=lefts||[0]; return '<table class="mini"><thead><tr>'+head.map(function(h,i){return '<th'+(lefts.indexOf(i)<0?' style="text-align:right"':'')+'>'+h+'</th>'}).join('')+'</tr></thead><tbody>'+rowsHtml+'</tbody></table>'; }
+function panel(id,span,title,sub,chart,tbl){
+  var t=!!TBL[id];
+  return '<section class="panel s'+span+'"><div class="ph"><div><h3>'+title+'</h3><div class="sub">'+sub+'</div></div>'
+    +(tbl?'<button class="tg" data-tg="'+id+'">'+(t?'Chart':'Table')+'</button>':'')+'</div>'+(t&&tbl?tbl:chart)+'</section>';
+}
+function heroPanel(s){
+  return '<section class="panel hero s4"><div class="lab">Reached so far</div><div class="big">'+pct(s.reached,s.n)+'%</div>'
+   +'<div class="of">'+s.reached+' of '+s.n+' businesses contacted</div><div class="tiles">'
+   +'<div class="tile"><span>To contact</span><b>'+(s.n-s.reached)+'</b></div>'
+   +'<div class="tile"><span>Customers</span><b>'+s.customer+'</b></div>'
+   +'<div class="tile"><span>With a phone</span><b>'+pct(s.phone,s.n)+'<small>%</small></b></div>'
+   +'<div class="tile"><span>Areas searched</span><b>'+DATA.areas_searched+'<small> of '+DATA.areas_total+'</small></b></div></div></section>';
+}
+function funnelPanel(s){
+  var st=[['Found',s.n],['Contacted',s.reached],['Replied',s.replied],['Demo',s.demo],['Customer',s.customer]], max=Math.max(1,s.n);
+  var chart='<div role="img" aria-label="Pipeline from found to customer">'+st.map(function(r,i){
+    var tip=r[0]+': '+r[1]+' ('+pct(r[1],s.n)+'% of found)'+(i&&st[i-1][1]?' · '+pct(r[1],st[i-1][1])+'% of '+st[i-1][0].toLowerCase():'');
+    return '<div class="fr" data-tip="'+esc(tip)+'"><span class="fl">'+r[0]+'</span><span class="fbar"><i style="width:'+(r[1]/max*78)+'%;background:'+RAMP[i]+'"></i><b>'+r[1]+'</b><small>'+pct(r[1],s.n)+'%</small></span></div>';
+  }).join('')+'</div>';
+  var tbl=table(['Stage','Businesses','% of found','% of previous'],st.map(function(r,i){
+    return '<tr><td>'+r[0]+'</td><td class="n">'+r[1]+'</td><td class="n">'+pct(r[1],s.n)+'%</td><td class="n">'+(i&&st[i-1][1]?pct(r[1],st[i-1][1])+'%':'-')+'</td></tr>'; }).join(''));
+  return panel('funnel',8,'Pipeline','How far the businesses we found have got',chart,tbl);
+}
+function byArea(){
+  var m={}; DATA.leads.forEach(function(l){ var a=l.area||'No area yet'; m[a]=m[a]||{name:a,found:0,done:0}; m[a].found++; if(l.status!=='new') m[a].done++; });
+  return Object.keys(m).map(function(k){return m[k]}).sort(function(a,b){return b.found-a.found});
+}
+function areaPanel(){
+  var A=byArea(), show=A.slice(0,10), max=Math.max(1,A.length?A[0].found:1);
+  var chart='<div class="key"><span><i style="background:'+GREEN+'"></i>Contacted</span><span><i style="background:'+GRAY+'"></i>Not contacted yet</span></div>'
+    +(A.length?show.map(function(a){
+      var tip=a.name+': '+a.found+' found, '+a.done+' contacted ('+pct(a.done,a.found)+'%). Click to open the list.';
+      return '<div class="ar" data-area="'+esc(a.name)+'" data-tip="'+esc(tip)+'"><span class="fl">'+esc(a.name)+'</span><span class="fbar">'
+        +(a.done?'<i style="width:'+(a.done/max*76)+'%;background:'+GREEN+'"></i>':'')
+        +(a.found-a.done?'<i style="width:'+((a.found-a.done)/max*76)+'%;background:'+GRAY+'"></i>':'')
+        +'<b>'+a.done+'/'+a.found+'</b></span></div>'; }).join('')
+      +(A.length>10?'<div class="more">+ '+(A.length-10)+' more areas in the table view</div>':'')
+      :'<div class="empty-s">No businesses placed in an area yet.</div>');
+  var tbl=table(['Area','Found','Contacted','% contacted'],A.map(function(a){return '<tr><td>'+esc(a.name)+'</td><td class="n">'+a.found+'</td><td class="n">'+a.done+'</td><td class="n">'+pct(a.done,a.found)+'%</td></tr>'}).join(''));
+  return panel('area',7,'Coverage by area','Contacted against found, most businesses first',chart,tbl);
+}
+function activityPanel(){
+  var map={}; DATA.activity.forEach(function(a){map[a.day]=a.count});
+  var days=[]; for(var i=13;i>=0;i--){ var d=new Date(Date.now()-i*864e5), k=d.toISOString().slice(0,10); days.push({k:k,c:map[k]||0,l:d.getUTCDate()+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getUTCMonth()]}); }
+  var max=Math.max.apply(null,days.map(function(x){return x.c})), total=days.reduce(function(a,x){return a+x.c},0);
+  var chart;
+  if(!max){ chart='<div class="empty-s">No outreach logged in the last 14 days.<br>Change a status in the table and it shows here.</div>'; }
+  else {
+    var top=max<=4?4:max<=10?10:Math.ceil(max/10)*10, peak=days.reduce(function(a,x){return x.c>a.c?x:a},days[0]);
+    chart='<div class="act" role="img" aria-label="Contacts logged per day, last 14 days">'
+      +[0,.5,1].map(function(f){return '<div class="gl" style="bottom:'+(f*100)+'%"><span>'+Math.round(top*f)+'</span></div>'}).join('')
+      +'<div class="cols">'+days.map(function(x){
+        var h=x.c/top*100;
+        return '<div class="col" data-tip="'+esc(x.l+': '+x.c+' contact'+(x.c===1?'':'s'))+'"><i style="height:'+h+'%"></i>'+(x===peak?'<em style="bottom:calc('+h+'% + 3px)">'+x.c+'</em>':'')+'</div>'; }).join('')+'</div></div>'
+      +'<div class="xl">'+days.map(function(x,i){return '<span>'+(i%3===1?esc(x.l):'')+'</span>'}).join('')+'</div>';
+  }
+  var tbl=table(['Day','Contacts'],days.map(function(x){return '<tr><td>'+esc(x.l)+'</td><td class="n">'+x.c+'</td></tr>'}).join(''));
+  return panel('activity',5,'Outreach, last 14 days',total+' contact'+(total===1?'':'s')+' logged',chart,tbl);
+}
+function qualityPanel(s){
+  var rowsQ=[['Phone',s.phone],['Website',s.website],['Email',s.email],['Map position',s.coords]];
+  var chart=rowsQ.map(function(r){ var p=pct(r[1],s.n); return '<div class="mt" data-tip="'+esc(r[0]+': '+r[1]+' of '+s.n)+'"><span>'+r[0]+'</span><div class="trk"><i style="width:'+p+'%"></i></div><b>'+p+'%</b></div>'; }).join('');
+  var tbl=table(['Field','Have it','Of'],rowsQ.map(function(r){return '<tr><td>'+r[0]+'</td><td class="n">'+r[1]+'</td><td class="n">'+s.n+'</td></tr>'}).join(''));
+  return panel('quality',5,'How complete the list is','Share of businesses that have each detail',chart,tbl);
+}
+function callPanel(){
+  var L=DATA.leads.filter(function(l){return l.status==='new'&&l.phone}).slice(0,6);
+  var chart=L.length?table(['Business','Area','Reviews','',''],L.map(function(l){
+      return '<tr><td><span class="nm">'+esc(l.name)+'</span><div class="sub">'+esc(l.cat||'')+' &middot; <span class="mono">'+esc(l.phone)+'</span></div></td><td class="n" style="text-align:left">'+esc(l.area||'-')+'</td><td class="n">'+(l.reviews==null?'-':l.reviews)+'</td>'
+        +'<td class="n">'+(l.wa?'<a class="wa" href="'+esc(l.wa)+'" target="_blank" rel="noopener">Message</a>':'')+'</td>'
+        +'<td class="n"><button class="go" data-mark="'+l.id+'">Mark contacted</button></td></tr>'; }).join(''),[0,1])
+    :'<div class="empty-s">No businesses with a phone are waiting.<br>Run a search to find more.</div>';
+  return panel('call',7,'Call these first','Most reviews first, only those with a phone',chart,null);
+}
+function renderOverview(){
+  var s=stats();
+  if(!s.n) return '<div class="empty"><b>No businesses yet.</b>Find some: <code>python3 -m gmaps collect --area Lazimpat --dry-run</code></div>';
+  return '<div class="ov">'+heroPanel(s)+funnelPanel(s)+areaPanel()+qualityPanel(s)+activityPanel()+callPanel()+'</div>';
+}
+var tip=document.createElement('div'); tip.className='tip'; document.body.appendChild(tip);
+document.addEventListener('mouseover',function(e){ var t=e.target.closest&&e.target.closest('[data-tip]'); if(!t){ tip.classList.remove('on'); return; }
+  tip.textContent=t.dataset.tip; var r=t.getBoundingClientRect(); tip.style.left=Math.min(Math.max(r.left+r.width/2,140),innerWidth-140)+'px'; tip.style.top=r.top+'px'; tip.classList.add('on'); });
+document.addEventListener('scroll',function(){ tip.classList.remove('on'); },true);
+
+/* ---- tools: find places / Zennly customers ---- */
+var TERMS=['salon','beauty parlour','spa','barbershop','nail studio','makeup artist','gym'];
+var F={area:'',terms:{'salon':1,'beauty parlour':1,'spa':1},extra:'',limit:20,headed:true,place:'',found:[],pick:-1,pname:'',radius:800};
+(function(){ var want=''; try{ want=sessionStorage.getItem('zl_area')||''; }catch(e){}
+  var L=DATA.areas_list; F.area=(L.filter(function(a){return a.name===want})[0]||L.filter(function(a){return a.pilot&&!a.found})[0]||L[0]||{name:''}).name; })();
+function api(method,url,body){
+  return fetch(url,{method:method,headers:method==='POST'?{'Content-Type':'application/json','X-Token':TOKEN}:{},body:body?JSON.stringify(body):undefined})
+    .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error(j.error||('Error '+r.status)); return j; }); });
+}
+function selTerms(){ var t=TERMS.filter(function(x){return F.terms[x]}); F.extra.split(',').forEach(function(x){ x=x.trim(); if(x&&t.indexOf(x)<0) t.push(x); }); return t; }
+function curArea(){ return DATA.areas_list.filter(function(a){return a.name===F.area})[0]; }
+function planText(){
+  var a=curArea(), n=selTerms().length;
+  if(!a) return 'Choose a place, or add one.'; if(!n) return 'Choose at least one search word.';
+  return esc(a.name)+': '+a.cells+' search spots &times; '+n+' word'+(n>1?'s':'')+' = up to '+(a.cells*n)+' searches. It stops after '+(+F.limit||0)+' new businesses.';
+}
+function renderFind(){
+  var opts=DATA.areas_list.map(function(a){
+    return '<option value="'+esc(a.name)+'"'+(a.name===F.area?' selected':'')+'>'+esc(a.name)+(a.found?' ('+a.found+' found)':a.searched?' (searched)':' (not searched yet)')+'</option>'; }).join('')
+    +'<option value="__new"'+(F.area==='__new'?' selected':'')+'>+ Add another place...</option>';
+  var np='';
+  if(F.area==='__new'){
+    np='<div class="newp"><label class="lbl" for="placeq">Search a place in Nepal</label><div class="row2"><input class="in" id="placeq" data-f="place" placeholder="e.g. Lakeside, Pokhara" value="'+esc(F.place)+'"><button class="btn ghost" type="button" data-act="lookup">Look up</button></div>'
+      +F.found.map(function(r,i){ return '<button class="pickrow'+(i===F.pick?' on':'')+'" type="button" data-act="pick" data-i="'+i+'">'+esc(r.display_name)+'</button>'; }).join('')
+      +(F.pick>=0?'<div class="fld" style="margin-top:12px"><label for="pname">Name it</label><input class="in" id="pname" data-f="pname" value="'+esc(F.pname)+'"></div>'
+        +'<div class="fld"><label for="rad">How far around it to search</label><select class="in" id="rad" data-f="radius">'
+        +[500,800,1200,2000].map(function(m){return '<option value="'+m+'"'+(+F.radius===m?' selected':'')+'>'+(m>=1000?m/1000+' km':m+' m')+'</option>'}).join('')+'</select></div>'
+        +'<button class="btn" type="button" data-act="savearea">Save this place</button>':'')+'</div>';
+  }
+  var terms=TERMS.map(function(t){ return '<label class="chk2"><input type="checkbox" data-term="'+esc(t)+'"'+(F.terms[t]?' checked':'')+'> '+esc(t)+'</label>'; }).join('');
+  var install=DATA.can_run?'':'<div class="warn"><b>One-time setup.</b> Searching needs a browser helper that is not installed yet. In a terminal, in the gmaps-scraper folder, run:<br><code>python3 -m venv .venv</code><br><code>.venv/bin/python -m pip install -r requirements.txt</code><br><code>.venv/bin/python -m playwright install chromium</code><br>Then start this dashboard with <code>.venv/bin/python -m gmaps open</code>. Preview works without it.</div>';
+  return '<div class="ov"><section class="panel s7"><div class="ph"><div><h3>Find businesses</h3><div class="sub">Pick a place and what to look for. Results are saved to the To contact list.</div></div></div>'
+    +'<div class="fld"><label for="areasel">Where</label><select class="in" id="areasel" data-f="area">'+opts+'</select></div>'+np
+    +'<div class="fld"><label>Looking for</label><div class="chips2">'+terms+'</div></div>'
+    +'<div class="fld"><label for="extra">Other words (optional, separate with commas)</label><input class="in" id="extra" data-f="extra" placeholder="e.g. threading, facial" value="'+esc(F.extra)+'"></div>'
+    +'<div class="fld"><label for="limit">Save at most this many new businesses</label><input class="in" id="limit" type="number" min="1" max="200" data-f="limit" value="'+esc(F.limit)+'" style="max-width:160px"></div>'
+    +'<label class="chk2" style="margin-bottom:16px"><input type="checkbox" data-f="headed"'+(F.headed?' checked':'')+'> Show the browser window (recommended for the first runs)</label>'
+    +'<div class="plan" id="planline">'+planText()+'</div>'
+    +'<div class="btns"><button class="btn" type="button" data-act="start"'+(DATA.can_run?'':' disabled')+'>Start search</button><button class="btn ghost" type="button" data-act="preview">Preview plan</button></div>'
+    +install
+    +'<div class="warn">This opens Chrome and reads Google Maps slowly, one place at a time. Google&rsquo;s terms do not allow automated collection, so keep the numbers small. If Google asks for a check, the search stops by itself; wait a few hours before trying again.</div>'
+    +'</section><section class="panel s5"><div class="ph"><div><h3>Search status</h3><div class="sub">Updates every second or two</div></div></div><div id="runbox"></div></section></div>';
+}
+var pollTimer=null;
+function pollRun(){
+  clearTimeout(pollTimer);
+  api('GET','/api/run').then(function(r){ drawRun(r); if(r.state==='running'&&S.tab==='find') pollTimer=setTimeout(pollRun,1500); }).catch(function(){});
+}
+function drawRun(r){
+  var box=document.getElementById('runbox'); if(!box) return;
+  var NAMES={idle:'Nothing running',running:'Searching '+(r.area||'')+'...',done:r.dry_run?'Preview ready':'Finished',stopped:'Stopped',blocked:'Stopped: Google asked for a check',error:'Could not run'};
+  var h='<span class="pill '+r.state+'">'+(r.state==='running'?'<span class="spin"></span>':'')+esc(NAMES[r.state]||r.state)+'</span>';
+  if(r.state==='idle'&&!r.log.length) h+='<p class="sub" style="margin-top:12px">Choose a place and press <b>Start search</b>. Nothing has run yet.</p>';
+  if(r.error) h+='<div class="err">'+esc(r.error)+'</div>';
+  if(r.log.length) h+='<pre class="log" id="logbox">'+esc(r.log.join('\n'))+'</pre>';
+  h+='<div class="btns" style="margin-top:12px">';
+  if(r.state==='running') h+='<button class="btn ghost" type="button" data-act="stop">Stop</button>';
+  if(r.stats&&r.stats.new>0&&!r.dry_run&&r.state!=='running') h+='<button class="btn" type="button" data-act="seenew">See the '+r.stats.new+' new businesses</button>';
+  h+='</div>';
+  box.innerHTML=h;
+  var lb=document.getElementById('logbox'); if(lb) lb.scrollTop=lb.scrollHeight;
+}
+function renderZennly(){
+  var ours=DATA.leads.filter(function(l){return l.status==='customer'}).length;
+  return '<div class="ov"><section class="panel s7"><div class="ph"><div><h3>Add your Zennly customers</h3><div class="sub">They show as Ours here and as reached on the map. Right now there are <b>'+ours+'</b>.</div></div></div>'
+    +'<div class="fld"><label for="csv">Paste one business per line: name, phone</label>'
+    +'<textarea class="in" id="csv" rows="9" placeholder="Glow Beauty Lounge, 9801234567\nLotus Spa, 9841000000"></textarea></div>'
+    +'<div class="btns"><button class="btn" type="button" data-act="import">Import customers</button>'
+    +'<label class="btn ghost" style="cursor:pointer">Choose a CSV file<input type="file" id="csvfile" accept=".csv,text/csv" hidden></label>'
+    +'<button class="btn ghost" type="button" data-act="template">Download template</button></div>'
+    +'<p class="sub" style="margin-top:14px">A file can also have <code>lat</code>, <code>lng</code> and <code>city</code> columns. A business whose phone number is already in the list becomes a customer; the rest are added.</p>'
+    +'</section><section class="panel s5"><div class="ph"><div><h3>How Zennly connects here</h3></div></div><ol class="steps">'
+    +'<li><b>Customers:</b> you add them on this page. Matching is by phone number.</li>'
+    +'<li><b>Messages:</b> every business links to its page on Zennly for its type, for example salons to <span class="mono">/solutions/salon/</span>.</li>'
+    +'<li><b>Not automatic yet:</b> this page does not read the Zennly app by itself. If your customers are stored in a database, an API or an export, tell us where and it can be connected so this list stays up to date on its own.</li></ol></section></div>';
+}
+function setPlan(){ var el=document.getElementById('planline'); if(el) el.innerHTML=planText(); }
+document.getElementById('out').addEventListener('input',function(e){
+  var f=e.target.dataset&&e.target.dataset.f; if(!f||f==='area'||f==='headed') return;
+  F[f]=e.target.value; if(f==='extra'||f==='limit') setPlan();
+});
+document.getElementById('out').addEventListener('change',function(e){
+  var t=e.target;
+  if(t.dataset&&t.dataset.term){ F.terms[t.dataset.term]=t.checked?1:0; return setPlan(); }
+  if(t.dataset&&t.dataset.f==='headed'){ F.headed=t.checked; return; }
+  if(t.dataset&&t.dataset.f==='area'){ F.area=t.value; try{ sessionStorage.setItem('zl_area',F.area); }catch(x){} F.found=[]; F.pick=-1;
+    if(t.value==='__new'||F.area==='__new') return render(); return setPlan(); }
+  if(t.dataset&&t.dataset.f==='radius'){ F.radius=+t.value; return; }
+  if(t.id==='csvfile'&&t.files[0]){ var rd=new FileReader(); rd.onload=function(){ document.getElementById('csv').value=String(rd.result); }; rd.readAsText(t.files[0]); }
+});
+document.getElementById('out').addEventListener('click',function(e){
+  var b=e.target.closest('[data-act]'); if(!b) return; var act=b.dataset.act;
+  function fail(err){ toast(err.message,true); }
+  if(act==='start'||act==='preview'){
+    if(F.area==='__new'||!curArea()) return toast('Choose a place first',true);
+    if(!selTerms().length) return toast('Choose at least one search word',true);
+    api('POST','/api/run',{area:F.area,queries:selTerms(),limit:+F.limit||20,headed:F.headed,dry_run:act==='preview'}).then(function(){ toast(act==='start'?'Search started':'Preview ready'); pollRun(); }).catch(fail);
+  } else if(act==='stop'){ api('POST','/api/run/stop',{}).then(function(){ toast('Stopping after the current step'); }).catch(fail);
+  } else if(act==='seenew'){ location.hash='todo'; location.reload();
+  } else if(act==='lookup'){
+    var q=(document.getElementById('placeq').value||'').trim(); if(!q) return toast('Type a place first',true); F.place=q;
+    fetch('https://nominatim.openstreetmap.org/search?format=json&limit=5&accept-language=en&countrycodes=np&q='+encodeURIComponent(q))
+      .then(function(r){return r.json()}).then(function(r){ F.found=r; F.pick=-1; if(!r.length) toast('Nothing found. Try a bigger place name.',true); render(); }).catch(function(){ toast('Could not look that up (no internet?)',true); });
+  } else if(act==='pick'){ F.pick=+b.dataset.i; F.pname=(F.found[F.pick].display_name||'').split(',')[0]; render();
+  } else if(act==='savearea'){
+    var r=F.found[F.pick]; if(!r) return;
+    api('POST','/api/areas',{name:F.pname,lat:+r.lat,lng:+r.lon,radius_m:+F.radius}).then(function(j){ try{ sessionStorage.setItem('zl_area',j.area.name); }catch(x){} toast('Saved '+j.area.name); location.hash='find'; location.reload(); }).catch(fail);
+  } else if(act==='import'){
+    var text=(document.getElementById('csv').value||'').trim(); if(!text) return toast('Paste your customers first',true);
+    if(text.split(/\r?\n/)[0].toLowerCase().indexOf('name')<0) text='name,phone,lat,lng,city\n'+text;
+    api('POST','/api/customers',{csv:text}).then(function(j){ toast(j.matched+' matched existing leads, '+j.added+' added'); setTimeout(function(){ location.hash='ours'; location.reload(); },900); }).catch(fail);
+  } else if(act==='template'){
+    var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(['name,phone,lat,lng,city\nGlow Beauty Lounge,9801234567,27.7154,85.3123,Kathmandu\n'],{type:'text/csv'}));
+    a.download='zennly-customers-template.csv'; document.body.appendChild(a); a.click(); a.remove();
+  }
+});
+
+/* ---- render ---- */
+var ICON={
+  find:'<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  zennly:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.700l1-1"/>',
+  overview:'<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
+  ours:'<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  todo:'<path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5.5 5h13L21 13v6H3v-6z"/>',
+  progress:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  all:'<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
+  runs:'<path d="m7 4 13 8-13 8z"/>'
+};
+function renderTabs(){
+  var c=counts(), html='';
+  TABS.forEach(function(t){
+    if(t.id==='find') html+='<div class="grp">Tools</div>';
+    if(t.id==='ours') html+='<div class="grp">Lists</div>';
+    if(t.id==='runs') html+='<div class="grp">History</div>';
+    html+='<button class="tab" role="tab" data-t="'+t.id+'" aria-selected="'+(t.id===S.tab)+'" title="'+esc(t.hint)+'">'
+      +'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+ICON[t.id]+'</svg>'
+      +esc(t.label)+(c[t.id]==null?'':'<span class="n">'+c[t.id]+'</span>')+'</button>';
+  });
+  document.getElementById('tabs').innerHTML=html;
+}
+function renderViews(){
+  document.getElementById('views').innerHTML=VIEWS.map(function(v){
+    return '<button data-v="'+v.id+'" aria-pressed="'+(v.id===S.view)+'">'+esc(v.label)+'</button>'; }).join('');
+}
+function fillBadge(list,k){
+  if(!list.length) return '';
+  var n=list.filter(function(l){return l[k]!==null&&l[k]!==undefined&&l[k]!==''}).length, p=Math.round(n/list.length*100);
+  return '<span class="fill '+(p>=90?'':p>=50?'mid':'low')+'">'+p+'%</span>';
+}
+function renderRuns(){
+  var out=document.getElementById('out'), foot=document.getElementById('foot');
+  if(!DATA.runs.length){ out.innerHTML='<div class="empty"><b>No runs yet.</b>Start one: <code>python3 -m gmaps collect --area Lazimpat --query salon --limit 3 --headed</code></div>'; foot.innerHTML=''; return; }
+  out.innerHTML='<div class="scroll"><table><thead><tr><th>Run</th><th>Area / source</th><th>When</th><th>Searches</th><th>Places found</th></tr></thead><tbody>'
+   +DATA.runs.map(function(r){ return '<tr><td>'+esc(r.kind)+'</td><td class="nm">'+esc(r.name)+'</td><td>'+esc(fmtDate(r.at))+'</td><td class="num">'+(r.searches==null?'-':r.searches)+'</td><td class="num">'+r.found+'</td></tr>'}).join('')
+   +'</tbody></table></div>';
+  foot.innerHTML='<span>'+DATA.runs.length+' runs</span>';
+}
+var SUBS={find:'Search Google Maps for businesses in a place you choose. New ones land in To contact.', zennly:'Tell the system which businesses already use Zennly.', overview:'A summary of every business we have found.', ours:'Businesses that are Zennly customers.',
+  todo:'Found by the runs and not contacted yet. This is the call list.', progress:'Contacted, replied or at the demo stage.',
+  all:'Every business, whatever its status.', runs:'Every search that has been run.'};
+function render(){
+  renderTabs();
+  document.getElementById('ttl').textContent=tabDef().label; document.getElementById('ttlsub').textContent=SUBS[S.tab]||'';
+  var t=tabDef(), bar=document.getElementById('bar'), card=document.querySelector('.card');
+  var bare=!!(t.overview||t.page);
+  card.classList.toggle('bare',bare);
+  bar.style.display=(t.runs||bare)?'none':'flex';
+  if(bare){
+    document.getElementById('out').innerHTML=t.overview?renderOverview():t.id==='find'?renderFind():renderZennly();
+    document.getElementById('foot').innerHTML=''; document.getElementById('foot').style.display='none';
+    if(t.id==='find') pollRun();
+    return;
+  }
+  document.getElementById('foot').style.display='';
+  if(t.runs) return renderRuns();
+  var list=rows(), out=document.getElementById('out'), foot=document.getElementById('foot');
+  var pages=Math.max(1,Math.ceil(list.length/PAGE)); if(S.page>=pages) S.page=pages-1;
+  var slice=list.slice(S.page*PAGE,S.page*PAGE+PAGE);
+
+  if(!list.length){
+    var e=t.empty; out.innerHTML='<div class="empty"><b>'+e[0]+'</b>'+e[1]+'</div>';
+  } else if(S.mode==='json'){
+    out.innerHTML='<pre class="json">'+esc(JSON.stringify(slice,null,2))+'</pre>';
+  } else {
+    var cols=VIEWS.filter(function(v){return v.id===S.view})[0].cols;
+    out.innerHTML='<div class="scroll"><table><thead><tr><th style="width:42px">#</th>'+cols.map(function(c){
+      var d=C[c]; return '<th data-s="'+d.k+'">'+esc(d.l)+fillBadge(list,d.k)+(S.sort===d.k?'<span class="arr">'+(S.dir>0?'&uarr;':'&darr;')+'</span>':'')+'<span class="key">'+d.k+'</span></th>'; }).join('')
+      +'</tr></thead><tbody>'+slice.map(function(l,i){
+        return '<tr><td class="id">'+(S.page*PAGE+i+1)+'</td>'+cols.map(function(c){
+          var d=C[c], v=l[d.k];
+          var html=d.r?d.r(l):(v==null||v===''?'<span class="none">-</span>':esc(v));
+          return '<td class="'+(d.num?'num ':'')+(d.cls||'')+'">'+html+'</td>'; }).join('')+'</tr>'; }).join('')
+      +'</tbody></table></div>';
+  }
+  foot.innerHTML='<span>'+list.length+' of '+DATA.leads.filter(t.test).length+' '+esc(t.label.toLowerCase())+'</span>'
+    +'<span><button id="prev"'+(S.page<=0?' disabled':'')+'>Previous</button> &nbsp;Page '+(S.page+1)+' of '+pages+'&nbsp; <button id="next"'+(S.page>=pages-1?' disabled':'')+'>Next</button></span>';
+}
+
+/* ---- events ---- */
+function toast(msg,err){ var t=document.getElementById('toast'); t.textContent=msg; t.className='toast on'+(err?' err':''); clearTimeout(toast.h); toast.h=setTimeout(function(){t.className='toast'},2600); }
+document.getElementById('tabs').addEventListener('click',function(e){ var b=e.target.closest('.tab'); if(!b) return; S.tab=b.dataset.t; S.page=0; location.hash=S.tab; render(); });
+document.getElementById('views').addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b) return; S.view=b.dataset.v; renderViews(); render(); });
+document.getElementById('mode').addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b) return; S.mode=b.dataset.m;
+  [].forEach.call(this.children,function(x){x.setAttribute('aria-pressed',x===b)}); render(); });
+document.getElementById('q').addEventListener('input',function(){ S.q=this.value; S.page=0; render(); });
+document.getElementById('area').addEventListener('change',function(){ S.area=this.value; S.page=0; render(); });
+document.getElementById('cat').addEventListener('change',function(){ S.cat=this.value; S.page=0; render(); });
+document.getElementById('phoneOnly').addEventListener('change',function(){ S.phoneOnly=this.checked; S.page=0; render(); });
+document.getElementById('out').addEventListener('click',function(e){
+  var th=e.target.closest('th[data-s]'); if(!th) return;
+  var k=th.dataset.s; if(S.sort===k) S.dir=-S.dir; else { S.sort=k; S.dir=1; } render(); });
+document.getElementById('out').addEventListener('click',function(e){
+  var tg=e.target.closest('[data-tg]'); if(tg){ TBL[tg.dataset.tg]=!TBL[tg.dataset.tg]; return render(); }
+  var ar=e.target.closest('[data-area]'); if(ar){ S.tab='all'; S.area=ar.dataset.area==='No area yet'?'':ar.dataset.area; S.page=0; location.hash='all';
+    document.getElementById('area').value=S.area; return render(); }
+  var mk=e.target.closest('[data-mark]'); if(mk){
+    var id=+mk.dataset.mark, lead=DATA.leads.filter(function(l){return l.id===id})[0]; mk.disabled=true;
+    fetch('/api/mark',{method:'POST',headers:{'Content-Type':'application/json','X-Token':TOKEN},body:JSON.stringify({id:id,status:'contacted'})})
+      .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error(j.error||'failed'); return j; }); })
+      .then(function(j){ lead.status='contacted'; toast(j.name+' marked contacted'); render(); })
+      .catch(function(err){ mk.disabled=false; toast('Could not save: '+err.message,true); });
+  }
+});
+document.getElementById('foot').addEventListener('click',function(e){
+  if(e.target.id==='prev'){ S.page--; render(); } if(e.target.id==='next'){ S.page++; render(); } });
+
+document.getElementById('out').addEventListener('change',function(e){
+  var sel=e.target.closest('select.st'); if(!sel) return;
+  var id=+sel.dataset.id, status=sel.value, lead=DATA.leads.filter(function(l){return l.id===id})[0], before=lead.status;
+  fetch('/api/mark',{method:'POST',headers:{'Content-Type':'application/json','X-Token':TOKEN},body:JSON.stringify({id:id,status:status})})
+    .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error(j.error||'failed'); return j; }); })
+    .then(function(j){ lead.status=status; toast(j.name+' is now '+status); render(); })
+    .catch(function(err){ lead.status=before; toast('Could not save: '+err.message,true); render(); });
+});
+
+document.getElementById('export').addEventListener('click',function(){
+  var list=rows(), cols=VIEWS[3].cols;
+  function cell(v){ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+  var csv=[cols.map(function(c){return C[c].k}).join(',')].concat(list.map(function(l){ return cols.map(function(c){return cell(l[C[c].k])}).join(','); })).join('\n');
+  var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv'}));
+  a.download='zennly-'+S.tab+'-'+new Date().toISOString().slice(0,10)+'.csv'; document.body.appendChild(a); a.click(); a.remove();
+  toast('Exported '+list.length+' rows');
+});
+
+renderViews(); render();
+})();
+</script>
+</body>
+</html>

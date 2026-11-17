@@ -1,0 +1,31 @@
+# Regions/cities to collect. country = ISO code used by the normalizer.
+categories: [salon, spa, gym, beauty parlour, barbershop]
+regions:
+  NP: [Kathmandu, Lalitpur, Bhaktapur, Pokhara, Chitwan, Biratnagar, Butwal, Birgunj]
+  IN: [Delhi, Mumbai, Bangalore]
+  GB: [London, Manchester]
+  US: [New York, Los Angeles]
+  CA: [Toronto, Vancouver]
+
+# Software to detect on business websites / booking links (substring -> label)
+platforms:
+  chairlyo.com: Chairlyo
+  joomni: Joomni
+  fresha.com: Fresha
+  vagaro.com: Vagaro
+  booksy.com: Booksy
+  mindbodyonline.com: Mindbody
+  treatwell: Treatwell
+  squareup.com/appointments: Square Appointments
+  setmore.com: Setmore
+  salonist: Salonist
+  gymudaan: GymUdaan
+  gymnepalpro: GymNepal Pro
+  momence.com: Momence
+  marianatek: Mariana Tek
+  wellnessliving: WellnessLiving
+  glofox: Glofox
+  pike13: Pike13
+  teamup.com: TeamUp
+  walla.com: Walla
+  acuityscheduling: Acuity

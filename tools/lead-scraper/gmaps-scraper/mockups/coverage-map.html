@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coverage map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<link rel="preconnect" href="https://server.arcgisonline.com" crossorigin>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap">
+<style>
+:root{ --ink:#14201C; --muted:#66716D; --line:#E6EAE8; --soft:#F3F5F4; --green:#12805C; --red:#E04B35; }
+*{box-sizing:border-box}
+html,body{height:100%; margin:0}
+body{font:500 14px "DM Sans",system-ui,sans-serif; color:var(--ink)}
+#map{position:absolute; inset:0; background:#E9EEEA}
+.leaflet-container{font-family:inherit}
+
+.float{position:absolute; z-index:1000; background:#fff; box-shadow:0 6px 24px rgb(20 32 28/.18), 0 1px 3px rgb(20 32 28/.10)}
+
+/* ---------- left search card (Google-Maps style) ---------- */
+.panel{top:16px; left:16px; width:372px; max-height:calc(100% - 150px); border-radius:18px; display:flex; flex-direction:column; overflow:hidden}
+.search{display:flex; align-items:center; gap:10px; padding:0 16px; height:54px; border-bottom:1px solid var(--line)}
+.search svg{flex:none; color:var(--muted)}
+.search input{flex:1; border:0; outline:0; font:500 15px "DM Sans",sans-serif; color:var(--ink); background:none; min-width:0}
+.search input::placeholder{color:#97A09C}
+.search button{border:0; background:none; color:var(--muted); font-size:20px; line-height:1; cursor:pointer; padding:4px; display:none}
+.search.has button{display:block}
+
+.head{padding:14px 18px 6px; font-size:12px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted)}
+.list{overflow-y:auto; padding:0 8px 10px}
+.row{display:flex; align-items:center; gap:12px; width:100%; text-align:left; background:none; border:0; font:inherit; color:inherit; padding:10px; border-radius:12px; cursor:pointer}
+.row:hover,.row:focus-visible{background:var(--soft); outline:0}
+.ico{flex:none; width:34px; height:34px; border-radius:50%; background:var(--soft); display:grid; place-items:center; color:var(--muted)}
+.row b{display:block; font-weight:600; font-size:14.5px}
+.row span{display:block; font-size:12.5px; color:var(--muted); font-weight:400}
+.dotk{width:9px; height:9px; border-radius:50%; flex:none; margin-left:auto}
+.empty{padding:16px 18px 18px; color:var(--muted); font-weight:400; font-size:13.5px}
+
+/* ---------- view switch ---------- */
+.seg{top:16px; left:calc(50% + 100px); transform:translateX(-50%); display:flex; gap:2px; padding:5px; border-radius:999px}
+.seg button{font:inherit; font-weight:600; border:0; background:none; color:var(--muted); padding:10px 17px; border-radius:999px; cursor:pointer; display:flex; align-items:center; gap:8px; white-space:nowrap}
+.seg button i{width:10px; height:10px; border-radius:50%; display:block}
+.seg button[aria-pressed="true"]{background:var(--ink); color:#fff}
+
+/* ---------- map type (bottom-left, like Google) ---------- */
+.type{left:16px; bottom:26px; display:flex; gap:10px; padding:8px; border-radius:16px}
+.type button{border:2px solid transparent; background:none; padding:0; border-radius:11px; cursor:pointer; text-align:center; font:600 11.5px "DM Sans",sans-serif; color:var(--muted); width:74px}
+.type button .sw{display:block; height:48px; border-radius:9px; margin-bottom:4px; background-size:cover; background-position:center}
+.type button[aria-pressed="true"]{border-color:var(--ink); color:var(--ink)}
+.sw.m{background:linear-gradient(135deg,#F1E8CF 0 45%,#E9C9A8 45% 52%,#F1E8CF 52% 70%,#CFE0C4 70%)}
+.sw.s{background:linear-gradient(135deg,#3C5C34,#5C6E45 40%,#7C7656 65%,#2E4630)}
+
+.play{left:50%; bottom:26px; transform:translateX(-50%); display:flex; gap:6px; padding:5px; border-radius:999px}
+.play button{font:inherit; font-weight:600; border:0; border-radius:999px; padding:11px 20px; cursor:pointer; background:var(--ink); color:#fff}
+.play button.ghost{background:none; color:var(--muted)}
+.mover{width:22px; height:22px; border-radius:50%; background:#12805C; border:3px solid #fff; box-shadow:0 2px 8px rgb(0 0 0/.4)}
+.mover:after{content:''; position:absolute; inset:-3px; border-radius:50%; border:2px solid #12805C; animation:ping 1.2s ease-out infinite}
+@keyframes ping{from{transform:scale(1); opacity:.8}to{transform:scale(2.6); opacity:0}}
+@media (prefers-reduced-motion:reduce){.mover:after{animation:none}}
+.legend{right:70px; bottom:26px; border-radius:14px; padding:11px 14px; font-size:13px; display:grid; gap:7px}
+.legend div{display:flex; align-items:center; gap:10px}
+
+.pin{filter:drop-shadow(0 3px 3px rgb(0 0 0/.35))}
+.zone-label{background:none; border:0; box-shadow:none; font:700 12.5px "DM Sans",sans-serif; padding:0; color:#14201C;
+  text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 5px #fff,0 0 6px #fff}
+.sat .zone-label{color:#fff; text-shadow:0 1px 3px rgb(0 0 0/.9),0 0 6px rgb(0 0 0/.8)}
+.zone-label:before{display:none}
+.leaflet-control-zoom{border:0!important; box-shadow:0 6px 24px rgb(20 32 28/.18)!important; border-radius:14px; overflow:hidden}
+
+@media (max-width:820px){
+  .panel{width:calc(100% - 32px); max-height:46%}
+  .seg{top:auto; bottom:150px; left:50%}
+  .play{bottom:104px}
+  .legend{display:none}
+  .type{bottom:16px}
+}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="float panel">
+  <div class="search" id="searchbox">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="q" type="text" placeholder="Search a city or area" autocomplete="off" aria-label="Search a city or area">
+    <button id="clear" type="button" aria-label="Clear">&times;</button>
+  </div>
+  <div class="head" id="head">Cities</div>
+  <div class="list" id="list"></div>
+</div>
+
+<div class="float seg" id="seg">
+  <button data-v="all" aria-pressed="true">All</button>
+  <button data-v="have" aria-pressed="false"><i style="background:var(--green)"></i>Where we are</button>
+  <button data-v="not" aria-pressed="false"><i style="background:var(--red)"></i>Where we are not</button>
+</div>
+
+<div class="float type" id="type">
+  <button data-t="map" aria-pressed="true"><span class="sw m"></span>Map</button>
+  <button data-t="sat" aria-pressed="false"><span class="sw s"></span>Satellite</button>
+</div>
+
+<div class="float play" id="play">
+  <button id="go" type="button">&#9654; Play outreach</button>
+  <button id="reset" type="button" class="ghost">Reset</button>
+</div>
+
+<div class="float legend">
+  <div><svg width="18" height="18"><circle cx="9" cy="9" r="8" fill="#12805C" fill-opacity=".22" stroke="#12805C" stroke-width="1.5"/></svg>Reached</div>
+  <div><svg width="18" height="18"><circle cx="9" cy="9" r="8" fill="#E04B35" fill-opacity=".16" stroke="#E04B35" stroke-width="1.5" stroke-dasharray="3 3"/></svg>Not reached</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+var map=L.map('map',{zoomControl:false,preferCanvas:true,zoomSnap:.5,zoomDelta:.5,wheelPxPerZoomLevel:90,inertiaDeceleration:2200}).setView([27.705,85.335],13);
+var TILE={maxZoom:19,keepBuffer:6,updateWhenIdle:false,updateWhenZooming:false,detectRetina:false};
+L.control.zoom({position:'bottomright'}).addTo(map);
+
+/* ---- map types: street + satellite (both free, English labels) ---- */
+var ESRI='https://server.arcgisonline.com/ArcGIS/rest/services/';
+var street=L.tileLayer(ESRI+'World_Street_Map/MapServer/tile/{z}/{y}/{x}',L.extend({attribution:'Tiles &copy; Esri'},TILE));
+var sat=L.layerGroup([
+  L.tileLayer(ESRI+'World_Imagery/MapServer/tile/{z}/{y}/{x}',L.extend({attribution:'Imagery &copy; Esri, Maxar'},TILE)),
+  L.tileLayer(ESRI+'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',TILE)
+]);
+street.addTo(map);
+document.getElementById('type').addEventListener('click',function(e){
+  var b=e.target.closest('button'); if(!b) return;
+  [].forEach.call(this.children,function(x){x.setAttribute('aria-pressed',x===b)});
+  var s=b.dataset.t==='sat';
+  map.removeLayer(s?street:sat); map.addLayer(s?sat:street);
+  document.body.classList.toggle('sat',s);
+});
+
+/* ---- example data ---- */
+var seed=11;
+function rnd(){ seed=(seed*1103515245+12345)&0x7fffffff; return seed/0x7fffffff; }
+function spread(lat,lon,n,r){ var o=[]; for(var i=0;i<n;i++){ var a=rnd()*6.283, d=Math.sqrt(rnd())*r; o.push([lat+Math.sin(a)*d, lon+Math.cos(a)*d*1.1]); } return o; }
+function pin(color){
+  return L.divIcon({className:'', iconSize:[26,34], iconAnchor:[13,32],
+    html:'<svg class="pin" width="26" height="34" viewBox="0 0 26 34"><path d="M13 1C6.4 1 1.5 5.9 1.5 12.4c0 8.2 9.4 17.6 10.9 19.1a.9.9 0 0 0 1.2 0c1.5-1.5 10.9-10.9 10.9-19.1C24.5 5.9 19.6 1 13 1z" fill="'+color+'" stroke="#fff" stroke-width="2"/><circle cx="13" cy="12.5" r="4.2" fill="#fff"/></svg>'});
+}
+var HAVE_AREAS=[
+  {n:'Thamel',c:[27.7154,85.3123],r:900,pins:11},
+  {n:'Lazimpat',c:[27.7195,85.3270],r:780,pins:8},
+  {n:'Sanepa',c:[27.6862,85.3092],r:760,pins:7}
+];
+var NOT_AREAS=[
+  {n:'Patan',c:[27.6644,85.3188],r:1100,pins:6},
+  {n:'Baneshwor',c:[27.6915,85.3436],r:950,pins:5},
+  {n:'Boudha',c:[27.7215,85.3620],r:900,pins:5},
+  {n:'Koteshwor',c:[27.6780,85.3560],r:900,pins:4},
+  {n:'Maharajgunj',c:[27.7370,85.3300],r:850,pins:4},
+  {n:'Kalanki',c:[27.6935,85.2810],r:900,pins:4},
+  {n:'Bhaktapur',c:[27.6710,85.4298],r:1200,pins:5}
+];
+function build(areas,color,reached){
+  var g=L.layerGroup();
+  areas.forEach(function(a){
+    a.circle=L.circle(a.c,{radius:a.r,color:color,weight:2,dashArray:reached?null:'7 7',fillColor:color,fillOpacity:reached?.22:.14}).addTo(g);
+    a.markers=spread(a.c[0],a.c[1],a.pins,a.r/111000*.8).map(function(p){ return L.marker(p,{icon:pin(color)}).addTo(g); });
+    L.marker(a.c,{icon:L.divIcon({className:'',iconSize:[0,0]}),interactive:false})
+      .bindTooltip(a.n,{permanent:true,direction:'center',className:'zone-label'}).addTo(g);
+  });
+  return g;
+}
+var have=build(HAVE_AREAS,'#12805C',true), not=build(NOT_AREAS,'#E04B35',false);
+function show(v){
+  [].forEach.call(document.getElementById('seg').children,function(b){b.setAttribute('aria-pressed',b.dataset.v===v)});
+  v==='not'?map.removeLayer(have):map.addLayer(have);
+  v==='have'?map.removeLayer(not):map.addLayer(not);
+}
+document.getElementById('seg').addEventListener('click',function(e){ var b=e.target.closest('button'); if(b) show(b.dataset.v); });
+show((location.hash||'#all').slice(1)||'all');
+if(/[?&]t=sat/.test(location.search)) document.querySelector('#type [data-t=sat]').click();
+
+/* ---- animated outreach route: a marker travels, each area turns green on arrival ---- */
+var ROUTE=['Sanepa','Thamel','Lazimpat','Maharajgunj','Boudha','Baneshwor','Koteshwor','Patan'];
+var ALL=HAVE_AREAS.concat(NOT_AREAS);
+function area(n){ return ALL.filter(function(a){return a.n===n})[0]; }
+var running=0, mover, trail, anim;
+function ease(t){ return t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2; }
+function turnGreen(a){
+  a.circle.setStyle({color:'#12805C',dashArray:null,fillColor:'#12805C',fillOpacity:.22});
+  a.markers.forEach(function(m){ m.setIcon(pin('#12805C')); });
+}
+function leg(from,to,ms,done,token){
+  var t0=null;
+  (function frame(ts){
+    if(token!==running) return;
+    t0=t0||ts; var k=Math.min(1,(ts-t0)/ms), e=ease(k);
+    var pos=[from[0]+(to[0]-from[0])*e, from[1]+(to[1]-from[1])*e];
+    mover.setLatLng(pos); trail.addLatLng(pos);
+    if(k<1) anim=requestAnimationFrame(frame); else done();
+  })(performance.now());
+}
+function play(){
+  reset(true); show('all');
+  var token=++running, pts=ROUTE.map(function(n){return area(n)});
+  map.flyToBounds(L.latLngBounds(pts.map(function(a){return a.c})).pad(.25),{duration:1.2});
+  mover=L.marker(pts[0].c,{icon:L.divIcon({className:'',html:'<div class="mover" style="position:relative"></div>',iconSize:[22,22],iconAnchor:[11,11]}),zIndexOffset:1000}).addTo(map);
+  trail=L.polyline([pts[0].c],{color:'#12805C',weight:3,opacity:.85,dashArray:'2 7',lineCap:'round'}).addTo(map);
+  var i=0;
+  setTimeout(function next(){
+    if(token!==running) return;
+    if(++i>=pts.length) return;
+    leg(pts[i-1].c,pts[i].c,1900,function(){ if(NOT_AREAS.indexOf(pts[i])>-1) turnGreen(pts[i]); setTimeout(next,350); },token);
+  },1300);
+}
+function reset(keepView){
+  running++; cancelAnimationFrame(anim);
+  if(mover){map.removeLayer(mover); mover=null;} if(trail){map.removeLayer(trail); trail=null;}
+  NOT_AREAS.forEach(function(a){
+    a.circle.setStyle({color:'#E04B35',dashArray:'7 7',fillColor:'#E04B35',fillOpacity:.14});
+    a.markers.forEach(function(m){ m.setIcon(pin('#E04B35')); });
+  });
+  if(!keepView) map.flyTo([27.705,85.335],13,{duration:1});
+}
+document.getElementById('go').addEventListener('click',play);
+document.getElementById('reset').addEventListener('click',function(){ reset(); });
+if(/[?&]play=1/.test(location.search)) setTimeout(play,500);
+
+/* ---- left search: cities + areas ---- */
+var PLACES=[
+  {n:'Kathmandu',s:'Bagmati Province',c:[27.705,85.335],z:13,k:'city',st:'mix'},
+  {n:'Lalitpur (Patan)',s:'Bagmati Province',c:[27.6644,85.3188],z:14,k:'city',st:'not'},
+  {n:'Bhaktapur',s:'Bagmati Province',c:[27.6710,85.4298],z:14,k:'city',st:'not'},
+  {n:'Pokhara',s:'Gandaki Province',c:[28.2096,83.9856],z:13,k:'city',st:'none'},
+  {n:'Chitwan',s:'Bagmati Province',c:[27.6800,84.4300],z:12,k:'city',st:'none'},
+  {n:'Biratnagar',s:'Koshi Province',c:[26.4525,87.2718],z:13,k:'city',st:'none'},
+  {n:'Butwal',s:'Lumbini Province',c:[27.7000,83.4484],z:13,k:'city',st:'none'},
+  {n:'Birgunj',s:'Madhesh Province',c:[27.0104,84.8770],z:13,k:'city',st:'none'},
+  {n:'Thamel',s:'Kathmandu',c:[27.7154,85.3123],z:15,k:'area',st:'have'},
+  {n:'Lazimpat',s:'Kathmandu',c:[27.7195,85.3270],z:15,k:'area',st:'have'},
+  {n:'Sanepa',s:'Lalitpur',c:[27.6862,85.3092],z:15,k:'area',st:'have'},
+  {n:'Baneshwor',s:'Kathmandu',c:[27.6915,85.3436],z:15,k:'area',st:'not'},
+  {n:'Boudha',s:'Kathmandu',c:[27.7215,85.3620],z:15,k:'area',st:'not'},
+  {n:'Koteshwor',s:'Kathmandu',c:[27.6780,85.3560],z:15,k:'area',st:'not'},
+  {n:'Maharajgunj',s:'Kathmandu',c:[27.7370,85.3300],z:15,k:'area',st:'not'},
+  {n:'Kalanki',s:'Kathmandu',c:[27.6935,85.2810],z:15,k:'area',st:'not'}
+];
+var DOT={have:'#12805C',not:'#E04B35',mix:'#E0A030',none:'#C7CDCA'};
+var PINSVG='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.500C19 14.800 12 21 12 21z"/><circle cx="12" cy="9.500" r="2.500"/></svg>';
+var list=document.getElementById('list'), head=document.getElementById('head'), q=document.getElementById('q'), box=document.getElementById('searchbox');
+
+function row(p){
+  return '<button class="row" data-i="'+PLACES.indexOf(p)+'"><span class="ico">'+PINSVG+'</span><span><b>'+p.n+'</b><span>'+(p.k==='city'?'City':'Area')+' · '+p.s+'</span></span><i class="dotk" style="background:'+DOT[p.st]+'"></i></button>';
+}
+function render(){
+  var t=q.value.trim().toLowerCase();
+  box.classList.toggle('has',!!t);
+  var rows=PLACES.filter(function(p){return !t||p.n.toLowerCase().indexOf(t)>-1||p.s.toLowerCase().indexOf(t)>-1;});
+  head.textContent=t?'Results':'Cities';
+  if(!t){
+    list.innerHTML=rows.filter(function(p){return p.k==='city'}).map(row).join('')
+      +'<div class="head" style="padding:12px 10px 6px">Areas in Kathmandu Valley</div>'
+      +rows.filter(function(p){return p.k==='area'}).map(row).join('');
+    head.style.display='block';
+  } else {
+    list.innerHTML=rows.length?rows.map(row).join(''):'<div class="empty">No match in our list. Press Enter to search the whole map.</div>';
+  }
+}
+render();
+q.addEventListener('input',render);
+document.getElementById('clear').addEventListener('click',function(){ q.value=''; render(); q.focus(); });
+list.addEventListener('click',function(e){
+  var b=e.target.closest('.row'); if(!b) return;
+  var p=PLACES[b.dataset.i]; map.flyTo(p.c,p.z,{duration:1});
+});
+// Enter on an unknown place -> look it up with OpenStreetMap's free search
+q.addEventListener('keydown',function(e){
+  if(e.key!=='Enter'||!q.value.trim()) return;
+  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=en&countrycodes=np&q='+encodeURIComponent(q.value))
+    .then(function(r){return r.json()}).then(function(r){ if(r[0]) map.flyTo([+r[0].lat,+r[0].lon],13,{duration:1}); }).catch(function(){});
+});
+</script>
+</body>
+</html>
