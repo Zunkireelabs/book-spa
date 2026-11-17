@@ -17,8 +17,7 @@ import {
   isDateInRanges,
   minutesToTime24,
   minutesToTime12,
-  START_HOUR,
-  END_HOUR,
+  slotRangeForDate,
 } from '../../customer-booking-flow/utils/availability';
 import { buildTherapistOccupancy, isTherapistFree } from './therapistAvailability';
 import { getRoomCapacity } from '../../../services/api';
@@ -105,7 +104,7 @@ function allPeopleFitSlot({ people, allTherapists, therapistOccupancy, byRoom, b
   return true;
 }
 
-export function computeGroupSlots({ dates, availabilityWindow, therapistWindow, closedRanges, enableRooms, onlineCapacity, people, allTherapists }) {
+export function computeGroupSlots({ dates, availabilityWindow, therapistWindow, closedRanges, branchHours = null, enableRooms, onlineCapacity, people, allTherapists }) {
   const rooms = availabilityWindow?.rooms || [];
   const { byRoom, byBranch } = buildOccupancy(availabilityWindow?.bookings || []);
   const therapistOccupancy = buildTherapistOccupancy(therapistWindow?.bookings || []);
@@ -116,12 +115,13 @@ export function computeGroupSlots({ dates, availabilityWindow, therapistWindow, 
 
   return (dates || []).map((d) => {
     const isToday = d.fullDate === nepalToday;
-    const isClosed = isDateInRanges(d.fullDate, closedRanges || []);
+    const range = slotRangeForDate(d.fullDate, branchHours); // null = the branch's day off (ZNLY-222)
+    const isClosed = isDateInRanges(d.fullDate, closedRanges || []) || range === null;
     const slots = [];
 
     const maxDuration = people.reduce((max, p) => Math.max(max, p.service?.duration_minutes || 60), 60);
 
-    for (let start = START_HOUR * 60; start + maxDuration <= END_HOUR * 60; start += 30) {
+    for (let start = range ? range.startMin : 0; range && start + maxDuration <= range.endMin; start += 30) {
       const isPast = isToday && start <= nowMinutes;
 
       const isAvailable = !isPast && !isClosed && allPeopleFitSlot({

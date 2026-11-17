@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildOccupancy } from './availability';
+import { buildOccupancy, slotRangeForDate } from './availability';
 
 // buildOccupancy's byBranch bucket backs the customer date-picker's branch online-capacity
 // graying (migration-301). It must count exactly the rows the DB's
@@ -65,5 +65,30 @@ describe('buildOccupancy byBranch (online capacity)', () => {
     ]);
     expect(byBranch['2026-11-02'].get(600)).toBe(1);
     expect(byBranch['2026-11-03'].get(600)).toBe(1);
+  });
+});
+
+// ZNLY-222: online slot range follows the branch's weekday hours (Monday = 0 ... Sunday = 6).
+describe('slotRangeForDate', () => {
+  const row = (dow, s, e, off = false) => ({ day_of_week: dow, start_time: s, end_time: e, is_day_off: off });
+  const MON = '2026-11-16'; // a Monday
+  const SUN = '2026-11-22';
+  it('opens 09:00-19:00 from the weekday row', () => {
+    expect(slotRangeForDate(MON, { weekly: [row(0, '09:00:00', '19:00:00')] })).toEqual({ startMin: 540, endMin: 1140 });
+  });
+  it('opens 09:00-21:00 and Sunday uses day 6, not 0', () => {
+    const hours = { weekly: [row(0, '10:00:00', '18:00:00'), row(6, '09:00:00', '21:00:00')] };
+    expect(slotRangeForDate(SUN, hours)).toEqual({ startMin: 540, endMin: 1260 });
+    expect(slotRangeForDate(MON, hours)).toEqual({ startMin: 600, endMin: 1080 });
+  });
+  it('a day off has no slots (null)', () => {
+    expect(slotRangeForDate(SUN, { weekly: [row(6, null, null, true)] })).toBeNull();
+  });
+  it('a weekday with no row falls back to branches.open_time/close_time', () => {
+    expect(slotRangeForDate(MON, { weekly: [row(1, '09:00:00', '19:00:00')], openTime: '08:30:00', closeTime: '20:00:00' })).toEqual({ startMin: 510, endMin: 1200 });
+  });
+  it('nothing configured (or hours not loaded) keeps the legacy 10:00-18:00', () => {
+    expect(slotRangeForDate(MON, { weekly: [] })).toEqual({ startMin: 600, endMin: 1080 });
+    expect(slotRangeForDate(MON, null)).toEqual({ startMin: 600, endMin: 1080 });
   });
 });

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { useTenant } from '../../../../contexts/TenantContext';
-import { fetchBranchAvailabilityWindow, fetchTherapistAvailabilityWindow, fetchPublicClosedDateRanges } from '../../../../services/api';
-import { isDateInRanges } from '../../../customer-booking-flow/utils/availability';
+import { fetchBranchAvailabilityWindow, fetchTherapistAvailabilityWindow, fetchPublicClosedDateRanges, fetchBranchSlotHours } from '../../../../services/api';
+import { isDateInRanges, slotRangeForDate } from '../../../customer-booking-flow/utils/availability';
 import { computeGroupSlots } from '../../utils/groupAvailability';
 
 // Shared time-slot step — one calendar for the whole party. Fetches the branch-wide
@@ -19,6 +19,7 @@ const GroupTimeStep = ({ selectedBranch, orgSlug, people, therapists, selectedDa
   const [therapistWindow, setTherapistWindow] = useState(null);
   const [therapistWindowError, setTherapistWindowError] = useState(null);
   const [closedRanges, setClosedRanges] = useState([]);
+  const [branchHours, setBranchHours] = useState(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
 
   const effectiveWindow = selectedBranch?.advance_booking_days ?? 30;
@@ -72,6 +73,11 @@ const GroupTimeStep = ({ selectedBranch, orgSlug, people, therapists, selectedDa
       .catch((err) => console.error('[GroupTimeStep] closed-dates fetch failed:', err.message));
   }, [selectedBranch?.id]);
 
+  useEffect(() => {
+    if (!selectedBranch?.id) { setBranchHours(null); return; }
+    fetchBranchSlotHours(selectedBranch.id).then(({ data }) => setBranchHours(data || null));
+  }, [selectedBranch?.id]);
+
   const resolvedPeople = useMemo(() => people.map((p) => ({
     id: p.id,
     service: p.service,
@@ -93,18 +99,19 @@ const GroupTimeStep = ({ selectedBranch, orgSlug, people, therapists, selectedDa
       availabilityWindow,
       therapistWindow,
       closedRanges,
+      branchHours,
       enableRooms,
       onlineCapacity,
       people: resolvedPeople,
       allTherapists: therapists || [],
     });
-  }, [availabilityWindow, therapistWindow, therapistWindowError, stillLoadingTherapistWindow, closedRanges, enableRooms, onlineCapacity, resolvedPeople, therapists, dates]);
+  }, [availabilityWindow, therapistWindow, therapistWindowError, stillLoadingTherapistWindow, closedRanges, branchHours, enableRooms, onlineCapacity, resolvedPeople, therapists, dates]);
 
   const closedDatesSet = useMemo(() => {
     const set = new Set();
-    dates.forEach((d) => { if (isDateInRanges(d.fullDate, closedRanges)) set.add(d.fullDate); });
+    dates.forEach((d) => { if (isDateInRanges(d.fullDate, closedRanges) || slotRangeForDate(d.fullDate, branchHours) === null) set.add(d.fullDate); });
     return set;
-  }, [dates, closedRanges]);
+  }, [dates, closedRanges, branchHours]);
 
   const datesWithNoAvailability = useMemo(() => {
     const set = new Set();

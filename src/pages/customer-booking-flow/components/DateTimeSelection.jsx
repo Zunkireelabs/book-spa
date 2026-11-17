@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
-import { fetchBranchAvailabilityWindow, fetchTherapistAvailabilityWindow, fetchPublicClosedDateRanges, fetchServiceEligibleGenderHeadcount, getRoomCapacity } from '../../../services/api';
+import { fetchBranchAvailabilityWindow, fetchTherapistAvailabilityWindow, fetchPublicClosedDateRanges, fetchBranchSlotHours, fetchServiceEligibleGenderHeadcount, getRoomCapacity } from '../../../services/api';
 import { useTenant } from '../../../contexts/TenantContext';
 import {
-  START_HOUR,
-  END_HOUR,
+  slotRangeForDate,
   getNepalNow,
   getNepalToday,
   minutesToTime24,
@@ -32,6 +31,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
   const [therapistWindowError, setTherapistWindowError] = useState(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [closedRanges, setClosedRanges] = useState([]);
+  const [branchHours, setBranchHours] = useState(null); // branch's own opening hours; null until loaded / on failure (legacy range)
 
   // Per-branch cap on how far ahead customers can book online (branches.
   // advance_booking_days, migration-303; enforced server-side by
@@ -112,6 +112,11 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
       .catch((err) => console.error('[DateTimeSelection] closed-dates fetch failed:', err.message));
   }, [selectedBranch?.id]);
 
+  useEffect(() => {
+    if (!selectedBranch?.id) { setBranchHours(null); return; }
+    fetchBranchSlotHours(selectedBranch.id).then(({ data }) => setBranchHours(data || null));
+  }, [selectedBranch?.id]);
+
   // Per-therapist busy rows — only fetched when filtering by a specific professional
   // or "any professional"; every other caller (every other tenant, and this tenant's
   // own gender-preference path) never triggers this at all.
@@ -165,10 +170,11 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
 
     return dayList.map((d) => {
       const isToday = d.fullDate === nepalToday;
-      const isClosed = isDateInRanges(d.fullDate, closedRanges);
+      const range = slotRangeForDate(d.fullDate, branchHours); // null = the branch's day off
+      const isClosed = isDateInRanges(d.fullDate, closedRanges) || range === null;
       const slots = [];
 
-      for (let start = START_HOUR * 60; start + duration <= END_HOUR * 60; start += 30) {
+      for (let start = range ? range.startMin : 0; range && start + duration <= range.endMin; start += 30) {
         const isPast = isToday && start <= nowMinutes;
 
         let roomAvailable = true;
@@ -239,13 +245,13 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
 
       return { date: d.fullDate, slots, isClosed };
     });
-  }, [availabilityWindow, therapistWindow, therapistWindowError, therapistFilter, selectedService?.durationMinutes, genderPreference, enableRooms, therapistCounts, dates, closedRanges, selectedBranch?.online_booking_capacity, effectiveWindow]);
+  }, [availabilityWindow, therapistWindow, therapistWindowError, therapistFilter, selectedService?.durationMinutes, genderPreference, enableRooms, therapistCounts, dates, closedRanges, branchHours, selectedBranch?.online_booking_capacity, effectiveWindow]);
 
   const closedDatesSet = useMemo(() => {
     const set = new Set();
-    dates.forEach((d) => { if (isDateInRanges(d.fullDate, closedRanges)) set.add(d.fullDate); });
+    dates.forEach((d) => { if (isDateInRanges(d.fullDate, closedRanges) || slotRangeForDate(d.fullDate, branchHours) === null) set.add(d.fullDate); });
     return set;
-  }, [dates, closedRanges]);
+  }, [dates, closedRanges, branchHours]);
 
   const timeSlots = useMemo(
     () => computedDays.find((d) => d.date === selectedDate)?.slots || [],

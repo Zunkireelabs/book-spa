@@ -13676,6 +13676,24 @@ export async function updateBranchDetails({ branchId, name, address, phone, maps
  * off when unset) but for the branch itself rather than a therapist, and with no breaks
  * concept — branch_working_hours has no sibling breaks table.
  */
+// Raw hours for the customer slot grid (ZNLY-222): the weekly rows exactly as stored (a weekday with no row is NOT a day off here;
+// slotRangeForDate falls back to branches.open_time/close_time) plus that fallback pair. Both are anon-readable (RLS "Public can read ...").
+export async function fetchBranchSlotHours(branchId) {
+  try {
+    const id = resolveBranchId(branchId);
+    const [weekly, branch] = await Promise.all([
+      supabase.from('branch_working_hours').select('day_of_week, start_time, end_time, is_day_off').eq('branch_id', id),
+      supabase.from('branches').select('open_time, close_time').eq('id', id).maybeSingle(),
+    ]);
+    if (weekly.error) throw weekly.error;
+    if (branch.error) throw branch.error;
+    return { data: { weekly: weekly.data || [], openTime: branch.data?.open_time || null, closeTime: branch.data?.close_time || null }, error: null };
+  } catch (error) {
+    console.error('[API] fetchBranchSlotHours error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function fetchBranchOpeningHours(branchId) {
   try {
     if (!branchId) return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
