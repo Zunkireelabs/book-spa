@@ -10,6 +10,8 @@ import MembershipWalletCard from './MembershipWalletCard';
 import PaymentMethodSelector from './PaymentMethodSelector';
 import PaymentModeCorrectionModal from './PaymentModeCorrectionModal';
 import TimeBoxInput from './TimeBoxInput';
+import { paymentStatusLabel } from '../../utils/paymentStatusLabel';
+const payTone = (b) => ({ success: 'text-success', neutral: 'text-text-secondary', warning: 'text-warning' })[paymentStatusLabel(b).tone];
 import InvoicePrintModal from './InvoicePrintModal';
 import { adminCorrectBooking, correctPaymentMode, adminDeleteBooking, correctPaymentAmount, fetchMemberDiscountContext, applyMemberDiscount, fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, checkoutWithProducts, fetchBookingProductSales, refundProductSale, recordTip, getCustomerFirstBookingFlag, fetchInvoiceByBookingId } from '../../services/api';
 import { excludeRelatedFromPreviousDue, toDbStatus } from '../../services/bookingTransformers';
@@ -1342,7 +1344,7 @@ const BookingActionModal = ({
   const nextStatuses = isViewer ? [] : getNextStatuses(booking.status);
   // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).
   // Only day-lock and already-paid block it — not terminal status.
-  const canPay = !isViewer && ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isLocked;
+  const canPay = !isViewer && ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && booking.paymentStatus !== 'refunded' && !isLocked;
   // Allow discounts on completed-but-unpaid bookings (standard cash-spa flow: service done → apply discount → pay).
   // Once the booking is fully paid, the price is locked — the discount can no longer move retroactively
   // against money already collected. 'partial' stays discountable so a discount can still be applied
@@ -1885,9 +1887,8 @@ const BookingActionModal = ({
                   const dateLabel = dObj && !Number.isNaN(dObj.getTime())
                     ? dObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '')
                     : (booking.date || '');
-                  const pay = booking.paymentStatus === 'paid' ? { label: 'Paid', cls: 'bg-success/10 text-success' }
-                    : booking.paymentStatus === 'partial' ? { label: 'Partially paid', cls: 'bg-warning/10 text-warning' }
-                    : { label: 'Unpaid', cls: 'bg-warning/10 text-warning' };
+                  const payState = paymentStatusLabel(booking);
+                  const pay = { label: payState.label, cls: payState.tone === 'success' ? 'bg-success/10 text-success' : payState.tone === 'neutral' ? 'bg-border-muted text-text-secondary' : 'bg-warning/10 text-warning' };
                   const npr = (n) => `NPR ${Number(n || 0).toLocaleString('en-IN')}`;
                   const phone = booking.customerPhone ? formatPhoneGrouped(booking.customerPhone) : '';
                   const copy = (v) => { try { navigator.clipboard?.writeText(v); } catch (_) { /* clipboard unavailable */ } };
@@ -1920,7 +1921,7 @@ const BookingActionModal = ({
                         <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
                           <span className="font-body text-[13px] font-medium text-text-primary tabular-nums">{npr(booking.finalAmount ?? booking.baseAmount)}</span>
                           <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${pay.cls}`}>{pay.label}</span>
-                          {!isViewer && booking.paymentStatus !== 'paid' && (
+                          {canPay && (
                             <button type="button" onClick={() => setActiveTab('payment')} className="text-[13px] text-primary hover:underline">Collect payment →</button>
                           )}
                           {booking.discountAmount > 0 && <span className="text-xs text-text-tertiary tabular-nums">−{npr(booking.discountAmount)} discount</span>}
@@ -2172,8 +2173,8 @@ const BookingActionModal = ({
                       </div>
                       <div>
                         <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Payment</label>
-                        <p className={`font-body font-body-medium text-sm ${booking.paymentStatus === 'paid' ? 'text-success' : 'text-warning'}`}>
-                          {booking.paymentStatus === 'paid' ? 'Paid' : booking.paymentStatus === 'partial' ? 'Partial' : 'Unpaid'}
+                        <p className={`font-body font-body-medium text-sm ${payTone(booking)}`}>
+                          {paymentStatusLabel(booking, { partialText: 'Partial' }).label}
                         </p>
                       </div>
                     </div>
@@ -3513,8 +3514,8 @@ const BookingActionModal = ({
                 {/* Payment status */}
                 <div className="flex items-center justify-between px-1">
                   <span className="font-body font-body-normal text-xs text-text-secondary">Status</span>
-                  <span className={`font-body font-body-medium text-sm ${booking.paymentStatus === 'paid' ? 'text-success' : booking.paymentStatus === 'partial' ? 'text-warning' : 'text-warning'}`}>
-                    {booking.paymentStatus === 'paid' ? 'Paid' : booking.paymentStatus === 'partial' ? 'Partial' : 'Unpaid'}
+                  <span className={`font-body font-body-medium text-sm ${payTone(booking)}`}>
+                    {paymentStatusLabel(booking, { partialText: 'Partial' }).label}
                   </span>
                 </div>
 

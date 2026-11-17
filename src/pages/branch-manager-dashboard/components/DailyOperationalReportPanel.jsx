@@ -4,6 +4,7 @@ import Button from '../../../components/ui/Button';
 import ConfirmDialog from '../../../components/ui/ConfirmDialog';
 import { getDailyOperationalReport, exportDailyReportCSV, closeDay, fetchAttendance, fetchAttendanceSummary } from '../../../services/api';
 import { useIndustry } from '../../../hooks/useIndustry';
+import { paymentStatusLabel } from '../../../utils/paymentStatusLabel';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -432,13 +433,15 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                           )}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                            b.paymentStatus === 'paid'
-                              ? 'bg-success/10 text-success'
-                              : 'bg-warning/10 text-warning'
-                          }`}>
-                            {b.paymentStatus === 'paid' ? b.paymentMode || 'Paid' : 'Unpaid'}
-                          </span>
+                          {(() => {
+                            const payState = paymentStatusLabel(b);
+                            const tone = { success: 'bg-success/10 text-success', warning: 'bg-warning/10 text-warning', neutral: 'bg-gray-100 text-text-secondary' }[payState.tone];
+                            return (
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${tone}`}>
+                                {b.paymentStatus === 'paid' ? b.paymentMode || 'Paid' : payState.label}
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className="px-4 py-3 text-center">
                           <StatusBadge status={b.status} />

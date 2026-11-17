@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import Icon from '../../../../components/AppIcon';
 import AvailabilityNoteLine from '../../../../components/ui/AvailabilityNoteLine';
 import { getBookingStatusColors } from '../../../../utils/bookingStatusColors';
+import { paymentStatusLabel } from '../../../../utils/paymentStatusLabel';
 
 // ── Hover-card controller (module singleton) ──────────────────────────────────────────────────────────────────────────
 // One popover for the whole calendar. Cards report enter/leave/focus; this decides when to show it:
@@ -95,6 +96,7 @@ export function useHoverCardBookingId() {
 
 // ── Content ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 const AMBER = { fill: '#FBF5E6', text: '#7A5408' };
+const PILL_COLORS = { success: { fill: '#EAF6F0', text: '#125E41' }, warning: AMBER, neutral: { fill: '#F1F1EF', text: '#515152' } };
 
 function to12h(t) {
   if (!t) return '';
@@ -167,14 +169,13 @@ function Avatars({ names }) {
 
 export function BookingHoverContent({ booking, draggable }) {
   const colors = getBookingStatusColors(isNoShow(booking) ? 'No Show' : booking.status);
-  const isPaid = booking.paymentStatus === 'paid';
-  const isPartial = booking.paymentStatus === 'partial';
   const range = compactRange(booking.startTime, booking.endTime);
   const names = (booking.therapistName || '').split(/,\s*/).filter(Boolean);
   const shownNames = names.length > 2 ? `${names.slice(0, 2).join(', ')} +${names.length - 2}` : names.join(', ');
   const amount = booking.finalAmount ?? booking.baseAmount;
   const phone = formatPhone(booking.customerPhone);
-  const pill = isPaid ? { label: 'Paid', fill: '#EAF6F0', text: '#125E41' } : { label: isPartial ? 'Partially paid' : 'Unpaid', fill: AMBER.fill, text: AMBER.text };
+  const payState = paymentStatusLabel(booking);
+  const pill = { label: payState.label, ...PILL_COLORS[payState.tone] };
   const prev = booking.previousDue;
   const touch = typeof window !== 'undefined' && window.matchMedia && !window.matchMedia('(hover: hover)').matches;
   return (

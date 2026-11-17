@@ -1,6 +1,9 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
+import { paymentStatusLabel } from '../../../utils/paymentStatusLabel';
+
+const PAY_TONE = { success: 'text-success', warning: 'text-error', neutral: 'text-text-secondary' };
 
 const STATUS_COLORS = {
   Pending:       'bg-amber-100 text-amber-800',
@@ -64,8 +67,8 @@ const CustomerAppointmentsTab = ({ data }) => {
             </div>
             <div className="text-right flex-shrink-0 ml-3">
               <p className="font-data font-data-medium text-sm text-text-primary">{formatNPR(b.finalAmount)}</p>
-              <span className={`text-[10px] font-caption font-caption-medium ${b.paymentStatus === 'paid' ? 'text-success' : 'text-error'}`}>
-                {b.paymentStatus === 'paid' ? 'Paid' : 'Unpaid'}
+              <span className={`text-[10px] font-caption font-caption-medium ${PAY_TONE[paymentStatusLabel(b).tone]}`}>
+                {paymentStatusLabel(b).label}
               </span>
             </div>
           </button>
