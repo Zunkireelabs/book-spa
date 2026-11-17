@@ -1,3 +1,4 @@
+import { lateMinutes } from '../utils/bookingsList';
 import { computeCommissionParts, computeReferralCommission } from '../services/payrollCalc';
 
 const toMin = (t) => Number(String(t).slice(0, 2)) * 60 + Number(String(t).slice(3, 5));
@@ -32,9 +33,27 @@ export function nextClient(bookings, nowHm) {
  * My day counts from the list: done (Completed), open (Pending/Confirmed/In-Progress), late (start passed, still Pending/Confirmed).
  * allClosed is true only when every booking is Completed/Cancelled/No Show; "All done" must not be said otherwise.
  */
-export function dayStatus(bookings, nowHm) {
+export function dayStatus(bookings, nowHm, today = null) {
   const list = bookings || [];
   const open = list.filter((b) => ['Pending', 'Confirmed', 'In-Progress'].includes(b.status));
-  const late = open.filter((b) => b.status !== 'In-Progress' && toMin(b.start) < toMin(nowHm)).length;
-  return { total: list.length, done: list.filter((b) => b.status === 'Completed').length, open: open.length, late, allClosed: list.length > 0 && open.length === 0 };
+  const late = open.filter((b) => lateMinutes({ status: b.status, date: today || '', startTime: b.start }, { today: today || '', nowHM: nowHm }) != null).length;
+  return {
+    total: list.length, done: list.filter((b) => b.status === 'Completed').length, open: open.length, late, allClosed: list.length > 0 && open.length === 0,
+    cancelled: list.filter((b) => b.status === 'Cancelled').length, noShow: list.filter((b) => b.status === 'No Show').length,
+  };
+}
+
+/** "4 of 5 done" plus what the other finished ones were: "4 of 5 done · 1 no-show" (same terminal statuses as the Bookings list). */
+export function dayMeta(s) {
+  return [`${s.done} of ${s.total} done`, s.noShow ? `${s.noShow} no-show` : null, s.cancelled ? `${s.cancelled} cancelled` : null].filter(Boolean).join(' · ');
+}
+
+/** The status chip of a My day row, using the Bookings list's status mapping (bookingsList.lateMinutes): "Late" ONLY for Pending/Confirmed past their start. */
+export function dayChip(b, { nowHm, today, nextId }) {
+  if (b.status === 'Completed') return ['Done', 'bg-gray-100 text-gray-500'];
+  if (b.status === 'No Show') return ['No show', 'bg-error/10 text-error'];
+  if (b.status === 'Cancelled') return ['Cancelled', 'bg-gray-100 text-gray-500'];
+  if (b.status === 'In-Progress') return ['With client', 'bg-primary/10 text-primary'];
+  if (nextId && b.id === nextId) return ['Next', 'bg-primary/10 text-primary'];
+  return lateMinutes({ status: b.status, date: today || '', startTime: b.start }, { today: today || '', nowHM: nowHm }) != null ? ['Late', 'bg-warning/10 text-warning'] : ['Booked', 'bg-gray-100 text-gray-500'];
 }

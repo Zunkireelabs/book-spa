@@ -5,7 +5,7 @@ import Button from '../../components/ui/Button';
 import { Card, SuggestionsCard, clock12, npr } from './dashKit';
 import { DashPanels } from './DashboardPanels';
 import { fetchAttendancePunches, punchIn, punchOut } from '../../services/api';
-import { dayStatus, myEarnings, nextClient } from '../../lib/dashboardMyDay';
+import { dayStatus, dayMeta, dayChip, myEarnings, nextClient } from '../../lib/dashboardMyDay';
 import { fmtClock, fmtDuration, upcomingGaps } from '../../lib/dashboardFloor';
 import { friendlyError } from '../../utils/friendlyError';
 
@@ -61,7 +61,7 @@ const MyDayView = ({ data, dataError, branchId, today, nowHm, role, staffLabelPl
   const month = myEarnings(mine, 'month');
   const toMin = (t) => Number(String(t).slice(0, 2)) * 60 + Number(String(t).slice(3, 5));
   const nowMin = toMin(nowHm);
-  const day = dayStatus(list, nowHm);
+  const day = dayStatus(list, nowHm, today);
   const done = day.done;
 
   // The timeline: my bookings plus my free gaps (an hour or more, still ahead), in time order.
@@ -72,10 +72,7 @@ const MyDayView = ({ data, dataError, branchId, today, nowHm, role, staffLabelPl
   const kicker = !next ? null : next.status === 'In-Progress' ? 'WITH YOU NOW'
     : startsIn > 0 ? `YOUR NEXT CLIENT IN ${fmtDuration(startsIn).replace(/m$/, ' MIN').toUpperCase()}` : 'YOUR NEXT CLIENT IS DUE';
   const meta = next && [`${clock12(next.start)}`, next.room, next.visit ? `${ordinal(next.visit)} visit` : null].filter(Boolean).join(' · ');
-  const chip = (b) => (b.status === 'Completed' ? ['Done', 'bg-gray-100 text-gray-500']
-    : b.status === 'In-Progress' ? ['With client', 'bg-primary/10 text-primary']
-      : next && b.id === next.id ? ['Next', 'bg-primary/10 text-primary']
-        : toMin(b.start) < nowMin ? ['Late', 'bg-warning/10 text-warning'] : ['Booked', 'bg-gray-100 text-gray-500']);
+  const chip = (b) => dayChip(b, { nowHm, today, nextId: next?.id });
 
   return (
     <div className="space-y-3 sm:space-y-4 max-w-xl">
@@ -92,7 +89,7 @@ const MyDayView = ({ data, dataError, branchId, today, nowHm, role, staffLabelPl
       </section>
 
       {list.length > 0 && (
-        <Card title="My day" meta={`${done} of ${list.length} done`}>
+        <Card title="My day" meta={dayMeta(day)}>
           <div className="-mx-4 -my-4">
             {timeline.map((it) => it.b ? (
               <div key={it.b.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-100 last:border-0">

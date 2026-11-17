@@ -113,3 +113,23 @@ describe('dayStatus', () => {
     expect(dayStatus([b('a', '09:00', 'In-Progress'), b('b', '15:00', 'Confirmed'), b('c', '10:00', 'Pending')], '13:00').late).toBe(1);
   });
 });
+
+import { dayChip, dayMeta } from './dashboardMyDay';
+describe('My day uses the Bookings list status mapping (ZNLY-237)', () => {
+  const t = (id, status, start = '14:00') => ({ id, status, start });
+  const ctx = { nowHm: '18:30', today: '2026-11-17', nextId: null };
+  it('Late only for Pending or Confirmed past their start', () => {
+    expect(dayChip(t('a', 'Confirmed'), ctx)[0]).toBe('Late');
+    expect(dayChip(t('a', 'Pending'), ctx)[0]).toBe('Late');
+    expect(dayChip(t('a', 'Confirmed', '19:00'), ctx)[0]).toBe('Booked');
+  });
+  it('No show and Cancelled are their own chips, never Late', () => {
+    expect(dayChip(t('a', 'No Show'), ctx)[0]).toBe('No show');
+    expect(dayChip(t('a', 'Cancelled'), ctx)[0]).toBe('Cancelled');
+  });
+  it('counts and meta line follow the same statuses', () => {
+    const s = dayStatus([t('a', 'Completed'), t('b', 'No Show'), t('c', 'Confirmed'), t('d', 'Cancelled')], '18:30', '2026-11-17');
+    expect(s).toMatchObject({ done: 1, noShow: 1, cancelled: 1, open: 1, late: 1, allClosed: false });
+    expect(dayMeta(s)).toBe('1 of 4 done · 1 no-show · 1 cancelled');
+  });
+});
