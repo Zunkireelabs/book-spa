@@ -930,12 +930,20 @@ const PaymentModal = ({
   const methodBtnRefs = useRef({});
   const listRef = useRef(null);
   const [fade, setFade] = useState({ top: false, bottom: false });
+  // The last fade we pushed into state. measureFade runs after EVERY commit (layout effect, no deps), so it must not
+  // call setFade when nothing changed: even a same-value setState is queued as a sync update whenever the fiber has
+  // other pending work, and while a lower-priority update (the REST-row sync below) is pending it is never eagerly
+  // bailed out. Each such sync render re-runs this effect, the pending update never gets its turn, and React throws
+  // "Maximum update depth exceeded" (ZNLY-228: typing quickly into a split row).
+  const fadeRef = useRef(fade);
   const measureFade = () => {
     const el = listRef.current;
     if (!el) return;
     const top = el.scrollTop > 2;
     const bottom = el.scrollHeight - el.clientHeight - el.scrollTop > 2;
-    setFade((f) => (f.top === top && f.bottom === bottom ? f : { top, bottom }));
+    if (fadeRef.current.top === top && fadeRef.current.bottom === bottom) return;
+    fadeRef.current = { top, bottom };
+    setFade(fadeRef.current);
   };
   useLayoutEffect(measureFade);
   useEffect(() => { window.addEventListener('resize', measureFade); return () => window.removeEventListener('resize', measureFade); }, []);
@@ -1102,7 +1110,11 @@ const PaymentModal = ({
   const restIdx = restIndexOf(tenders, restOn);
   // REST = total minus every other row, never below 0. Kept in state so everything downstream (entered, leftover,
   // submit, receipt) keeps reading plain tender amounts.
-  useEffect(() => {
+  // A LAYOUT effect on purpose (ZNLY-228): as a passive effect this setState ran after paint, so when staff typed
+  // fast the next keystroke's event flushed it first, re-rendered the row and reset the input's DOM value to the
+  // state it still held ("75"), which also made React swallow that keystroke's onChange (the last digit was lost,
+  // and the split got collected wrong). Run inside the commit, the REST row is settled before any further input.
+  useLayoutEffect(() => {
     if (restIdx < 0 || !tenders[restIdx]) return;
     const others = round2(tenders.reduce((sum, t, i) => (i === restIdx ? sum : sum + (Number(t.amount) > 0 ? Number(t.amount) : 0)), 0));
     const want = Math.max(0, round2(grandTotal - others));
