@@ -3,7 +3,7 @@ import Icon from '../AppIcon';
 import {
   PanelShell, FormBody, Field, TextInput, NumberInput, SelectField, Segmented, TabBar, DateField, TimeField, InlineError, InfoRows,
 } from './PanelFormKit';
-import { computeRevertDate as computeRevertDateUtil, DURATION_UNIT_OPTIONS as UNIT_OPTIONS, formatRevert, toYmd, toHm, validateExtension } from '../../utils/transferPreview';
+import { computeRevertDate as computeRevertDateUtil, DURATION_UNIT_OPTIONS as UNIT_OPTIONS, formatRevert, toYmd, toHm, validateExtension, transferSuccessMessage, transferCreateError } from '../../utils/transferPreview';
 import { friendlyError } from '../../utils/friendlyError';
 import { useIndustry } from '../../hooks/useIndustry';
 import TransferHoursWarning from './TransferHoursWarning';
@@ -23,15 +23,6 @@ import {
   cancelScheduledTransfer,
 } from '../../services/api';
 import { wordBranch } from '../../utils/industryTerms';
-
-function formatPrettyDate(d) {
-  if (!d) return '—';
-  // d is a YYYY-MM-DD string; parse as local to avoid TZ shift.
-  const [y, m, day] = d.split('-').map(Number);
-  return new Date(y, m - 1, day).toLocaleDateString('en-GB', {
-    day: 'numeric', month: 'short', year: 'numeric',
-  });
-}
 
 // Nepal-local 'YYYY-MM-DD' for capping a date input to "today" — new Date().toISOString()
 // is UTC and lands on the previous calendar day between 00:00-05:45 Nepal time (UTC+5:45),
@@ -334,7 +325,6 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
     });
     if (!proceed) { setTransferring(false); return; }
 
-    const isFuture = transferStartDate > today;
     if (editingScheduled && scheduledTransfer) {
       const cancelled = await cancelScheduledTransfer(scheduledTransfer.id);
       if (cancelled.error) {
@@ -355,20 +345,17 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
     });
 
     if (result.error) {
-      setTransferError(result.error.message || 'Transfer failed.');
+      setTransferError(transferCreateError(result.error, therapistName));
       setTransferring(false);
       return;
     }
 
-    const revertPreview = isPermanentTransfer
-      ? null
-      : computeRevertPreview(transferStartDate, transferStartTime, transferDurationValue, transferDurationUnit);
     setTransferring(false);
-    onSuccess(
-      isFuture
-        ? `Transfer scheduled for ${therapistName} on ${formatPrettyDate(transferStartDate)}${revertPreview ? `, returns around ${revertPreview}` : ''}.`
-        : `${therapistName} transferred${revertPreview ? `, returns around ${revertPreview}` : isPermanentTransfer ? ' permanently.' : '.'}`
-    );
+    onSuccess(transferSuccessMessage({
+      name: therapistName, startDate: transferStartDate, startTime: transferStartTime,
+      durationValue: transferDurationValue, durationUnit: transferDurationUnit,
+      permanent: isPermanentTransfer, applied: result.data?.applied,
+    }));
   };
 
   const isOriginCancelView = !!(

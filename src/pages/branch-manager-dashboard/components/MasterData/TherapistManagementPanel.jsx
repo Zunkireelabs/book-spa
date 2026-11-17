@@ -447,7 +447,7 @@ const TherapistManagementPanel = ({
 
       {transferFor && (
         <TransferFromCalendarModal variant="panel" therapistId={transferFor.id} therapistName={transferFor.name} currentBranchId={transferFor.branchId} defaultDate={today} defaultTime=""
-          onClose={() => setTransferFor(null)} onSuccess={() => { setTransferFor(null); notify(`${transferFor.name} transferred`); onChanged(); }} />
+          onClose={() => setTransferFor(null)} onSuccess={({ message } = {}) => { setTransferFor(null); notify(message || `${transferFor.name} transferred`); onChanged(); }} />
       )}
 
       {returnFor && (

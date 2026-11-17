@@ -548,12 +548,10 @@ const OperationalCalendar = ({ branchId }) => {
           defaultDate={transferModalTarget.defaultDate}
           defaultTime={transferModalTarget.defaultTime}
           onClose={() => setTransferModalTarget(null)}
-          onSuccess={({ applied, startDate, startTime } = {}) => {
+          onSuccess={({ message } = {}) => {
             const name = transferModalTarget.therapistName;
             setTransferModalTarget(null);
-            showToast(applied === false
-              ? `${name}'s transfer is scheduled for ${startTime ? `${startDate} at ${startTime}` : startDate} — it hasn't happened yet.`
-              : `${name} transferred.`);
+            showToast(message || `${name} transferred.`);
             refreshCalendar();
           }}
         />

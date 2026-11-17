@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { transferTherapist, fetchAllBranches } from '../../../../services/api';
+import { transferTherapist, fetchAllBranches, fetchTherapistTransferStatus } from '../../../../services/api';
 import { useAvailabilityConflictGuard } from '../../../../hooks/useAvailabilityConflictGuard';
 import { transferChange } from '../../../../services/availabilityConflicts';
-import { computeRevertDate, DURATION_UNIT_OPTIONS, formatRevert, toYmd, toHm } from '../../../../utils/transferPreview';
+import { computeRevertDate, DURATION_UNIT_OPTIONS, formatRevert, toYmd, toHm, transferSuccessMessage, transferCreateError, hasOpenTransfer } from '../../../../utils/transferPreview';
+import TransferManagementModal from '../../../../components/ui/TransferManagementModal';
 import TransferHoursWarning from '../../../../components/ui/TransferHoursWarning';
 import {
   PanelShell, FormBody, Field, TextInput, NumberInput, SelectField, Segmented, DateField, TimeField, InlineError,
@@ -13,7 +14,7 @@ import { staffWord, wordBranch } from '../../../../utils/industryTerms';
 // transfer form (creation half only) so both entry points call the exact same transferTherapist() API and produce identical
 // staff_transfers rows. Renders as a docked SidePanel on the calendar (variant="panel"). While open it reports a live
 // draft (`onDraftChange`) so the grid shades the window the therapist will be away.
-const TransferFromCalendarModal = ({
+const TransferFromCalendarForm = ({
   variant = 'modal', therapistId, therapistName, currentBranchId, defaultDate, defaultTime, guardRef, onClose, onSuccess, onDraftChange,
 }) => {
   const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
@@ -89,13 +90,18 @@ const TransferFromCalendarModal = ({
     });
 
     if (result.error) {
-      setError(result.error.message || 'Transfer failed.');
+      setError(transferCreateError(result.error, therapistName));
       setSubmitting(false);
       return;
     }
 
     setSubmitting(false);
-    onSuccess?.({ applied: result.data?.applied, startDate, startTime: isPermanent ? null : startTime });
+    onSuccess?.({
+      applied: result.data?.applied, startDate, startTime: isPermanent ? null : startTime,
+      message: transferSuccessMessage({
+        name: therapistName, startDate, startTime, durationValue, durationUnit, permanent: isPermanent, applied: result.data?.applied,
+      }),
+    });
   };
 
   const reason = !toBranch ? `Select a destination ${wordBranch()}` : !startDate ? 'Pick a start date'
@@ -170,6 +176,32 @@ const TransferFromCalendarModal = ({
     {conflictModal}
     </>
   );
+};
+
+// One rule for every entry point: a staffer who already has a scheduled or active transfer gets that transfer
+// (where / when / returns, with Cancel / Extend / Return) instead of an empty new-transfer form that could only fail.
+const TransferFromCalendarModal = (props) => {
+  const { therapistId, currentBranchId, onSuccess } = props;
+  const [open, setOpen] = useState(undefined); // undefined = still checking
+  useEffect(() => {
+    let cancelled = false;
+    fetchTherapistTransferStatus(currentBranchId).then(({ data }) => {
+      if (!cancelled) setOpen(hasOpenTransfer(data && data[therapistId]));
+    });
+    return () => { cancelled = true; };
+  }, [therapistId, currentBranchId]);
+  if (open === undefined) return null;
+  if (open) {
+    return (
+      <TransferManagementModal
+        variant={props.variant} guardRef={props.guardRef} onDraftChange={props.onDraftChange}
+        therapistId={therapistId} therapistName={props.therapistName} currentBranchId={currentBranchId}
+        defaultStartDate={props.defaultDate} onClose={props.onClose}
+        onSuccess={(message) => onSuccess?.({ message })}
+      />
+    );
+  }
+  return <TransferFromCalendarForm {...props} />;
 };
 
 export default TransferFromCalendarModal;
