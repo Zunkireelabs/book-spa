@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { foldDayMoney } from '../../../lib/dayMoney';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import ConfirmDialog from '../../../components/ui/ConfirmDialog';
@@ -163,27 +164,27 @@ const DailyClosingPanel = ({ branchId }) => {
             <div className="bg-surface rounded-spa-lg spa-shadow-resting p-5 border border-border">
               <div className="flex items-center space-x-2 mb-2">
                 <Icon name="TrendingUp" size={16} className="text-text-secondary" />
-                <span className="font-caption font-caption-medium text-xs text-text-secondary uppercase tracking-wider">Gross Revenue</span>
+                <span className="font-caption font-caption-medium text-xs text-text-secondary uppercase tracking-wider">Money in</span>
               </div>
               <p className="font-heading font-heading-semibold text-xl text-text-primary">
-                {formatNPR(summary.grossRevenue)}
+                {formatNPR(summary.netRevenue + (summary.refunds || 0))}
               </p>
             </div>
 
             <div className="bg-surface rounded-spa-lg spa-shadow-resting p-5 border border-border">
               <div className="flex items-center space-x-2 mb-2">
                 <Icon name="Percent" size={16} className="text-text-secondary" />
-                <span className="font-caption font-caption-medium text-xs text-text-secondary uppercase tracking-wider">Total Discounts</span>
+                <span className="font-caption font-caption-medium text-xs text-text-secondary uppercase tracking-wider">Refunds</span>
               </div>
               <p className="font-heading font-heading-semibold text-xl text-error">
-                - {formatNPR(summary.totalDiscounts)}
+                − {formatNPR(summary.refunds || 0)}
               </p>
             </div>
 
             <div className="bg-surface rounded-spa-lg spa-shadow-resting p-5 border border-border border-l-4 border-l-success">
               <div className="flex items-center space-x-2 mb-2">
                 <Icon name="IndianRupee" size={16} className="text-success" />
-                <span className="font-caption font-caption-medium text-xs text-text-secondary uppercase tracking-wider">Net Revenue</span>
+                <span className="font-caption font-caption-medium text-xs text-text-secondary uppercase tracking-wider">Taken today</span>
               </div>
               <p className="font-heading font-heading-semibold text-xl text-success">
                 {formatNPR(summary.netRevenue)}
@@ -212,8 +213,20 @@ const DailyClosingPanel = ({ branchId }) => {
                   <span className="font-body font-body-normal text-sm text-text-secondary">Cancelled</span>
                   <span className="font-body font-body-semibold text-sm text-error">{summary.cancelledBookings}</span>
                 </div>
+                <div className="flex items-center justify-between">
+                  <span className="font-body font-body-normal text-sm text-text-secondary">No Show</span>
+                  <span className="font-body font-body-semibold text-sm text-warning">{summary.noShowBookings}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="font-body font-body-normal text-sm text-text-secondary">Not finished (Pending / Confirmed / In-Progress)</span>
+                  <span className="font-body font-body-semibold text-sm text-text-primary">{summary.notFinishedBookings}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="font-body font-body-normal text-sm text-text-secondary">Discounts given (today's bookings)</span>
+                  <span className="font-body font-body-semibold text-sm text-text-primary">− {formatNPR(summary.totalDiscounts)}</span>
+                </div>
                 <div className="border-t border-border pt-2 flex items-center justify-between">
-                  <span className="font-body font-body-normal text-sm text-text-secondary">Unpaid (Confirmed/Completed)</span>
+                  <span className="font-body font-body-normal text-sm text-text-secondary">Not fully paid</span>
                   <span className={`font-body font-body-semibold text-sm ${summary.unpaidCount > 0 ? 'text-warning' : 'text-success'}`}>
                     {summary.unpaidCount}
                   </span>
@@ -228,55 +241,37 @@ const DailyClosingPanel = ({ branchId }) => {
                 <span>Payment Breakdown</span>
               </h3>
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Icon name="Banknote" size={14} className="text-text-secondary" />
-                    <span className="font-body font-body-normal text-sm text-text-secondary">Cash</span>
-                  </div>
-                  <span className="font-body font-body-semibold text-sm text-text-primary">
-                    {formatNPR(summary.paymentBreakdown.cash)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Icon name="CreditCard" size={14} className="text-text-secondary" />
-                    <span className="font-body font-body-normal text-sm text-text-secondary">Card (Nabil / GlobalIME / NIC Asia)</span>
-                  </div>
-                  <span className="font-body font-body-semibold text-sm text-text-primary">
-                    {formatNPR(summary.paymentBreakdown.card)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Icon name="Smartphone" size={14} className="text-text-secondary" />
-                    <span className="font-body font-body-normal text-sm text-text-secondary">Fonepay</span>
-                  </div>
-                  <span className="font-body font-body-semibold text-sm text-text-primary">
-                    {formatNPR(summary.paymentBreakdown.fonepay)}
-                  </span>
-                </div>
-                {summary.productSales?.count > 0 && (
-                  <div className="border-t border-border pt-2 flex items-center justify-between" data-products-line>
-                    <div className="flex items-center space-x-2">
-                      <Icon name="Package" size={14} className="text-text-secondary" />
-                      <span className="font-body font-body-normal text-sm text-text-secondary">of which: Products ({summary.productSales.count} sold)</span>
+                {(() => {
+                  const m = foldDayMoney({ byMode: summary.byMode, refunds: summary.refunds });
+                  return (<>
+                    {m.byMethod.length === 0 && <p className="text-sm text-text-secondary">No money taken yet.</p>}
+                    {m.byMethod.map((r) => (
+                      <div key={r.method} className="flex items-center justify-between" data-method-row>
+                        <span className="font-body font-body-normal text-sm text-text-secondary">{r.label}</span>
+                        <span className="font-body font-body-semibold text-sm text-text-primary">{formatNPR(r.amount)}</span>
+                      </div>
+                    ))}
+                    {m.refunds > 0 && (
+                      <div className="flex items-center justify-between" data-refunds-row>
+                        <span className="font-body font-body-normal text-sm text-text-secondary">Refunds</span>
+                        <span className="font-body font-body-semibold text-sm text-text-primary text-error">− {formatNPR(m.refunds)}</span>
+                      </div>
+                    )}
+                    <div className="border-t border-border pt-2 flex items-center justify-between">
+                      <span className="font-body font-body-normal text-sm text-text-secondary">Cash expected in the drawer</span>
+                      <span className="font-body font-body-semibold text-sm text-text-primary">{formatNPR(m.cashExpected)}</span>
                     </div>
-                    <span className="font-body font-body-semibold text-sm text-text-primary">
-                      {formatNPR(summary.productSales.total)}
-                    </span>
-                  </div>
-                )}
-                {summary.voucherSalesTotal > 0 && (
-                  <div className="border-t border-border pt-2 flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <Icon name="Ticket" size={14} className="text-text-secondary" />
-                      <span className="font-body font-body-normal text-sm text-text-secondary">of which: Voucher Sales</span>
+                  </>);
+                })()}
+                {[['product', 'Products', 'Package'], ['voucher', 'Voucher sales', 'Ticket'], ['membership', 'Membership deposits', 'Wallet'], ['package', 'Package sales', 'Gift']].filter(([k]) => Number(summary.sources?.[k]) > 0).map(([k, label, icon]) => (
+                  <div key={k} className="border-t border-border pt-2 flex items-center justify-between" data-source-line={k}>
+                    <div className="flex items-center gap-2">
+                      <Icon name={icon} size={14} className="text-text-secondary" />
+                      <span className="font-body font-body-normal text-sm text-text-secondary">of which: {label}</span>
                     </div>
-                    <span className="font-body font-body-semibold text-sm text-text-primary">
-                      {formatNPR(summary.voucherSalesTotal)}
-                    </span>
+                    <span className="font-body font-body-semibold text-sm text-text-primary">{formatNPR(summary.sources[k])}</span>
                   </div>
-                )}
+                ))}
               </div>
             </div>
           </div>

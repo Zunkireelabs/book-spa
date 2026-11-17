@@ -1,0 +1,71 @@
+import { describe, it, expect } from 'vitest';
+import { foldDayMoney, addTender, isTendered, methodLabel, canonicalMode } from './dayMoney';
+
+// Same fixture as supabase/tests/znly-232.sql (the SQL rule, get_dashboard): the Nuad Smoke case, cash was shown as 100 while the drawer held 900.
+//   booking: Cash 100 (+ Cash 70 on a booking dated ANOTHER day, paid today: counts today), Khalti 300, Membership 200 (wallet) | products: Cash 800, Esewa 100, Membership 50 (wallet) | refunds 40 + 150
+const FIXTURE_TENDERS = [['Cash', 100], ['Cash', 70], ['Khalti', 300], ['Membership', 200], ['Cash', 800], ['Esewa', 100], ['Membership', 50], ['SessionPackage', 70]];
+const REFUNDS = 40 + 150;
+
+describe('dayMoney: the one money-today rule (ZNLY-232)', () => {
+  const byMode = {};
+  FIXTURE_TENDERS.forEach(([m, a]) => addTender(byMode, m, a));
+  const day = foldDayMoney({ byMode, refunds: REFUNDS });
+
+  it('matches the SQL test numbers', () => {
+    expect(Object.fromEntries(day.byMethod.map((r) => [r.method, r.amount]))).toEqual({ Cash: 970, Khalti: 300, Esewa: 100 });
+    expect(day.moneyIn).toBe(1370);
+    expect(day.refunds).toBe(190);
+    expect(day.taken).toBe(1180);
+    expect(day.cashExpected).toBe(780);
+  });
+
+  it('the rows add up: methods - refunds = taken', () => {
+    expect(day.byMethod.reduce((s, r) => s + r.amount, 0) - day.refunds).toBe(day.taken);
+  });
+
+  it('dashboard (SQL by_method shape), Close card and Daily Reconciliation agree on the same day', () => {
+    const sqlShape = { Cash: 970, Khalti: 300, Esewa: 100 };                       // get_dashboard money.by_method
+    const closeCard = foldDayMoney({ byMode: sqlShape, refunds: 190 });             // BranchView Close card
+    const reconciliation = foldDayMoney({ byMode: { ...byMode }, refunds: 190 });   // getDailySummary.byMode (wallet modes can never get in)
+    for (const f of ['taken', 'cashExpected', 'refunds', 'moneyIn']) expect(closeCard[f]).toBe(reconciliation[f]);
+    expect(closeCard.byMethod).toEqual(reconciliation.byMethod);
+  });
+
+  it('wallet / voucher-balance / package tenders are never money in', () => {
+    ['Membership', 'ReferralWallet', 'VoucherWallet', 'ReferralVoucher', 'SessionPackage', '', null].forEach((m) => expect(isTendered(m)).toBe(false));
+    ['Cash', 'Card', 'Khalti', 'Nabil Card'].forEach((m) => expect(isTendered(m)).toBe(true));
+    expect(foldDayMoney({ byMode: { Membership: 500 } }).moneyIn).toBe(0);
+  });
+
+  it('shows real method names, no Fonepay / bank hardcoding', () => {
+    expect(methodLabel('Khalti')).toBe('Khalti');
+    expect(methodLabel('Nabil Card')).toBe('Nabil Card');
+    expect(methodLabel('MobileBanking')).toBe('Mobile banking');
+    expect(day.byMethod.map((r) => r.label)).toEqual(['Cash', 'Khalti', 'eSewa']);
+  });
+
+  it('refunds with no sales: cash expected goes negative rather than hiding the hand-back', () => {
+    const d = foldDayMoney({ byMode: {}, refunds: 100 });
+    expect(d.taken).toBe(-100);
+    expect(d.cashExpected).toBe(-100);
+  });
+
+  it('Nuad Smoke 17 Nov: Cash 4,900 + Khalti 1,500 - refunds 3,000 = taken 3,400, cash expected 1,900 (refund taken once)', () => {
+    const m = {};
+    [['Cash', 3000], ['Cash', 100], ['Cash', 1000], ['Khalti', 1500], ['Cash', 800]].forEach(([k, a]) => addTender(m, k, a));  // 3 booking cash + khalti + product cash
+    const d = foldDayMoney({ byMode: m, refunds: 3000 });
+    expect(Object.fromEntries(d.byMethod.map((r) => [r.method, r.amount]))).toEqual({ Cash: 4900, Khalti: 1500 });
+    expect(d.refunds).toBe(3000);
+    expect(d.taken).toBe(3400);
+    expect(d.cashExpected).toBe(1900);
+  });
+
+  it('mixed-case modes fold into one row (seed wrote lowercase "cash")', () => {
+    expect(canonicalMode('cash')).toBe('Cash');
+    expect(canonicalMode('Nabil Card')).toBe('Nabil Card');
+    const d = foldDayMoney({ byMode: { Cash: 25750, cash: 1500, Khalti: 100 }, refunds: 2500 });
+    expect(d.byMethod.map((r) => r.method)).toEqual(['Cash', 'Khalti']);
+    expect(d.cashExpected).toBe(24750);
+    expect(foldDayMoney({ byMode: { membership: 9 } }).moneyIn).toBe(0);
+  });
+});

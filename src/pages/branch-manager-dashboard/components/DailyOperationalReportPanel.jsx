@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { foldDayMoney } from '../../../lib/dayMoney';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import ConfirmDialog from '../../../components/ui/ConfirmDialog';
@@ -242,27 +243,27 @@ const DailyOperationalReportPanel = ({ branchId }) => {
             <div className="bg-surface rounded-spa p-5 border border-border">
               <div className="flex items-center gap-2 mb-2">
                 <Icon name="TrendingUp" size={16} className="text-text-secondary" />
-                <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">Gross Revenue</span>
+                <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">Money in</span>
               </div>
               <p className="text-xl font-semibold text-text-primary">
-                {formatNPR(report.totals.grossRevenue)}
+                {formatNPR(report.totals.netRevenue + (report.refunds || 0))}
               </p>
             </div>
 
             <div className="bg-surface rounded-spa p-5 border border-border">
               <div className="flex items-center gap-2 mb-2">
                 <Icon name="Percent" size={16} className="text-text-secondary" />
-                <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">Total Discounts</span>
+                <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">Refunds</span>
               </div>
               <p className="text-xl font-semibold text-error">
-                - {formatNPR(report.totals.totalDiscount)}
+                − {formatNPR(report.refunds || 0)}
               </p>
             </div>
 
             <div className="bg-surface rounded-spa p-5 border border-border border-l-4 border-l-success">
               <div className="flex items-center gap-2 mb-2">
                 <Icon name="IndianRupee" size={16} className="text-success" />
-                <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">Net Revenue</span>
+                <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">Taken today</span>
               </div>
               <p className="text-xl font-semibold text-success">
                 {formatNPR(report.totals.netRevenue)}
@@ -307,8 +308,16 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                   <span className="text-sm text-text-secondary">No Show</span>
                   <span className="text-sm font-semibold text-warning">{report.totals.noShowBookings}</span>
                 </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-text-secondary">Not finished (Pending / Confirmed / In-Progress)</span>
+                  <span className="text-sm font-semibold text-text-primary">{report.totals.notFinishedBookings}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-text-secondary">Discounts given (today's bookings)</span>
+                  <span className="text-sm font-semibold text-text-primary">− {formatNPR(report.totals.totalDiscount)}</span>
+                </div>
                 <div className="border-t border-border pt-2 flex items-center justify-between">
-                  <span className="text-sm text-text-secondary">Unpaid (Confirmed/Completed)</span>
+                  <span className="text-sm text-text-secondary">Not fully paid</span>
                   <span className={`text-sm font-semibold ${report.unpaidBookings.length > 0 ? 'text-warning' : 'text-success'}`}>
                     {report.unpaidBookings.length}
                   </span>
@@ -323,55 +332,37 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                 <span>Payment Breakdown</span>
               </h3>
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Icon name="Banknote" size={14} className="text-text-secondary" />
-                    <span className="text-sm text-text-secondary">Cash</span>
-                  </div>
-                  <span className="text-sm font-semibold text-text-primary">
-                    {formatNPR(report.paymentBreakdown.cash)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Icon name="CreditCard" size={14} className="text-text-secondary" />
-                    <span className="text-sm text-text-secondary">Card (Nabil / GlobalIME / NIC Asia)</span>
-                  </div>
-                  <span className="text-sm font-semibold text-text-primary">
-                    {formatNPR(report.paymentBreakdown.card)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Icon name="Smartphone" size={14} className="text-text-secondary" />
-                    <span className="text-sm text-text-secondary">Fonepay</span>
-                  </div>
-                  <span className="text-sm font-semibold text-text-primary">
-                    {formatNPR(report.paymentBreakdown.fonepay)}
-                  </span>
-                </div>
-                {report.productSales?.count > 0 && (
-                  <div className="border-t border-border pt-2 flex items-center justify-between" data-products-line>
-                    <div className="flex items-center gap-2">
-                      <Icon name="Package" size={14} className="text-text-secondary" />
-                      <span className="text-sm text-text-secondary">of which: Products ({report.productSales.count} sold)</span>
+                {(() => {
+                  const m = foldDayMoney({ byMode: report.byMode, refunds: report.refunds });
+                  return (<>
+                    {m.byMethod.length === 0 && <p className="text-sm text-text-secondary">No money taken yet.</p>}
+                    {m.byMethod.map((r) => (
+                      <div key={r.method} className="flex items-center justify-between" data-method-row>
+                        <span className="text-sm text-text-secondary">{r.label}</span>
+                        <span className="text-sm font-semibold text-text-primary">{formatNPR(r.amount)}</span>
+                      </div>
+                    ))}
+                    {m.refunds > 0 && (
+                      <div className="flex items-center justify-between" data-refunds-row>
+                        <span className="text-sm text-text-secondary">Refunds</span>
+                        <span className="text-sm font-semibold text-text-primary text-error">− {formatNPR(m.refunds)}</span>
+                      </div>
+                    )}
+                    <div className="border-t border-border pt-2 flex items-center justify-between">
+                      <span className="text-sm text-text-secondary">Cash expected in the drawer</span>
+                      <span className="text-sm font-semibold text-text-primary">{formatNPR(m.cashExpected)}</span>
                     </div>
-                    <span className="text-sm font-semibold text-text-primary">
-                      {formatNPR(report.productSales.total)}
-                    </span>
-                  </div>
-                )}
-                {report.voucherSalesTotal > 0 && (
-                  <div className="border-t border-border pt-2 flex items-center justify-between">
+                  </>);
+                })()}
+                {[['product', 'Products', 'Package'], ['voucher', 'Voucher sales', 'Ticket'], ['membership', 'Membership deposits', 'Wallet'], ['package', 'Package sales', 'Gift']].filter(([k]) => Number(report.sources?.[k]) > 0).map(([k, label, icon]) => (
+                  <div key={k} className="border-t border-border pt-2 flex items-center justify-between" data-source-line={k}>
                     <div className="flex items-center gap-2">
-                      <Icon name="Ticket" size={14} className="text-text-secondary" />
-                      <span className="text-sm text-text-secondary">of which: Voucher Sales</span>
+                      <Icon name={icon} size={14} className="text-text-secondary" />
+                      <span className="text-sm text-text-secondary">of which: {label}</span>
                     </div>
-                    <span className="text-sm font-semibold text-text-primary">
-                      {formatNPR(report.voucherSalesTotal)}
-                    </span>
+                    <span className="text-sm font-semibold text-text-primary">{formatNPR(report.sources[k])}</span>
                   </div>
-                )}
+                ))}
               </div>
             </div>
           </div>

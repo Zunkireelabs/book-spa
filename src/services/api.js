@@ -1,4 +1,5 @@
 import { buildQueue, needsOf } from '../lib/dashboardNeeds';
+import { WALLET_MODES, addTender, isTendered, canonicalMode } from '../lib/dayMoney';
 import { toTransferInput } from '../utils/transferText';
 import { workedAtNote } from './visitorAttendance';
 import { computeReferralCommission, payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, computeNetPay, splitServiceRevenueByBranch, visitorPayrollHelpLine } from './payrollCalc';
@@ -1106,7 +1107,7 @@ export const PAYMENT_MODES = ['Cash', 'Card', 'MobileBanking', 'Cheque', 'Esewa'
 // membership/voucher/referral credit was originally purchased or earned, not when it's
 // later spent down. Shared by getTodayInsights, getDailySummary, and
 // getDailyOperationalReport so all three revenue calculations agree on what to exclude.
-const WALLET_MODES = new Set(['Membership', 'ReferralWallet', 'VoucherWallet', 'ReferralVoucher']);
+// (WALLET_MODES now lives in src/lib/dayMoney.js, the one money-today rule shared with the dashboard — ZNLY-232.)
 
 // Bucket key ('cash' | 'card' | 'fonepay') for the simple 3-way cash/card/other
 // split used by getDailySummary() and getDailyOperationalReport() (both the
@@ -1114,7 +1115,8 @@ const WALLET_MODES = new Set(['Membership', 'ReferralWallet', 'VoucherWallet', '
 // getTodayInsights(), which returns a flat per-payment_mode total instead so the
 // Dashboard can group by the org's own configured payment-method tree
 // (WALLET_MODES above is shared across all three functions).
-function classifyPaymentMode(mode) {
+function classifyPaymentMode(rawMode) {
+  const mode = canonicalMode(rawMode);
   if (mode === 'Cash') return 'cash';
   if (mode.includes('Card')) return 'card';
   return 'fonepay'; // MobileBanking, Esewa, Khalti, Cheque (+ legacy Fonepay) → digital/other
@@ -1150,6 +1152,16 @@ export async function getProductSalesForDate(branchId, date) {
   return out;
 }
 
+// The day's money, ONE source shared with the dashboard Close card (get_day_money -> _dashboard_money_in / _dashboard_refunds, migration 391):
+// everything TAKEN that Nepal day (any booking date) by real method name, minus refunds made that day. ZNLY-232.
+//   { byMode, refunds, taken, cashExpected, serviceIn }
+export async function getDayMoneyForDate(branchId, date) {
+  const { data, error } = await supabase.rpc('get_day_money', { p_branch_id: isOverallBranch(branchId) ? null : resolveBranchId(branchId), p_date: date });
+  if (error) throw error;
+  const d = data || {};
+  return { byMode: d.by_method || {}, refunds: Number(d.refunds || 0), taken: Number(d.taken || 0), cashExpected: Number(d.cash_expected || 0), serviceIn: Number(d.service_in || 0), sources: d.sources || {} };
+}
+
 // Membership top-ups and package purchases on [date] — new cash in from selling
 // a wallet-style product. Mirrors the voucher-sale pattern (voucherSalesTotal)
 // already folded into getDailySummary/getDailyOperationalReport: recognized as
@@ -1165,6 +1177,7 @@ async function getWalletProductSalesForDate(branchId, date) {
   // sales already do — membership and package sales are real tendered cash
   // (Cash/Card/MobileBanking) too, not a wallet mode themselves.
   const modeBreakdown = { cash: 0, card: 0, fonepay: 0 };
+  const byMode = {};
 
   let depositsQuery = supabase
     .from('membership_transactions')
@@ -1182,6 +1195,7 @@ async function getWalletProductSalesForDate(branchId, date) {
     // payment_mode is nullable (migration-060) — default to Cash rather than
     // falling through classifyPaymentMode('') into the fonepay bucket.
     modeBreakdown[classifyPaymentMode(d.payment_mode || 'Cash')] += amount;
+    addTender(byMode, d.payment_mode || 'Cash', amount);
   }
 
   let packagesQuery = supabase
@@ -1198,9 +1212,10 @@ async function getWalletProductSalesForDate(branchId, date) {
     // payment_method is nullable (migration-185) with no "required when paid"
     // check — default to Cash rather than falling through into fonepay.
     modeBreakdown[classifyPaymentMode(p.payment_method || 'Cash')] += amount;
+    addTender(byMode, p.payment_method || 'Cash', amount);
   }
 
-  return { membershipSoldTotal, packageSoldTotal, modeBreakdown };
+  return { membershipSoldTotal, packageSoldTotal, modeBreakdown, byMode };
 }
 
 // Persists the org's admin-configured payment method list (organizations.settings
@@ -4719,7 +4734,7 @@ export async function getDailySummary(branchId, date) {
     // 1. Fetch all bookings for the branch + date
     let bookingsQuery = supabase
       .from('bookings')
-      .select('id, status, payment_status, base_amount, discount_amount, final_amount')
+      .select('id, status, payment_status, base_amount, discount_amount, final_amount, cancellation_reason')
       .eq('date', date);
     bookingsQuery = withBranch(bookingsQuery, branchId);
     const { data: bookings, error: bookingsError } = await bookingsQuery;
@@ -4729,11 +4744,13 @@ export async function getDailySummary(branchId, date) {
     const all = bookings || [];
     const totalBookings = all.length;
     const completedBookings = all.filter(b => b.status === 'Completed').length;
-    const cancelledBookings = all.filter(b => b.status === 'Cancelled').length;
+    // Exclusive status rows that add up to the total: Completed + Cancelled + No Show + Not finished (a no-show is not also "cancelled").
+    const noShowBookings = all.filter(isNoShow).length;
+    const cancelledBookings = all.filter(b => b.status === 'Cancelled' && !isNoShow(b)).length;
+    const notFinishedBookings = totalBookings - completedBookings - cancelledBookings - noShowBookings;
 
     // 2. Gross/discount from fully-paid (settled) bookings
     const paid = all.filter(b => b.payment_status === 'paid');
-    const grossRevenue = paid.reduce((sum, b) => sum + Number(b.base_amount), 0);
     const totalDiscounts = paid.reduce((sum, b) => sum + Number(b.discount_amount), 0);
 
     // 3. Outstanding count (Confirmed/Completed not fully paid — unpaid or partial)
@@ -4748,12 +4765,16 @@ export async function getDailySummary(branchId, date) {
       .map(b => b.id);
     let netRevenue = 0;
     let paymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
+    const byMode = {}; // real method name -> money in (the one rule, src/lib/dayMoney.js)
 
-    if (settledBookingIds.length > 0) {
+    // Every payment on today's bookings counts as money in, whatever the booking's status is NOW: a fully refunded booking drops back to
+    // 'unpaid', but its payment was still taken today and its refund is subtracted below (ZNLY-232 — skipping it subtracted the refund twice).
+    const dayBookingIds = all.map(b => b.id);
+    if (dayBookingIds.length > 0) {
       const { data: payments, error: paymentsError } = await supabase
         .from('payments')
         .select('amount, payment_mode')
-        .in('booking_id', settledBookingIds);
+        .in('booking_id', dayBookingIds);
 
       if (paymentsError) throw paymentsError;
 
@@ -4769,6 +4790,7 @@ export async function getDailySummary(branchId, date) {
         const amount = Number(p.amount);
         netRevenue += amount;
         paymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
+        addTender(byMode, p.payment_mode, amount);
       }
     }
 
@@ -4801,16 +4823,18 @@ export async function getDailySummary(branchId, date) {
         voucherSalesTotal += amount;
         netRevenue += amount;
         paymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
+        addTender(byMode, p.payment_mode, amount);
       }
     }
 
     // 4c. Membership top-ups + package sales collected today — same
     // recognized-once-at-sale-time policy as vouchers above.
-    const { membershipSoldTotal, packageSoldTotal, modeBreakdown } = await getWalletProductSalesForDate(branchId, date);
+    const { membershipSoldTotal, packageSoldTotal, modeBreakdown, byMode: walletSaleModes } = await getWalletProductSalesForDate(branchId, date);
     netRevenue += membershipSoldTotal + packageSoldTotal;
     paymentBreakdown.cash += modeBreakdown.cash;
     paymentBreakdown.card += modeBreakdown.card;
     paymentBreakdown.fonepay += modeBreakdown.fonepay;
+    for (const [m, v] of Object.entries(walletSaleModes)) addTender(byMode, m, v);
 
     // 4c-2. Products sold today (V26) — money in the drawer exactly like voucher sales, so it folds into the same buckets; also
     // reported as its own `productSales` line so the treatment figures stay comparable (treatment = net minus this).
@@ -4819,6 +4843,18 @@ export async function getDailySummary(branchId, date) {
     paymentBreakdown.cash += productSales.breakdown.cash;
     paymentBreakdown.card += productSales.breakdown.card;
     paymentBreakdown.fonepay += productSales.breakdown.fonepay;
+    for (const [m, v] of Object.entries(productSales.byMode)) addTender(byMode, m, v);
+
+    // 4c-3. Refunds handed back today come OFF the takings and the cash in the drawer (ZNLY-232) — same rule as the dashboard Close card.
+    // The money figures come from ONE source (the cash day: what was taken today whatever the booking's date, minus refunds made today).
+    const dayMoney = await getDayMoneyForDate(branchId, date);
+    const refunds = dayMoney.refunds;
+    for (const k of Object.keys(byMode)) delete byMode[k];
+    Object.assign(byMode, dayMoney.byMode);
+    paymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
+    for (const [m, v] of Object.entries(byMode)) paymentBreakdown[classifyPaymentMode(m)] += Number(v);
+    paymentBreakdown.cash -= refunds;
+    netRevenue = dayMoney.taken;
 
     // 4d. Tips collected today — NOT revenue (migration-240). Reported separately,
     // deliberately NEVER folded into netRevenue/paymentBreakdown, same "visible but
@@ -4846,6 +4882,11 @@ export async function getDailySummary(branchId, date) {
       existingReport = data;
     }
 
+    // Gross = services (bookings taken payment on, at list price) + everything else sold today (products, vouchers, memberships, packages)
+    // before discounts, so Gross >= Net always (Net = money in - refunds). ZNLY-232.
+    // 'grossRevenue' (the daily_reports.gross_revenue column) is MONEY IN: net + refunds, so Money in - Refunds = Taken always adds up.
+    const grossRevenue = netRevenue + refunds;
+
     return {
       data: {
         totalBookings,
@@ -4854,6 +4895,11 @@ export async function getDailySummary(branchId, date) {
         grossRevenue,
         totalDiscounts,
         netRevenue,
+        refunds,
+        byMode,
+        noShowBookings,
+        notFinishedBookings,
+        sources: dayMoney.sources,
         paymentBreakdown,
         voucherSalesTotal,
         productSales,
@@ -5371,6 +5417,8 @@ export async function getDailyOperationalReport(branchId, date) {
     // this, the live branch would show lower cash/card/fonepay totals than the same
     // report shows once the day is closed, purely from a voucher sale.
     let voucherSalesTotal = 0;
+    const voucherByMode = {};
+    const byMode = {};   // real method name -> money in today (the one rule, src/lib/dayMoney.js)
     const voucherPaymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
     let vouchersQuery = supabase
       .from('vouchers')
@@ -5395,12 +5443,16 @@ export async function getDailyOperationalReport(branchId, date) {
         const amount = Number(p.amount);
         voucherSalesTotal += amount;
         voucherPaymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
+        voucherByMode[p.payment_mode] = (voucherByMode[p.payment_mode] || 0) + amount;
       }
     }
 
     // Products sold that day (V26): live count + per-method detail; the money total of a CLOSED day comes from the snapshot
     // (daily_reports.product_revenue, already inside its net revenue and method totals), an open day's from the live sum.
     const liveProductSales = await getProductSalesForDate(branchId, date);
+    // ZNLY-232: the day's money (by real method, refunds, taken) from ONE source shared with the dashboard Close card, live also on a closed day.
+    const dayMoney = await getDayMoneyForDate(branchId, date);
+    const refunds = dayMoney.refunds;
     const productSales = {
       count: liveProductSales.count,
       total: isClosed ? Number(closedReport.product_revenue || 0) : liveProductSales.total,
@@ -5430,6 +5482,8 @@ export async function getDailyOperationalReport(branchId, date) {
       };
     });
 
+    Object.assign(byMode, dayMoney.byMode);
+
     // Step 3 — Compute totals
     // If closed, use stored snapshot for financial totals
     // If open, compute live from payments
@@ -5437,9 +5491,9 @@ export async function getDailyOperationalReport(branchId, date) {
 
     if (isClosed) {
       totals = {
-        totalBookings: closedReport.total_bookings,
-        completedBookings: closedReport.completed_bookings,
-        cancelledBookings: closedReport.cancelled_bookings,
+        totalBookings: all.length,   // status rows are counted live (a closed day's bookings are locked), so they always add up
+        completedBookings: all.filter(b => b.status === 'Completed').length,
+        cancelledBookings: all.filter(b => b.status === 'Cancelled' && !isNoShow(b)).length,
         noShowBookings: all.filter(isNoShow).length,
         grossRevenue: Number(closedReport.gross_revenue),
         totalDiscount: Number(closedReport.total_discounts),
@@ -5448,30 +5502,22 @@ export async function getDailyOperationalReport(branchId, date) {
     } else {
       // Live compute — revenue from payments only
       const paidBookings = all.filter(b => b.payment_status === 'paid');
-      const { membershipSoldTotal, packageSoldTotal } = await getWalletProductSalesForDate(branchId, date);
 
       totals = {
         totalBookings: all.length,
         completedBookings: all.filter(b => b.status === 'Completed').length,
-        cancelledBookings: all.filter(b => b.status === 'Cancelled').length,
+        cancelledBookings: all.filter(b => b.status === 'Cancelled' && !isNoShow(b)).length,
         noShowBookings: all.filter(isNoShow).length,
-        grossRevenue: paidBookings.reduce((sum, b) => sum + Number(b.base_amount), 0),
+        // Gross = services at list price + everything else sold today before discounts, so Gross >= Net (ZNLY-232).
+        grossRevenue: dayMoney.taken + refunds,   // MONEY IN (see getDailySummary)
         totalDiscount: paidBookings.reduce((sum, b) => sum + Number(b.discount_amount), 0),
-        // REVENUE LAW: netRevenue = SUM(payments.amount) — includes partial collections.
-        // Excludes SessionPackage rows (migration-141) and wallet-mode rows (WALLET_MODES:
-        // Membership/Referral/Voucher balances) — same policy as getDailySummary: that value
-        // was already recognized as revenue when the package/membership/voucher was
-        // originally purchased or earned, so it isn't cash collected today. Without this
-        // exclusion, getDailyOperationalReport would disagree with getDailySummary (whose
-        // netRevenue is what closeDay persists) on any day with such a redemption.
-        // Folds in voucherSalesTotal + membershipSoldTotal + packageSoldTotal so the live
-        // branch matches what the closed snapshot already includes (closeDay persists
-        // getDailySummary()'s sold-inclusive netRevenue).
-        netRevenue: paymentRows
-          .filter(p => p.payment_mode !== 'SessionPackage' && !WALLET_MODES.has(p.payment_mode))
-          .reduce((sum, p) => sum + Number(p.amount), 0) + voucherSalesTotal + membershipSoldTotal + packageSoldTotal + liveProductSales.total,
+        // REVENUE LAW: net = everything TAKEN today (any booking date; real tenders only, no wallet / voucher-balance / package redemptions)
+        // minus refunds made today — get_day_money, the same figure as the dashboard Close card.
+        netRevenue: dayMoney.taken,
       };
     }
+
+    totals.notFinishedBookings = totals.totalBookings - totals.completedBookings - totals.cancelledBookings - totals.noShowBookings;
 
     // Step 4 — Payment breakdown
     let paymentBreakdown;
@@ -5484,19 +5530,8 @@ export async function getDailyOperationalReport(branchId, date) {
       };
     } else {
       paymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
-      for (const p of paymentRows) {
-        // SessionPackage and wallet-mode rows are never money collected today — see
-        // netRevenue above.
-        if (p.payment_mode === 'SessionPackage' || WALLET_MODES.has(p.payment_mode)) continue;
-        const amount = Number(p.amount);
-        paymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
-      }
-      paymentBreakdown.cash += voucherPaymentBreakdown.cash;
-      paymentBreakdown.card += voucherPaymentBreakdown.card;
-      paymentBreakdown.fonepay += voucherPaymentBreakdown.fonepay;
-      paymentBreakdown.cash += liveProductSales.breakdown.cash;
-      paymentBreakdown.card += liveProductSales.breakdown.card;
-      paymentBreakdown.fonepay += liveProductSales.breakdown.fonepay;
+      for (const [m, v] of Object.entries(byMode)) paymentBreakdown[classifyPaymentMode(m)] += Number(v);
+      paymentBreakdown.cash -= refunds;
     }
 
     // Step 5 — Staff discount summary
@@ -5594,6 +5629,9 @@ export async function getDailyOperationalReport(branchId, date) {
         paymentBreakdown,
         voucherSalesTotal,
         productSales,
+        sources: dayMoney.sources,
+        refunds,
+        byMode,
         tipsTotal,
         staffDiscountSummary,
         therapistRevenueSummary,
@@ -5646,9 +5684,10 @@ export function exportDailyReportCSV(reportData) {
   rows.push(`Completed,${totals.completedBookings}`);
   rows.push(`Cancelled,${totals.cancelledBookings}`);
   rows.push(`No Show,${totals.noShowBookings}`);
-  rows.push(`Gross Revenue,${totals.grossRevenue.toFixed(2)}`);
-  rows.push(`Total Discount,${totals.totalDiscount.toFixed(2)}`);
-  rows.push(`Net Revenue,${totals.netRevenue.toFixed(2)}`);
+  rows.push(`Money In,${(totals.netRevenue + (reportData.refunds || 0)).toFixed(2)}`);
+  rows.push(`Refunds,${(reportData.refunds || 0).toFixed(2)}`);
+  rows.push(`Taken Today,${totals.netRevenue.toFixed(2)}`);
+  rows.push(`Discounts given (today's bookings),${totals.totalDiscount.toFixed(2)}`);
   if (reportData.productSales) {
     rows.push(`Products sold (${reportData.productSales.count}),${Number(reportData.productSales.total).toFixed(2)}`);
   }

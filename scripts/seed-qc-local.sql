@@ -171,7 +171,7 @@ BEGIN
         FROM services s WHERE s.id = r.sid
         RETURNING id)
       INSERT INTO payments (booking_id, amount, payment_mode, recorded_by)
-      SELECT b.id, r.paid, 'cash', v_admin FROM b WHERE r.paid > 0;
+      SELECT b.id, r.paid, 'Cash', v_admin FROM b WHERE r.paid > 0;
     END LOOP;
   END IF;
 

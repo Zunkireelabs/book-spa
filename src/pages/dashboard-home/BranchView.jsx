@@ -12,6 +12,7 @@ import { supabase } from '../../lib/supabase';
 import { bookingSplit, splitLine, fmtClock, fmtDuration, fmtRange, fmtFreeTotal, freeNow, freeTime } from '../../lib/dashboardFloor';
 import DeskButtons from './DeskButtons';
 import { paidNote } from '../../lib/dashboardMoney';
+import { foldDayMoney } from '../../lib/dayMoney';
 import { npr, plural, shortDay, clock12, LoadError, Card, Row, SuggestionsCard, Tile, sharePct } from './dashKit';
 import { dayStatus, nextClient } from '../../lib/dashboardMyDay';
 import { ofKind } from '../../lib/dashboardNeeds';
@@ -206,14 +207,18 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
             {canMoney && (
               <Card icon="Banknote" title="Today's money" error={bad} onRetry={refresh}>
                 <div className="text-sm divide-y divide-gray-100">
-                  {Object.entries(data.money.by_method || {}).map(([m, v]) => <div key={m} className="flex justify-between py-1.5"><span className="text-gray-600">{m}</span><b className="font-data">{npr(v)}</b></div>)}
+                  {(() => { const m = foldDayMoney({ byMode: data.money.by_method, refunds: data.money.refunds }); return (<>
+                    {m.byMethod.map((r) => <div key={r.method} className="flex justify-between py-1.5"><span className="text-gray-600">{r.label}</span><b className="font-data">{npr(r.amount)}</b></div>)}
+                    {m.refunds > 0 && <div className="flex justify-between py-1.5"><span className="text-gray-600">Refunds</span><b className="font-data text-error">−{npr(m.refunds)}</b></div>}
+                    <div className="flex justify-between py-1.5"><span className="text-gray-600">Taken today</span><b className="font-data">{npr(m.taken)}</b></div>
+                  </>); })()}
                   <div className="flex justify-between py-1.5"><span className="text-gray-600">Tips (passed to staff, not revenue)</span><b className="font-data">{npr(data.money.tips)}</b></div>
                   <div className="flex justify-between py-2"><b>Cash expected in the drawer</b><b className="font-data">{npr(data.money.cash_expected)}</b></div>
                 </div>
                 {closed ? (
                   <p className="text-sm text-success font-medium mt-2">Closed at {new Date(closed.closed_at).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kathmandu' })}{closed.closer?.full_name ? ` by ${closed.closer.full_name}` : ''} ✓</p>
                 ) : canAct && (
-                  <Button className="mt-3" onClick={() => setClosing((v) => !v)}>{closing ? 'Hide closing' : 'Count cash and close the day'}</Button>
+                  <Button className="mt-3" onClick={() => setClosing((v) => !v)}>{closing ? 'Hide closing' : 'Close the day'}</Button>
                 )}
               </Card>
             )}
