@@ -74,6 +74,15 @@ describe('new tenant', () => {
   it('marks steps done from real counts', () => {
     expect(setupSteps({ services: 3, staff: 0, rooms: 1, bookings: 0 }).map((s) => s.done)).toEqual([true, false, true, false]);
   });
+  it('drops the rooms step when the industry has no rooms', () => {
+    const keys = setupSteps({ services: 1 }, { enableRooms: false }).map((s) => s.key);
+    expect(keys).toEqual(['services', 'staff', 'booking']);
+    expect(setupSteps({}, {}).map((s) => s.key)).toContain('rooms');
+  });
+  it('labels the rooms step with the industry location label, lowercased', () => {
+    const r = setupSteps({}, { roomLabel: 'Stations' }).find((s) => s.key === 'rooms');
+    expect(r.label).toBe('Add your stations');
+  });
 });
 
 describe('floor helpers', () => {

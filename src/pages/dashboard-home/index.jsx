@@ -47,7 +47,7 @@ const dateLine = (today) =>
 const DashboardHome = ({ hasBookingsToday = false }) => {
   const { profile, user } = useAuth();
   const { branchId, branchName, branches = [], isOverall, switchBranch } = useBranch();
-  const { staffLabel, staffLabelPlural } = useIndustry();
+  const { staffLabel, staffLabelPlural, locationLabelPlural, enableRooms } = useIndustry();
   const [searchParams, setSearchParams] = useSearchParams();
   const highlight = searchParams.get('highlight'); // discount notifications deep-link to the Branch view's Needs action
   const role = profile?.role || 'staff';
@@ -115,7 +115,7 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
     return () => { cancelled = true; };
   }, [branchId, isOverall]);
   const newTenant = !!setupState && isNewTenant(setupState.firstBookingDate, now.today);
-  const setup = setupState ? setupSteps(setupState.counts, { staffLabel, roomLabel: 'Rooms' }) : null;
+  const setup = setupState ? setupSteps(setupState.counts, { staffLabel, roomLabel: locationLabelPlural || 'Rooms', enableRooms }) : null;
   const nowMin = Number(now.hm.slice(0, 2)) * 60 + Number(now.hm.slice(3, 5));
   const openBranch = (id, discountId = null) => {
     switchBranch(id);
