@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react';
+import UnlinkedLoginNotice from '../../../components/ui/UnlinkedLoginNotice';
 import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate, useLocation, useNavigationType } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 import BookingActionModal from '../../../components/ui/BookingActionModal';
 import { Menu, FilterChip } from '../../../components/ui/ListToolbarKit';
 import { useAuth } from '../../../contexts/AuthContext';
+import { viewerAccess } from '../../../services/dataMasking';
 import { useBranch } from '../../../contexts/BranchContext';
 import { supabase } from '../../../lib/supabase';
 import {
@@ -47,6 +49,7 @@ const rangeFromParams = (sp, today) => {
 
 const BookingsViewPanel = ({ branchId }) => {
   const { profile } = useAuth();
+  const access = viewerAccess(profile);
   const { guard } = useAvailabilityGuard();
   const { isOverall } = useBranch();
   const role = profile?.role || 'staff';
@@ -59,7 +62,7 @@ const BookingsViewPanel = ({ branchId }) => {
   const [clock, setClock] = useState(() => nepalNow());
   useEffect(() => { const t = setInterval(() => setClock(nepalNow()), 30000); return () => clearInterval(t); }, []);
   const { today, hm: nowHM } = clock;
-  const ctx = useMemo(() => ({ today, nowHM }), [today, nowHM]);
+  const ctx = useMemo(() => ({ today, nowHM, hidePrices: !access.canViewPrices }), [today, nowHM, access.canViewPrices]);
 
   // ── URL state (the dashboard's own `view=` param is preserved) ───────────────────────────────────────────────────────
   const range = useMemo(() => rangeFromParams(sp, today), [sp, today]);
@@ -119,8 +122,9 @@ const BookingsViewPanel = ({ branchId }) => {
   const isSm = cw ? cw >= 560 : bp.sm;
   const isMd = cw ? cw >= 700 : bp.md;
   const isLg = cw ? cw >= 900 : bp.lg;
-  const [columns, setColumns] = useState(readCols);
-  useEffect(() => { try { localStorage.setItem(COLS_KEY, JSON.stringify(columns)); } catch { /* ignore */ } }, [columns]);
+  const [columnPrefs, setColumns] = useState(readCols);
+  const columns = useMemo(() => ({ ...columnPrefs, amount: columnPrefs.amount && access.canViewPrices }), [columnPrefs, access.canViewPrices]); // ZNLY-235: no price column for a login that cannot see prices
+  useEffect(() => { try { localStorage.setItem(COLS_KEY, JSON.stringify(columnPrefs)); } catch { /* ignore */ } }, [columnPrefs]);
 
   // ── Data ────────────────────────────────────────────────────────────────────────────────────────────────────────────
   const [rows, setRows] = useState([]);
@@ -698,6 +702,7 @@ const BookingsViewPanel = ({ branchId }) => {
   return (
     <div ref={rootRef} className="pb-6" style={{ '--bk-top': `${stickyTop}px` }}>
       {headerActions}
+      <UnlinkedLoginNotice />
       {toast && (
         <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-toast px-5 py-3 rounded-lg shadow-lg flex items-center gap-2 ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
           <span className="text-sm font-medium">{toast.msg}</span>
@@ -756,7 +761,7 @@ const BookingsViewPanel = ({ branchId }) => {
 
       <BookingActionModal
         variant="panel"
-        canViewCustomerDetails={profile?.role === 'manager' || profile?.role === 'admin' || profile?.can_view_customer_details !== false}
+        canViewCustomerDetails={access.canViewCustomerDetails}
         isOpen={!!openId}
         previewBooking={rows.find((r) => r.bookingId === openId) || null}
         onRefreshBooking={refreshSelected}

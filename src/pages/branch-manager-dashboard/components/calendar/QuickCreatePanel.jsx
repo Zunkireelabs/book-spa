@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useAuth } from '../../../../contexts/AuthContext';
+import { viewerAccess } from '../../../../services/dataMasking';
 import Icon from '../../../../components/AppIcon';
 import MiniMonthCalendar from './MiniMonthCalendar';
 import SidePanel from '../../../../components/ui/SidePanel';
@@ -20,6 +22,8 @@ import { todayStr } from './calendarDates';
 // ── Quick Create Panel ────────────────────────────────────────
 
 const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours, retarget, onDraftChange, columnMode = 'therapist', allTherapists = [], guardRef }) => {
+  const { profile: viewerProfile } = useAuth();
+  const canViewPrices = viewerAccess(viewerProfile).canViewPrices; // ZNLY-235: no prices for this login
   const [serviceId, setServiceId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -790,7 +794,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     { value: '', label: 'Select a service' },
                     ...pickerServices.map((s) => ({
                       value: s.id,
-                      label: `${s.name} — ${s.duration_minutes}min — Rs.${s.effective_price_npr ?? s.price_npr}`,
+                      label: `${s.name} — ${s.duration_minutes}min ${canViewPrices ? ` — Rs.${s.effective_price_npr ?? s.price_npr}` : ''}`,
                     })),
                   ]}
                   placeholder="Select a service"
@@ -1083,7 +1087,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               </div>
             </div>
 
-            {previousDue && (
+            {canViewPrices && previousDue && (
               <div className="flex items-start gap-2 p-3 bg-warning/5 border border-warning/20 rounded-spa">
                 <Icon name="AlertTriangle" size={14} className="text-warning flex-shrink-0 mt-0.5" />
                 <p className="font-body font-body-normal text-sm text-warning">
@@ -1234,7 +1238,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                       { value: '', label: <>Select a service <span className="text-error">*</span></>, searchLabel: 'Select a service' },
                       ...groupServices.map((s) => ({
                         value: s.id,
-                        label: `${s.name} — ${s.duration_minutes}min — Rs.${s.effective_price_npr ?? s.price_npr}`,
+                        label: `${s.name} — ${s.duration_minutes}min ${canViewPrices ? ` — Rs.${s.effective_price_npr ?? s.price_npr}` : ''}`,
                       })),
                     ]}
                     placeholder={<>Select a service <span className="text-error">*</span></>}
@@ -1352,7 +1356,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                           { value: '', label: <>Select a service <span className="text-error">*</span></>, searchLabel: 'Select a service' },
                           ...groupServices.map((s) => ({
                             value: s.id,
-                            label: `${s.name} — ${s.duration_minutes}min — Rs.${s.effective_price_npr ?? s.price_npr}`,
+                            label: `${s.name} — ${s.duration_minutes}min ${canViewPrices ? ` — Rs.${s.effective_price_npr ?? s.price_npr}` : ''}`,
                           })),
                         ]}
                         placeholder={<>Select a service <span className="text-error">*</span></>}

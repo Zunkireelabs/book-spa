@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import { viewerAccess, isRestricted } from '../../services/dataMasking';
+import { supabase as supabaseClient } from '../../lib/supabase';
 import BookingHistory from './BookingHistory';
 import { createPortal } from 'react-dom';
 import Button from './Button';
@@ -206,6 +209,31 @@ function correctionFieldsFromBooking(booking) {
   };
 }
 
+// ZNLY-235: notes on a booking for a restricted login (their only free-text write), saved through the definer RPC.
+const RestrictedNotes = ({ bookingId, value, onSaved }) => {
+  const [text, setText] = React.useState(value || '');
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  React.useEffect(() => { setText(value || ''); }, [bookingId, value]);
+  const save = async () => {
+    setBusy(true); setErr(null);
+    const { error } = await supabaseClient.rpc('restricted_set_booking_notes', { p_booking_id: bookingId, p_notes: text });
+    setBusy(false);
+    if (error) setErr(error.message); else onSaved?.();
+  };
+  return (
+    <div className="space-y-1.5" data-restricted-notes>
+      <label className="font-body font-medium text-xs uppercase tracking-wider text-text-tertiary">Notes</label>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2} placeholder="Add a note for this booking…"
+        className="w-full px-3 py-2 border border-border rounded-spa text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30" />
+      <div className="flex items-center gap-3">
+        <button type="button" onClick={save} disabled={busy || text === (value || '')} className="px-3 py-1.5 rounded-spa bg-primary text-white text-sm disabled:opacity-40">{busy ? 'Saving…' : 'Save note'}</button>
+        {err && <span className="text-xs text-error">{err}</span>}
+      </div>
+    </div>
+  );
+};
+
 const BookingActionModal = ({
   isOpen = false,
   onClose,
@@ -256,6 +284,13 @@ const BookingActionModal = ({
   const cancelReasonOptions = orgSettings?.cancellation_reasons?.length
     ? orgSettings.cancellation_reasons
     : CANCEL_REASON_OPTIONS;
+  // ZNLY-235: a login that cannot see prices gets no Discount / Payment tabs and no Collect payment (never shown then erroring).
+  const { profile: viewerProfile } = useAuth();
+  const canViewPrices = viewerAccess(viewerProfile).canViewPrices;
+  // A restricted login cannot read a booking back after writing it, so the only writes it gets are status, check-in and notes (each a
+  // definer RPC in migration 393). Everything else is removed, not shown-then-failing.
+  const restricted = isRestricted(viewerProfile);
+  if (restricted) { onEditBooking = undefined; onCreateBooking = undefined; onRebookStart = undefined; onRescheduleStart = undefined; }
   const [activeTab, setActiveTab] = useState('details');
   const [isFirstBooking, setIsFirstBooking] = useState(false);
   const [selectedTherapists, setSelectedTherapists] = useState([]);
@@ -618,7 +653,7 @@ const BookingActionModal = ({
     { id: 'assign', label: 'Assigned', labelFull: 'Assigned', icon: 'UserCheck' },
     { id: 'discount', label: 'Discount', labelFull: 'Discount', icon: 'Percent' },
     { id: 'payment', label: 'Payment', labelFull: 'Payment', icon: 'CreditCard' }
-  ];
+  ].filter((t) => canViewPrices || (t.id !== 'discount' && t.id !== 'payment'));
 
   // Valid next-status transitions (lowercase UI values)
   const getNextStatuses = (currentStatus) => {
@@ -1334,7 +1369,7 @@ const BookingActionModal = ({
   const nextStatuses = isViewer ? [] : getNextStatuses(booking.status);
   // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).
   // Only day-lock and already-paid block it — not terminal status.
-  const canPay = !isViewer && ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && booking.paymentStatus !== 'refunded';   // ZNLY-234: a closed day's balance can still be collected
+  const canPay = canViewPrices && !isViewer && ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && booking.paymentStatus !== 'refunded';   // ZNLY-234: a closed day's balance can still be collected
   // Allow discounts on completed-but-unpaid bookings (standard cash-spa flow: service done → apply discount → pay).
   // Once the booking is fully paid, the price is locked — the discount can no longer move retroactively
   // against money already collected. 'partial' stays discountable so a discount can still be applied
@@ -1514,7 +1549,7 @@ const BookingActionModal = ({
   const secondaryVisible = [
     !isViewer && onCreateBooking && !isEditing && { key: 'rebook', label: rebookLabel, icon: 'CalendarClock', run: () => onRebookStart?.(booking) },
     !isViewer && onCreateBooking && !isEditing && { key: 'add', label: '+ Service', icon: 'PlusCircle', run: () => { setActiveTab('details'); openNewBookingForm('add-service'); } },
-    !isViewer && !isTerminal && !isLocked && extendOptions.length > 0 && { key: 'extend', label: 'Extend', icon: 'Timer', run: () => { setActiveTab('details'); setShowExtendPanel(true); } },
+    !isViewer && !restricted && !isTerminal && !isLocked && extendOptions.length > 0 && { key: 'extend', label: 'Extend', icon: 'Timer', run: () => { setActiveTab('details'); setShowExtendPanel(true); } },
   ].filter(Boolean);
   // Fit: footer width minus the ⋯ button, the primary action and gaps; each button's width is estimated from its label.
   const primaryW = primaryAction ? 24 + primaryAction.label.length * 7.5 : 0;
@@ -1649,10 +1684,10 @@ const BookingActionModal = ({
     { id: 'assign', label: `${staffLabelPlural || 'Team'}`, icon: 'UserCheck' },
     { id: 'discount', label: 'Discount', icon: 'Percent' },
     { id: 'payment', label: 'Payment', icon: 'CreditCard' },
-  ];
+  ].filter((t) => canViewPrices || (t.id !== 'discount' && t.id !== 'payment'));
   const panelTabsNode = (
     <div className="sticky top-0 z-10 bg-surface border-b border-border">
-      <nav className="grid grid-cols-4" role="tablist">
+      <nav className="grid" style={{ gridTemplateColumns: `repeat(${panelTabs.length}, minmax(0, 1fr))` }} role="tablist">
         {panelTabs.map((tab) => (
           <button
             key={tab.id}
@@ -1908,7 +1943,7 @@ const BookingActionModal = ({
                             <span className="truncate">{dlist.map((t) => t.name).join(', ')}{booking.roomName ? `${dlist.length ? ' · ' : ''}${booking.roomName}` : ''}</span>
                           </div>
                         )}
-                        <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
+                        {canViewPrices && <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
                           <span className="font-body text-[13px] font-medium text-text-primary tabular-nums">{npr(booking.finalAmount ?? booking.baseAmount)}</span>
                           <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${pay.cls}`}>{pay.label}</span>
                           {canPay && (
@@ -1916,11 +1951,14 @@ const BookingActionModal = ({
                           )}
                           {booking.discountAmount > 0 && <span className="text-xs text-text-tertiary tabular-nums">−{npr(booking.discountAmount)} discount</span>}
                           {extras?.previousDue?.amount > 0 && <span className="text-xs tabular-nums" style={{ color: '#7A5408' }}>· Prev. due {npr(extras.previousDue.amount)}</span>}
-                        </div>
+                        </div>}
                       </div>
 
                       <AvailabilityNoteLine note={booking.availabilityNote} className="mb-2" />
                       <AlertsBlock customerNotes={extras?.customerNotes} specialRequests={booking.specialRequests} />
+                      {restricted && !isViewer && !isTerminal && !isLocked && (
+                        <RestrictedNotes bookingId={booking.bookingId} value={booking.specialRequests} onSaved={() => onRefreshBooking?.(booking.bookingId)} />
+                      )}
 
                       <div className="border-t border-border pt-5 space-y-2">
                         <div className="flex items-center justify-between">
@@ -2161,12 +2199,12 @@ const BookingActionModal = ({
                           <p className="font-body font-body-normal text-sm text-text-primary">{booking.date} at {to12h(booking.time || booking.startTime)}</p>
                         )}
                       </div>
-                      <div>
+{canViewPrices && <div>
                         <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Payment</label>
                         <p className={`font-body font-body-medium text-sm ${payTone(booking)}`}>
                           {paymentStatusLabel(booking, { partialText: 'Partial' }).label}
                         </p>
-                      </div>
+                      </div>}
                     </div>
                   </div>
                 </div>

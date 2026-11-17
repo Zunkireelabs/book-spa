@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from 'contexts/AuthContext';
+import { viewerAccess } from 'services/dataMasking';
 import { useBranch } from 'contexts/BranchContext';
 import { useIndustry } from 'hooks/useIndustry';
 import { AreaPage } from './AreaLayout';
@@ -14,7 +15,8 @@ const AreaTabs = ({ area, view, children }) => {
   const { staffLabelPlural, productLabel } = useIndustry();
   const listRef = useRef(null);
 
-  const ctx = { role: profile?.role, isOverall, branchName, staffLabelPlural, productLabel };
+  const ownOnly = viewerAccess(profile).ownOnly;
+  const ctx = { role: profile?.role, ownOnly, hidePrices: !viewerAccess(profile).canViewPrices, isOverall, branchName, staffLabelPlural, productLabel };
   const tabs = getVisibleTabs(area, ctx);
   // The role cannot open this view: send it to the area's first visible tab, or to the dashboard when it has none.
   if (!tabs.some((t) => t.view === view)) {

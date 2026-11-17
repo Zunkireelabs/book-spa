@@ -3,6 +3,8 @@ import { supabase, retryingFetch } from '../lib/supabase';
 import { identify, reset, setGroup } from '../lib/analytics';
 import { isTransientStatus, ServiceUnavailableError } from '../lib/supabaseRetry';
 import { isLoginAllowed, LOGIN_OFF_MESSAGE } from '../services/loginAccess';
+import { setRestrictedReads } from '../lib/restrictedReads';
+import { isRestricted } from '../services/dataMasking';
 
 // Ceiling on how long the profile fetch may run before we give up and treat it
 // as "service unavailable" rather than leaving the app on a spinner forever.
@@ -75,7 +77,14 @@ export const getSafeRedirect = (from, orgSlug) => {
  * the stored session from localStorage automatically — this path works fine.
  */
 // ZNLY-216: an explicit column list, never '*': users.pin is not readable by the app (migration-384), so '*' would be refused.
+// ZNLY-235: the restricted-read flag is set HERE, before the profile reaches React, so no child query can fire first.
 async function fetchProfile(userId, accessToken) {
+  const p = await fetchProfileRaw(userId, accessToken);
+  setRestrictedReads(isRestricted(p));
+  return p;
+}
+
+async function fetchProfileRaw(userId, accessToken) {
   try {
     if (accessToken) {
       const url = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/users`
@@ -212,6 +221,7 @@ export const AuthProvider = ({ children }) => {
 
   const signOut = async () => {
     reset();
+    setRestrictedReads(false);
     setProfile(null);
     setUser(null);
     const { error } = await supabase.auth.signOut();
@@ -234,6 +244,7 @@ export const AuthProvider = ({ children }) => {
         } else {
           setUser(null);
           setProfile(null);
+          setRestrictedReads(false);
         }
 
         if (event === 'INITIAL_SESSION' && !session?.user) {

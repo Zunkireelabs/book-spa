@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { nameForList } from '../../../../services/dataMasking';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import Icon from '../../../../components/AppIcon';
@@ -202,7 +203,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         {isShort ? (
           <div className="flex items-center gap-1 min-w-0 leading-tight">
             {isUnpaid && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: UNPAID_DOT_COLOR }} title="Unpaid" />}
-            <span className="font-body font-medium text-xs text-text-primary truncate">{hideSensitive ? '•••••' : booking.customerName}</span>
+            <span className="font-body font-medium text-xs text-text-primary truncate">{hideSensitive ? '•••••' : nameForList(booking.customerName, booking.customerPhone)}</span>
             <span className="font-data text-[11px] text-text-secondary shrink-[1000] min-w-0 truncate">· {formatClockTime(booking.startTime, use24h)}</span>
             {(sharedLabel || booking.specialRequests || booking.customerNotes) && (
               <span className="flex-shrink-0 ml-auto flex items-center gap-1">
@@ -217,7 +218,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
           <>
             <div className="flex items-center gap-1 min-w-0 flex-shrink-0">
               {isUnpaid && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: UNPAID_DOT_COLOR }} title="Unpaid" />}
-              <span className="font-body font-medium text-xs text-text-primary leading-tight truncate">{hideSensitive ? '•••••' : booking.customerName}</span>
+              <span className="font-body font-medium text-xs text-text-primary leading-tight truncate">{hideSensitive ? '•••••' : nameForList(booking.customerName, booking.customerPhone)}</span>
               <span className="ml-auto flex items-center gap-1 flex-shrink-0 text-text-tertiary">
                 {sharedLabel && (
                   <span title={sharedLabel} aria-label={sharedLabel} className="flex items-center gap-0.5">

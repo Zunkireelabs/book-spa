@@ -170,6 +170,7 @@ export function moneyOf(b, { today }) {
 
 /** What the Amount column shows. */
 export function amountCell(b, ctx) {
+  if (ctx.hidePrices) return { tone: 'void', text: '—' }; // ZNLY-235: a login that cannot see prices gets no amount
   const m = moneyOf(b, ctx);
   if (m.kind === 'void') return { tone: 'void', text: '—' };
   if (m.kind === 'rendered') return m.due > 0 ? { tone: 'due', amount: m.due } : { tone: 'paid', text: 'Paid' };

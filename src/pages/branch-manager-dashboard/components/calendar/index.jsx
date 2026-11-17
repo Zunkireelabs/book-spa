@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
+import UnlinkedLoginNotice from 'components/ui/UnlinkedLoginNotice';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { DndContext, pointerWithin } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
@@ -242,6 +243,7 @@ const OperationalCalendar = ({ branchId }) => {
 
   return (
     <>
+      <UnlinkedLoginNotice />
       <DndContext
         sensors={sensors}
         collisionDetection={pointerWithin}

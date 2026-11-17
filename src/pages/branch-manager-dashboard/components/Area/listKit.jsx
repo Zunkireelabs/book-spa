@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { viewerAccess } from 'services/dataMasking';
 import { Link } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
 import { Menu } from '../../../../components/ui/ListToolbarKit';
@@ -102,7 +103,7 @@ export const ListPageShell = ({ view, title, lead, actions, counts = {}, childre
     if (sc) sc.scrollTop = 0;
   }, [view]);
   const area = getAreaForView(view);
-  const tabs = area ? getVisibleTabs(area, { role: profile?.role, isOverall, productLabel }) : [];
+  const tabs = area ? getVisibleTabs(area, { role: profile?.role, isOverall, productLabel, hidePrices: !viewerAccess(profile).canViewPrices }) : [];
   return (
     <div ref={rootRef} className="pb-6">
       <div className="flex items-start justify-between gap-3 flex-wrap">

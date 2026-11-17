@@ -1,3 +1,4 @@
+import { OWN_BOOKINGS_HEADER } from 'services/dataMasking';
 import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED, PRODUCTS_ENABLED } from 'lib/featureFlags';
 
 // Small areas (2–4 pages) get tabs at the top of the page; each tab is an existing `?view=` URL, so every view URL keeps working.
@@ -12,14 +13,14 @@ export const AREAS = [
   {
     id: 'bookings',
     title: 'Bookings',
-    description: ({ branchName, isOverall }) => `Every booking at ${isOverall ? 'all branches' : (branchName || 'this branch')}.`,
+    description: ({ branchName, isOverall, ownOnly }) => ownOnly ? OWN_BOOKINGS_HEADER : `Every booking at ${isOverall ? 'all branches' : (branchName || 'this branch')}.`,
     tabs: [
       { view: 'bookings', label: 'All bookings', roles: ALL },
       { view: 'new-booking', label: 'New booking', roles: ['staff', 'manager', 'admin'], overallHidden: true },
       { view: 'check-booking', label: 'Check booking', roles: ALL, overallHidden: true },
-      { view: 'collect-payment', label: 'Collect payment', roles: FRONT_DESK, overallHidden: true },
-      ...(MEMBERSHIP_ENABLED ? [{ view: 'new-membership', label: 'New membership', roles: FRONT_DESK, overallHidden: true }] : []),
-      ...(VOUCHER_ENABLED ? [{ view: 'new-voucher', label: 'New voucher', roles: FRONT_DESK, overallHidden: true }] : []),
+      { view: 'collect-payment', money: true, label: 'Collect payment', roles: FRONT_DESK, overallHidden: true },
+      ...(MEMBERSHIP_ENABLED ? [{ view: 'new-membership', money: true, label: 'New membership', roles: FRONT_DESK, overallHidden: true }] : []),
+      ...(VOUCHER_ENABLED ? [{ view: 'new-voucher', money: true, label: 'New voucher', roles: FRONT_DESK, overallHidden: true }] : []),
     ],
   },
   // Single pages: one tab, so the header shows and there is no tab row.
@@ -113,7 +114,7 @@ export const AREAS = [
 export const getAreaForView = (view) => AREAS.find((a) => a.tabs.some((t) => t.view === view)) || null;
 
 // Tabs this role / branch can see, in order (labels resolved).
-export const getVisibleTabs = (area, { role, isOverall, ...labels }) =>
+export const getVisibleTabs = (area, { role, isOverall, hidePrices, ...labels }) =>
   area.tabs
-    .filter((t) => t.roles.includes(role) && !(isOverall && t.overallHidden))
+    .filter((t) => t.roles.includes(role) && !(isOverall && t.overallHidden) && !(hidePrices && t.money)) // money tabs: a no-prices login never sees them (ZNLY-235)
     .map((t) => ({ ...t, label: typeof t.label === 'function' ? t.label(labels) : t.label }));

@@ -6,6 +6,8 @@ import { toTransferInput } from '../utils/transferText';
 import { workedAtNote } from './visitorAttendance';
 import { computeReferralCommission, payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, computeNetPay, splitServiceRevenueByBranch, visitorPayrollHelpLine } from './payrollCalc';
 import { supabase, supabaseCustomer, supabaseProvision } from '../lib/supabase';
+import { isReadingViaSafeViews } from '../lib/restrictedReads';
+import { maskCustomerName, maskPhone, viewerAccess } from './dataMasking';
 import { transformMembership, transformMemberships, toTitleCase, isNoShow } from './bookingTransformers';
 import { dedupeTransfersByKey, sortTransfersByTime } from './transferDedup';
 import { capture } from '../lib/analytics';
@@ -618,7 +620,7 @@ export async function fetchMoneyOwed({ branchIds, asOf = null }) {
 // Completed, not fully paid bookings, any date (the candidates for lib/dashboardMoney's owed rule, which then keeps balance > 0).
 const owedBookingsQuery = (cols) => supabase.from('bookings').select(cols).eq('status', 'Completed').neq('payment_status', 'paid').order('date').order('start_time');
 
-const QUEUE_SELECT = 'id, booking_number, branch_id, customer_name, date, start_time, end_time, final_amount, status, payment_status, service_name_snapshot, booking_therapists(therapist_id, therapist:therapists(name)), payments(amount)';
+const QUEUE_SELECT = 'id, booking_number, branch_id, customer_name, customer_phone, date, start_time, end_time, final_amount, status, payment_status, service_name_snapshot, booking_therapists(therapist_id, therapist:therapists(name)), payments(amount)';
 
 // Front desk "Next up": today's bookings that still need a desk step (assign / collect / confirm / check in) plus the ones with a client now, see lib/dashboardNeeds.
 export async function fetchFrontDeskQueue({ branchId, date }) {
@@ -3069,14 +3071,23 @@ export async function updateBookingStatus({ bookingId, newStatus, reason }) {
     if (newStatus === 'Cancelled' || newStatus === 'No Show') {
       updatePayload.cancellation_reason = reason;
     }
-    const { data: updated, error: updateError } = await supabase
-      .from('bookings')
-      .update(updatePayload)
-      .eq('id', bookingId)
-      .select('id, status')
-      .single();
-
-    if (updateError) throw updateError;
+    // ZNLY-235: a restricted login cannot read the base row back (UPDATE ... RETURNING needs it), so it writes through a definer RPC
+    // that checks the booking is theirs.
+    let updated;
+    if (isReadingViaSafeViews()) {
+      const { data: r, error: rpcError } = await supabase.rpc('restricted_set_booking_status', { p_booking_id: bookingId, p_status: newStatus, p_reason: reason ?? null });
+      if (rpcError) throw rpcError;
+      updated = { id: r.id, status: r.status };
+    } else {
+      const { data: u, error: updateError } = await supabase
+        .from('bookings')
+        .update(updatePayload)
+        .eq('id', bookingId)
+        .select('id, status')
+        .single();
+      if (updateError) throw updateError;
+      updated = u;
+    }
 
     // 6. If this booking just completed and carries a pending customer referral,
     // credit the referring customer's reward. Non-blocking — a crediting failure
@@ -4305,10 +4316,9 @@ export async function fetchNotificationPrefs() {
  */
 export async function markNotificationRead(notificationId) {
   try {
-    const { error } = await supabase
-      .from('notifications')
-      .update({ read: true })
-      .eq('id', notificationId);
+    const { error } = isReadingViaSafeViews()
+      ? await supabase.rpc('restricted_mark_notifications_read', { p_id: notificationId })  // ZNLY-235: base table is not readable for this login
+      : await supabase.from('notifications').update({ read: true }).eq('id', notificationId);
     if (error) throw error;
     return { data: { success: true }, error: null };
   } catch (error) {
@@ -4325,11 +4335,9 @@ export async function markAllNotificationsRead() {
     const { user, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    const { error } = await supabase
-      .from('notifications')
-      .update({ read: true })
-      .eq('user_id', user.id)
-      .eq('read', false);
+    const { error } = isReadingViaSafeViews()
+      ? await supabase.rpc('restricted_mark_notifications_read', { p_id: null })
+      : await supabase.from('notifications').update({ read: true }).eq('user_id', user.id).eq('read', false);
     if (error) throw error;
     return { data: { success: true }, error: null };
   } catch (error) {
@@ -6969,6 +6977,16 @@ export async function createBooking({
       return { data: null, error: { message: 'Phone number is required' } };
     }
 
+    // ZNLY-235: an own-only login only ever sees bookings it is on, so a booking it makes is assigned to itself when it did not pick
+    // someone (otherwise the new row would vanish from its own screens).
+    if (!orgSlug && isReadingViaSafeViews() && !therapistId && !(therapistIds && therapistIds.length)) {
+      const { user: me, profile: meProfile } = await getAuthenticatedUser();
+      if (me && meProfile && viewerAccess(meProfile).ownOnly) {
+        const { data: mine } = await supabase.from('therapists').select('id').eq('user_id', me.id).limit(1);
+        if (mine && mine[0]) therapistId = mine[0].id;
+      }
+    }
+
     // knownCustomerId: overwrite whatever was passed as customerName/Phone/Email
     // with the real customer record, before any of those values reach a write.
     // The caller's own copies may be masked (canViewCustomerDetails=false), and
@@ -7395,7 +7413,7 @@ export async function createBooking({
     // leak there), so `.insert().select()` can't satisfy RETURNING under RLS and would
     // reject the whole insert. Instead skip .select() below and read the row back
     // through public_get_booking_by_request_id (migration-223), keyed on this id.
-    const clientRequestId = orgSlug ? crypto.randomUUID() : null;
+    const clientRequestId = (orgSlug || isReadingViaSafeViews()) ? crypto.randomUUID() : null;  // restricted logins re-read their new row by this id (ZNLY-235)
 
     // Tiered pricing: the quote at booking time follows whoever is actually
     // requested, same as every other price type — "Any available" (no
@@ -7446,7 +7464,10 @@ export async function createBooking({
 
     let booking;
     let insertError;
-    if (orgSlug) {
+    // ZNLY-235: a restricted login cannot read the base row back (INSERT ... RETURNING needs SELECT visibility), so it inserts bare and
+    // re-reads the masked row through the safe view by request id (the fetch wrapper points bookings reads at bookings_safe).
+    const restrictedInsert = !orgSlug && isReadingViaSafeViews();
+    if (orgSlug || restrictedInsert) {
       ({ error: insertError } = await supabase.from('bookings').insert(insertPayload));
     } else {
       ({ data: booking, error: insertError } = await supabase
@@ -7488,6 +7509,13 @@ export async function createBooking({
         }
       }
       throw insertError;
+    }
+
+    if (restrictedInsert) {
+      const { data: safeRow, error: safeErr } = await supabase.from('bookings').select('*').eq('client_request_id', clientRequestId).maybeSingle();
+      if (safeErr) throw safeErr;
+      if (!safeRow) return { data: null, error: { code: 'BOOKING_NOT_VISIBLE', message: 'The booking was saved, but it is not assigned to you, so it is not shown here. Ask your manager to check it.' } };
+      booking = safeRow;
     }
 
     if (orgSlug) {
@@ -19330,35 +19358,7 @@ async function resolveVisibility(profile) {
 // receives the real name, so devtools cannot recover it. Deliberately NOT
 // dropping the field entirely, which was the first design — a booking with no
 // customer at all is unusable for the staff member actually delivering it.
-export function maskCustomerName(name) {
-  if (!name) return name;
-  return String(name)
-    .split(/(\s+)/)             // keep the whitespace runs so spacing survives
-    .map((part) => (/^\s+$/.test(part) || part.length === 0
-      ? part
-      : part[0] + '*'.repeat(Math.max(part.length - 1, 0))))
-    .join('');
-}
-
-// "+9779818088655" → "**********655". Last three digits only: enough for
-// staff to confirm they have the right customer on the phone or at the desk,
-// not enough to contact them outside the business. Keeps the original length
-// so the shape of the number still reads normally.
-export function maskPhone(phone) {
-  if (!phone) return phone;
-  const str = String(phone);
-  const digits = str.replace(/\D/g, '');
-  if (digits.length <= 3) return str;          // too short to mask meaningfully
-  let remaining = digits.length - 3;           // how many leading digits to hide
-  return str
-    .split('')
-    .map((ch) => {
-      if (!/\d/.test(ch)) return ch;           // keep +, spaces, dashes
-      if (remaining > 0) { remaining -= 1; return '*'; }
-      return ch;
-    })
-    .join('');
-}
+export { maskCustomerName, maskPhone };
 
 const CUSTOMER_NAME_FIELDS = ['customer_name'];
 // Phone is masked rather than dropped — see maskPhone. Email and notes are

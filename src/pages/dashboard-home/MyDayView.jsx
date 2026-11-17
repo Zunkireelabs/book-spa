@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { nameWithTailDigits } from '../../services/dataMasking';
+import { UNLINKED_LOGIN_MESSAGE } from '../../services/dataMasking';
 import Button from '../../components/ui/Button';
 import { Card, SuggestionsCard, clock12, npr } from './dashKit';
 import { DashPanels } from './DashboardPanels';
@@ -36,7 +38,7 @@ const MyDayView = ({ data, dataError, branchId, today, nowHm, role, staffLabelPl
   if (!therapistId) {
     return (
       <Card icon="User" title="My day">
-        <p className="text-sm text-gray-700">Your login isn't linked to a person yet, so there is no day to show.</p>
+        <p className="text-sm text-gray-700">{UNLINKED_LOGIN_MESSAGE}</p>
         <p className="text-xs text-gray-500 mt-1">{role === 'manager' || role === 'admin'
           ? `Link it in ${staffLabelPlural} → open yourself → Login.`
           : `Ask your manager to link it in the ${staffLabelPlural} list (Login field).`}</p>
@@ -81,7 +83,7 @@ const MyDayView = ({ data, dataError, branchId, today, nowHm, role, staffLabelPl
         {next ? (
           <>
             <div className="text-[11.5px] tracking-wide opacity-75">{clock12(nowHm).toUpperCase()} · {kicker}</div>
-            <div className="text-lg font-semibold mt-1">{next.customer || next.number} · {next.service}</div>
+            <div className="text-lg font-semibold mt-1">{nameWithTailDigits(next.customer, next.customer_tail) || next.number} · {next.service}</div>
             <div className="text-[12.5px] opacity-85">{meta}</div>
           </>
         ) : (
@@ -95,7 +97,7 @@ const MyDayView = ({ data, dataError, branchId, today, nowHm, role, staffLabelPl
             {timeline.map((it) => it.b ? (
               <div key={it.b.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-100 last:border-0">
                 <span className="font-data text-xs text-gray-600 w-[62px] flex-shrink-0">{clock12(it.b.start)}</span>
-                <div className="min-w-0 flex-1 text-sm font-medium text-gray-900 truncate">{[it.b.customer || it.b.number, it.b.service].filter(Boolean).join(' · ')}</div>
+                <div className="min-w-0 flex-1 text-sm font-medium text-gray-900 truncate">{[nameWithTailDigits(it.b.customer, it.b.customer_tail) || it.b.number, it.b.service].filter(Boolean).join(' · ')}</div>
                 <span className={`text-[11px] font-medium rounded-full px-2 py-0.5 ${chip(it.b)[1]}`}>{chip(it.b)[0]}</span>
               </div>
             ) : (

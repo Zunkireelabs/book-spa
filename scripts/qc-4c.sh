@@ -145,6 +145,16 @@ rows=$(psql "$DB" -qAt -c "select count(*) from payments where booking_id='$PAYB
 [ "$rows" = "1" ] || fail "parallel pay: expected 1 payment row, got $rows"
 echo "parallel pay: one payment, the other refused"
 
+echo "== ZNLY-235 SQL test (supabase/tests/znly-235.sql): restricted staff see no other rows, names, phones or amounts"
+psql "$DB" -v ON_ERROR_STOP=1 -f supabase/tests/znly-235.sql >/tmp/qc-4c-235.log 2>&1
+grep -E "NOTICE|ERROR|DETAIL" /tmp/qc-4c-235.log | sed 's#psql:[^ ]* ##'
+grep -q "235 PASSED" /tmp/qc-4c-235.log || fail "ZNLY-235 SQL test"
+
+echo "== ZNLY-236 SQL test (supabase/tests/znly-236.sql): staff self check-in"
+psql "$DB" -v ON_ERROR_STOP=1 -f supabase/tests/znly-236.sql >/tmp/qc-4c-236.log 2>&1
+grep -E "NOTICE|ERROR|DETAIL" /tmp/qc-4c-236.log | sed 's#psql:[^ ]* ##'
+grep -q "236 PASSED" /tmp/qc-4c-236.log || fail "ZNLY-236 SQL test"
+
 echo "== ZNLY-219: anon/authenticated cannot execute the PIN functions"
 pinleak=$(psql "$DB" -qAt -c "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('verify_pin','login_with_pin') and (has_function_privilege('anon',p.oid,'EXECUTE') or has_function_privilege('authenticated',p.oid,'EXECUTE'))")
 [ "$pinleak" = "0" ] || fail "ZNLY-219: $pinleak PIN function(s) executable by anon/authenticated"

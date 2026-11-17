@@ -29,8 +29,8 @@ const CommandPalette = ({ onClose }) => {
   const orgSlug = urlOrgSlug || profile?.organizations?.slug;
   const basePath = orgSlug ? `/${orgSlug}/dashboard` : '/dashboard';
   const ctx = useMemo(
-    () => ({ role, isOverall, staffLabel, staffLabelPlural, productLabel, enableRooms, locationLabelPlural, basePath, branchId, orgSlug }),
-    [role, isOverall, staffLabel, staffLabelPlural, productLabel, enableRooms, locationLabelPlural, basePath, branchId, orgSlug]
+    () => ({ hidePrices: profile?.role === 'staff' && profile?.can_view_prices === false, role, isOverall, staffLabel, staffLabelPlural, productLabel, enableRooms, locationLabelPlural, basePath, branchId, orgSlug }),
+    [profile?.role, profile?.can_view_prices, role, isOverall, staffLabel, staffLabelPlural, productLabel, enableRooms, locationLabelPlural, basePath, branchId, orgSlug]
   );
 
   const [query, setQuery] = useState('');

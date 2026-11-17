@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { nameForList } from '../../../../services/dataMasking';
 import { formatClockTime } from './timeFormat';
 
 const STATUS_DOT = {
@@ -128,7 +129,7 @@ const MonthGridView = ({ currentDate, bookings = [], branchHours, hideSensitive,
                       >
                         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_DOT[b.status] || 'bg-gray-400'}`} />
                         <span className="font-caption text-[10px] text-text-primary truncate">
-                          {formatClockTime(b.startTime, use24h)} {hideSensitive ? '•••••' : (b.customerName || b.serviceName)}
+                          {formatClockTime(b.startTime, use24h)} {hideSensitive ? '•••••' : (nameForList(b.customerName, b.customerPhone) || b.serviceName)}
                         </span>
                       </div>
                     ))}

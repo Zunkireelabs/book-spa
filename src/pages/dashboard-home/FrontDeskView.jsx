@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { nameForList, viewerAccess } from '../../services/dataMasking';
+import { useAuth } from '../../contexts/AuthContext';
 import { useSearchParams } from 'react-router-dom';
 import Button from '../../components/ui/Button';
 import { Card, SuggestionsCard, clock12, npr, shortDay } from './dashKit';
@@ -27,6 +29,8 @@ const names = (b) => (b.booking_therapists || []).map((t) => t.therapist?.name).
  * `data` is get_dashboard for the branch (the floor gives "Free right now").
  */
 const FrontDeskView = ({ data, dataError, branchId, today, nowMin, role, staffLabel = 'staff', onReload }) => {
+  const { profile } = useAuth();
+  const canViewPrices = viewerAccess(profile).canViewPrices; // ZNLY-235: no collect rows or amounts for a no-prices login
   const [, setSearchParams] = useSearchParams();
   const [queue, setQueue] = useState([]);
   const [queueError, setQueueError] = useState(false);
@@ -68,7 +72,7 @@ const FrontDeskView = ({ data, dataError, branchId, today, nowMin, role, staffLa
     const a = ACTION[b.action];
     const who = names(b);
     const due = balanceOf(b);
-    const who1 = b.customer_name || b.booking_number;
+    const who1 = nameForList(b.customer_name, b.customer_phone) || b.booking_number;
     const title = b.action === 'collect' ? `${who1} · ready to pay` : [who1, b.service_name_snapshot].filter(Boolean).join(' · ');
     const detail = b.action === 'collect' ? [npr(due), paidNote(b), b.date < today ? `completed ${shortDay(b.date)}` : null].filter(Boolean).join(' · ')
       : b.action === 'with' ? `ends ${clock12(b.end_time)}`
@@ -94,7 +98,7 @@ const FrontDeskView = ({ data, dataError, branchId, today, nowMin, role, staffLa
           <Card icon="Clock" title="Next up" count={queue.filter((b) => b.action !== 'with').length} error={queueError} onRetry={refresh}
             meta={<span className="inline-flex items-center gap-1.5"><i className="w-1.5 h-1.5 rounded-full bg-success" />Live · updates by itself</span>}>
             {queue.length === 0 && <p className="text-sm text-gray-500">Nothing waiting at the desk ✓</p>}
-            {queue.map(rowFor)}
+            {queue.filter((b) => canViewPrices || b.action !== 'collect').map(rowFor)}
           </Card>
           <Card icon="Users" title="Free right now" error={dataError} onRetry={refresh}>
             {free.length === 0 ? <p className="text-sm text-gray-500">No one is free right now.</p> : (

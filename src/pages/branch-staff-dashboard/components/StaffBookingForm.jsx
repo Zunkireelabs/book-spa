@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useAuth } from '../../../contexts/AuthContext';
+import { viewerAccess } from '../../../services/dataMasking';
 import { useLocation } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
@@ -12,6 +14,8 @@ import { CUSTOMER_REFERRALS_ENABLED } from '../../../lib/featureFlags';
 const toTitleGender = (g) => String(g).charAt(0).toUpperCase() + String(g).slice(1).toLowerCase();
 
 const StaffBookingForm = ({ onBookingCreated }) => {
+  const { profile: viewerProfile } = useAuth();
+  const canViewPrices = viewerAccess(viewerProfile).canViewPrices; // ZNLY-235: no prices for this login
   const { branchId } = useBranch();
 
   // Steps: service → datetime → customer → confirm
@@ -373,9 +377,9 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                         <Icon name="Clock" size={12} />
                         <span>{svc.duration_minutes} min</span>
                       </span>
-                      <span className="font-medium text-primary">
+                      {canViewPrices && <span className="font-medium text-primary">
                         NPR {Number(svc.effective_price_npr ?? svc.price_npr).toLocaleString('en-IN')}
-                      </span>
+                      </span>}
                     </div>
                     {svc.description && (
                       <p className="text-xs text-gray-400 mt-1 line-clamp-1">
@@ -500,7 +504,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
               </div>
             </div>
 
-            {previousDue && (
+            {canViewPrices && previousDue && (
               <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                 <Icon name="AlertTriangle" size={14} className="text-amber-600 flex-shrink-0 mt-0.5" />
                 <p className="text-sm text-amber-800">
@@ -657,12 +661,12 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                   <span className="text-sm text-gray-900 text-right max-w-xs">{specialRequests}</span>
                 </div>
               )}
-              <div className="border-t border-gray-200 pt-3 flex items-center justify-between">
+              {canViewPrices && <div className="border-t border-gray-200 pt-3 flex items-center justify-between">
                 <span className="text-sm font-medium text-gray-900">Total</span>
                 <span className="text-lg font-semibold text-primary">
                   NPR {Number(selectedService?.effective_price_npr ?? selectedService?.price_npr).toLocaleString('en-IN')}
                 </span>
-              </div>
+              </div>}
             </div>
 
             {error && (

@@ -113,6 +113,7 @@ export function formatPhoneDisplay(value, fallbackDial = DEFAULT_DIAL) {
  * falls back to formatPhoneDisplay's plain `+dial national`. Empty / invalid → ''.
  */
 export function formatPhoneGrouped(value, fallbackDial = DEFAULT_DIAL) {
+  if (typeof value === 'string' && value.includes('•')) return value; // already masked by the server (ZNLY-235): show as is
   const e164 = toE164(value, fallbackDial);
   if (!e164) return '';
   const { dial, national } = splitE164(e164, fallbackDial);

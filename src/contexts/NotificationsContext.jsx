@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { isReadingViaSafeViews } from '../lib/restrictedReads';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import {
@@ -145,6 +146,13 @@ export const NotificationsProvider = ({ children }) => {
       }
     }
   }, [userId]);
+
+  // ZNLY-235: a restricted login cannot receive realtime rows (they carry unmasked text), so its bell refreshes by polling the masked view.
+  useEffect(() => {
+    if (!userId || !isReadingViaSafeViews()) return undefined;
+    const t = setInterval(() => { load(); }, 30000);
+    return () => clearInterval(t);
+  }, [userId, load]);
 
   useEffect(() => {
     if (!userId) return;

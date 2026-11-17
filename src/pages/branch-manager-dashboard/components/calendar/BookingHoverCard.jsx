@@ -1,4 +1,5 @@
 import { isNoShow } from '../../../../services/bookingTransformers';
+import { nameForList } from '../../../../services/dataMasking';
 import React, { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import Icon from '../../../../components/AppIcon';
@@ -181,7 +182,7 @@ export function BookingHoverContent({ booking, draggable }) {
   return (
     <div className="p-4 space-y-2 text-[13px] text-text-primary">
       <div className="flex items-center gap-2 min-w-0">
-        <span className="font-body text-[15px] font-semibold text-text-primary truncate min-w-0">{booking.customerName}</span>
+        <span className="font-body text-[15px] font-semibold text-text-primary truncate min-w-0">{nameForList(booking.customerName, booking.customerPhone)}</span>
         {booking.isNewCustomer && <span className="flex-shrink-0 px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-medium">New</span>}
         <span className="ml-auto flex-shrink-0 px-2 py-0.5 rounded-full text-[11px] font-medium whitespace-nowrap" style={{ backgroundColor: colors.fill, color: colors.text }}>{booking.status}</span>
       </div>
@@ -207,7 +208,7 @@ export function BookingHoverContent({ booking, draggable }) {
         {phone && (
           <div className="group flex items-center gap-2">
             <Icon name="Phone" size={14} className="text-text-tertiary flex-shrink-0" />
-            <a href={`tel:${String(booking.customerPhone).replace(/\s/g, '')}`} className="tabular-nums hover:underline">{phone}</a>
+            {String(booking.customerPhone).includes('•') ? <span className="tabular-nums">{phone}</span> : <a href={`tel:${String(booking.customerPhone).replace(/\s/g, '')}`} className="tabular-nums hover:underline">{phone}</a>}
             <span className="ml-auto opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"><CopyButton value={String(booking.customerPhone)} label="Copy phone" /></span>
           </div>
         )}
