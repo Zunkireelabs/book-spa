@@ -395,7 +395,7 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                       <th className="text-left px-4 py-3 font-medium text-text-secondary">Customer</th>
                       <th className="text-left px-4 py-3 font-medium text-text-secondary">Service</th>
                       <th className="text-left px-4 py-3 font-medium text-text-secondary">{staffLabel}</th>
-                      <th className="text-left px-4 py-3 font-medium text-text-secondary">Room</th>
+                      {report.bookings.some((b) => b.roomName) && <th className="text-left px-4 py-3 font-medium text-text-secondary">Room</th>}
                       <th className="text-right px-4 py-3 font-medium text-text-secondary">Amount</th>
                       <th className="text-center px-4 py-3 font-medium text-text-secondary">Payment</th>
                       <th className="text-center px-4 py-3 font-medium text-text-secondary">Status</th>
@@ -416,9 +416,11 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                         <td className="px-4 py-3 text-text-secondary">
                           {b.therapistName}
                         </td>
-                        <td className="px-4 py-3 text-text-secondary">
-                          {b.roomName}
-                        </td>
+                        {report.bookings.some((x) => x.roomName) && (
+                          <td className="px-4 py-3 text-text-secondary">
+                            {b.roomName}
+                          </td>
+                        )}
                         <td className="px-4 py-3 text-right whitespace-nowrap">
                           <div className="font-semibold text-text-primary">
                             {formatNPR(b.finalAmount)}

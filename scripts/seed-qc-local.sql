@@ -7,7 +7,7 @@
 DO $seed$
 DECLARE
   v_pw   constant text := 'qc-local-2026';
-  v_org  uuid; v_nuad uuid; v_br uuid; v_nuad_br uuid; v_room uuid;
+  v_org  uuid; v_nuad uuid; v_br uuid; v_nuad_br uuid;
   v_t1 uuid; v_t2 uuid; v_tier_sr uuid; v_tier_jr uuid;
   v_s_fixed uuid; v_s_tier uuid; v_s_addon uuid;
   v_admin uuid; v_cust uuid; v_today date := (now() at time zone 'Asia/Kathmandu')::date;
@@ -52,11 +52,10 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- bookings.room_id is NOT NULL; beauty hides rooms (enable_rooms=false) so one background station satisfies the FK.
-  IF NOT EXISTS (SELECT 1 FROM rooms WHERE branch_id = v_br) THEN
-    INSERT INTO rooms (branch_id, name) VALUES (v_br, 'Station 1');
-  END IF;
-  SELECT id INTO v_room FROM rooms WHERE branch_id = v_br ORDER BY created_at LIMIT 1;
+  -- Beauty has NO rooms/stations (enable_rooms=false); bookings use room_id NULL (mig 388, ZNLY-221).
+  -- Clean-up for DBs seeded before 388, which had a hidden "Station 1": detach its bookings, then drop it.
+  UPDATE bookings SET room_id = NULL WHERE room_id IN (SELECT id FROM rooms WHERE branch_id = v_br);
+  DELETE FROM rooms WHERE branch_id = v_br;
 
   -- price tiers + services
   INSERT INTO price_tiers (org_id, name, sort_order)
@@ -163,7 +162,7 @@ BEGIN
         INSERT INTO bookings (branch_id, room_id, service_id, therapist_id, customer_name, customer_phone, customer_id, date,
           start_time, end_time, start_datetime, end_datetime, status, payment_status, base_amount, final_amount,
           service_name_snapshot, therapist_name_snapshot, created_by)
-        SELECT v_br, v_room, r.sid, r.tid, r.cname, '98000000' || lpad((random()*99)::int::text,2,'0'), CASE WHEN r.cname='Anita Karki' THEN v_cust END,
+        SELECT v_br, NULL, r.sid, r.tid, r.cname, '98000000' || lpad((random()*99)::int::text,2,'0'), CASE WHEN r.cname='Anita Karki' THEN v_cust END,
           v_today + r.dayoff, r.st, r.st + (s.duration_minutes || ' minutes')::interval,
           ((v_today + r.dayoff + r.st) at time zone 'Asia/Kathmandu'),
           ((v_today + r.dayoff + r.st + (s.duration_minutes || ' minutes')::interval) at time zone 'Asia/Kathmandu'),
