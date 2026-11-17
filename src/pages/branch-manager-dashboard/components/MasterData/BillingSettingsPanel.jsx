@@ -5,6 +5,7 @@ import ConfirmDialog from '../../../../components/ui/ConfirmDialog';
 import { Field, TextInput, SelectField, SwitchRow, InlineError } from '../../../../components/ui/PanelFormKit';
 import { fetchBillingSettings, updateBillingSetting } from '../../../../services/api';
 import { useOrg } from '../../../../contexts/OrgContext';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 // Named by behaviour, not by the ambiguous "included/excluded/extra" the
 // request used — see migration-329. Deliberately no default selection
@@ -169,7 +170,7 @@ const BillingSettingsPanel = ({ readOnly = false }) => {
           />
         </Field>
         <Field id="billing-address" label="Registered address">
-          <TextInput id="billing-address" value={form.address} disabled={readOnly} onChange={set('address')} placeholder="Company address. Each branch's own address prints under it." />
+          <TextInput id="billing-address" value={form.address} disabled={readOnly} onChange={set('address')} placeholder={`Company address. Each ${wordBranch()}'s own address prints under it.`} />
         </Field>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field id="billing-phone" label="Phone"><TextInput id="billing-phone" value={form.phone} disabled={readOnly} onChange={set('phone')} /></Field>

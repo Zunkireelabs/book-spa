@@ -2,9 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PanelShell, FormBody, Field, TextInput, SwitchRow, InlineError, controlA11y } from '../../../../components/ui/PanelFormKit';
 import { createCategory, updateCategory } from '../../../../services/api';
 import { friendlyError } from '../../../../utils/friendlyError';
+import { useIndustry } from '../../../../hooks/useIndustry';
 
 // "New category" / "Edit category" in the right-hand panel. Callbacks: onClose(), onSaved(id, isNew).
 const CategoryFormPanel = ({ category, onClose, onSaved }) => {
+  const { examples } = useIndustry();
   const editing = !!category;
   const original = useMemo(() => ({
     name: category?.name || '',
@@ -64,7 +66,7 @@ const CategoryFormPanel = ({ category, onClose, onSaved }) => {
       <FormBody>
         <InlineError message={serverError} />
         <Field label="Category name" required id="cat-name" error={errors.name} hint={editing ? 'Renaming a category updates all services using it.' : undefined}>
-          <TextInput {...controlA11y('cat-name', errors.name)} error={!!errors.name} value={form.name} onChange={(e) => { set({ name: e.target.value }); clear('name'); }} placeholder="e.g. Massage, Hair, Wellness" />
+          <TextInput {...controlA11y('cat-name', errors.name)} error={!!errors.name} value={form.name} onChange={(e) => { set({ name: e.target.value }); clear('name'); }} placeholder={`e.g. ${examples.category}`} />
         </Field>
         <Field label="Description" id="cat-description">
           <textarea

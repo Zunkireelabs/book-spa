@@ -8,6 +8,7 @@ import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete
 import { mergeCustomers, updateCustomerContact } from '../../../../services/api';
 import { canSearchForMerge } from './manualMergeBranchGate';
 import { resolveMergeEditPatch } from './resolveMergeEditPatch';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 // Picks the same customer twice would otherwise slip straight into merge_customers and come
 // back as a raw SQL exception — caught client-side first for a clearer message.
@@ -75,7 +76,7 @@ const ManualMergeCustomersPanel = ({ branchId, isOverall = false }) => {
     return (
       <div className="bg-surface rounded-spa-lg border border-border text-center py-12">
         <Icon name="Building2" size={32} className="text-text-tertiary mx-auto mb-3" />
-        <p className="font-body font-body-medium text-sm text-text-primary">Select a branch to use Manual Merge</p>
+        <p className="font-body font-body-medium text-sm text-text-primary">Select a {wordBranch()} to use Manual Merge</p>
         <p className="font-caption text-xs text-text-tertiary mt-1">
           Switch out of "Overall" to a specific branch first — customer search needs one branch to resolve the organization.
         </p>

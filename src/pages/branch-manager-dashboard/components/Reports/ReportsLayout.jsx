@@ -13,6 +13,7 @@ import TherapistPerformanceReport from './TherapistPerformanceReport';
 import { useBusinessHealth } from './useBusinessHealth';
 import { DeltaChip, PeriodPicker } from './ReportFrame';
 import { buildTiles, num, isEmptyPeriod, hasPreviousData } from './businessHealthView';
+import { wordBranch, wordBranches } from '../../../../utils/industryTerms';
 
 const MENU_KEY = 'zennly.reports.menu';
 const favKey = (userId) => `zennly.reports.favs.${userId || 'anon'}`;
@@ -80,7 +81,7 @@ const ReportsLayout = ({ view, renderReport }) => {
   const openHome = () => go('all-reports');
 
   const report = view === 'all-reports' ? null : getReportByView(view);
-  const scope = isOverall ? 'all branches' : (branchName || 'this branch');
+  const scope = isOverall ? `all ${wordBranches()}` : (branchName || `this ${wordBranch()}`);
   const menuGroups = groups.map((g) => ({ ...g, items: g.items.map((r) => ({ ...r, title: L(r.title) })) }));
   const needsHealth = !report && visible.some((r) => r.id === 'business-health');
   const health = useBusinessHealth(periodId, needsHealth, custom);
@@ -169,7 +170,7 @@ const ReportsLayout = ({ view, renderReport }) => {
             <span className="px-2 py-0.5 rounded-full bg-black/[0.05] text-[11px] font-medium text-text-secondary tabular-nums">{base.length}</span>
             {needsHealth && PeriodPick}
           </div>
-          <p className="mt-1 text-[13px] text-text-secondary">{tab === 'favourites' ? 'Your starred reports.' : `How ${scope === 'all branches' ? 'the business is' : `${scope} is`} doing, and where to look next.`}</p>
+          <p className="mt-1 text-[13px] text-text-secondary">{tab === 'favourites' ? 'Your starred reports.' : `How ${isOverall ? 'the business is' : `${scope} is`} doing, and where to look next.`}</p>
           <div className="relative mt-4 max-w-md">
             <Icon name="Search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
             <input type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search reports" aria-label="Search reports"

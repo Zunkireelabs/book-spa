@@ -13,6 +13,7 @@ import { useOrg } from '../../../../contexts/OrgContext';
 import { fetchPackageTypes, createPackageType, fetchServicesForManagement, issuePackage } from '../../../../services/api';
 import { toDateInputValue } from '../../../../utils/date';
 import { friendlyError } from '../../../../utils/friendlyError';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 const formatNPR = (amount) => `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
@@ -338,7 +339,7 @@ const NewPackagePanel = ({ userRole, onClose, onIssued, initialCustomer = null, 
         <FormBody>
           <div className="py-10 text-center">
             <Icon name="Layers" size={28} className="text-text-tertiary mx-auto mb-3" />
-            <p className="text-[13px] text-text-secondary">Packages are issued from one branch. Switch branch in the header to continue.</p>
+            <p className="text-[13px] text-text-secondary">Packages are issued from one {wordBranch()}. Switch {wordBranch()} in the header to continue.</p>
           </div>
         </FormBody>
       ) : (

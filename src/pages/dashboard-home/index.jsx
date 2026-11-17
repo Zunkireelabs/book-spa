@@ -13,6 +13,7 @@ import { isNewTenant, setupSteps } from '../../lib/dashboardTenant';
 import { useSearchParams } from 'react-router-dom';
 import { nepalNow } from '../../utils/customerDirectory';
 import { VIEWS, availableViews, defaultView, dayPhase, readRememberedView, rememberView } from '../../lib/dashboardViews';
+import { localizeBranch, wordBranch, wordBranches } from '../../utils/industryTerms';
 
 const PHASES = [
   { key: 'prep', label: 'Prep', icon: 'Sun' },
@@ -134,7 +135,7 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
 
   const firstName = (profile?.full_name || '').split(' ')[0];
   const showPhases = view === 'branch' || view === 'business';
-  const scope = isOverall ? `${branches.length} ${(branches.length === 1 ? 'branch' : 'branches')}` : branchName;
+  const scope = isOverall ? `${branches.length} ${(branches.length === 1 ? wordBranch() : wordBranches())}` : branchName;
 
   return (
     <div className="space-y-3 sm:space-y-4">
@@ -155,7 +156,7 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
                 onClick={() => pickView(v)}
                 className={`px-3 py-1.5 text-[12.5px] whitespace-nowrap rounded-md transition-colors ${view === v ? 'bg-white text-gray-900 shadow-sm font-medium' : 'text-gray-500 hover:text-gray-700'}`}
               >
-                {VIEWS[v]}
+                {localizeBranch(VIEWS[v])}
               </button>
             ))}
           </div>

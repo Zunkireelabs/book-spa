@@ -8,6 +8,7 @@ import {
 } from '../../../../services/membershipsView';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { useMinWidth, useSlashFocus, useStickyBlock, thClass, SearchBox, ClearableChip, csvDownload, EmptyBlock, ErrorBlock, leadNodes, RangeMenu, isDate } from '../Area/listKit';
+import { wordBranchCap } from '../../../../utils/industryTerms';
 
 const detailOf = (r) => {
   if (r.kind === 'deduction') return [r.service, r.bookingNumber].filter(Boolean).join(' · ') || r.notes || '';
@@ -89,7 +90,7 @@ const WalletUsagePanel = ({ members, tiers, today, stickyTop, registerExport, on
   useEffect(() => () => onLead(' '), [onLead]);
 
   const exportCsv = useCallback(() => {
-    csvDownload(`wallet-activity-${from}_to_${to}.csv`, ['When', 'Member', 'Card', 'Tier', 'Type', 'Detail', 'By', 'Branch', 'Amount'],
+    csvDownload(`wallet-activity-${from}_to_${to}.csv`, ['When', 'Member', 'Card', 'Tier', 'Type', 'Detail', 'By', `${wordBranchCap()}`, 'Amount'],
       filtered.map((r) => [new Date(r.createdAt).toLocaleString('en-GB', { timeZone: 'Asia/Kathmandu' }), r.memberName, r.cardNo, r.tierName, kindLabel(r.kind), detailOf(r), r.performerName, r.branchName, r.amount]));
   }, [filtered, from, to]);
   useEffect(() => { registerExport({ run: exportCsv, disabled: !rows || filtered.length === 0 }); }, [exportCsv, rows, filtered.length, registerExport]);

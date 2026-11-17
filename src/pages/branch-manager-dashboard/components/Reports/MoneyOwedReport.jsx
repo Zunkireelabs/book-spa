@@ -15,6 +15,7 @@ import NeedsClosingSection from '../Outstanding/NeedsClosingSection';
 import { isReportOpenable } from './reportRegistry';
 import { num } from './businessHealthView';
 import { buildOwedTiles, ageBars, isEmptyOwed, statusLabel, dayLabel, TABS, owedExportRows, responsibleOf, UNASSIGNED } from './moneyOwedView';
+import { wordBranch, wordBranchCap, wordBranches } from '../../../../utils/industryTerms';
 
 const DEFINITIONS = [
   { term: 'Owed', text: 'Completed bookings with payment not "paid" and balance = final amount − payments − refunds > 0, any date. Same rule as the dashboard (dashboardMoney.js + mig 368).' },
@@ -227,14 +228,14 @@ const MoneyOwedReport = ({ reopen, onBack, onHome, onOpenView, titleExtra, isFav
 
   const branchTable = () => (
     <table className="w-full border-collapse">
-      <thead><tr><th className={`${th} text-left`}>Branch</th><th className={`${th} text-right`}>Bookings</th><th className={`${th} text-right`}>Oldest</th><th className={`${th} text-right`}>Balance</th></tr></thead>
+      <thead><tr><th className={`${th} text-left`}>{wordBranchCap()}</th><th className={`${th} text-right`}>Bookings</th><th className={`${th} text-right`}>Oldest</th><th className={`${th} text-right`}>Balance</th></tr></thead>
       <tbody>
         {data.by_branch.map((b) => (
           <tr key={b.branch_id} onClick={() => switchBranch(b.branch_id)} className="cursor-pointer hover:bg-black/[0.02]">
             <td className={td}>{b.name}</td><td className={numTd}>{b.count}</td><td className={numTd}>{b.oldest_days} d</td><td className={`${numTd} font-semibold`}>{num(b.amount)}</td>
           </tr>
         ))}
-        <tr><td className={`${td} font-semibold`}>All branches</td><td className={numTd}>{data.totals.count}</td><td className={numTd}>{data.totals.oldest_days} d</td><td className={`${numTd} font-semibold`}>{num(data.totals.amount)}</td></tr>
+        <tr><td className={`${td} font-semibold`}>All {wordBranches()}</td><td className={numTd}>{data.totals.count}</td><td className={numTd}>{data.totals.oldest_days} d</td><td className={`${numTd} font-semibold`}>{num(data.totals.amount)}</td></tr>
       </tbody>
     </table>
   );
@@ -281,7 +282,7 @@ const MoneyOwedReport = ({ reopen, onBack, onHome, onOpenView, titleExtra, isFav
         {error && !loading && <p className="py-12 text-center text-sm text-error">Couldn't load Money owed. Please try again.</p>}
         {empty && (
           <div className="border border-dashed border-border rounded-spa-lg bg-surface p-7 text-center text-sm text-text-secondary leading-relaxed">
-            <b className="block text-text-primary mb-1">Nothing is owed</b>No completed booking or package has an unpaid balance{isOverall ? '' : ' at this branch'}.
+            <b className="block text-text-primary mb-1">Nothing is owed</b>No completed booking or package has an unpaid balance{isOverall ? '' : ` at this ${wordBranch()}`}.
           </div>
         )}
         {ready && (

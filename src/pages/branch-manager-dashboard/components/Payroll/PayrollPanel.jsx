@@ -13,6 +13,7 @@ import {
   fetchTherapistProductSales,
 } from '../../../../services/api';
 import { Avatar, thClass, ErrorBlock, EmptyBlock, shortDate } from '../Area/listKit';
+import { teamMemberLower, teamMemberWord, wordBranch } from '../../../../utils/industryTerms';
 
 // Display-only mirror of services/api.js's SICK_LEAVE_PAID_CAP_DAYS/ANNUAL_LEAVE_PAID_CAP_DAYS
 // (the actual deduction is computed server-side) — keep these two numbers in sync if the policy
@@ -99,7 +100,7 @@ const CompensationPanel = ({ branchId, readOnly = false }) => {
         <table className="w-full border-collapse mt-3">
           <thead>
             <tr>
-              <th scope="col" className={`${th} text-left pl-2`}>Team member</th>
+              <th scope="col" className={`${th} text-left pl-2`}>{teamMemberWord()}</th>
               <th scope="col" className={`${th} text-right pr-3`}>Monthly salary</th>
               <th scope="col" className={`${th} text-right pr-3`}>Treatment commission</th>
               <th scope="col" className={`${th} text-right pr-3`}>Product commission{NEW_TAG}</th>
@@ -149,8 +150,8 @@ const CompensationPanel = ({ branchId, readOnly = false }) => {
           </tbody>
         </table>
       )}
-      {staff && staff.length === 0 && !loadError && <EmptyBlock icon="Users" title="No active team members" hint="Add people under Team first." />}
-      <p className="mt-4 text-[12.5px] text-[#515152] bg-[#F7F7F5] rounded-lg px-3 py-2.5 max-w-[640px] flex gap-2"><Icon name="Info" size={14} className="mt-0.5 flex-none text-[#8A8A90]" /><span>Product commission is a share of what the team member <b className="font-medium">sold</b>, after refunds, for products marked <b className="font-medium">Earns commission</b>. It is separate from treatment commission, which stays as it is today.</span></p>
+      {staff && staff.length === 0 && !loadError && <EmptyBlock icon="Users" title={`No active ${teamMemberLower()}s`} hint="Add people under Team first." />}
+      <p className="mt-4 text-[12.5px] text-[#515152] bg-[#F7F7F5] rounded-lg px-3 py-2.5 max-w-[640px] flex gap-2"><Icon name="Info" size={14} className="mt-0.5 flex-none text-[#8A8A90]" /><span>Product commission is a share of what the {teamMemberLower()} <b className="font-medium">sold</b>, after refunds, for products marked <b className="font-medium">Earns commission</b>. It is separate from treatment commission, which stays as it is today.</span></p>
     </div>
   );
 };
@@ -337,7 +338,7 @@ const RunPayrollPanel = ({ branchId, readOnly = false }) => {
           <table className="w-full border-collapse min-w-[980px]">
             <thead>
               <tr>
-                <th scope="col" className={`${th} text-left pl-2`}>Team member</th>
+                <th scope="col" className={`${th} text-left pl-2`}>{teamMemberWord()}</th>
                 <th scope="col" className={`${th} text-right pr-3`}>Base salary</th>
                 <th scope="col" className={`${th} text-right pr-3`} title="Present / Absent / Half / Leave">P/A/H/L</th>
                 <th scope="col" className={`${th} text-right pr-3`}>Deduction</th>
@@ -427,8 +428,8 @@ const PayrollPanel = ({ branchId, isOverall, readOnly = false }) => {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <Icon name="Wallet" size={40} className="text-text-tertiary mb-4" />
-        <h3 className="font-heading font-heading-semibold text-lg text-text-primary mb-1">Select a specific branch</h3>
-        <p className="font-body text-sm text-text-secondary max-w-sm">Payroll is branch-specific. Use the branch switcher in the header to select a branch before running payroll.</p>
+        <h3 className="font-heading font-heading-semibold text-lg text-text-primary mb-1">Select a specific {wordBranch()}</h3>
+        <p className="font-body text-sm text-text-secondary max-w-sm">Payroll is {wordBranch()}-specific. Use the {wordBranch()} switcher in the header to select a {wordBranch()} before running payroll.</p>
       </div>
     );
   }

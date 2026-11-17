@@ -53,6 +53,8 @@ import { attendanceDays, busyMinutesInSpans } from '../pages/branch-manager-dash
 import { summarizeMoney, classifyBooking, roundMoney, paidPaisa } from '../utils/bookingMoney';
 import { planClose, runCloseSteps } from '../utils/closeBooking';
 import { friendlyError } from '../utils/friendlyError';
+import { staffWord, staffWordPlural, wordBranch, wordBranches } from '../utils/industryTerms';
+const cap = (w) => w.charAt(0).toUpperCase() + w.slice(1);
 import { buildTherapistsOverview, addDaysStr, weekDatesOf } from './therapistsOverview';
 import { isClosedDate } from '../utils/todayStatusLine';
 
@@ -244,6 +246,8 @@ const DISCOUNT_LIMITS = {
 // Staff can request a discount up to this band (above their direct-apply limit).
 // Manager/admin direct-apply is bounded by DISCOUNT_LIMITS above.
 const STAFF_REQUEST_CEILING = 0.50;
+// False while staff direct-apply equals the ceiling (the temporary 50% rule): then no request can reach a manager.
+export const staffCanRequestDiscountApproval = DISCOUNT_LIMITS.staff < STAFF_REQUEST_CEILING;
 
 /**
  * Fetch authenticated user + profile in one call.
@@ -295,7 +299,7 @@ async function validateRoomsForBranch(roomIds, branchId) {
   const rooms = new Map((data || []).map(r => [r.id, r]));
   const missing = ids.find(id => !rooms.has(id));
   if (missing) {
-    return { rooms, error: { code: 'INVALID_ROOM', message: 'Selected room is not available in this branch.' } };
+    return { rooms, error: { code: 'INVALID_ROOM', message: `Selected room is not available in this ${wordBranch()}.` } };
   }
   const inactive = data.find(r => !r.is_active);
   if (inactive) {
@@ -3194,7 +3198,7 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
 
       const inactive = (therapistsData || []).find(t => !t.is_active);
       if (inactive) {
-        return { data: null, error: { code: 'THERAPIST_INACTIVE', message: `Cannot assign inactive therapist: ${inactive.name}` } };
+        return { data: null, error: { code: 'THERAPIST_INACTIVE', message: `Cannot assign inactive ${staffWord()}: ${inactive.name}` } };
       }
 
       // A therapist's live branch_id only reflects the CURRENT moment (flipped by the
@@ -3219,7 +3223,7 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
         computeTherapistBranchAt(transfersByTherapist[t.id] || [], t.branch_id, atDate) !== booking.branch_id
       );
       if (wrongBranch) {
-        return { data: null, error: { code: 'INVALID_THERAPIST', message: `${wrongBranch.name} is not available in this branch at this time (transferred elsewhere for this date).` } };
+        return { data: null, error: { code: 'INVALID_THERAPIST', message: `${wrongBranch.name} is not available in this ${wordBranch()} at this time (transferred elsewhere for this date).` } };
       }
 
       if (booking.date) {
@@ -3234,7 +3238,7 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
         );
         if (absent) {
           const absentTherapist = (therapistsData || []).find(t => t.id === absent.therapist_id);
-          return { data: null, error: { code: 'THERAPIST_ABSENT', message: `Cannot assign ${absentTherapist?.name || 'therapist'}: marked as ${absent.status} for this date.` } };
+          return { data: null, error: { code: 'THERAPIST_ABSENT', message: `Cannot assign ${absentTherapist?.name || staffWord()}: marked as ${absent.status} for this date.` } };
         }
 
         const checkedOut = (attendanceRecords || []).find(a =>
@@ -3242,7 +3246,7 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
         );
         if (checkedOut) {
           const checkedOutTherapist = (therapistsData || []).find(t => t.id === checkedOut.therapist_id);
-          return { data: null, error: { code: 'THERAPIST_CHECKED_OUT', message: `Cannot assign ${checkedOutTherapist?.name || 'therapist'}: already checked out for this date.` } };
+          return { data: null, error: { code: 'THERAPIST_CHECKED_OUT', message: `Cannot assign ${checkedOutTherapist?.name || staffWord()}: already checked out for this date.` } };
         }
       }
 
@@ -3309,7 +3313,7 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
       const availabilityErr = availabilityFailure(updateError);
       if (availabilityErr) return availabilityErr;
       if (updateError.code === '23P01') {
-        return { data: null, error: { code: 'THERAPIST_CONFLICT', message: 'Therapist is already booked during this time slot.' } };
+        return { data: null, error: { code: 'THERAPIST_CONFLICT', message: `${cap(staffWord())} is already booked during this time slot.` } };
       }
       throw updateError;
     }
@@ -4531,7 +4535,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
           .single();
 
         if (therapist && !therapist.is_active) {
-          return { data: null, error: { code: 'THERAPIST_INACTIVE', message: 'Cannot assign an inactive therapist.' } };
+          return { data: null, error: { code: 'THERAPIST_INACTIVE', message: `Cannot assign an inactive ${staffWord()}.` } };
         }
         // A therapist's live branch_id only reflects the CURRENT moment (flipped by
         // the apply/revert cron) — it's the wrong thing to check against the NEW
@@ -4546,7 +4550,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
           const atDate = toKathmanduDate(newDate, newStartTime);
           const effectiveBranch = computeTherapistBranchAt(transferRows || [], therapist.branch_id, atDate);
           if (effectiveBranch !== booking.branch_id && !(await staffAvailabilityEnforced(booking.branch_id))) {
-            return { data: null, error: { code: 'INVALID_THERAPIST', message: `${therapist.name} is not available in this branch at this time (transferred elsewhere for this date).` } };
+            return { data: null, error: { code: 'INVALID_THERAPIST', message: `${therapist.name} is not available in this ${wordBranch()} at this time (transferred elsewhere for this date).` } };
           }
 
           const { data: attRow } = await supabase
@@ -4580,7 +4584,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
         const atDate = toKathmanduDate(newDate, newStartTime);
         const effectiveBranch = computeTherapistBranchAt(transferRows || [], currentTherapist.branch_id, atDate);
         if (effectiveBranch !== booking.branch_id && !(await staffAvailabilityEnforced(booking.branch_id))) {
-          return { data: null, error: { code: 'INVALID_THERAPIST', message: `${currentTherapist.name} is not available in this branch at this time (transferred elsewhere for this date). Reassign or choose a different date.` } };
+          return { data: null, error: { code: 'INVALID_THERAPIST', message: `${currentTherapist.name} is not available in this ${wordBranch()} at this time (transferred elsewhere for this date). Reassign or choose a different date.` } };
         }
 
         const { data: attRow } = await supabase
@@ -4676,7 +4680,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       if (availabilityErr) return availabilityErr;
       // GIST exclusion: therapist double-booking
       if (updateError.code === '23P01') {
-        return { data: null, error: { code: 'THERAPIST_CONFLICT', message: 'Therapist is already booked during this time slot.' } };
+        return { data: null, error: { code: 'THERAPIST_CONFLICT', message: `${cap(staffWord())} is already booked during this time slot.` } };
       }
       // Room-capacity trigger: lost a race against a concurrent booking for the same room
       if (updateError.code === 'P0003') {
@@ -6135,7 +6139,7 @@ export async function getUtilizationIntelligence({ branchId, date, from, to }) {
       data: {
         operatingMinutes: overall ? null : operatingMinutes,
         operatingHours: overall
-          ? 'Multiple branches'
+          ? `Multiple ${wordBranches()}`
           : (branch.open_time && branch.close_time
             ? `${branch.open_time.slice(0, 5)}–${branch.close_time.slice(0, 5)}`
             : 'Not set'),
@@ -7056,7 +7060,7 @@ export async function createBooking({
         data: null,
         error: {
           code: 'COUPLE_SERVICE_NOT_ALLOWED_IN_GROUP',
-          message: `${service.name} is a couple service and can't be booked as a group booking — use a single booking with 2 therapists instead.`,
+          message: `${service.name} is a couple service and can't be booked as a group booking — use a single booking with 2 ${staffWordPlural()} instead.`,
         },
       };
     }
@@ -7091,7 +7095,7 @@ export async function createBooking({
           .maybeSingle();
         if (roomLookupError) throw roomLookupError;
         if (!selectedRoom) {
-          return { data: null, error: { code: 'INVALID_ROOM', message: 'Selected room is not available in this branch.' } };
+          return { data: null, error: { code: 'INVALID_ROOM', message: `Selected room is not available in this ${wordBranch()}.` } };
         }
         if (!selectedRoom.is_active) {
           return { data: null, error: { code: 'ROOM_INACTIVE', message: 'Selected room is not active.' } };
@@ -7157,7 +7161,7 @@ export async function createBooking({
         // Same checks in the same order as before they were batched.
         if (roomsError) throw roomsError;
         if (!rooms || rooms.length === 0) {
-          return { data: null, error: { code: 'ROOMS_FULL', message: 'No rooms available at this branch.' } };
+          return { data: null, error: { code: 'ROOMS_FULL', message: `No rooms available at this ${wordBranch()}.` } };
         }
         if (overlapError) throw overlapError;
 
@@ -7326,11 +7330,11 @@ export async function createBooking({
       if (therapistLookupError) throw therapistLookupError;
 
       if (!therapistsData || therapistsData.length !== allTherapistIds.length) {
-        return { data: null, error: { code: 'INVALID_THERAPIST', message: 'One or more selected therapists are not available in this branch.' } };
+        return { data: null, error: { code: 'INVALID_THERAPIST', message: `One or more selected ${staffWordPlural()} are not available in this ${wordBranch()}.` } };
       }
       const inactive = therapistsData.find(t => !t.is_active);
       if (inactive) {
-        return { data: null, error: { code: 'THERAPIST_INACTIVE', message: `Therapist ${inactive.name} is not active.` } };
+        return { data: null, error: { code: 'THERAPIST_INACTIVE', message: `${cap(staffWord())} ${inactive.name} is not active.` } };
       }
 
       const transfersByTherapist = {};
@@ -7343,7 +7347,7 @@ export async function createBooking({
         computeTherapistBranchAt(transfersByTherapist[t.id] || [], t.branch_id, atDate) !== resolvedBranchId
       );
       if (wrongBranch) {
-        return { data: null, error: { code: 'INVALID_THERAPIST', message: `${wrongBranch.name} is not available in this branch at this time (transferred elsewhere for this date).` } };
+        return { data: null, error: { code: 'INVALID_THERAPIST', message: `${wrongBranch.name} is not available in this ${wordBranch()} at this time (transferred elsewhere for this date).` } };
       }
 
       if (date) {
@@ -7352,7 +7356,7 @@ export async function createBooking({
         );
         if (absent) {
           const absentTherapist = therapistsData.find(t => t.id === absent.therapist_id);
-          return { data: null, error: { code: 'THERAPIST_ABSENT', message: `${absentTherapist?.name || 'Therapist'} is marked as ${absent.status} on this date.` } };
+          return { data: null, error: { code: 'THERAPIST_ABSENT', message: `${absentTherapist?.name || cap(staffWord())} is marked as ${absent.status} on this date.` } };
         }
 
         const checkedOut = (attendanceRecords || []).find(a =>
@@ -7360,7 +7364,7 @@ export async function createBooking({
         );
         if (checkedOut) {
           const checkedOutTherapist = therapistsData.find(t => t.id === checkedOut.therapist_id);
-          return { data: null, error: { code: 'THERAPIST_CHECKED_OUT', message: `${checkedOutTherapist?.name || 'Therapist'} already checked out for this date.` } };
+          return { data: null, error: { code: 'THERAPIST_CHECKED_OUT', message: `${checkedOutTherapist?.name || cap(staffWord())} already checked out for this date.` } };
         }
       }
 
@@ -7481,7 +7485,7 @@ export async function createBooking({
       const availabilityErr = availabilityFailure(insertError);
       if (availabilityErr) return availabilityErr;
       if (insertError.code === '23P01') {
-        return { data: null, error: { code: 'THERAPIST_CONFLICT', message: 'One or more selected therapists are already booked during this time slot.' } };
+        return { data: null, error: { code: 'THERAPIST_CONFLICT', message: `One or more selected ${staffWordPlural()} are already booked during this time slot.` } };
       }
       if (insertError.code === 'P0003') {
         return { data: null, error: { code: 'ROOMS_FULL', message: 'Scheduling conflict. Please try a different time or room.' } };
@@ -7490,7 +7494,7 @@ export async function createBooking({
         return { data: null, error: { code: 'BRANCH_CLOSED', message: 'We are closed on that date. Please choose another day.' } };
       }
       if (insertError.code === 'P0005') {
-        return { data: null, error: { code: 'BRANCH_ONLINE_CAPACITY', message: 'This time is fully booked — no therapists available. Please choose another time.' } };
+        return { data: null, error: { code: 'BRANCH_ONLINE_CAPACITY', message: `This time is fully booked — no ${staffWordPlural()} available. Please choose another time.` } };
       }
       // compute_booking_datetimes trigger (migration-179): start time +
       // service duration would extend past midnight.
@@ -7534,7 +7538,7 @@ export async function createBooking({
           data: null,
           error: {
             code: 'BOOKING_CONFIRMATION_UNAVAILABLE',
-            message: 'Your booking was placed, but we could not load the confirmation details. Please check your email/SMS, or contact the branch to confirm, before trying to book again.',
+            message: `Your booking was placed, but we could not load the confirmation details. Please check your email/SMS, or contact the ${wordBranch()} to confirm, before trying to book again.`,
           },
         };
       }
@@ -7698,7 +7702,7 @@ export async function createBookingGroup({ services, date, startTime, therapistI
             data: null,
             error: {
               code: 'BOOKING_GROUP_PARTIAL',
-              message: `${service.name} could not be booked, and we could not automatically release the services booked before it. Please contact the branch to confirm what is reserved.`,
+              message: `${service.name} could not be booked, and we could not automatically release the services booked before it. Please contact the ${wordBranch()} to confirm what is reserved.`,
             },
           };
         }
@@ -7869,7 +7873,7 @@ export async function submitGroupBooking({ branchId, orgSlug, date, startTime, g
             data: null,
             error: {
               code: 'BOOKING_GROUP_PARTIAL',
-              message: `${person.label || person.name || 'A person in your group'} could not be booked, and we could not automatically release the others. Please contact the branch to confirm what is reserved.`,
+              message: `${person.label || person.name || 'A person in your group'} could not be booked, and we could not automatically release the others. Please contact the ${wordBranch()} to confirm what is reserved.`,
             },
           };
         }
@@ -8068,7 +8072,7 @@ export async function createRoom({ name, branchId, amenities = [], floor = null,
       .maybeSingle();
 
     if (existing) {
-      return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A room with this name already exists in this branch.' } };
+      return { data: null, error: { code: 'DUPLICATE_NAME', message: `A room with this name already exists in this ${wordBranch()}.` } };
     }
 
     const { data, error } = await supabase
@@ -8110,7 +8114,7 @@ export async function updateRoom({ roomId, name, amenities, floor, capacity }) {
 
     // Manager can only update own branch
     if (profile.role === 'manager' && room.branch_id !== profile.branch_id) {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot manage rooms outside your branch.' } };
+      return { data: null, error: { code: 'UNAUTHORIZED', message: `Cannot manage rooms outside your ${wordBranch()}.` } };
     }
 
     // Check for duplicate name within branch (excluding this room)
@@ -8123,7 +8127,7 @@ export async function updateRoom({ roomId, name, amenities, floor, capacity }) {
       .maybeSingle();
 
     if (existing) {
-      return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A room with this name already exists in this branch.' } };
+      return { data: null, error: { code: 'DUPLICATE_NAME', message: `A room with this name already exists in this ${wordBranch()}.` } };
     }
 
     const updatePayload = { name: name.trim() };
@@ -8170,7 +8174,7 @@ export async function toggleRoomActive({ roomId, isActive }) {
     }
 
     if (profile.role === 'manager' && room.branch_id !== profile.branch_id) {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot manage rooms outside your branch.' } };
+      return { data: null, error: { code: 'UNAUTHORIZED', message: `Cannot manage rooms outside your ${wordBranch()}.` } };
     }
 
     const { data, error } = await supabase
@@ -8211,7 +8215,7 @@ export async function deleteRoom({ roomId }) {
 
     // Manager can only delete rooms in their own branch
     if (profile.role === 'manager' && room.branch_id !== profile.branch_id) {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot delete rooms outside your branch.' } };
+      return { data: null, error: { code: 'UNAUTHORIZED', message: `Cannot delete rooms outside your ${wordBranch()}.` } };
     }
 
     // Check if room has any bookings (past or future)
@@ -8697,7 +8701,7 @@ export async function createTherapist({ name, gender, specialties, position, isS
       .maybeSingle();
 
     if (existing) {
-      return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A therapist with this name already exists in this branch.' } };
+      return { data: null, error: { code: 'DUPLICATE_NAME', message: `A therapist with this name already exists in this ${wordBranch()}.` } };
     }
 
     // Get max display_order for this branch to place new therapist at end
@@ -8769,7 +8773,7 @@ export async function updateTherapist({ therapistId, name, gender, specialties, 
     }
 
     if (profile.role === 'manager' && therapist.branch_id !== profile.branch_id) {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot manage therapists outside your branch.' } };
+      return { data: null, error: { code: 'UNAUTHORIZED', message: `Cannot manage therapists outside your ${wordBranch()}.` } };
     }
 
     // Check for duplicate name within branch (excluding this therapist)
@@ -8783,7 +8787,7 @@ export async function updateTherapist({ therapistId, name, gender, specialties, 
         .maybeSingle();
 
       if (existing) {
-        return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A therapist with this name already exists in this branch.' } };
+        return { data: null, error: { code: 'DUPLICATE_NAME', message: `A therapist with this name already exists in this ${wordBranch()}.` } };
       }
     }
 
@@ -8863,7 +8867,7 @@ export async function fetchTherapistById(therapistId) {
     if (profile.role === 'manager' && data.branch_id !== profile.branch_id) {
       // ZNLY-113: a manager may read (never edit) a therapist visiting one of their branches today. Anything else stays an error.
       const visit = await findVisitWindowForManager(profile, data.id);
-      if (!visit) return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot view therapists outside your branch.' } };
+      if (!visit) return { data: null, error: { code: 'UNAUTHORIZED', message: `Cannot view therapists outside your ${wordBranch()}.` } };
       return { data: { ...data, visitingHere: visit }, error: null };
     }
 
@@ -8941,7 +8945,7 @@ export async function upsertTherapistWorkingHours(therapistId, rows) {
     }
 
     if (profile.role === 'manager' && therapist.branch_id !== profile.branch_id) {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot manage therapists outside your branch.' } };
+      return { data: null, error: { code: 'UNAUTHORIZED', message: `Cannot manage therapists outside your ${wordBranch()}.` } };
     }
 
     // dayOfWeek -> that day's breaks in chronological order. The validation loop
@@ -9145,7 +9149,7 @@ export async function upsertRosterOverrides(overrides) {
       const branchId = branchById.get(id);
       if (!branchId) return { data: null, error: { code: 'NOT_FOUND', message: 'Therapist not found.' } };
       if (profile.role === 'manager' && branchId !== profile.branch_id) {
-        return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot manage therapists outside your branch.' } };
+        return { data: null, error: { code: 'UNAUTHORIZED', message: `Cannot manage therapists outside your ${wordBranch()}.` } };
       }
     }
 
@@ -9224,7 +9228,7 @@ export async function toggleTherapistActive({ therapistId, isActive }) {
     }
 
     if (profile.role === 'manager' && therapist.branch_id !== profile.branch_id) {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot manage therapists outside your branch.' } };
+      return { data: null, error: { code: 'UNAUTHORIZED', message: `Cannot manage therapists outside your ${wordBranch()}.` } };
     }
 
     // If deactivating, check for future bookings
@@ -9283,7 +9287,7 @@ export async function deleteTherapist({ therapistId }) {
 
     // Manager can only delete therapists in their own branch
     if (profile.role === 'manager' && therapist.branch_id !== profile.branch_id) {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot delete therapists outside your branch.' } };
+      return { data: null, error: { code: 'UNAUTHORIZED', message: `Cannot delete therapists outside your ${wordBranch()}.` } };
     }
 
     // Check if therapist has any bookings (past or future)
@@ -10281,7 +10285,7 @@ export async function uploadBranchPhoto(branchId, file) {
     if (authError) return { url: null, error: authError };
 
     if (profile.role !== 'admin') {
-      return { url: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can upload branch photos.' } };
+      return { url: null, error: { code: 'UNAUTHORIZED', message: `Only admins can upload ${wordBranch()} photos.` } };
     }
 
     const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -10402,7 +10406,7 @@ const removeCustomerFiles = async (paths) => {
 // within their branch, admin within their org. Path-prefixed per customer, since a customer can have multiple photos.
 export async function uploadCustomerPhoto(customerId, branchId, file) {
   try {
-    if (!customerId || !branchId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID and branch ID are required.' } };
+    if (!customerId || !branchId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: `Customer ID and ${wordBranch()} ID are required.` } };
 
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -10482,7 +10486,7 @@ export async function deleteCustomerPhoto(photoId) {
 // photos, broader file-type allow-list.
 export async function uploadCustomerDocument(customerId, branchId, file) {
   try {
-    if (!customerId || !branchId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID and branch ID are required.' } };
+    if (!customerId || !branchId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: `Customer ID and ${wordBranch()} ID are required.` } };
 
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -12595,7 +12599,7 @@ const attendanceRpcError = (error) => {
   if (msg.includes('PUNCH_OPEN_EXISTS')) return { code: 'PUNCH_OPEN_EXISTS', message: 'This person is already checked in. Check them out first.' };
   if (msg.includes('PUNCH_OVERLAP')) return { code: 'PUNCH_OVERLAP', message: 'That time overlaps another check-in for this person.' };
   if (msg.includes('PUNCH_BAD_TIMES')) return { code: 'PUNCH_BAD_TIMES', message: 'Check-out must be after check-in.' };
-  if (msg.includes('not working at this branch')) return { code: 'NOT_AT_BRANCH', message: 'This person is not working at this branch that day.' };
+  if (msg.includes('not working at this branch')) return { code: 'NOT_AT_BRANCH', message: `This person is not working at this ${wordBranch()} that day.` };
   if (msg.includes('cannot be in the future')) return { code: 'PUNCH_FUTURE', message: msg.includes('check-out') ? "A check-out can't be later than now." : "A check-in can't be later than now." };
   if (msg.includes('must stay on the same day')) return { code: 'PUNCH_OTHER_DAY', message: 'A check-in has to stay on the same day.' };
   if (msg.includes('no open check-in')) return { code: 'PUNCH_NONE_OPEN', message: 'There is no open check-in to close.' };
@@ -14693,7 +14697,7 @@ export async function generatePayroll({ branchId, periodMonth }) {
       ...departed.map((d) => ({ id: d.id, name: d.name, staff_compensation: { monthly_salary: 0, commission_rate: d.commission_rate, product_commission_rate: d.product_commission_rate } })),
     ];
     if (therapists.length === 0) {
-      return { data: null, error: { code: 'NO_STAFF', message: 'No active staff found for this branch.' } };
+      return { data: null, error: { code: 'NO_STAFF', message: `No active staff found for this ${wordBranch()}.` } };
     }
 
     const therapistIds = therapists.map((t) => t.id);
@@ -14905,7 +14909,7 @@ export const MEMBERSHIP_DEPOSIT_MODES = ['Cash', 'Card', 'MobileBanking', 'Chequ
 export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, email, gender, dateOfBirth }) {
   try {
     if (!orgId || !branchId || !fullName) {
-      return { data: null, error: { code: 'INVALID_INPUT', message: 'Org, branch, and name are required.' } };
+      return { data: null, error: { code: 'INVALID_INPUT', message: `Org, ${wordBranch()}, and name are required.` } };
     }
     fullName = toTitleCase(fullName);
     // Canonical E.164 so the same number always resolves to the same customer
@@ -20166,6 +20170,21 @@ export async function assignTherapistTier({ therapistId, tierId }) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] assignTherapistTier error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Tier prices of every tiered service at once, for the Services list: { [serviceId]: [price_npr, ...] }. Manager/admin only (RLS scopes it to the org). */
+export async function fetchTierPricesByService() {
+  try {
+    const rows = await fetchAllPages((opts) =>
+      supabase.from('service_tier_prices').select('service_id, price_npr', opts).order('id')
+    );
+    const byService = {};
+    rows.forEach((r) => { (byService[r.service_id] ||= []).push(Number(r.price_npr)); });
+    return { data: byService, error: null };
+  } catch (error) {
+    console.error('[API] fetchTierPricesByService error:', error.message);
     return { data: null, error };
   }
 }

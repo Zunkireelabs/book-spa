@@ -70,7 +70,7 @@ booking page stays live for existing tenants' clients, **unchanged and not redes
 Bookings → Check booking: search by phone, name or number. *Rule:* search input is sanitised before PostgREST `or()` filters **[API]**. ⚠ The notifications search (`api.js` ≈ line 3980) builds `or()` from raw input (gap G-9).
 
 ### J-S4. Move a booking through its day (CP3)
-State machine: Pending → Confirmed → In-Progress → Completed; Pending/Confirmed → Cancelled; Confirmed → No Show.
+State machine: Pending → Confirmed → In-Progress → Completed; Pending/Confirmed → Cancelled; Pending/Confirmed → No Show.
 | Rule | Layer |
 |---|---|
 | Allowed transitions only | **API** (`VALID_TRANSITIONS`, `validateStatusTransition`). Not in DB: a Cancelled or No Show booking can be re-opened by a direct write (gap G-10) |

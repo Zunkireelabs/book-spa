@@ -2,6 +2,7 @@
 // search, sorting and day grouping. Everything takes the spa's local (Nepal) `today` / `nowHM` explicitly — never the browser clock.
 import { classifyBooking } from './bookingMoney';
 import { phoneSearchDigits } from './customerDirectory';
+import { teamMemberWord } from './industryTerms';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -217,7 +218,7 @@ export function matchesFilters(b, { therapist, service, room }) {
 export const SORTS = {
   time: { label: 'Time' },
   customer: { label: 'Customer' },
-  therapist: { label: 'Team member' },
+  therapist: { get label() { return teamMemberWord(); } },
   amount: { label: 'Amount' },
 };
 

@@ -6,6 +6,7 @@ import Button from '../../../components/ui/Button';
 import ConfirmDialog from '../../../components/ui/ConfirmDialog';
 import { getDailySummary, closeDay, getDayUnfinishedBookings } from '../../../services/api';
 import { closeDayBlock, unpaidCloseWarning } from '../../../lib/closeDay';
+import { wordBranch } from '../../../utils/industryTerms';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -85,7 +86,7 @@ const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
   if (!branchId) {
     return (
       <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border text-center">
-        <p className="font-body font-body-normal text-text-secondary">No branch selected.</p>
+        <p className="font-body font-body-normal text-text-secondary">No {wordBranch()} selected.</p>
       </div>
     );
   }

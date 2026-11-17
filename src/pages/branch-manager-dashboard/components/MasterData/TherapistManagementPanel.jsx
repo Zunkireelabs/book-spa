@@ -27,6 +27,7 @@ import TherapistPeekPanel from './TherapistPeekPanel';
 import { toKathmanduParts } from '../calendar/calendarDates';
 import { formatClockTime } from '../calendar/timeFormat';
 import { TodayCell, BookingsCell, todayLabels } from './therapistBits';
+import { wordBranch, wordBranchCap } from '../../../../utils/industryTerms';
 
 const positionParts = (p) => (p ? p.split('/').map((x) => x.trim()).filter(Boolean) : []);
 const NAME_MIN = 230;
@@ -270,10 +271,10 @@ const TherapistManagementPanel = ({
     const manage = canManage && !isOverall;
     return [
       { key: 'profile', label: 'Open full profile', icon: 'User', run: () => navigate(`/${orgSlug}/staff/${t.id}`) },
-      { key: 'calendar', label: 'See on calendar', icon: 'Calendar', run: () => goCalendar(t), disabled: isOverall, reason: 'Pick a branch first.' },
-      { key: 'attendance', label: 'Mark attendance', icon: 'Clock', run: () => navigate({ search: `?view=attendance&therapist=${t.id}` }), disabled: !manage || !t.isActive, reason: isOverall ? 'Pick a branch first.' : 'Only for active staff.' },
+      { key: 'calendar', label: 'See on calendar', icon: 'Calendar', run: () => goCalendar(t), disabled: isOverall, reason: `Pick a ${wordBranch()} first.` },
+      { key: 'attendance', label: 'Mark attendance', icon: 'Clock', run: () => navigate({ search: `?view=attendance&therapist=${t.id}` }), disabled: !manage || !t.isActive, reason: isOverall ? `Pick a ${wordBranch()} first.` : 'Only for active staff.' },
       ...(manage ? [
-        { key: 'transfer', label: 'Transfer to branch…', icon: 'ArrowRightLeft', run: () => { onCloseOpen(); setTransferFor(t); } },
+        { key: 'transfer', label: `Transfer to ${wordBranch()}…`, icon: 'ArrowRightLeft', run: () => { onCloseOpen(); setTransferFor(t); } },
         { divider: true },
         { key: 'toggle', label: t.isActive ? 'Deactivate' : 'Activate', icon: t.isActive ? 'X' : 'Check', run: () => onToggle(t) },
         { key: 'delete', label: 'Delete…', icon: 'Trash2', danger: true, run: () => askDelete(t) },
@@ -296,7 +297,7 @@ const TherapistManagementPanel = ({
 
   // ── export ───────────────────────────────────────────────────────────────────────────────────────────────────
   const exportCsv = useCallback(() => {
-    const head = ['Name', 'Position', 'Gender', 'Type', ...(isOverall ? ['Branch', 'Now at'] : []), 'Today', 'Bookings today', 'Services', ...(canSeeRates ? ['Service commission %', 'Product commission %'] : []), 'Phone', 'Active'];
+    const head = ['Name', 'Position', 'Gender', 'Type', ...(isOverall ? [`${wordBranchCap()}`, 'Now at'] : []), 'Today', 'Bookings today', 'Services', ...(canSeeRates ? ['Service commission %', 'Product commission %'] : []), 'Phone', 'Active'];
     const rows = filtered.map((t) => [t.name, t.position, t.gender, t.isServiceStaff ? 'Service' : 'Support', ...(isOverall ? [branchNameById?.[t.branchId] || '', branchNameById?.[t.nowAtBranchId] || ''] : []),
       t.isActive ? todayLabels(t).title : 'Inactive', t.bookings.count, t.isServiceStaff ? `${t.serviceCount} of ${ov.totalServices}` : '',
       ...(canSeeRates ? [t.rates?.servicePct ?? '', t.rates?.productPct ?? ''] : []), t.phone, t.isActive ? 'Yes' : 'No']);
@@ -332,7 +333,7 @@ const TherapistManagementPanel = ({
   const searchBox = <SearchBox ref={searchRef} value={searchText} onChange={setSearchText} placeholder="Search name or phone" ariaLabel={`Search ${staffLabelPlural.toLowerCase()}`} />;
   const chips = (
     <>
-      {isOverall && <FilterChip label="Branch" value={filters.branch} options={branchOptions} onChange={(v) => patch({ branch: v })} selectedLabel={chipLabel(branchOptions, filters.branch)} />}
+      {isOverall && <FilterChip label={`${wordBranchCap()}`} value={filters.branch} options={branchOptions} onChange={(v) => patch({ branch: v })} selectedLabel={chipLabel(branchOptions, filters.branch)} />}
       <FilterChip label="Position" value={filters.position} options={positionOptions} onChange={(v) => patch({ position: v })} selectedLabel={chipLabel(positionOptions, filters.position)} />
       <FilterChip label="Type" value={filters.type} options={typeOptions} onChange={(v) => patch({ type: v })} selectedLabel={chipLabel(typeOptions, filters.type)} />
       <FilterChip label="Gender" value={filters.gender} options={genderOptions} onChange={(v) => patch({ gender: v })} selectedLabel={chipLabel(genderOptions, filters.gender)} />
@@ -405,7 +406,7 @@ const TherapistManagementPanel = ({
               <tr>
                 <th scope="col" className={th} style={thTop}><span className="sr-only">Reorder</span></th>
                 <th scope="col" className={`${th} text-left`} style={thTop}>Name</th>
-                {cols.branch && <th scope="col" className={`${th} text-left`} style={thTop}>Branch</th>}
+                {cols.branch && <th scope="col" className={`${th} text-left`} style={thTop}>{wordBranchCap()}</th>}
                 {cols.nowAt && <th scope="col" className={`${th} text-left`} style={thTop}>Now at</th>}
                 {cols.today && <th scope="col" className={`${th} text-left`} style={thTop}>Today</th>}
                 {cols.bookings && <th scope="col" className={`${th} text-left`} style={thTop}>Bookings today</th>}

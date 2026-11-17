@@ -7,6 +7,7 @@ import { importProducts, createSupplier, createProductCategory } from '../../../
 import { IMPORT_COLUMNS, IMPORT_HEADINGS, parseImportSheet, sheetErrors } from '../../../../services/productsView';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { csvDownload } from '../Area/listKit';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 // Import products (V25): pick a CSV or Excel file, see what would happen (new / updates matched by SKU, then by name + size / rows to
 // fix) before anything is written, choose the branch that gets opening stock, then Import. All or nothing: any row to fix blocks it.
@@ -138,7 +139,7 @@ const ImportPanel = ({ branches, branchId, onClose, onDone, width }) => {
         )}
 
         <Field label="Opening stock goes to" id="imp-branch" hint="Only for new products or sizes. It is saved as “Opening stock” in the stock history.">
-          <CustomSelect value={branch} onChange={setBranch} placeholder="Select branch" options={branches.map((b) => ({ value: b.id, label: b.name }))} />
+          <CustomSelect value={branch} onChange={setBranch} placeholder={`Select ${wordBranch()}`} options={branches.map((b) => ({ value: b.id, label: b.name }))} />
         </Field>
         <p className="text-[12.5px] text-[#8A8A90]">
           Columns: {IMPORT_COLUMNS.map((c) => IMPORT_HEADINGS[c].toLowerCase()).join(', ')}. Suppliers and categories must already exist.{' '}

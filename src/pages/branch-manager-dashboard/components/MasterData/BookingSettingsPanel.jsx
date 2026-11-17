@@ -6,6 +6,7 @@ import ModalShell from '../../../../components/ui/ModalShell';
 import { useIndustry } from '../../../../hooks/useIndustry';
 import { DB_DOW_LABELS } from '../../../../utils/staffDay';
 import { updateOrgBookingSetting, fetchAvailabilityRolloutCheck, setEnforceStaffAvailability } from '../../../../services/api';
+import { localizeBranch } from '../../../../utils/industryTerms';
 
 const TOGGLES = [
   {
@@ -14,7 +15,7 @@ const TOGGLES = [
     label: 'Show staff during booking',
     // The customer-facing staff-picker UI itself is a separate, future piece of work —
     // this toggle only plumbs the setting end-to-end (DB -> RPC -> context).
-    description: 'Let customers pick their preferred staff member when booking (Fresha-style), instead of only a gender preference. Customer-facing picker UI is coming in a later update.',
+    description: 'Let customers pick their preferred staff member when booking instead of only a gender preference.',
   },
   {
     key: 'enable_staff_ratings',
@@ -39,7 +40,7 @@ const CODE_TEXT = {
 };
 
 // What turning the availability rule ON would change today (availability_rollout_check). Shown before the switch flips.
-const RolloutCheck = ({ check, staffLabel, staffLabelPlural, onCancel, onConfirm, confirming }) => {
+const RolloutCheck = ({ check, staffLabel, staffLabelPlural, branchWord = 'branch', onCancel, onConfirm, confirming }) => {
   const byCode = Object.entries(check.outside_by_code || {});
   const partial = check.therapists_with_partial_hours || [];
   const without = check.therapists_without_hours || [];
@@ -61,19 +62,19 @@ const RolloutCheck = ({ check, staffLabel, staffLabelPlural, onCancel, onConfirm
             </p>
             {byCode.length > 0 && (
               <ul className="mt-1.5 space-y-0.5">
-                {byCode.map(([code, n]) => <li key={code} className="font-body text-sm text-text-secondary">{n} {CODE_TEXT[code] || code}</li>)}
+                {byCode.map(([code, n]) => <li key={code} className="font-body text-sm text-text-secondary">{n} {localizeBranch(CODE_TEXT[code]) || code}</li>)}
               </ul>
             )}
           </div>
           {check.outside_branch_hours_no_shift_set > 0 && (
             <p className="font-body text-sm text-text-secondary" data-testid="rollout-branch-hours">
-              {check.outside_branch_hours_no_shift_set} booking{check.outside_branch_hours_no_shift_set === 1 ? '' : 's'} are outside branch hours for {staffLabelPlural.toLowerCase()} with no hours set. Someone with no hours set can only be booked inside branch hours.
+              {check.outside_branch_hours_no_shift_set} booking{check.outside_branch_hours_no_shift_set === 1 ? '' : 's'} are outside {branchWord} hours for {staffLabelPlural.toLowerCase()} with no hours set. Someone with no hours set can only be booked inside branch hours.
             </p>
           )}
           {partial.length > 0 && (
             <div data-testid="rollout-partial">
               <p className="font-body font-body-medium text-sm text-text-primary">Only some weekdays have hours</p>
-              <p className="font-caption text-xs text-text-secondary mb-1">A weekday with no hours is bookable only inside branch hours.</p>
+              <p className="font-caption text-xs text-text-secondary mb-1">A weekday with no hours is bookable only inside {branchWord} hours.</p>
               <ul className="space-y-0.5">
                 {partial.map((t) => (
                   <li key={t.id} className="font-body text-sm text-text-secondary">
@@ -101,7 +102,7 @@ const RolloutCheck = ({ check, staffLabel, staffLabelPlural, onCancel, onConfirm
 const BookingSettingsPanel = () => {
   const org = useOrg();
   const { refreshOrg, orgId, enforceStaffAvailability } = org;
-  const { staffLabel, staffLabelPlural } = useIndustry();
+  const { staffLabel, staffLabelPlural, branchWord } = useIndustry();
   const [saving, setSaving] = useState(null);
   const [error, setError] = useState(null);
   const [rollout, setRollout] = useState(null);   // the rollout check shown before switching ON
@@ -146,7 +147,7 @@ const BookingSettingsPanel = () => {
     <div className="space-y-4">
       <div>
         <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Booking Settings</h3>
-        <p className="font-body text-sm text-text-secondary">Org-wide toggles for the customer booking flow</p>
+        <p className="font-body text-sm text-text-secondary">Settings for the customer booking flow</p>
       </div>
 
       {error && (
@@ -209,7 +210,7 @@ const BookingSettingsPanel = () => {
         })}
       </div>
       {rollout && (
-        <RolloutCheck check={rollout} staffLabel={staffLabel} staffLabelPlural={staffLabelPlural} onCancel={() => setRollout(null)} onConfirm={confirmEnforce} confirming={saving === 'enforce_staff_availability'} />
+        <RolloutCheck check={rollout} staffLabel={staffLabel} staffLabelPlural={staffLabelPlural} branchWord={branchWord} onCancel={() => setRollout(null)} onConfirm={confirmEnforce} confirming={saving === 'enforce_staff_availability'} />
       )}
     </div>
   );

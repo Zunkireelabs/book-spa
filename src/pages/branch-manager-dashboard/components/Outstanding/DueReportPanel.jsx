@@ -8,6 +8,7 @@ import { submitCheckout } from '../../../../services/checkoutSubmit';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
 import { getDueReportByBranch, recordPayment, recordTip, getCustomerOutstandingBalance } from '../../../../services/api';
 import { useIndustry } from '../../../../hooks/useIndustry';
+import { wordBranchCap, wordBranches } from '../../../../utils/industryTerms';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -96,7 +97,7 @@ const DueReportPanel = () => {
   }, [groups]);
 
   const branchOptions = useMemo(() => [
-    { value: '', label: 'All branches' },
+    { value: '', label: `All ${wordBranches()}` },
     ...groups.map((g) => ({ value: g.branchId, label: g.branchName })),
   ], [groups]);
 
@@ -211,7 +212,7 @@ const DueReportPanel = () => {
   const handleExportCSV = () => {
     if (!filtered.length) return;
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Branch', 'Date', 'Booking #', 'Stage', 'Payment', 'Due', 'Customer', 'Phone', staffLabel, 'Created By'];
+    const header = [`${wordBranchCap()}`, 'Date', 'Booking #', 'Stage', 'Payment', 'Due', 'Customer', 'Phone', staffLabel, 'Created By'];
     let csv = header.join(',') + '\n';
     filtered.forEach((r) => {
       csv += [
@@ -314,7 +315,7 @@ const DueReportPanel = () => {
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
-          <span className="font-body text-sm text-text-secondary flex-shrink-0">Branch</span>
+          <span className="font-body text-sm text-text-secondary flex-shrink-0">{wordBranchCap()}</span>
           <CustomSelect value={branchFilter} onChange={setBranchFilter} options={branchOptions} size="sm" searchable className="w-48" />
         </div>
         <div className="flex items-center gap-2">

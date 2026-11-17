@@ -161,7 +161,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
   );
 
   const freeList = freeNow(floor?.therapists, nowMin ?? 0);
-  const walkIn = () => { const m = Math.floor((nowMin ?? 9 * 60) / 5) * 5; openCreate({ colType: freeList[0] ? 'therapist' : null, colId: freeList[0]?.therapist_id || null, hour: Math.floor(m / 60), minute: m % 60 }); };
+  const walkIn = () => { const m = Math.floor((nowMin ?? 9 * 60) / 5) * 5; openCreate({ walkIn: true, colType: freeList[0] ? 'therapist' : null, colId: freeList[0]?.therapist_id || null, hour: Math.floor(m / 60), minute: m % 60 }); };
   const frontDesk = canAct && <DeskButtons onNew={bookNow} onWalkIn={walkIn} onGo={go} extras />;
 
   const brief = (icon, children) => badNeeds ? (

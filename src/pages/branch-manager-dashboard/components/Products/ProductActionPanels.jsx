@@ -11,6 +11,7 @@ import { nepalNow } from '../../../../utils/customerDirectory';
 import { newAvgCost, npr, REMOVE_REASONS, withArticle } from '../../../../services/productsView';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { ProductThumb, Seg, BeforeAfter } from './productBits';
+import { wordBranch, wordBranchCap, wordBranches } from '../../../../utils/industryTerms';
 
 // Receive / Remove (take out or set the real count) / Move / Sell (V25). Each is a right-hand panel for one product at one branch.
 // `branchId` null (the Overall view) adds a Branch field. The server re-checks everything (role, branch, never below 0).
@@ -57,8 +58,8 @@ const SizePicker = ({ sizes, value, onChange, branchId, optionLabel, showQty = t
 };
 
 const BranchField = ({ branches, value, onChange, id = 'pa-branch' }) => (
-  <Field label="Branch" required id={id}>
-    <CustomSelect value={value} onChange={onChange} options={branches.map((b) => ({ value: b.id, label: b.name }))} placeholder="Select branch" />
+  <Field label={`${wordBranchCap()}`} required id={id}>
+    <CustomSelect value={value} onChange={onChange} options={branches.map((b) => ({ value: b.id, label: b.name }))} placeholder={`Select ${wordBranch()}`} />
   </Field>
 );
 
@@ -93,7 +94,7 @@ export const ReceivePanel = ({ product: given = null, variantId: givenVariant = 
   const total = variant ? variant.total : 0;
   const unit = cost === '' ? null : Number(cost);
   const bName = branchId ? branchName : (branches.find((b) => b.id === branch)?.name || '');
-  const why = !product ? 'Choose a product' : !product.trackStock ? 'This product does not count stock' : !branch ? 'Select the branch' : !(n > 0) ? 'Enter the quantity' : '';
+  const why = !product ? 'Choose a product' : !product.trackStock ? 'This product does not count stock' : !branch ? `Select the ${wordBranch()}` : !(n > 0) ? 'Enter the quantity' : '';
   const dirty = !!(note || cost || n !== 1);
 
   const submit = async () => {
@@ -176,7 +177,7 @@ export const RemovePanel = ({ product, variantId: givenVariant = null, initialMo
   const counted = count === '' ? null : Number(count);
   const bName = branchId ? branchName : (branches.find((b) => b.id === branch)?.name || '');
   const avg = variant?.unitCost || 0; // 0 = cost unknown: no write-off value is shown
-  const why = !branch ? 'Select the branch'
+  const why = !branch ? `Select the ${wordBranch()}`
     : mode === 'take'
       ? (!(n > 0) ? 'Enter the quantity' : n > here ? `Only ${here} here` : reasonId === 'other' && !note.trim() ? 'Explain in the note' : '')
       : (counted == null ? 'Enter the count' : counted === here ? 'The count already matches' : '');
@@ -269,7 +270,7 @@ export const MovePanel = ({ product, variantId: givenVariant = null, from: given
   // Managers can only send stock out of the branches they manage (sendFromIds); admins (null) can send from any. Anyone can send to any.
   const fromList = sendFromIds ? branches.filter((b) => sendFromIds.has(b.id)) : branches;
   const opts = (exclude, list = branches) => list.filter((b) => b.id !== exclude).map((b) => ({ value: b.id, label: variant ? `${b.name} · ${qtyAt(variant, b.id)} left` : b.name }));
-  const why = !from ? 'Choose where it comes from' : !to ? 'Choose where it goes' : from === to ? 'Pick two different branches' : !(n > 0) ? 'Enter the quantity' : n > have ? `Only ${have} at the source` : '';
+  const why = !from ? 'Choose where it comes from' : !to ? 'Choose where it goes' : from === to ? `Pick two different ${wordBranches()}` : !(n > 0) ? 'Enter the quantity' : n > have ? `Only ${have} at the source` : '';
   const dirty = !!(note || n !== 1 || (from && !givenFrom));
 
   const submit = async () => {
@@ -290,9 +291,9 @@ export const MovePanel = ({ product, variantId: givenVariant = null, from: given
         <Head product={product} sub={[product.brand, sizeLabel(variant)].filter(Boolean).join(' · ') || product.category} />
         <SizePicker sizes={sizes} value={variant?.id} onChange={setVariantId} branchId={null} optionLabel={product.optionLabel} showQty={false} />
         <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-end">
-          <Field label="From" required id="mv-from"><CustomSelect value={from} onChange={setFrom} options={opts(to, fromList)} placeholder="Branch" /></Field>
+          <Field label="From" required id="mv-from"><CustomSelect value={from} onChange={setFrom} options={opts(to, fromList)} placeholder={`${wordBranchCap()}`} /></Field>
           <Icon name="ArrowRight" size={16} className="text-[#8A8A90] mb-3" />
-          <Field label="To" required id="mv-to"><CustomSelect value={to} onChange={setTo} options={opts(from)} placeholder="Branch" /></Field>
+          <Field label="To" required id="mv-to"><CustomSelect value={to} onChange={setTo} options={opts(from)} placeholder={`${wordBranchCap()}`} /></Field>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <Field label="Quantity" required id="mv-qty"><Stepper id="mv-qty" value={qty} onChange={setQty} min={1} max={Math.max(1, have)} /></Field>
@@ -303,7 +304,7 @@ export const MovePanel = ({ product, variantId: givenVariant = null, from: given
         {from && to && from !== to && (
           <InfoRows rows={[[name(from), `${have} → ${have - n}`], [name(to), `${there} → ${there + n}`]]} />
         )}
-        <p className="text-[12.5px] text-[#8A8A90]">The move is immediate and recorded on both branches in the stock history.</p>
+        <p className="text-[12.5px] text-[#8A8A90]">The move is immediate and recorded on both {wordBranches()} in the stock history.</p>
       </FormBody>
     </PanelShell>
   );
@@ -357,7 +358,7 @@ export const SellPanel = ({ product, variantId: givenVariant = null, branchId, b
     return () => clearTimeout(t);
   }, [sold]);
 
-  const why = !branchId ? 'Pick a branch first'
+  const why = !branchId ? `Pick a ${wordBranch()} first`
     : tracked && left <= 0 ? 'Out of stock'
       : !(qty > 0) ? 'Enter the quantity'
         : tracked && qty > left ? `Only ${left} in stock`

@@ -13,6 +13,7 @@ import { useAvailabilityConflictGuard } from '../../../../hooks/useAvailabilityC
 import { rosterChange } from '../../../../services/availabilityConflicts';
 import { SHADE_STYLES } from '../../../../services/availabilityShading';
 import ModalShell from '../../../../components/ui/ModalShell';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -459,7 +460,7 @@ const RosterPanel = ({ branchId }) => {
                 <tr>
                   <td colSpan={days.length + 1} className="px-4 py-14 text-center">
                     <Icon name="Users" size={28} className="text-text-tertiary mx-auto mb-2" />
-                    <p className="font-body text-sm text-text-secondary">No staff found for this branch.</p>
+                    <p className="font-body text-sm text-text-secondary">No staff found for this {wordBranch()}.</p>
                   </td>
                 </tr>
               ) : (

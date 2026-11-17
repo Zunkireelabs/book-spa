@@ -14,6 +14,7 @@ import CustomerPanel from './CustomerPanel';
 import CustomersSpotlight from './CustomersSpotlight';
 import { useBranch } from '../../../../contexts/BranchContext';
 import { StarIcon, InSpaTag } from './customerBits';
+import { teamMemberWord } from '../../../../utils/industryTerms';
 
 const PAGE_SIZE = 25;
 const LAST_VISIT_OPTIONS = [
@@ -398,7 +399,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
   );
   const chips = (
     <>
-      <FilterChip label="Team member" value={filters.therapist} options={therapistOptions} onChange={setFilter('therapist')} selectedLabel={therapistOptions.find((o) => o.id === filters.therapist)?.label} />
+      <FilterChip label={teamMemberWord()} value={filters.therapist} options={therapistOptions} onChange={setFilter('therapist')} selectedLabel={therapistOptions.find((o) => o.id === filters.therapist)?.label} />
       <FilterChip label="Service" value={filters.service} options={serviceOptions} onChange={setFilter('service')} selectedLabel={filters.service} />
       {noMember && (
         <span className="h-7 rounded-full inline-flex items-center text-[12.5px] font-medium border border-border bg-[#FAFAF9] text-text-primary">

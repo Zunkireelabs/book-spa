@@ -12,6 +12,7 @@ import { transformBooking, toDbStatus } from '../../services/bookingTransformers
 import { friendlyError } from '../../utils/friendlyError';
 import { useIndustry } from '../../hooks/useIndustry';
 import { bookingWords } from '../../components/ui/NotificationBell';
+import { teamMemberLower, teamMemberCap } from '../../utils/industryTerms';
 
 // The Bookings page's side panel, opened from an Inbox row (ZNLY-135 V35b). Same BookingActionModal, same API calls;
 // it loads just what the panel needs (this booking's branch lists) instead of the whole list.
@@ -81,8 +82,8 @@ const InboxBookingPanel = ({ bookingId, onClose, onChanged }) => {
     const r = await guard((overrideReason) => assignTherapist({
       bookingId: id, therapistIds: ids, roomId: roomId !== undefined ? (roomId || null) : undefined, therapistRoomOverrides, companionName, companionPhone, overrideReason,
     }));
-    if (r.error) { showToast(friendlyError(r.error, 'Failed to assign team member.'), 'error'); return; }
-    showToast('Team member assigned successfully');
+    if (r.error) { showToast(friendlyError(r.error, `Failed to assign ${teamMemberLower()}.`), 'error'); return; }
+    showToast(`${teamMemberCap()} assigned successfully`);
     await after(id);
   };
   const handleRecordPayment = async (id, opts) => {

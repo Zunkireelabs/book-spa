@@ -14,6 +14,7 @@ import {
   useMinWidth, useSlashFocus, isTyping, useStickyBlock, thClass, LifecycleStrip, SearchBox, SortMenu, ClearableChip, Avatar, MiniButton, MiniLink,
   longDate, shortDate, npr, csvDownload, EmptyBlock, ErrorBlock,
 } from '../Area/listKit';
+import { wordBranchCap } from '../../../../utils/industryTerms';
 
 const uniqueOptions = (list, idOf, labelOf) => {
   const seen = new Map();
@@ -114,7 +115,7 @@ const PackageListPanel = ({ packages, today, error, onRetry, onChanged, readOnly
 
   const exportCsv = useCallback(() => {
     csvDownload(`packages-${seg || 'all'}-${today}.csv`,
-      ['Guest', 'Phone', 'Package', 'Service', 'Branch', 'Sessions', 'Left', 'Status', 'Valid until', 'Sold', 'Sold by', 'Price', 'Paid', 'Method', 'Due'],
+      ['Guest', 'Phone', 'Package', 'Service', `${wordBranchCap()}`, 'Sessions', 'Left', 'Status', 'Valid until', 'Sold', 'Sold by', 'Price', 'Paid', 'Method', 'Due'],
       filtered.map((p) => [p.guestName, phoneOf(p), p.packageTypeName, p.serviceName, p.branchName, p.sessionsTotal, p.sessionsRemaining,
         displayStatusLabel(p, today), p.expiryDate, p.issuedDate, p.issuedByName, p.finalAmount ?? p.paidAmount, p.paidAmount, p.paymentMethod || '', p.dueAmount || 0]));
   }, [filtered, seg, today]);
@@ -163,7 +164,7 @@ const PackageListPanel = ({ packages, today, error, onRetry, onChanged, readOnly
       <FilterChip label="Package type" value={filters.type} options={options.type} onChange={(v) => patch({ pt: v })} selectedLabel={chipValue('type')} />
       <FilterChip label="Service" value={filters.service} options={options.service} onChange={(v) => patch({ sv: v })} selectedLabel={chipValue('service')} />
       <FilterChip label="Sold by" value={filters.seller} options={options.seller} onChange={(v) => patch({ by: v })} selectedLabel={chipValue('seller')} />
-      {isOverall && <FilterChip label="Branch" value={filters.branch} options={options.branch} onChange={(v) => patch({ br: v })} selectedLabel={chipValue('branch')} />}
+      {isOverall && <FilterChip label={`${wordBranchCap()}`} value={filters.branch} options={options.branch} onChange={(v) => patch({ br: v })} selectedLabel={chipValue('branch')} />}
       {hasDue && <ClearableChip label="Has due" onClear={() => patch({ due: '' })} />}
     </>
   );
@@ -306,7 +307,7 @@ const PackageListPanel = ({ packages, today, error, onRetry, onChanged, readOnly
               {showPackage && <th scope="col" className={`${th} text-left`} style={thTop}>Package</th>}
               <th scope="col" className={`${th} text-left`} style={thTop}>Sessions</th>
               {showValid && <th scope="col" className={`${th} text-left`} style={thTop}>Valid until</th>}
-              {showBranch && <th scope="col" className={`${th} text-left`} style={thTop}>Branch</th>}
+              {showBranch && <th scope="col" className={`${th} text-left`} style={thTop}>{wordBranchCap()}</th>}
               {showPaid && <th scope="col" className={`${th} text-right pr-3`} style={thTop}>Paid</th>}
               {isSm && <th scope="col" className={`${th} text-left pl-2`} style={thTop}>Status</th>}
               <th scope="col" className={th} style={thTop}><span className="sr-only">Actions</span></th>

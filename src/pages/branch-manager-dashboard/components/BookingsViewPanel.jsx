@@ -31,6 +31,8 @@ import NeedsYouNow from './Bookings/NeedsYouNow';
 import { isClosedByBlocks } from '../../../utils/todayStatusLine';
 import FreeNowChip from './Bookings/FreeNowChip';
 import BookingRow, { COLUMN_DEFS } from './Bookings/BookingRow';
+import { useIndustry } from '../../../hooks/useIndustry';
+import { teamMemberCap, teamMemberLower, teamMemberWord } from '../../../utils/industryTerms';
 
 const COLS_KEY = 'zennly.bookings.columns';
 const readCols = () => { try { return { service: true, therapist: true, amount: true, ...JSON.parse(localStorage.getItem(COLS_KEY) || '{}') }; } catch { return { service: true, therapist: true, amount: true }; } };
@@ -72,6 +74,7 @@ const BookingsViewPanel = ({ branchId }) => {
   const isTodayView = range.from === range.to && range.from === today && !isOverall;
   const nowMin = toMin(nowHM);
   const needCtx = useMemo(() => ({ date: today, nowMin }), [today, nowMin]);
+  const { enableRooms, locationLabel } = useIndustry();
   const filters = { therapist: sp.get('th') || '', service: sp.get('sv') || '', room: sp.get('rm') || '' };
   const query = sp.get('q') || '';
   const paramsRef = useRef(sp);
@@ -359,8 +362,8 @@ const BookingsViewPanel = ({ branchId }) => {
     const result = await guard((overrideReason) => assignTherapist({
       bookingId, therapistIds: ids, roomId: roomId !== undefined ? (roomId || null) : undefined, therapistRoomOverrides, companionName, companionPhone, overrideReason,
     }));
-    if (result.error) { showToast(friendlyError(result.error, 'Failed to assign team member.'), 'error'); return; }
-    showToast('Team member assigned successfully');
+    if (result.error) { showToast(friendlyError(result.error, `Failed to assign ${teamMemberLower()}.`), 'error'); return; }
+    showToast(`${teamMemberCap()} assigned successfully`);
     await load();
     await refreshSelected(bookingId);
   };
@@ -401,10 +404,10 @@ const BookingsViewPanel = ({ branchId }) => {
   };
 
   const exportCsv = () => {
-    const head = ['Date', 'Time', 'Booking', 'Customer', 'Phone', 'Service', 'Team member', 'Room', 'Status', 'Price', 'Paid', 'Due'];
+    const head = ['Date', 'Time', 'Booking', 'Customer', 'Phone', 'Service', teamMemberWord(), ...(enableRooms ? [locationLabel] : []), 'Status', 'Price', 'Paid', 'Due'];
     const lines = visible.map((b) => {
       const m = moneyOf(b, ctx);
-      return [b.date, b.time, b.id, b.customerName, b.customerPhone, b.service, (b.therapists || []).map((t) => t.name).join(' + '), b.roomName, b.status, m.price, m.paid, m.due].map(csvEscape).join(',');
+      return [b.date, b.time, b.id, b.customerName, b.customerPhone, b.service, (b.therapists || []).map((t) => t.name).join(' + '), ...(enableRooms ? [b.roomName] : []), b.status, m.price, m.paid, m.due].map(csvEscape).join(',');
     });
     const blob = new Blob([[head.map(csvEscape).join(','), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
@@ -522,9 +525,9 @@ const BookingsViewPanel = ({ branchId }) => {
   );
   const chips = (
     <>
-      <FilterChip label="Team member" value={filters.therapist} options={therapistOptions} onChange={setFilter('th')} selectedLabel={therapistOptions.find((o) => o.id === filters.therapist)?.label} />
+      <FilterChip label={teamMemberWord()} value={filters.therapist} options={therapistOptions} onChange={setFilter('th')} selectedLabel={therapistOptions.find((o) => o.id === filters.therapist)?.label} />
       <FilterChip label="Service" value={filters.service} options={serviceOptions} onChange={setFilter('sv')} selectedLabel={serviceOptions.find((o) => o.id === filters.service)?.label} />
-      <FilterChip label="Room" value={filters.room} options={roomOptions} onChange={setFilter('rm')} selectedLabel={roomOptions.find((o) => o.id === filters.room)?.label} />
+      {enableRooms && <FilterChip label={locationLabel} value={filters.room} options={roomOptions} onChange={setFilter('rm')} selectedLabel={roomOptions.find((o) => o.id === filters.room)?.label} />}
     </>
   );
   const sortCols = (
@@ -735,7 +738,7 @@ const BookingsViewPanel = ({ branchId }) => {
                     <th className={`${th} text-left pl-2`}>Time</th>
                     <th className={`${th} text-left`}>Customer</th>
                     {isMd && columns.service && <th className={`${th} text-left`}>Service</th>}
-                    {isLg && columns.therapist && <th className={`${th} text-left`}>Team member</th>}
+                    {isLg && columns.therapist && <th className={`${th} text-left`}>{teamMemberWord()}</th>}
                     {isSm && <th className={`${th} text-left`}>Status</th>}
                     {isSm && columns.amount && <th className={`${th} text-right pr-4`}>Amount</th>}
                     <th className={th} />

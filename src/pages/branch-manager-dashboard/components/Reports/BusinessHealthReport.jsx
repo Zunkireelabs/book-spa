@@ -10,6 +10,7 @@ import ReportFrame, { DeltaChip, InsightList } from './ReportFrame';
 import { isReportOpenable } from './reportRegistry';
 import { useBusinessHealth } from './useBusinessHealth';
 import { buildTiles, buildBridge, hasPreviousData, methodSlices, bookingFunnel, isEmptyPeriod, exportRows, num, pctText, DEFINITIONS } from './businessHealthView';
+import { wordBranch, wordBranchCap, wordBranches, wordBranchesCap } from '../../../../utils/industryTerms';
 
 const Card = ({ title, meta, children }) => (
   <div className="bg-surface border border-border rounded-spa-lg">
@@ -122,13 +123,13 @@ const BranchesTable = ({ data, onPickBranch }) => {
     <div className="overflow-x-auto">
       <table className="w-full border-collapse">
         <thead>
-          <tr>{['Branch', 'Sales', 'vs prev', 'Bookings', 'Avg ticket', 'Busy', 'Return rate', 'Owed'].map((h, i) => (
+          <tr>{[`${wordBranchCap()}`, 'Sales', 'vs prev', 'Bookings', 'Avg ticket', 'Busy', 'Return rate', 'Owed'].map((h, i) => (
             <th key={h} className={`px-3.5 py-2 text-[11px] font-medium text-text-tertiary bg-background border-b border-border ${i === 0 ? 'text-left' : 'text-right'}`}>{h}</th>
           ))}</tr>
         </thead>
         <tbody>
           {rows.map((b) => line(b.branch_id, b.name, b.current, b.previous, false, () => onPickBranch(b.branch_id)))}
-          {line('all', 'All branches', data.current, data.previous, true, null)}
+          {line('all', `All ${wordBranches()}`, data.current, data.previous, true, null)}
         </tbody>
       </table>
     </div>
@@ -158,7 +159,7 @@ const BusinessHealthReport = ({ periodId, onPeriod, custom, onCustom, reopen, on
       range={range} periodId={periodId} onPeriod={onPeriod} onCustom={onCustom}
       previousNote={ready && !hasPreviousData(data) ? `No data for the previous ${range.days} days yet.` : null}
       tiles={ready ? buildTiles(data) : []}
-      tabs={ready && showBranches ? [{ id: 'summary', label: 'Summary' }, { id: 'branches', label: 'Branches' }] : []} activeTab={activeTab} onTab={setTab}
+      tabs={ready && showBranches ? [{ id: 'summary', label: 'Summary' }, { id: 'branches', label: `${wordBranchesCap()}` }] : []} activeTab={activeTab} onTab={setTab}
       definitions={DEFINITIONS}
       isFavourite={isFavourite} onToggleFav={onToggleFav}
       onExport={ready ? () => downloadCsv(`business-health-${range.from}-to-${range.to}${activeTab === 'branches' ? '-branches' : ''}.csv`, exportRows(data, activeTab, range.label)) : null}
@@ -192,7 +193,7 @@ const BusinessHealthReport = ({ periodId, onPeriod, custom, onCustom, reopen, on
           <div className="bg-surface border border-border rounded-spa-lg overflow-hidden">
             <BranchesTable data={data} onPickBranch={(id) => { switchBranch(id); setTab('summary'); }} />
           </div>
-          <p className="text-xs text-text-tertiary flex items-center gap-1.5"><Icon name="MousePointerClick" size={12} /> Click a branch to open its Summary. Branch rows add up to All branches.</p>
+          <p className="text-xs text-text-tertiary flex items-center gap-1.5"><Icon name="MousePointerClick" size={12} /> Click a {wordBranch()} to open its Summary. {wordBranchCap()} rows add up to All {wordBranches()}.</p>
         </div>
       )}
     </ReportFrame>

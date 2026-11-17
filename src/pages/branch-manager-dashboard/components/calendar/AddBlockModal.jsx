@@ -8,6 +8,9 @@ import {
   PanelShell, FormBody, Field, TextInput, NumberInput, SelectField, Segmented, TabBar, DateField, TimeField,
   InlineError, InlineWarning, format12h, addMinutes, formatShortDate,
 } from '../../../../components/ui/PanelFormKit';
+import { staffWord } from '../../../../utils/industryTerms';
+import { useIndustry } from '../../../../hooks/useIndustry';
+import { teamMemberLower, teamMemberWord } from '../../../../utils/industryTerms';
 
 const TABS = [
   { id: 'details', label: 'Details', icon: 'FileText' },
@@ -37,6 +40,8 @@ const AddBlockModal = ({
   onClose, onSuccess, onRoomOnlyChange, onDraftChange,
 }) => {
   const { orgId } = useOrg();
+  const { enableRooms, locationLabel } = useIndustry();
+  const roomWord = locationLabel.toLowerCase();
   const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
   const [activeTab, setActiveTab] = useState('details');
 
@@ -154,7 +159,7 @@ const AddBlockModal = ({
 
   const reason = !date ? 'Pick a date' : !startTime ? 'Pick a start time'
     : !(Number(durationMinutes) > 0) ? 'Enter a duration'
-    : assigneeType === 'therapist' && !therapistId ? 'Select a team member' : '';
+    : assigneeType === 'therapist' && !therapistId ? `Select a ${teamMemberLower()}` : '';
 
   const moveOverride = moveConfirm ? (
     <div role="alertdialog" aria-label="Move block" className="flex items-center gap-3">
@@ -187,15 +192,15 @@ const AddBlockModal = ({
         {activeTab === 'details' && (
           <>
             <Segmented
-              options={[['therapist', 'Team member'], ['location', 'Whole location']]}
+              options={[['therapist', teamMemberWord()], ['location', 'Whole location']]}
               value={assigneeType}
               onChange={setAssigneeType}
             />
 
             {assigneeType === 'therapist' && (
-              <Field label="Team member" required>
+              <Field label={teamMemberWord()} required>
                 <SelectField
-                  placeholder="Select team member..."
+                  placeholder={`Select ${teamMemberLower()}...`}
                   options={(therapists || []).map((t) => ({ value: t.id, label: t.name }))}
                   value={therapistId}
                   onChange={setTherapistId}
@@ -203,17 +208,19 @@ const AddBlockModal = ({
               </Field>
             )}
 
+            {enableRooms && (
             <Field
-              label="Room (optional)"
-              hint={assigneeType === 'location' && roomId ? 'Blocks this room for any therapist (shown in Room view).' : undefined}
+              label={`${locationLabel} (optional)`}
+              hint={assigneeType === 'location' && roomId ? `Blocks this ${roomWord} for any ${staffWord()} (shown in ${locationLabel} view).` : undefined}
             >
               <SelectField
-                placeholder="No specific room..."
-                options={[{ value: '', label: 'No specific room' }, ...(rooms || []).map((r) => ({ value: r.id, label: r.name }))]}
+                placeholder={`No specific ${roomWord}...`}
+                options={[{ value: '', label: `No specific ${roomWord}` }, ...(rooms || []).map((r) => ({ value: r.id, label: r.name }))]}
                 value={roomId}
                 onChange={setRoomId}
               />
             </Field>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <DateField label="Date" required value={date} onChange={setDate} />

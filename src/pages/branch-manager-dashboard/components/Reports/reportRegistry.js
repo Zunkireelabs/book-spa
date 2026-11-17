@@ -1,4 +1,5 @@
 import { CUSTOMER_REFERRALS_ENABLED } from 'lib/featureFlags';
+import { localizeBranch } from '../../../../utils/industryTerms';
 
 // One source of truth for the Reports area (ZNLY-159): the internal menu, the home, the sidebar's active check, the command palette and the
 // dashboard's renderer all read this. Roles and flags mirror the sidebar's former "Reports" group exactly.
@@ -53,7 +54,7 @@ export const REPORTS = [
 
 // {staff} -> "Therapist", {staffs} -> "Therapists" (the org's own words). Without labels it falls back to the generic word.
 export const fillLabels = (text, { staffLabel, staffLabelPlural } = {}) =>
-  String(text || '').replace(/\{staffs\}/g, (staffLabelPlural || 'Staff').toLowerCase()).replace(/\{staff\}/g, staffLabel || 'Staff');
+  localizeBranch(String(text || '').replace(/\{staffs\}/g, (staffLabelPlural || 'Staff').toLowerCase()).replace(/\{staff\}/g, staffLabel || 'Staff'));
 
 const entryViews = (r) => [r.view, ...(r.aliases || []), ...(r.tabs || []).map((t) => t.view)];
 

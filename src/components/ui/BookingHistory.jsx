@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Icon from '../AppIcon';
 import { fetchAuditLogs } from '../../services/api';
+import { humanizePaymentMethod } from '../../services/paymentMethods';
 
 // Booking history (managers/admins; audit_logs is not readable by staff). Shows the staff-availability override rows
 // written by migration-353's guard: what was skipped, the reason the manager gave, who and when (panel C, right).
@@ -10,8 +11,15 @@ const when = (iso) => {
   } catch { return ''; }
 };
 
+const npr = (n) => `NPR ${Number(n).toLocaleString('en-IN')}`;
+
 const describe = (log) => {
   const d = log.new_data || {};
+  if (log.table_name === 'payments' && log.action_type === 'ADMIN_CORRECTION') {
+    const o = log.old_data || {};
+    if (d.payment_mode !== undefined) return { icon: 'PenLine', title: `Payment method corrected: ${humanizePaymentMethod(o.payment_mode)} → ${humanizePaymentMethod(d.payment_mode)}`, reason: log.reason };
+    if (d.amount !== undefined) return { icon: 'PenLine', title: `Payment amount corrected: ${npr(o.amount)} → ${npr(d.amount)}`, reason: log.reason };
+  }
   switch (log.action_type) {
     case 'AVAILABILITY_OVERRIDE':
       return { icon: 'ShieldAlert', title: `Booked outside availability (${d.message || d.code})`, reason: d.override_reason };
@@ -24,17 +32,25 @@ const describe = (log) => {
   }
 };
 
-const BookingHistory = ({ bookingId }) => {
+const BookingHistory = ({ bookingId, paymentIds = [], reloadKey = 0 }) => {
   const [rows, setRows] = useState([]);
+  const paymentKey = paymentIds.join(',');
 
   useEffect(() => {
     let cancelled = false;
     if (!bookingId) return undefined;
-    fetchAuditLogs({ tableName: 'bookings', recordId: bookingId, limit: 30 }).then(({ data }) => {
-      if (!cancelled) setRows(data || []);
+    // The booking's own rows, plus any admin correction on one of its payments (those are logged against the payment).
+    Promise.all([
+      fetchAuditLogs({ tableName: 'bookings', recordId: bookingId, limit: 30 }),
+      ...paymentKey.split(',').filter(Boolean).map((id) => fetchAuditLogs({ tableName: 'payments', recordId: id, limit: 10 })),
+    ]).then((results) => {
+      if (cancelled) return;
+      const all = results.flatMap((r) => r.data || []);
+      all.sort((a, b) => String(b.changed_at).localeCompare(String(a.changed_at)));
+      setRows(all);
     });
     return () => { cancelled = true; };
-  }, [bookingId]);
+  }, [bookingId, paymentKey, reloadKey]);
 
   const entries = rows.map((log) => ({ log, info: describe(log) })).filter((e) => e.info);
   if (entries.length === 0) return null;

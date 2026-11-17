@@ -5,6 +5,7 @@ import { Card, GroupBand, Row, SuggestionsCard, npr, sharePct, pctChange, plural
 import { approveDiscount, fetchNeeds, rejectDiscount } from '../../services/api';
 import { adminDiscounts, groupNeeds, summarizeWaiting } from '../../lib/dashboardNeeds';
 import { friendlyError } from '../../utils/friendlyError';
+import { wordBranch, wordBranchCap, wordBranches, wordBranchesCap } from '../../utils/industryTerms';
 
 const waited = (min) => (min >= 24 * 60 ? `${Math.floor(min / 1440)}d` : min >= 60 ? `${Math.floor(min / 60)}h` : `${min}m`);
 const nepalDay = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' });
@@ -24,8 +25,8 @@ const Change = ({ pct }) => (pct == null ? <span className="text-gray-400">—</
  * row per kind per branch, older than 2h), Suggestions placeholder. `data` is get_dashboard for every branch.
  */
 const BusinessView = ({ data, dataError, branchIds, today, role, onOpenBranch, onReload }) => {
-  const loc = 'branch'; // the app's own word for a site; useIndustry's locationLabel means rooms here
-  const locs = 'branches';
+  const loc = wordBranch(); // the app's own word for a site; useIndustry's locationLabel means rooms here
+  const locs = wordBranches();
   const [groups, setGroups] = useState([]);
   const [needsError, setNeedsError] = useState(false);
   const [busyId, setBusyId] = useState(null);
@@ -81,12 +82,12 @@ const BusinessView = ({ data, dataError, branchIds, today, role, onOpenBranch, o
               {!needsError && <>{sep}<span className={needCount ? 'text-warning font-medium' : ''}>{needCount === 0 ? 'nothing needs someone' : `${needCount} ${needCount === 1 ? 'thing needs' : 'things need'} someone`}</span></>}
             </div>
           </div>
-          <Card icon="Building2" title="Branches today" meta={`Click a row to open that ${loc}`}>
+          <Card icon="Building2" title={`${wordBranchesCap()} today`} meta={`Click a row to open that ${loc}`}>
             {rows.length === 0 ? <p className="text-sm text-gray-500">No {locs} yet.</p> : (
               <div className="overflow-x-auto -mx-4 -my-4">
                 <table className="w-full text-sm">
                   <thead><tr className="text-[11px] text-gray-500 bg-background border-b border-gray-100">
-                    <th className="px-3.5 py-2 font-medium text-left">Branch</th><th className="px-3.5 py-2 font-medium text-right">Now</th>
+                    <th className="px-3.5 py-2 font-medium text-left">{wordBranchCap()}</th><th className="px-3.5 py-2 font-medium text-right">Now</th>
                     <th className="px-3.5 py-2 font-medium text-right">Bookings</th>
                     {canMoney && <th className="px-3.5 py-2 font-medium text-right">Taken today</th>}
                     {canMoney && <th className="px-3.5 py-2 font-medium text-right whitespace-nowrap">vs last {weekday.slice(0, 3)}</th>}

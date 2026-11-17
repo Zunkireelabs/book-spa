@@ -17,7 +17,7 @@ import TimeBoxInput from './TimeBoxInput';
 import { paymentStatusLabel } from '../../utils/paymentStatusLabel';
 const payTone = (b) => ({ success: 'text-success', neutral: 'text-text-secondary', warning: 'text-warning' })[paymentStatusLabel(b).tone];
 import InvoicePrintModal from './InvoicePrintModal';
-import { adminCorrectBooking, correctPaymentMode, adminDeleteBooking, correctPaymentAmount, fetchMemberDiscountContext, applyMemberDiscount, fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, fetchBookingProductSales, refundProductSale, recordTip, getCustomerFirstBookingFlag, fetchInvoiceByBookingId } from '../../services/api';
+import { adminCorrectBooking, correctPaymentMode, adminDeleteBooking, correctPaymentAmount, fetchMemberDiscountContext, applyMemberDiscount, fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, fetchBookingProductSales, refundProductSale, recordTip, getCustomerFirstBookingFlag, fetchInvoiceByBookingId, staffCanRequestDiscountApproval } from '../../services/api';
 import { excludeRelatedFromPreviousDue, toDbStatus } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
@@ -33,6 +33,8 @@ import { Segmented } from './PanelFormKit';
 import { memberDiscountFor } from '../../services/memberDiscount';
 import { nepalNow } from '../../utils/customerDirectory';
 import { MEMBERSHIP_ENABLED, PRODUCTS_ENABLED } from '../../lib/featureFlags';
+import { humanizePaymentMethod } from '../../services/paymentMethods';
+import { wordBranchCap } from '../../utils/industryTerms';
 
 function getNepalNow() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
@@ -392,6 +394,8 @@ const BookingActionModal = ({
   // bundling (see fetchGroupBookings). Keeps a paid sibling
   // visible from every other sibling's modal instead of silently vanishing.
   const [groupSiblings, setGroupSiblings] = useState([]);
+  const [historyReload, setHistoryReload] = useState(0);
+  const [correctionNote, setCorrectionNote] = useState(null);
   const [dueHolderSuggestions, setDueHolderSuggestions] = useState([]);
   const [selectedDiscountIds, setSelectedDiscountIds] = useState(new Set()); // includes current booking ID by default
   // Tracks the `activeTab:bookingId` pair the discount-selection state was last reset for, so a
@@ -2389,7 +2393,14 @@ const BookingActionModal = ({
 
                 {/* History: availability overrides (reason, code, who) for managers/admins */}
                 {!isEditing && (userRole === 'manager' || userRole === 'admin') && booking?.bookingId && (
-                  <BookingHistory bookingId={booking.bookingId} />
+                  <BookingHistory bookingId={booking.bookingId} paymentIds={(booking.payments || []).map((p) => p.id).filter(Boolean)} reloadKey={historyReload} />
+                )}
+
+                {correctionNote && (
+                  <div role="status" className="flex items-center gap-2 p-3 bg-success/10 border border-success/20 rounded-spa text-success text-sm">
+                    <Icon name="CheckCircle2" size={16} />
+                    <span>{correctionNote}</span>
+                  </div>
                 )}
 
                 {/* Action error (status update failures) */}
@@ -3108,7 +3119,7 @@ const BookingActionModal = ({
                     {/* Role limit */}
                     <p className="flex items-start gap-2 text-[12px] text-[#8A8A90]" data-limit-note>
                       <Icon name="Info" size={13} className="mt-0.5 flex-shrink-0" />
-                      <span>You ({userRole}) can give up to {discountLimitLabel}.{discountMaxPercent < 100 ? ' More than your limit goes to a manager for approval.' : ''}{memberCardOn ? ' This replaces the member discount.' : ''}</span>
+                      <span>You ({userRole}) can give up to {discountLimitLabel}.{discountMaxPercent < 100 && staffCanRequestDiscountApproval ? ' More than your limit goes to a manager for approval.' : ''}{memberCardOn ? ' This replaces the member discount.' : ''}</span>
                     </p>
 
                     {/* Request routing — only when discount exceeds the user's limit */}
@@ -3152,7 +3163,7 @@ const BookingActionModal = ({
                               onChange={(val) => { setSelectedApprover(val); setDiscountError(null); }}
                               options={approvers.map(a => ({
                                 value: a.id,
-                                label: `${a.fullName} (${a.role === 'admin' ? 'Admin' : 'Branch Manager'})`,
+                                label: `${a.fullName} (${a.role === 'admin' ? 'Admin' : `${wordBranchCap()} Manager`})`,
                               }))}
                               placeholder="Select an approver…"
                               size="md"
@@ -3318,7 +3329,7 @@ const BookingActionModal = ({
                             </div>
                           ) : (
                             <div key={p.id} className="flex items-center justify-between pl-2 text-[11px] gap-2">
-                              <span className="text-text-tertiary">{p.paymentMode}</span>
+                              <span className="text-text-tertiary">{humanizePaymentMethod(p.paymentMode)}</span>
                               <div className="flex items-center space-x-1.5">
                                 <span className="font-data text-text-tertiary">NPR {Number(p.amount).toLocaleString('en-IN')}</span>
                                 {userRole === 'admin' && (
@@ -3335,8 +3346,8 @@ const BookingActionModal = ({
                             </div>
                           )
                         ) : (
-                          <div key={`${p.paymentMode}-${p.amount}`} className="flex items-center justify-between pl-2 text-[11px]">
-                            <span className="text-text-tertiary">{p.paymentMode}</span>
+                          <div key={`${humanizePaymentMethod(p.paymentMode)}-${p.amount}`} className="flex items-center justify-between pl-2 text-[11px]">
+                            <span className="text-text-tertiary">{humanizePaymentMethod(p.paymentMode)}</span>
                             <span className="font-data text-text-tertiary">NPR {Number(p.amount).toLocaleString('en-IN')}</span>
                           </div>
                         )
@@ -3420,7 +3431,7 @@ const BookingActionModal = ({
                   <div className="space-y-2">
                     <label className="font-body font-body-medium text-xs text-text-secondary uppercase flex items-center gap-1.5">
                       <Icon name="CheckCircle2" size={13} className="text-success" />
-                      Already paid in this group
+                      {booking?.bookingGroupId ? 'Already paid in this group' : 'Already paid for this customer today'}
                     </label>
                     <div className="border border-success/20 bg-success/5 rounded-spa divide-y divide-success/10 overflow-hidden">
                       {groupSiblings.filter(gb => gb.payment_status === 'paid').map(gb => (
@@ -3600,8 +3611,8 @@ const BookingActionModal = ({
                           )}
                         </div>
                       ) : (
-                        <div key={p.id || `${p.paymentMode}-${p.amount}`} className="flex items-center justify-between px-3 py-1.5 text-xs gap-2">
-                          <span className="text-text-secondary">{p.paymentMode}</span>
+                        <div key={p.id || `${humanizePaymentMethod(p.paymentMode)}-${p.amount}`} className="flex items-center justify-between px-3 py-1.5 text-xs gap-2">
+                          <span className="text-text-secondary">{humanizePaymentMethod(p.paymentMode)}</span>
                             <div className="flex items-center space-x-2">
                               <span className="font-data text-text-primary">NPR {Number(p.amount).toLocaleString('en-IN')}</span>
                               {userRole === 'admin' && p.id && (
@@ -3977,6 +3988,9 @@ const BookingActionModal = ({
           onClose={() => setCorrectingPayment(null)}
           onSuccess={() => {
             setCorrectingPayment(null);
+            setCorrectionNote('Payment corrected. It is on the booking history.');
+            setHistoryReload((n) => n + 1);
+            setTimeout(() => setCorrectionNote(null), 4000);
             if (isPanel) onRefreshBooking?.(booking.bookingId);
             else if (onClose) onClose();
           }}

@@ -6,6 +6,7 @@ import { fetchAttendanceChanges, fetchAttendancePayContext } from '../../../../s
 import { defaultHalfDayOff, validateHalfDay } from '../../../../services/availabilityConflicts';
 import { diffPatch, needsReason, payEffect, isHalfDayStatus, LEAVE_STATUSES } from '../../../../services/attendanceView';
 import { Avatar } from '../Area/listKit';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 const MODES = [['present', 'Present'], ['half', 'Half day'], ['leave', 'Leave'], ['off', 'Off'], ['absent', 'Absent']];
 const LEAVE_TYPES = [{ value: 'Annual Leave', label: 'Annual leave' }, { value: 'Sick Leave', label: 'Sick leave' }];
@@ -179,7 +180,7 @@ const AttendanceSidePanel = ({ open, onClose, person, date, today, shift, initia
   const startDelete = (q) => { setDelId(q.id); setEditId(null); setAdding(false); resetBox(); };
   const cancelPunch = () => { setEditId(null); setAdding(false); setDelId(null); resetBox(); };
   const boxOpen = editId != null || adding || delId != null;
-  const bn = (id) => branchNameById[id] || 'This branch';
+  const bn = (id) => branchNameById[id] || `This ${wordBranch()}`;
   // A rejected punch, in plain words about this person's day (never the raw error).
   const plainPunchError = (err, skipId, inHM, outHM) => {
     if (err.code === 'PUNCH_FUTURE') return `A ${/check-out/.test(err.message) ? 'check-out' : 'check-in'} can't be later than now (${fmt(nowHM())})`;

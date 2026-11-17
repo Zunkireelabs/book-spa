@@ -1,5 +1,6 @@
 import { OWN_BOOKINGS_HEADER } from 'services/dataMasking';
 import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED, PRODUCTS_ENABLED } from 'lib/featureFlags';
+import { wordBranch, wordBranches } from '../../../../utils/industryTerms';
 
 // Small areas (2–4 pages) get tabs at the top of the page; each tab is an existing `?view=` URL, so every view URL keeps working.
 // Roles, flags and `overallHidden` mirror the sidebar entries these tabs replace.
@@ -13,7 +14,7 @@ export const AREAS = [
   {
     id: 'bookings',
     title: 'Bookings',
-    description: ({ branchName, isOverall, ownOnly }) => ownOnly ? OWN_BOOKINGS_HEADER : `Every booking at ${isOverall ? 'all branches' : (branchName || 'this branch')}.`,
+    description: ({ branchName, isOverall, ownOnly }) => ownOnly ? OWN_BOOKINGS_HEADER : `Every booking at ${isOverall ? `all ${wordBranches()}` : (branchName || `this ${wordBranch()}`)}.`,
     tabs: [
       { view: 'bookings', label: 'All bookings', roles: ALL },
       { view: 'new-booking', label: 'New booking', roles: ['staff', 'manager', 'admin'], overallHidden: true },

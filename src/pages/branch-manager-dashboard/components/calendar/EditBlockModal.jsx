@@ -8,6 +8,8 @@ import {
   PanelShell, FormBody, Field, TextInput, NumberInput, SelectField, Segmented, TabBar, DateField, TimeField,
   InlineError, InlineWarning, format12h, addMinutes, formatShortDate,
 } from '../../../../components/ui/PanelFormKit';
+import { useIndustry } from '../../../../hooks/useIndustry';
+import { teamMemberLower, teamMemberWord } from '../../../../utils/industryTerms';
 
 const TABS = [
   { id: 'details', label: 'Details', icon: 'FileText' },
@@ -39,6 +41,8 @@ const EditBlockModal = ({
   onClose, onSuccess, onDraftChange,
 }) => {
   const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
+  const { enableRooms, locationLabel } = useIndustry();
+  const roomWord = locationLabel.toLowerCase();
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('details');
 
@@ -150,7 +154,7 @@ const EditBlockModal = ({
   const validate = () => {
     if (!date || !startTime) { setError('Select a date and start time.'); return false; }
     if (!(Number(durationMinutes) > 0)) { setError('Enter a valid duration.'); return false; }
-    if (assigneeType === 'therapist' && !therapistId) { setError('Select a team member.'); return false; }
+    if (assigneeType === 'therapist' && !therapistId) { setError(`Select a ${teamMemberLower()}.`); return false; }
     return true;
   };
 
@@ -247,7 +251,7 @@ const EditBlockModal = ({
 
   const reason = !date ? 'Pick a date' : !startTime ? 'Pick a start time'
     : !(Number(durationMinutes) > 0) ? 'Enter a duration'
-    : assigneeType === 'therapist' && !therapistId ? 'Select a team member' : '';
+    : assigneeType === 'therapist' && !therapistId ? `Select a ${teamMemberLower()}` : '';
 
   return (
     <>
@@ -288,15 +292,15 @@ const EditBlockModal = ({
             {activeTab === 'details' && (
               <>
                 <Segmented
-                  options={[['therapist', 'Team member'], ['location', 'Whole location']]}
+                  options={[['therapist', teamMemberWord()], ['location', 'Whole location']]}
                   value={assigneeType}
                   onChange={setAssigneeType}
                 />
 
                 {assigneeType === 'therapist' && (
-                  <Field label="Team member" required>
+                  <Field label={teamMemberWord()} required>
                     <SelectField
-                      placeholder="Select team member..."
+                      placeholder={`Select ${teamMemberLower()}...`}
                       options={(therapists || []).map((t) => ({ value: t.id, label: t.name }))}
                       value={therapistId}
                       onChange={setTherapistId}
@@ -304,14 +308,16 @@ const EditBlockModal = ({
                   </Field>
                 )}
 
-                <Field label="Room (optional)">
+                {enableRooms && (
+                <Field label={`${locationLabel} (optional)`}>
                   <SelectField
-                    placeholder="No specific room..."
-                    options={[{ value: '', label: 'No specific room' }, ...(rooms || []).map((r) => ({ value: r.id, label: r.name }))]}
+                    placeholder={`No specific ${roomWord}...`}
+                    options={[{ value: '', label: `No specific ${roomWord}` }, ...(rooms || []).map((r) => ({ value: r.id, label: r.name }))]}
                     value={roomId}
                     onChange={setRoomId}
                   />
                 </Field>
+                )}
 
                 <div className="grid grid-cols-2 gap-3">
                   <DateField label="Date" required value={date} onChange={setDate} />

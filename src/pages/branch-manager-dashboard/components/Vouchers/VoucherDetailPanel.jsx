@@ -25,6 +25,7 @@ import { friendlyError } from '../../../../utils/friendlyError';
 import { Avatar, StatusPill, tileDate, MiniButton } from '../Area/listKit';
 import { TicketCard, useCopy } from './voucherBits';
 import { ExtendView, ContactView, CouponView } from './VoucherActionViews';
+import { wordBranch, wordBranchCap } from '../../../../utils/industryTerms';
 
 const formatNPR = (amount) => `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
 const SECTION = 'text-[11.5px] text-[#8A8A90] font-medium uppercase tracking-[.05em] mb-2';
@@ -53,13 +54,13 @@ const ClaimView = ({ voucher, branches, services, onBack, onClose, onDone, width
   const submitRef = useRef(null);
 
   const amountNum = Number(amount) || 0;
-  const reason = !branchId ? 'Select the branch' : !(amountNum > 0) ? 'Enter the amount' : amountNum > remaining ? `Only ${formatNPR(remaining)} remaining` : '';
+  const reason = !branchId ? `Select the ${wordBranch()}` : !(amountNum > 0) ? 'Enter the amount' : amountNum > remaining ? `Only ${formatNPR(remaining)} remaining` : '';
   const dirty = !!(notes || service || guest !== (voucher.guestName || '') || amount !== String(remaining) || branchId !== (!isOverall && currentBranchId ? currentBranchId : ''));
 
   const submit = async () => {
     if (busyRef.current) return;
     const e = {};
-    if (!branchId) e.branch = 'Select the branch where this is being claimed.';
+    if (!branchId) e.branch = `Select the ${wordBranch()} where this is being claimed.`;
     if (!(amountNum > 0)) e.amount = 'Amount claimed must be greater than zero.';
     else if (amountNum > remaining) e.amount = `Amount exceeds the remaining balance of ${formatNPR(remaining)}.`;
     setErrors(e);
@@ -96,8 +97,8 @@ const ClaimView = ({ voucher, branches, services, onBack, onClose, onDone, width
         <Field label="Amount" required id="vc-amount" error={errors.amount} hint="Use less than the full value to leave the rest for another visit.">
           <MoneyInput {...controlA11y('vc-amount', errors.amount)} error={!!errors.amount} value={amount} onChange={setAmount} />
         </Field>
-        <Field label="Branch" required id="vc-branch" error={errors.branch}>
-          <CustomSelect value={branchId} onChange={setBranchId} options={branches.map((b) => ({ value: b.id, label: b.name }))} placeholder="Select branch" error={!!errors.branch} />
+        <Field label={`${wordBranchCap()}`} required id="vc-branch" error={errors.branch}>
+          <CustomSelect value={branchId} onChange={setBranchId} options={branches.map((b) => ({ value: b.id, label: b.name }))} placeholder={`Select ${wordBranch()}`} error={!!errors.branch} />
         </Field>
         <DateField label="Redeemed date" value={redeemedDate} onChange={setRedeemedDate} />
         <Field label="Used by" id="vc-guest" hint="Anyone with the code can use it.">
@@ -287,8 +288,8 @@ const VoucherDetailPanel = ({ voucherId, readOnly = false, width, initialView = 
   const paidModes = [...new Set((history?.payments || []).map((p) => p.payment_mode).filter(Boolean))].join(' + ');
   const headSub = !v ? '' : v.buyerName ? `A gift from ${v.buyerName}` : fPhone ? phoneText(fPhone) : (v.guestInfo || 'No phone yet');
   const ticketSub = !v ? '' : coupon
-    ? (v.couponUsed ? 'off one visit · used' : 'off one visit · at any branch')
-    : status === 'usedUp' ? `fully redeemed · it was worth ${npr(valueOf(v))}` : `left of ${npr(valueOf(v))} · use over several visits, at any branch`;
+    ? (v.couponUsed ? 'off one visit · used' : `off one visit · at any ${wordBranch()}`)
+    : status === 'usedUp' ? `fully redeemed · it was worth ${npr(valueOf(v))}` : `left of ${npr(valueOf(v))} · use over several visits, at any ${wordBranch()}`;
 
   return (
     <PanelShell width={width} variant="panel" title="Voucher" onClose={onClose} hideFooter headerExtra={menu.length ? <OverflowMenu items={menu} /> : null}>

@@ -5,7 +5,7 @@ import { submitQuickCreate } from '../branch-manager-dashboard/components/calend
 import PaymentModal from '../../components/ui/PaymentModal';
 import { submitCheckout } from '../../services/checkoutSubmit';
 import { useAvailabilityGuard } from '../../contexts/AvailabilityOverrideContext';
-import { fetchAttendance, fetchServices, getCalendarBookings, recordPayment, recordTip } from '../../services/api';
+import { fetchAttendance, fetchServices, getCalendarBookings, recordPayment, recordTip, updateBookingStatus } from '../../services/api';
 
 // Hosts for the panels the Calendar already owns, so the dashboard can open them in place (it stays put behind the panel).
 
@@ -47,6 +47,8 @@ export const CreateBookingHost = ({ slot, branchId, onClose, onCreated }) => {
       onSubmit={async (formData) => {
         const r = await submitQuickCreate({ formData, branchId, guard });
         if (r.error) return r.error;
+        // A walk-in is already at the desk, so it starts Confirmed (never "late"); a failed confirm leaves a normal Pending booking.
+        if (slot?.walkIn && r.bookingId) await updateBookingStatus({ bookingId: r.bookingId, newStatus: 'Confirmed' });
         onCreated?.(r.toast);
         return null;
       }}

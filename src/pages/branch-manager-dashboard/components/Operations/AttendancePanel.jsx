@@ -27,6 +27,7 @@ import {
 } from '../../../../services/attendanceView';
 import { useStickyBlock, SearchBox, useSlashFocus, Avatar, EmptyBlock, ErrorBlock } from '../Area/listKit';
 import AttendanceSidePanel from './AttendanceSidePanel';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 // therapist_shifts_for_range row -> { start, end, breaks } (null when the person doesn't work that day).
 const shiftShape = (r) => (!r || !r.works || !r.start_time ? null : {
@@ -642,7 +643,7 @@ const AttendancePanel = ({ branchId }) => {
     if (r.d.kind === 'out' && selectedDate === today) bits.push(`Done · ${r.punchCount ? minutesText(r.workedMin) : durationText(r.checkInTime, r.checkOutTime)}`);
     const role = r.position && !bits.length ? r.position : null;
     // Punches at other branches: "Checked in at Sanepa 6:55 pm – 7:25 pm" when that's the whole day, else "At Sanepa 2:00 pm – 4:00 pm".
-    const bn = (id) => branchNameById[id] || 'another branch';
+    const bn = (id) => branchNameById[id] || `another ${wordBranch()}`;
     const worked = r.elsewhere && r.elsewhere.length
       ? r.elsewhere.slice(0, 2).map((q) => `${r.elsewhere.length === r.punchCount ? 'Checked in at' : 'At'} ${bn(q.branchId)} ${fmt(q.checkIn)}${q.checkOut ? ` – ${fmt(q.checkOut)}` : ' (still in)'}`).join(' · ')
       : null;
@@ -681,7 +682,7 @@ const AttendancePanel = ({ branchId }) => {
     if (['in', 'half'].includes(k)) {
       if (r.openHere) return <MiniBtn disabled={busy} onClick={() => checkOutNow(r)}>Check out</MiniBtn>;
       const away = (r.elsewhere || []).find((q) => !q.checkOut);
-      if (away) return <span className="text-[12px] text-text-tertiary">At {branchNameById[away.branchId] || 'another branch'}</span>;
+      if (away) return <span className="text-[12px] text-text-tertiary">At {branchNameById[away.branchId] || `another ${wordBranch()}`}</span>;
       return <MiniBtn disabled={busy} onClick={() => openPanel(r, { mode: null })}>Add out time</MiniBtn>;
     }
     if (k === 'out') return <MiniBtn disabled={busy} onClick={() => checkIn(r)}>Check in again</MiniBtn>;
@@ -828,7 +829,7 @@ const AttendancePanel = ({ branchId }) => {
       return <div className="space-y-2 pt-3 animate-pulse" aria-busy="true">{[0, 1, 2, 3].map((i) => <div key={i} className="h-11 bg-background rounded" />)}</div>;
     }
     if (rows.length === 0 && visitorRows.length === 0 && awayRows.length === 0) {
-      return <EmptyBlock icon="Users" title={`No active ${staffLabelPlural.toLowerCase()} found for this branch.`} />;
+      return <EmptyBlock icon="Users" title={`No active ${staffLabelPlural.toLowerCase()} found for this ${wordBranch()}.`} />;
     }
     if (shownCount === 0) {
       return (
@@ -855,7 +856,7 @@ const AttendancePanel = ({ branchId }) => {
           {groups.attention.map((r) => <RowBoundary key={r.id}>{renderRow(r)}</RowBoundary>)}
           {groups.service.length > 0 && groupHead({ key: 'h-service', title: staffLabelPlural, count: groups.service.length })}
           {groups.service.map((r) => <RowBoundary key={r.id}>{renderRow(r)}</RowBoundary>)}
-          {groups.vis.length > 0 && groupHead({ key: 'h-vis', title: 'Visiting today', count: groups.vis.length, note: 'works here on a temporary transfer, paid by their home branch' })}
+          {groups.vis.length > 0 && groupHead({ key: 'h-vis', title: 'Visiting today', count: groups.vis.length, note: `works here on a temporary transfer, paid by their home ${wordBranch()}` })}
           {groups.vis.map((r) => <RowBoundary key={r.id}>{renderRow(r)}</RowBoundary>)}
           {groups.support.length > 0 && groupHead({ key: 'h-support', title: 'Support staff', count: groups.support.length })}
           {groups.support.map((r) => <RowBoundary key={r.id}>{renderRow(r)}</RowBoundary>)}

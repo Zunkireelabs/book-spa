@@ -22,6 +22,7 @@ import {
 import { fetchInbox, fetchInboxCounts, fetchLastNotificationAt, markInboxFilterRead, updateBookingStatus, acknowledgeBooking } from '../../services/api';
 import InboxBookingPanel from './InboxBookingPanel';
 import NotificationSettingsContent, { CATEGORY_META } from './NotificationSettingsPanel';
+import { wordBranch, wordBranches } from '../../utils/industryTerms';
 
 const TYPE_ICON = {
   new_online_booking: 'Globe', booking_cancelled_by_guest: 'CalendarX', booking_rescheduled_by_guest: 'CalendarClock',
@@ -258,7 +259,7 @@ const InboxBody = () => {
   const totalUnread = allowed.reduce((n, c) => n + (counts.byCategory[c] || 0), 0);
   const groups = useMemo(() => groupByDayLabel(rows), [rows]);
   const branchLabel = (id) => (multiBranch ? branches.find((b) => b.id === id)?.name : null);
-  const branchOptions = [{ value: '', label: 'All branches' }, ...branches.map((b) => ({ value: b.id, label: b.name }))];
+  const branchOptions = [{ value: '', label: `All ${wordBranches()}` }, ...branches.map((b) => ({ value: b.id, label: b.name }))];
   const goTo = (c) => patch({ c: c === 'all' ? '' : c, settings: '', n: '' });
 
   // ── Menu (shared AreaLayout) ──
@@ -278,7 +279,7 @@ const InboxBody = () => {
     { id: 'prefs', label: 'Preferences', items: [{ id: 'settings', view: 'settings', title: 'Notification settings', icon: 'Settings' }] },
   ];
 
-  const scope = branchId ? branches.find((b) => b.id === branchId)?.name || 'This branch' : (multiBranch ? 'All branches' : (branchName || branches[0]?.name || 'This branch'));
+  const scope = branchId ? branches.find((b) => b.id === branchId)?.name || `This ${wordBranch()}` : (multiBranch ? `All ${wordBranches()}` : (branchName || branches[0]?.name || `This ${wordBranch()}`));
   const chipCount = category ? (counts.byCategory[category] || 0) : totalUnread;
   const emptyAllRead = !loading && !error && rows.length === 0;
   const unreadAny = totalUnread > 0 || rows.some((r) => !r.read);
@@ -348,7 +349,7 @@ const InboxBody = () => {
           <Icon name="CheckCircle2" size={30} className="text-gray-300 mx-auto mb-2" />
           <p className="text-[14px] font-medium text-text-primary">{search || branchId ? 'Nothing matches' : "You're all caught up"}</p>
           <p className="text-[13px] text-text-tertiary mt-1">
-            {search || branchId ? 'Try a different search or branch.' : lastAt ? `Last notification: ${dateTimeOf(lastAt)}` : 'Nothing has come in yet.'}
+            {search || branchId ? `Try a different search or ${wordBranch()}.` : lastAt ? `Last notification: ${dateTimeOf(lastAt)}` : 'Nothing has come in yet.'}
           </p>
           {unreadOnly && !search && !branchId && lastAt && (
             <button type="button" onClick={() => setUnreadOnly(false)} className="mt-3 text-[13px] font-medium text-primary hover:underline">Show read ones too</button>

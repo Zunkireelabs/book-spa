@@ -104,8 +104,9 @@ function ExpandableRow({ log }) {
 }
 
 const AuditPanel = ({ branchId, initialRecordId = '' }) => {
-  const { staffLabelPlural } = useIndustry();
-  const tableOptions = TABLE_OPTIONS.map((o) => o.value === 'therapists' ? { ...o, label: staffLabelPlural } : o);
+  const { staffLabelPlural, enableRooms, locationLabelPlural } = useIndustry();
+  const tableOptions = TABLE_OPTIONS.filter((o) => enableRooms || o.value !== 'rooms')
+    .map((o) => o.value === 'therapists' ? { ...o, label: staffLabelPlural } : o.value === 'rooms' ? { ...o, label: locationLabelPlural } : o);
   const [logs, setLogs] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);

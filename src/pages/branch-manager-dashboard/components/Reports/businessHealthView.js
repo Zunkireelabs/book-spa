@@ -1,6 +1,7 @@
 // Pure view-model for Business health: raw RPC numbers in, formatted tiles / bridge / CSV rows out (unit-tested; no React).
 import { computeDelta } from 'utils/reportPeriod';
 import { hasPreviousData } from 'lib/reportInsights';
+import { wordBranchCap, wordBranches } from '../../../../utils/industryTerms';
 
 export { hasPreviousData };
 
@@ -86,9 +87,9 @@ export function exportRows(data, tab, rangeLabel) {
   if (tab === 'branches') {
     const row = (name, cur, prev) => [name, cur.sales, computeDelta(cur.sales, prev.sales)?.text || '', cur.bookings, cur.avg_ticket ?? '', pctText(cur.busy?.share) ?? '', pctText(cur.return_rate?.rate) ?? '', cur.owed?.amount ?? ''];
     return [
-      ['Branch', 'Sales', 'vs previous', 'Bookings', 'Average ticket', 'Busy', 'Return rate', 'Owed'],
+      [`${wordBranchCap()}`, 'Sales', 'vs previous', 'Bookings', 'Average ticket', 'Busy', 'Return rate', 'Owed'],
       ...(data.branches || []).map((b) => row(b.name, b.current, b.previous)),
-      row('All branches', data.current, data.previous),
+      row(`All ${wordBranches()}`, data.current, data.previous),
     ];
   }
   const c = data.current;

@@ -89,6 +89,7 @@ import NewVoucherPanel from './components/Vouchers/NewVoucherPanel';
 import DashboardHome from '../dashboard-home';
 import { AIAssistantPanel } from '../../components/ui/AIAssistant';
 import { useAIAssistant } from '../../contexts/AIAssistantContext';
+import { wordBranch, wordBranchCap } from '../../utils/industryTerms';
 
 // Views that render org-wide data and therefore hide the branch switcher —
 // see the comment at its render site for why each one qualifies.
@@ -125,7 +126,7 @@ const BranchManagerDashboard = () => {
 
   const managerData = {
     name: profile?.full_name || 'Manager',
-    role: profile?.role === 'admin' ? 'Admin' : 'Branch Manager',
+    role: profile?.role === 'admin' ? 'Admin' : `${wordBranchCap()} Manager`,
     branch: branchName || profile?.branches?.name || '',
     avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150',
     email: profile?.email || ''
@@ -489,7 +490,7 @@ const BranchManagerDashboard = () => {
             </>
           ) : (
             <div className="border-t border-border pt-8 font-body text-sm text-text-secondary">
-              Select a specific branch to configure the online booking limit and advance booking window.
+              Select a specific {wordBranch()} to configure the online booking limit and advance booking window.
             </div>
           )}
         </div>
@@ -510,8 +511,8 @@ const BranchManagerDashboard = () => {
   return (
     <>
       <Helmet>
-        <title>Branch Manager Dashboard - Zennly</title>
-        <meta name="description" content="Comprehensive branch management dashboard for Zennly managers with analytics, staff oversight, and operational controls." />
+        <title>{`${wordBranchCap()} Manager Dashboard - Zennly`}</title>
+        <meta name="description" content={`Comprehensive ${wordBranch()} management dashboard for Zennly managers with analytics, staff oversight, and operational controls.`} />
       </Helmet>
 
       <AppShell

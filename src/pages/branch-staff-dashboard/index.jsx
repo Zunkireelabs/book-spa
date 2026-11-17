@@ -28,6 +28,7 @@ import { transformBookings, toDbStatus, isNoShow } from '../../services/bookingT
 import { supabase } from '../../lib/supabase';
 import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED, PRODUCTS_ENABLED } from '../../lib/featureFlags';
 import { getTodayISO, toISO } from '../../utils/periodPresets';
+import { teamMemberLower, teamMemberCap } from '../../utils/industryTerms';
 
 const BranchStaffDashboard = () => {
   const { profile, user } = useAuth();
@@ -387,11 +388,11 @@ const BranchStaffDashboard = () => {
     const result = await assignTherapist({ bookingId, therapistIds: ids });
 
     if (result.error) {
-      showError(result.error.message || 'Failed to assign team member.');
+      showError(result.error.message || `Failed to assign ${teamMemberLower()}.`);
       return;
     }
 
-    showSuccess('Team member assigned successfully');
+    showSuccess(`${teamMemberCap()} assigned successfully`);
     await loadData();
   };
 

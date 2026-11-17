@@ -12,6 +12,7 @@ import {
 } from '../../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../../services/bookingTransformers';
 import { useAvailabilityGuard } from '../../../../../contexts/AvailabilityOverrideContext';
+import { teamMemberLower } from '../../../../../utils/industryTerms';
 
 // Booking-level actions wired to the booking panel (status, assignment, edit, discount, payment) plus the
 // shared-booking card resize from the grid.
@@ -100,7 +101,7 @@ export function useBookingActions({ showToast, refreshCalendar, selectedBooking,
     if (result.error) {
       showToast(result.error.message || 'Failed to resize.', 'error');
     } else if (isPartOfSelection) {
-      showToast(`Resized ${booking.therapistName || 'team member'} independently to ${newStartTime} – ${newEndTime}`, 'success');
+      showToast(`Resized ${booking.therapistName || teamMemberLower()} independently to ${newStartTime} – ${newEndTime}`, 'success');
     } else {
       showToast(`Resized to ${newStartTime} – ${newEndTime}`, 'success');
     }

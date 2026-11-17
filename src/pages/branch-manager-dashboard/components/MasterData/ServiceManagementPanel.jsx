@@ -11,12 +11,25 @@ import {
   fetchActiveCategories,
   toggleServiceActive,
   deleteService,
+  fetchTierPricesByService,
 } from '../../../../services/api';
+import { useIndustry } from '../../../../hooks/useIndustry';
+import { formatNPR } from '../../../../services/bookingTransformers';
+
+// "NPR 2,500 – NPR 4,000" for a tiered service: its standard price and every tier price (a blank tier charges the standard price).
+const tierRangeLabel = (service, tiers) => {
+  if (service.price_type !== 'tiered' || !tiers || tiers.length === 0) return null;
+  const all = [Number(service.price_npr), ...tiers];
+  const lo = Math.min(...all); const hi = Math.max(...all);
+  return lo === hi ? formatNPR(lo) : `${formatNPR(lo)} \u2013 ${formatNPR(hi)}`;
+};
 
 const ServiceManagementPanel = () => {
   const navigate = useNavigate();
   const { orgSlug } = useParams();
+  const { isSpa } = useIndustry();
   const [services, setServices] = useState([]);
+  const [tierPrices, setTierPrices] = useState({});
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -70,6 +83,11 @@ const ServiceManagementPanel = () => {
       setError(result.error.message || 'Failed to load services.');
     } else {
       setServices(result.data || []);
+      // A tiered service charges by who does it, so the list shows its range, as the online page does.
+      if ((result.data || []).some((x) => x.price_type === 'tiered')) {
+        const tiers = await fetchTierPricesByService();
+        if (!tiers.error) setTierPrices(tiers.data || {});
+      }
     }
     hasLoadedRef.current = true;
     setLoading(false);
@@ -125,7 +143,6 @@ const ServiceManagementPanel = () => {
     setDeleting(false);
   };
 
-  const formatNPR = (amount) => `NPR ${Number(amount).toLocaleString('en-IN')}`;
 
   if (loading) {
     return (
@@ -222,7 +239,7 @@ const ServiceManagementPanel = () => {
               filteredServices.map((s) => (
                 <tr key={s.id} className={`border-b border-border last:border-b-0 ${rowTone(false, flashId === s.id)}`}>
                   <td className={`px-4 py-3 font-body font-body-medium text-sm text-text-primary ${rowBar(flashId === s.id)}`}>{s.name}</td>
-                  <td className="px-4 py-3 font-body text-sm text-text-secondary hidden lg:table-cell">{s.category || 'Spa'}</td>
+                  <td className="px-4 py-3 font-body text-sm text-text-secondary hidden lg:table-cell">{s.category || (isSpa ? 'Spa' : '—')}</td>
                   <td className="px-4 py-3 font-body text-sm text-text-secondary">{s.duration_minutes} min</td>
                   <td className="px-4 py-3 font-data text-sm text-text-primary">
                     {s.is_on_offer ? (
@@ -240,7 +257,7 @@ const ServiceManagementPanel = () => {
                         </span>
                       </div>
                     ) : (
-                      formatNPR(s.price_npr)
+                      tierRangeLabel(s, tierPrices[s.id]) || formatNPR(s.price_npr)
                     )}
                   </td>
                   <td className="px-4 py-3 font-body text-sm text-text-secondary hidden md:table-cell max-w-[200px] truncate">

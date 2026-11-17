@@ -11,6 +11,7 @@ import { HOUR_HEIGHT } from '../CalendarGrid';
 import { formatTimeFromSlot, calculateEndTime } from '../calendarDates';
 import { isCheckedOutBlockedSlot } from '../calendarSlots';
 import { useAvailabilityGuard } from '../../../../../contexts/AvailabilityOverrideContext';
+import { teamMemberLower } from '../../../../../utils/industryTerms';
 
 // Drag-and-drop for the calendar grid: sensors, pointer tracking, drag start/move/over/end, block drag, the
 // cross-column confirm state and its execution.
@@ -294,7 +295,7 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
 
     if (columnMode === 'therapist' && isCrossColumn) {
       if (isCheckedOutBlockedSlot(calendarData?.checkedOutByTherapistAndDate, effectiveTargetColId, newDate, hour, minute)) {
-        showToast('This team member has already checked out for the day and is not bookable after their check-out time.', 'error');
+        showToast(`This ${teamMemberLower()} has already checked out for the day and is not bookable after their check-out time.`, 'error');
         return;
       }
     }
@@ -444,11 +445,11 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
           const newIds = currentTherapistIds.map(id => id === sourceColId ? targetColId : id);
           const result = await guard((overrideReason) => assignTherapist({ bookingId, therapistIds: newIds, overrideReason }));
           if (result.error) {
-            showToast(result.error.message || 'Failed to reassign team member.', 'error');
+            showToast(result.error.message || `Failed to reassign ${teamMemberLower()}.`, 'error');
           } else if (result.data?.warning) {
             showToast(`Assignment partially saved: ${result.data.warning}`, 'error');
           } else {
-            showToast(`Reassigned from ${colNameMap[sourceColId] || 'team member'} to ${targetColName}`, 'success');
+            showToast(`Reassigned from ${colNameMap[sourceColId] || teamMemberLower()} to ${targetColName}`, 'success');
           }
         }
         refreshCalendar();

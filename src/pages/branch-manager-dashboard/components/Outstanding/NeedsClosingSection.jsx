@@ -3,6 +3,8 @@ import { useNavigate, useParams, useSearchParams, useLocation } from 'react-rout
 import Icon from '../../../../components/AppIcon';
 import { getNeedsClosing } from '../../../../services/api';
 import { daysSinceNepal } from '../Reports/moneyOwedView';
+import { staffWord } from '../../../../utils/industryTerms';
+import { teamMemberWord } from '../../../../utils/industryTerms';
 
 const npr = (n) => `NPR ${Number(n || 0).toLocaleString('en-IN')}`;
 const fmtDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -44,7 +46,7 @@ const NeedsClosingSection = ({ branchId, from, to, collapsible = false, therapis
     return { ...raw, unclosed, unclosedAtStake: unclosed.reduce((n, b) => n + (b.atStake || 0), 0) };
   }, [raw, therapistId]);
   const filterChip = therapistId && onShowAll
-    ? <p className="text-xs text-text-secondary"><span className="rounded-full bg-primary/10 text-primary px-2 py-0.5 font-medium">Showing {therapistName || 'this therapist'} only</span> <button type="button" onClick={onShowAll} className="text-primary hover:underline ml-1">show all</button></p>
+    ? <p className="text-xs text-text-secondary"><span className="rounded-full bg-primary/10 text-primary px-2 py-0.5 font-medium">Showing {therapistName || `this ${staffWord()}`} only</span> <button type="button" onClick={onShowAll} className="text-primary hover:underline ml-1">show all</button></p>
     : null;
 
   // Arriving with ?section=needs-closing (e.g. from the notice): scroll here once the section has rendered.
@@ -124,7 +126,7 @@ const NeedsClosingSection = ({ branchId, from, to, collapsible = false, therapis
             <thead>
               <tr className="bg-background border-b border-border text-left font-body font-body-medium text-xs text-text-secondary">
                 <th className="px-4 py-2.5">Date</th><th className="px-4 py-2.5">Customer</th><th className="px-4 py-2.5">Service</th>
-                <th className="px-4 py-2.5">Team member</th><th className="px-4 py-2.5 text-right">At stake</th><th className="px-4 py-2.5" />
+                <th className="px-4 py-2.5">{teamMemberWord()}</th><th className="px-4 py-2.5 text-right">At stake</th><th className="px-4 py-2.5" />
               </tr>
             </thead>
             <tbody>

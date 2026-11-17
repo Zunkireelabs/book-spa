@@ -5,6 +5,8 @@ import {
 import { useOrg } from '../../../../contexts/OrgContext';
 import { createVoucherType, updateVoucherType } from '../../../../services/api';
 import { friendlyError } from '../../../../utils/friendlyError';
+import { useIndustry } from '../../../../hooks/useIndustry';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 const CATEGORIES = [
   { value: 'spa', label: 'Spa' },
@@ -23,6 +25,7 @@ const Seg = ({ value, onChange, options, label }) => (
 // coupon), worth or %, what member discount it counts as, usually sold or given free, and On sale (when editing). Changes apply
 // to vouchers handed out from now on.
 const VoucherTypePanel = ({ type = null, types = [], onClose, onSaved }) => {
+  const { examples } = useIndustry();
   const { orgId } = useOrg();
   const editing = !!type;
   const initial = useMemo(() => ({
@@ -85,14 +88,14 @@ const VoucherTypePanel = ({ type = null, types = [], onClose, onSaved }) => {
       <FormBody>
         <InlineError message={serverError} />
         <Field label="Name" required id="vt-name" error={errors.name}>
-          <TextInput ref={nameRef} value={form.name} onChange={(e) => set('name')(e.target.value)} placeholder="e.g. Full Body Oil Massage · 60 min" error={errors.name} {...controlA11y('vt-name', errors.name)} />
+          <TextInput ref={nameRef} value={form.name} onChange={(e) => set('name')(e.target.value)} placeholder={`e.g. ${examples.voucher}`} error={errors.name} {...controlA11y('vt-name', errors.name)} />
         </Field>
         <Field label="Code prefix" required id="vt-prefix" error={errors.prefix} hint={`Codes look like ${form.prefix.trim().toUpperCase() || 'NT 4326'}-0001. Booklet codes are typed in full when handing one out.`}>
           <TextInput value={form.prefix} onChange={(e) => set('prefix')(e.target.value.toUpperCase().slice(0, 24))} placeholder="NT 4326" className="font-data" error={errors.prefix} {...controlA11y('vt-prefix', errors.prefix)} />
         </Field>
         <Field label="Kind">
           <Seg label="Kind" value={form.kind} onChange={set('kind')} options={[['value', 'Money or service value'], ['coupon', '% off coupon']]} />
-          <p className="mt-1.5 text-xs text-text-secondary">{coupon ? 'A coupon takes a % off one visit. It holds no money.' : 'Holds a value the guest can use over several visits, at any branch.'}</p>
+          <p className="mt-1.5 text-xs text-text-secondary">{coupon ? 'A coupon takes a % off one visit. It holds no money.' : `Holds a value the guest can use over several visits, at any ${wordBranch()}.`}</p>
         </Field>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {coupon ? (

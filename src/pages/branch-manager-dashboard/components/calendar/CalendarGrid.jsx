@@ -28,6 +28,7 @@ import { PANEL_WIDTH } from '../../../../components/ui/SidePanel';
 import { findBlockOverlap, formatBlockRange } from '../../../../utils/blockOverlap';
 import { SHADE_STYLES, buildShadeSegments, shiftHeaderInfo, slotVerdict, outsideReasonText, outsideNote } from '../../../../services/availabilityShading';
 import { hhmmToMinutes } from '../../../../services/availability';
+import { staffWord, wordBranch } from '../../../../utils/industryTerms';
 
 // Export these constants for time calculation in parent
 export const SLOT_HEIGHT = 36; // px per 30-min slot (72px per hour) - for visual grid lines
@@ -1023,8 +1024,8 @@ const CalendarGrid = ({
     // Online-unassigned copy only applies to the synthetic Unassigned/No Room column and only when there is something to flag.
     const onlineUnassignedTooltip = isUnassigned && col.onlineUnassignedCount > 0
       ? (col.allSelfService
-          ? 'Please allocate the customer to a dedicated room'
-          : `${col.onlineUnassignedCount} new online booking${col.onlineUnassignedCount > 1 ? 's' : ''} — please assign to a therapist and allocate the room`)
+          ? `Please allocate the customer to a dedicated ${locationLabel.toLowerCase()}`
+          : `${col.onlineUnassignedCount} new online booking${col.onlineUnassignedCount > 1 ? 's' : ''} — please assign to a ${staffWord()} and allocate the ${locationLabel.toLowerCase()}`)
       : null;
     const hdrShift = col.type === 'therapist' && viewMode === 'day' ? shiftHeaderInfo(shiftOf(col.id, currentDate), { isToday: currentDate === todayStr, nowMin: hhmmToMinutes(nowTime), attendance: attendanceByTherapist?.[col.id], branchClosed: isClosedByBlocks(blockOccurrences, currentDate) }) : null;
     const trDesc = col.type === 'therapist' ? describeColumnTransfer(col, { day: currentDate, use24h, labels: { branch: (locationLabel || 'branch').toLowerCase() } }) : null;
@@ -1402,7 +1403,7 @@ const CalendarGrid = ({
       const startMin = (Number(winStart.time.slice(0, 2)) * 60) + Number(winStart.time.slice(3, 5));
       const sameDay = winStart.date === day;
       const before = sameDay && seg.startMin < startMin;
-      return { ...seg, label: before ? `Not at ${col.transferToBranch || 'this branch'}` : `Back at ${col.transferFromBranch || col.fromBranch || 'home'}` };
+      return { ...seg, label: before ? `Not at ${col.transferToBranch || `this ${wordBranch()}`}` : `Back at ${col.transferFromBranch || col.fromBranch || 'home'}` };
     };
     return [...rpcSegs, ...transferSegs].map(visitorLabel).map((seg, i) => {
       const s0 = Math.max(seg.startMin, lo);

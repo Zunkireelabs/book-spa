@@ -2,6 +2,8 @@ import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, forwardRe
 import { supabase } from '../../lib/supabase';
 import { createPortal } from 'react-dom';
 import Icon from '../AppIcon';
+import { useIndustry } from '../../hooks/useIndustry';
+import { wordBranch } from '../../utils/industryTerms';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
 import {
@@ -279,6 +281,7 @@ const PaymentModal = ({
   savesProducts = false,
 }) => {
   const { paymentMethods, orgName } = useOrg();
+  const { treatmentWord, treatmentWordLower } = useIndustry();
   const { branchName } = useBranch();
   const { profile } = useAuth();
   const userRole = profile?.role || 'staff';
@@ -891,7 +894,7 @@ const PaymentModal = ({
     // Products are paid first, in full, by money methods; vouchers and packages pay the treatment only (the server enforces the same).
     const productSplit = allocateProductsFirst(cleanedTenders, productsTotal);
     if (productSplit.shortfall > 0.001) {
-      setError(`Products come to ${formatNPR(productsTotal)} and are paid in full today. Cash, card, wallets and the membership wallet cover ${formatNPR(round2(productsTotal - productSplit.shortfall))}; vouchers and packages pay the treatment only.`);
+      setError(`Products come to ${formatNPR(productsTotal)} and are paid in full today. Cash, card, wallets and the membership wallet cover ${formatNPR(round2(productsTotal - productSplit.shortfall))}; vouchers and packages pay the ${treatmentWordLower} only.`);
       return;
     }
     if (treatmentOnlyOverflow(cleanedTenders, treatmentDue) > 0.001) {
@@ -1256,7 +1259,7 @@ const PaymentModal = ({
     if (entered > grandTotal) return `Over the total by NPR ${fmt(round2(entered - grandTotal))}`;
     if (walletOver) return 'A wallet or voucher amount exceeds its balance';
     if (productDue.belowProducts) return `Products need NPR ${fmt(productDue.shortBy)} more from a money method`;
-    if (treatmentOnlyOverflow(tenders.filter((t) => t.paymentMode && Number(t.amount) > 0), treatmentDue) > 0.001) return 'Vouchers and packages pay the treatment only';
+    if (treatmentOnlyOverflow(tenders.filter((t) => t.paymentMode && Number(t.amount) > 0), treatmentDue) > 0.001) return `Vouchers and packages pay the ${treatmentWordLower} only`;
     if (leftover > 0 && !leaveDue) return `${fmt(leftover)} not covered yet`;
     if (leftover > 0 && !dueHolderName.trim()) return 'Add who the remaining due is under';
     if (!qrSingle && pendingQr.length === 1) return `Confirm the ${tenderLabel(tenders[pendingQr[0]])} payment`;
@@ -1335,7 +1338,7 @@ const PaymentModal = ({
         tenders: sums(extra.productPayments?.length ? extra.productPayments : extra.split.product, (e) => labelFor(e)),
         treatmentTenders: sums(extra.split.treatment, (e) => labelFor(e)),
         total: extra.productsTotal ?? productsTotal,
-        stockLine: stockBits.length ? `Stock updated at ${branchName || 'this branch'}: ${stockBits.join(', ')}.` : '',
+        stockLine: stockBits.length ? `Stock updated at ${branchName || `this ${wordBranch()}`}: ${stockBits.join(', ')}.` : '',
         creditLine: sellerIds.length ? (() => { const names = sellerIds.map(shortSeller).join(' and '); return `The sale is credited to ${names}${names.endsWith('.') ? '' : '.'}`; })() : 'No commission on this sale.',
         perLine: splitAcrossLines(lineAmounts, extra.split.product),
       };
@@ -1536,7 +1539,7 @@ const PaymentModal = ({
             : <>{receipt.bookingNumber}{receipt.extraCount > 0 ? ` + ${receipt.extraCount} more` : ''} {receipt.extraCount > 0 ? 'are' : 'is'} fully paid</>}
         </div>
         <div className="mt-5 border-t border-[#E7E8E6] text-left text-[13px] pb-1">
-          {receipt.products && <div className="pt-3 pb-1 text-[11px] font-medium text-[#8A8A90] tracking-[.04em] uppercase">Treatment</div>}
+          {receipt.products && <div className="pt-3 pb-1 text-[11px] font-medium text-[#8A8A90] tracking-[.04em] uppercase">{treatmentWord}</div>}
           {(receipt.hasMember || receipt.products) && (
             <div data-receipt-lines>
               {receipt.lines.map((l, i) => (
@@ -1816,7 +1819,7 @@ const PaymentModal = ({
             <span className="text-[16px] font-medium text-[#8A8A90] tracking-normal mr-1.5">NPR</span>{fmt(grandTotal)}
           </div>
           {productsTotal > 0 && (
-            <div className="text-[12.5px] text-[#8A8A90] tabular-nums mt-0.5" data-due-split>Treatment <b className="font-medium text-[#515152]">{fmt(treatmentDue)}</b> · Products <b className="font-medium text-[#515152]">{fmt(productsTotal)}</b></div>
+            <div className="text-[12.5px] text-[#8A8A90] tabular-nums mt-0.5" data-due-split>{treatmentWord} <b className="font-medium text-[#515152]">{fmt(treatmentDue)}</b> · Products <b className="font-medium text-[#515152]">{fmt(productsTotal)}</b></div>
           )}
           <span className="sr-only" role="status" aria-live="polite">{productsTotal > 0 ? `Amount due NPR ${fmt(grandTotal)}: treatment ${fmt(treatmentDue)}, products ${fmt(productsTotal)}.` : ''}{busyFirst ? ` ${cp.busy[busyFirst].message}` : ''}</span>
           <div className="h-[3px] rounded-sm bg-[#F1F1EF] mt-3.5 mb-1.5 overflow-hidden"><i className={`block h-full transition-all ${leftover > 0.001 && entered > 0 ? 'bg-[#C99A2E]' : 'bg-primary'}`} style={{ width: `${dueFraction * 100}%` }} /></div>
@@ -1893,7 +1896,7 @@ const PaymentModal = ({
                 else if (isVoucherWallet && t.voucherId) hint = overVoucherWallet ? `Exceeds this voucher (${fmt(t.voucherRemainingBalance)})` : `${fmt(Math.max(0, round2(t.voucherRemainingBalance - (voucherWalletCommittedByVoucher.get(t.voucherId) || 0))))} remains on voucher`;
                 else if (isSessionPackage) hint = 'One session, covers this booking';
                 else if (t.paymentMode === 'ReferralVoucher') hint = 'Referral voucher';
-                if (productsTotal > 0 && isTreatmentOnly(t.paymentMode)) hint = 'Covers the treatment only';
+                if (productsTotal > 0 && isTreatmentOnly(t.paymentMode)) hint = `Covers the ${treatmentWordLower} only`;
                 const isActive = i === activeTenderIdx && !credit;
                 const isRest = i === restIdx;
                 const label = tenderLabel(t);
@@ -1977,14 +1980,14 @@ const PaymentModal = ({
           {productsTotal > 0 && tenders.some((t) => isTreatmentOnly(t.paymentMode)) && (
             <div className="mt-3 flex items-start gap-2 rounded-lg bg-[#F7F7F5] px-3 py-2.5 text-[12.5px] text-[#515152]" data-testid="treatment-only-note">
               <Icon name="Ticket" size={13} className="mt-0.5 flex-none text-[#8A8A90]" />
-              <span>Service vouchers and packages pay for treatments, never products. Cash, card, wallets and the membership wallet can pay for anything.</span>
+              <span>Service vouchers and packages pay for {treatmentWordLower}s, never products. Cash, card, wallets and the membership wallet can pay for anything.</span>
             </div>
           )}
 
           {leftover > 0.001 && productDue.belowProducts && (
             <div className="mt-3 relative rounded-[10px] border border-dashed border-[#E6C46F] bg-[#FEF7E8] px-3 py-2.5" data-testid="checkout-gap" data-products-short>
               <div className="flex items-center gap-2 text-[#92600A]"><Icon name="AlertCircle" size={14} className="flex-none" /><span><b className="font-semibold tabular-nums">NPR {fmt(productDue.shortBy)}</b> short of the products</span></div>
-              <p className="mt-1 text-[12.5px] text-[#515152]">Products are always paid in full today. Only the treatment can stay due, so you can't enter less than <b className="font-medium tabular-nums">{fmt(productsTotal)}</b> in cash, card or wallets.</p>
+              <p className="mt-1 text-[12.5px] text-[#515152]">Products are always paid in full today. Only the {treatmentWordLower} can stay due, so you can't enter less than <b className="font-medium tabular-nums">{fmt(productsTotal)}</b> in cash, card or wallets.</p>
               <div className="mt-2"><button type="button" onClick={addSplit} className="h-8 px-3 rounded-[7px] border border-[#E6C46F] bg-white text-[12.5px] font-medium text-[#0E0D0C] inline-flex items-center gap-1.5 hover:bg-[#FFFDF7]"><Icon name="Plus" size={13} strokeWidth={2} />Pay it with another method</button></div>
             </div>
           )}

@@ -9,6 +9,7 @@ import { friendlyError } from '../../../../utils/friendlyError';
 import ImageDropzone from './ImageDropzone';
 import ProductCategories from './ProductCategories';
 import { HereTag } from './productBits';
+import { wordBranch, wordBranchCap } from '../../../../utils/industryTerms';
 
 const OPTION_LABELS = ['Size', 'Shade', 'Colour', 'Scent', 'Flavour', 'Type'].map((v) => ({ value: v, label: v }));
 let keySeq = 0;
@@ -22,7 +23,7 @@ const cell = 'w-full h-9 px-2 text-[13px] border border-border rounded-md bg-whi
 // stock per branch × size. After creating, stock changes only through Receive / Remove / Set count (never a direct edit).
 // Category management is a stacked view (the draft stays mounted underneath).
 const ProductFormPanel = ({ product = null, branches, suppliers, branchId, onClose, onBack, onSaved, width }) => {
-  const { productsSoldByDefault, defaultProductCategories } = useIndustry();
+  const { productsSoldByDefault, defaultProductCategories, examples } = useIndustry();
   const editing = !!product;
   const original = useMemo(() => {
     if (!product) {
@@ -137,7 +138,7 @@ const ProductFormPanel = ({ product = null, branches, suppliers, branchId, onClo
       <FormBody>
         <InlineError message={serverError} />
         <Field label="Name" required id="prd-name" error={errors.name}>
-          <TextInput {...controlA11y('prd-name', errors.name)} ref={nameRef} error={errors.name} value={form.name} onChange={(e) => { set({ name: e.target.value }); setErrors((x) => ({ ...x, name: undefined })); }} placeholder="e.g. Lavender massage oil" />
+          <TextInput {...controlA11y('prd-name', errors.name)} ref={nameRef} error={errors.name} value={form.name} onChange={(e) => { set({ name: e.target.value }); setErrors((x) => ({ ...x, name: undefined })); }} placeholder={`e.g. ${examples.product}`} />
         </Field>
         <div className="grid grid-cols-2 gap-4">
           <Field label="Brand" id="prd-brand"><TextInput id="prd-brand" value={form.brand} onChange={(e) => set({ brand: e.target.value })} placeholder="Optional" /></Field>
@@ -209,7 +210,7 @@ const ProductFormPanel = ({ product = null, branches, suppliers, branchId, onClo
         <SwitchRow id="prd-sell" label="Sell at checkout" description="Turn off for pro-use items you only use in the work." checked={form.sell} onChange={(v) => set({ sell: v })} />
         {form.sell && <SwitchRow id="prd-earns" label="Earns commission" description="Whoever sold it earns their product commission on this item. Turn off for items that should not count." checked={form.earns} onChange={(v) => set({ earns: v })} />}
         <SwitchRow id="prd-track" label="Count stock" description="Off for things you don't count, like candles you restock by eye." checked={form.track} onChange={(v) => set({ track: v })} />
-        {form.track && <SwitchRow id="prd-notify" label="Tell me when it runs low" description="Managers of that branch get a notification, and it shows in Needs you now." checked={form.notify} onChange={(v) => set({ notify: v })} />}
+        {form.track && <SwitchRow id="prd-notify" label="Tell me when it runs low" description={`Managers of that ${wordBranch()} get a notification, and it shows in Needs you now.`} checked={form.notify} onChange={(v) => set({ notify: v })} />}
 
         {!editing && form.track && (
           <div>
@@ -219,7 +220,7 @@ const ProductFormPanel = ({ product = null, branches, suppliers, branchId, onClo
             </div>
             <div className="border border-border rounded-spa overflow-hidden" data-opening>
               <div className="grid items-center gap-2 px-3 py-1.5 bg-background text-[11.5px] font-medium text-[#8A8A90]" style={{ gridTemplateColumns: `minmax(0,1fr) repeat(${visibleSizes.length}, 76px)` }}>
-                <span>Branch</span>
+                <span>{wordBranchCap()}</span>
                 {visibleSizes.map((s) => <span key={s.key} className="text-right truncate" title={s.name}>{multi ? (s.name || 'Size') : 'Qty'}</span>)}
               </div>
               {branches.map((b) => (

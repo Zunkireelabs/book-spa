@@ -559,7 +559,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // ── Ghost block on the grid: report the draft (date, time, length, column) to the calendar ──
   const draftDuration = (services || []).find((t) => t.id === (bookingMode === 'group' ? groupServiceId : serviceId))?.duration_minutes || dragMinutes || 30;
   // Staff-availability pre-check (ZNLY-100): the guard's verdict for the first selected therapist, before Save.
-  const { staffLabel, locationLabel } = useIndustry();
+  const { staffLabel, staffLabelPlural, locationLabel } = useIndustry();
   const precheck = useAvailabilityPrecheck({
     branchId, date: bookingDate, startTime: bookingTime, durationMin: draftDuration,
     therapistId: bookingMode === 'individual' ? selectedTherapistIds[0] : null, enabled: !!slotInfo,
@@ -608,7 +608,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   // ── Footer: why Create is disabled, or the inline confirm ──────────────────────────────
   const disabledReason = submitting ? '' : precheck.blocked ? `${staffLabel} unavailable at this time` : blockOverlapMsg
-    ? (/^Overlaps '(Transferred|Visiting)/.test(blockOverlapMsg) ? 'Therapist unavailable' : 'Overlaps a block')
+    ? (/^Overlaps '(Transferred|Visiting)/.test(blockOverlapMsg) ? `${staffLabel} unavailable` : 'Overlaps a block')
     : bookingMode === 'group'
       ? (groupValid ? '' : 'Complete the group details')
       : !serviceId ? 'Pick a service' : !customerName.trim() ? 'Enter the customer name' : (!customerPhone.replace(/\D/g, '') && !knownCustomerId) ? 'Enter the customer phone' : '';
@@ -869,7 +869,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             {!comboAllDifferentStaff && serviceRequiresTherapist && (
             <div>
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                Therapist{selectedTherapistIds.length > 1 ? 's' : ''}
+                {selectedTherapistIds.length > 1 ? staffLabelPlural : staffLabel}
                 {selectedTherapistIds.length > 0 && (
                   <span className="ml-2 text-xs text-text-secondary font-normal">({selectedTherapistIds.length} selected)</span>
                 )}
@@ -881,7 +881,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     type="text"
                     value={therapistSearch}
                     onChange={(e) => setTherapistSearch(e.target.value)}
-                    placeholder={`Search ${staffLabel.toLowerCase()}s...`}
+                    placeholder={`Search ${staffLabelPlural.toLowerCase()}...`}
                     className="w-full pl-7 pr-3 py-1.5 bg-surface border border-border rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                   />
                 </div>

@@ -5,6 +5,7 @@ import { useBranch } from 'contexts/BranchContext';
 import { useIndustry } from 'hooks/useIndustry';
 import AreaLayout, { AreaPage } from '../Area/AreaLayout';
 import { SETTINGS_CATEGORIES, getSettingByView, canOpenSetting, getVisibleSettings } from './settingsRegistry';
+import { localizeBranch } from '../../../../utils/industryTerms';
 
 // Settings area: the same internal-menu pattern as Reports, without favourites or a catalogue.
 // `?view=settings` (and the retired `infrastructure`) land on the first visible page for the role / branch.
@@ -37,7 +38,7 @@ const SettingsLayout = ({ view, renderSetting }) => {
   return (
     <AreaLayout title="Settings" menuStorageKey="zennly.settings.menu" categories={cats} activeView={view} onNavigate={(v) => setParams({ view: v })}>
       {({ reopen }) => (shown ? (
-        <AreaPage title={shown.title} description={shown.description} backLabel="Settings" onBack={() => first && setParams({ view: first.view })} reopen={reopen}>
+        <AreaPage title={shown.title} description={localizeBranch(shown.description)} backLabel="Settings" onBack={() => first && setParams({ view: first.view })} reopen={reopen}>
           {allowed ? renderSetting(shown.view) : (
             <p className="py-12 text-center text-sm text-text-secondary">This page isn't available here.</p>
           )}

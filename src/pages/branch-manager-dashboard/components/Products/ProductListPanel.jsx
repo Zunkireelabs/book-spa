@@ -11,6 +11,7 @@ import {
   EmptyBlock, ErrorBlock,
 } from '../Area/listKit';
 import { ProductThumb, Tag, StockMeter } from './productBits';
+import { wordBranches } from '../../../../utils/industryTerms';
 
 const uniqueOptions = (rows, pick) => {
   const seen = new Map();
@@ -29,7 +30,7 @@ const ProductListPanel = ({
   const isMd = useMinWidth(768);
   const isLg = useMinWidth(1024);
   const isXl = useMinWidth(1280);
-  const here = isOverall ? 'in all branches' : `here`;
+  const here = isOverall ? `in all ${wordBranches()}` : `here`;
 
   const seg = segmentById(sp.get('seg')) ? sp.get('seg') : null;
   const query = sp.get('q') || '';

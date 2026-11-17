@@ -10,6 +10,7 @@ import { STATUS, reasonLabel, marginRange, npr, nepalDate, sizesText } from '../
 import { friendlyError } from '../../../../utils/friendlyError';
 import { StatusPill, tileDate } from '../Area/listKit';
 import { ProductThumb, Tag, HereTag, SECTION, ghostBtn, primaryBtn } from './productBits';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 // Product detail (V25): actions (Receive / Remove / Move / Sell by role), sizes, stock per branch split by size, Money (managers only),
 // Sales (last 30 days), and the latest 3 stock movements. `product` is a row from productsView.buildRows (so it refreshes with the list).
@@ -67,7 +68,7 @@ const ProductDetailPanel = ({
 
   const menu = !canManage ? [] : [
     { key: 'edit', label: 'Edit product', icon: 'Pencil', run: () => onEdit(p) },
-    { key: 'count', label: 'Set the real count', icon: 'ClipboardCheck', run: () => onAction('count', { product: p }), disabled: !act || !p.trackStock, reason: !p.trackStock ? 'This product does not count stock' : 'Choose a branch first' },
+    { key: 'count', label: 'Set the real count', icon: 'ClipboardCheck', run: () => onAction('count', { product: p }), disabled: !act || !p.trackStock, reason: !p.trackStock ? 'This product does not count stock' : `Choose a ${wordBranch()} first` },
     { key: 'toggle', label: p.isActive ? 'Switch off (hide from sale)' : 'Switch on', icon: p.isActive ? 'EyeOff' : 'Eye', run: toggleOn },
     { key: 'delete', label: 'Delete', icon: 'Trash2', danger: true, run: () => setConfirmDelete(true) },
   ];
@@ -105,7 +106,7 @@ const ProductDetailPanel = ({
             {sellable && <button type="button" onClick={() => onAction('sell', { product: p })} className={act ? ghostBtn : primaryBtn} data-act="sell"><Icon name="ShoppingCart" size={14} />Sell</button>}
           </div>
         )}
-        {canManage && isOverall && <p className="text-[12.5px] text-[#8A8A90] mt-3">Choose a branch in the header to receive, move or sell.</p>}
+        {canManage && isOverall && <p className="text-[12.5px] text-[#8A8A90] mt-3">Choose a {wordBranch()} in the header to receive, move or sell.</p>}
       </div>
 
       <div className="px-5 py-[18px] flex flex-col gap-[18px]">

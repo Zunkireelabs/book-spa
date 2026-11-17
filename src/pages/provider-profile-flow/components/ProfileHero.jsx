@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
+import { useTenant } from '../../../contexts/TenantContext';
 
 const DEFAULT_HERO = 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=1200&h=400&fit=crop';
 
@@ -9,16 +10,22 @@ const DEFAULT_HERO = 'https://images.unsplash.com/photo-1540555700478-4be289fbec
 const ProfileHero = ({ orgName, heroImageUrl, logoUrl }) => {
   const [heroFailed, setHeroFailed] = useState(false);
   const [logoFailed, setLogoFailed] = useState(false);
-  const heroSrc = (heroImageUrl && !heroFailed) ? heroImageUrl : DEFAULT_HERO;
+  const { isSpa } = useTenant();
+  // No custom hero: spa keeps its stock photo; every other trade gets a neutral gradient (the photo is a spa image).
+  const heroSrc = (heroImageUrl && !heroFailed) ? heroImageUrl : (isSpa ? DEFAULT_HERO : null);
 
   return (
   <div className="relative h-56 sm:h-80 w-full overflow-hidden bg-[var(--zn-muted)]">
-    <img
-      src={heroSrc}
-      alt={orgName}
-      onError={() => setHeroFailed(true)}
-      className="w-full h-full object-cover"
-    />
+    {heroSrc ? (
+      <img
+        src={heroSrc}
+        alt={orgName}
+        onError={() => setHeroFailed(true)}
+        className="w-full h-full object-cover"
+      />
+    ) : (
+      <div className="w-full h-full bg-gradient-to-br from-[var(--zn-primary)] via-[var(--zn-primary)]/70 to-[var(--zn-muted)]" data-testid="hero-gradient" />
+    )}
     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/15 to-transparent" />
     <div className="absolute bottom-0 left-0 px-4 sm:px-6 pb-5 sm:pb-6 flex items-center gap-4 max-w-7xl mx-auto right-0">
       <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-white bg-[var(--zn-card)] overflow-hidden flex items-center justify-center shrink-0 shadow-[0_1px_3px_rgba(35,33,29,0.15)]">

@@ -7,6 +7,7 @@ import ConfirmDialog from '../../../components/ui/ConfirmDialog';
 import { getDailyOperationalReport, exportDailyReportCSV, closeDay, fetchAttendance, fetchAttendanceSummary } from '../../../services/api';
 import { useIndustry } from '../../../hooks/useIndustry';
 import { paymentStatusLabel } from '../../../utils/paymentStatusLabel';
+import { wordBranch } from '../../../utils/industryTerms';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -140,7 +141,7 @@ const DailyOperationalReportPanel = ({ branchId }) => {
   if (!branchId) {
     return (
       <div className="bg-surface rounded-spa p-6 border border-border text-center">
-        <p className="text-sm text-text-secondary">No branch selected.</p>
+        <p className="text-sm text-text-secondary">No {wordBranch()} selected.</p>
       </div>
     );
   }

@@ -8,6 +8,7 @@ import {
   ROLE_LABELS, CALENDAR_LABELS, canViewAccess, canEditAccess, loginIsOn, branchSummary,
 } from '../../../../services/staffAccessRules';
 import AccessEditPanel from './AccessEditPanel';
+import { wordBranchesCap } from '../../../../utils/industryTerms';
 
 const SECTION = 'text-[11.5px] font-medium uppercase tracking-[.05em] text-[#8A8A90]';
 const ROW = 'flex items-center justify-between gap-3 px-3.5 py-2.5 text-[13px] text-[#515152] border-b border-[#F1F1EF] last:border-b-0';
@@ -134,7 +135,7 @@ const StaffAccessSection = ({ therapistId, personName, onEditingChange }) => {
         <div className={ROW}><span>Calendar</span><b className="font-semibold text-text-primary">{CALENDAR_LABELS[u.calendar_visibility] || '—'}</b></div>
         <div className={ROW}><span>Client details</span><b className="font-semibold text-text-primary">{u.can_view_customer_details === false ? 'Hidden' : 'Shown'}</b></div>
         <div className={ROW}><span>Prices</span><b className="font-semibold text-text-primary">{u.can_view_prices === false ? 'Hidden' : 'Shown'}</b></div>
-        <div className={ROW}><span>Branches</span><b className="font-semibold text-text-primary text-right">{branchSummary({ branches: state.branches, grantedIds: access.branchIds, homeBranchId })}</b></div>
+        <div className={ROW}><span>{wordBranchesCap()}</span><b className="font-semibold text-text-primary text-right">{branchSummary({ branches: state.branches, grantedIds: access.branchIds, homeBranchId })}</b></div>
       </div>
       <p className="text-xs text-[#8A8A90] mt-2" data-access-hint>Sees their own {sessionLabelPlural.toLowerCase()}, day and tips when signed in.</p>
       {editable && <div className="mt-2.5"><button type="button" className={BTN} onClick={() => setEditing(true)} data-access-edit>Edit access</button></div>}

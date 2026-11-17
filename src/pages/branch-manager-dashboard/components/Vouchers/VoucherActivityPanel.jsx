@@ -6,6 +6,7 @@ import { RANGES, rangeFor, rangeLead } from '../../../../services/membershipsVie
 import { KINDS, buildActivity, activityTotals, activityWhen, matchesVoucherSearch, shortName, npr } from '../../../../services/vouchersView';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { useMinWidth, useSlashFocus, useStickyBlock, thClass, SearchBox, ClearableChip, RangeMenu, isDate, csvDownload, EmptyBlock, ErrorBlock, leadNodes } from '../Area/listKit';
+import { wordBranchCap } from '../../../../utils/industryTerms';
 
 // Activity (V23, was "Redemptions"): everything that happened to vouchers in a date range (This month by default): sold, given
 // free, redeemed, coupon used, extended, checked (the one-off review) and corrected, with who did it. Amounts are voucher VALUE;
@@ -79,7 +80,7 @@ const VoucherActivityPanel = ({ vouchers, today, stickyTop, registerExport, onOp
   useEffect(() => () => onLead(' '), [onLead]);
 
   const exportCsv = useCallback(() => {
-    csvDownload(`voucher-activity-${from}_to_${to}.csv`, ['Date', 'Time', 'Guest', 'Code', 'What happened', 'Detail', 'Branch', 'By', 'Voucher value', 'Paid'],
+    csvDownload(`voucher-activity-${from}_to_${to}.csv`, ['Date', 'Time', 'Guest', 'Code', 'What happened', 'Detail', `${wordBranchCap()}`, 'By', 'Voucher value', 'Paid'],
       filtered.map((r) => { const w = activityWhen(r, today); return [r.date, w.time, r.guestName, r.code, KINDS[r.kind]?.label, r.detail, r.branchName, r.performerName, r.amount, r.paid]; }));
   }, [filtered, from, to, today]);
   useEffect(() => { registerExport({ run: exportCsv, disabled: !rows || filtered.length === 0 }); }, [exportCsv, rows, filtered.length, registerExport]);
@@ -91,7 +92,7 @@ const VoucherActivityPanel = ({ vouchers, today, stickyTop, registerExport, onOp
   const chips = (
     <>
       <FilterChip label="What happened" value={filters.kind} options={options.kind} onChange={(v) => patch({ kind: v })} selectedLabel={chipValue('kind')} />
-      <FilterChip label="Branch" value={filters.branch} options={options.branch} onChange={(v) => patch({ br: v })} selectedLabel={chipValue('branch')} />
+      <FilterChip label={`${wordBranchCap()}`} value={filters.branch} options={options.branch} onChange={(v) => patch({ br: v })} selectedLabel={chipValue('branch')} />
       <FilterChip label="Staff" value={filters.staff} options={options.staff} onChange={(v) => patch({ by: v })} selectedLabel={chipValue('staff')} />
       {filters.voucher && <ClearableChip label={`Voucher: ${voucherLabel}`} onClear={() => patch({ voucher: '' })} />}
     </>
@@ -176,7 +177,7 @@ const VoucherActivityPanel = ({ vouchers, today, stickyTop, registerExport, onOp
               {showWhen && <th scope="col" className={`${th} text-left pl-2`} style={thTop}>When</th>}
               <th scope="col" className={`${th} text-left ${showWhen ? '' : 'pl-2'}`} style={thTop}>Voucher</th>
               {isSm && <th scope="col" className={`${th} text-left`} style={thTop}>What happened</th>}
-              {showBranch && <th scope="col" className={`${th} text-left`} style={thTop}>Branch</th>}
+              {showBranch && <th scope="col" className={`${th} text-left`} style={thTop}>{wordBranchCap()}</th>}
               {showBy && <th scope="col" className={`${th} text-left`} style={thTop}>By</th>}
               <th scope="col" className={`${th} text-right pr-3`} style={thTop}>Voucher value</th>
             </tr>

@@ -22,6 +22,7 @@ import {
   fetchTherapistTransferStatus,
   cancelScheduledTransfer,
 } from '../../services/api';
+import { wordBranch } from '../../utils/industryTerms';
 
 function formatPrettyDate(d) {
   if (!d) return '—';
@@ -278,7 +279,7 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
     }
 
     setCancellingActive(false);
-    onSuccess(`${therapistName}'s transfer cancelled — back at this branch now.`);
+    onSuccess(`${therapistName}'s transfer cancelled — back at this ${wordBranch()} now.`);
   };
 
   const isPermanentTransfer = transferMode === 'permanent';
@@ -294,7 +295,7 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
 
   const handleTransfer = async () => {
     if (!transferToBranch) {
-      setTransferError('Select a destination branch.');
+      setTransferError(`Select a destination ${wordBranch()}.`);
       return;
     }
     if (!transferStartDate) {
@@ -327,8 +328,8 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
         toTs: revertDateObj ? `${toYmd(revertDateObj)}T${toHm(revertDateObj)}:00+05:45` : null,
         toBranchId: transferToBranch,
       }),
-      summary: `Moving ${therapistName} to another branch from ${transferStartDate}${isPermanentTransfer ? '' : ` ${transferStartTime}`}.`,
-      titleFor: (n) => `${n} upcoming booking${n === 1 ? '' : 's'} at this branch while away`,
+      summary: `Moving ${therapistName} to another ${wordBranch()} from ${transferStartDate}${isPermanentTransfer ? '' : ` ${transferStartTime}`}.`,
+      titleFor: (n) => `${n} upcoming booking${n === 1 ? '' : 's'} at this ${wordBranch()} while away`,
       saveLabel: 'Transfer anyway',
     });
     if (!proceed) { setTransferring(false); return; }
@@ -631,7 +632,7 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
       onClick: handleTransfer, disabled: !isTransferFormComplete, loading: transferring,
     };
     cancelLabel = 'Cancel';
-    reason = !transferToBranch ? 'Select a destination branch' : !transferStartDate ? 'Pick a start date'
+    reason = !transferToBranch ? `Select a destination ${wordBranch()}` : !transferStartDate ? 'Pick a start date'
       : !isPermanentTransfer && !transferStartTime ? 'Pick a start time'
       : !isPermanentTransfer && !transferDurationUnit ? 'Pick a duration unit'
       : !isPermanentTransfer && !(Number(transferDurationValue) > 0) ? 'Enter a duration' : '';
@@ -647,9 +648,9 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
             : <>Move {therapistName} to another branch for a set duration. They'll automatically return to their current branch once it elapses.</>}
         </p>
         <InlineError message={transferError} />
-        <Field label="Destination branch" required>
+        <Field label={`Destination ${wordBranch()}`} required>
           <SelectField
-            placeholder="Select a branch..."
+            placeholder={`Select a ${wordBranch()}...`}
             options={orgBranches.filter((b) => b.id !== currentBranchId).map((b) => ({ value: b.id, label: b.name }))}
             value={transferToBranch}
             onChange={setTransferToBranch}

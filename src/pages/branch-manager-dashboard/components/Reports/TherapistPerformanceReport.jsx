@@ -13,6 +13,7 @@ import {
   buildRows, buildTiles, sortRows, searchRows, exportRows, isEmptyPerformance, hasPrevious, scoreFormula, num, pctText,
   BUSY_LOW, DEFAULT_SORT, DEFINITIONS,
 } from './therapistPerformanceView';
+import { wordBranch, wordBranches } from '../../../../utils/industryTerms';
 
 const th = 'px-3 py-2 text-[11px] font-medium text-text-tertiary bg-background border-b border-border whitespace-nowrap';
 const td = 'px-3 py-2.5 border-b border-border text-[12.5px] font-data tabular-nums text-right whitespace-nowrap';
@@ -157,7 +158,7 @@ const TherapistPerformanceReport = ({ periodId, onPeriod, custom, onCustom, reop
             <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
               <b className="text-sm font-semibold">{b.name}</b>
               <span className="text-xs text-text-tertiary">{b.current.team.active} {b.current.team.active === 1 ? staffLabel.toLowerCase() : staffLabelPlural.toLowerCase()} · service sales {num(b.current.team.service_sales)}</span>
-              <button type="button" onClick={() => switchBranch(b.branch_id)} className="ml-auto text-xs text-primary hover:underline">Open this branch</button>
+              <button type="button" onClick={() => switchBranch(b.branch_id)} className="ml-auto text-xs text-primary hover:underline">Open this {wordBranch()}</button>
             </div>
             <table className="w-full border-collapse">
               <thead><tr>
@@ -211,7 +212,7 @@ const TherapistPerformanceReport = ({ periodId, onPeriod, custom, onCustom, reop
     </div>
   );
 
-  const tabs = ready ? [{ id: 'ranking', label: 'Ranking' }, ...(showBranches ? [{ id: 'branches', label: 'By branch' }] : []), { id: 'trend', label: 'Trend' }] : [];
+  const tabs = ready ? [{ id: 'ranking', label: 'Ranking' }, ...(showBranches ? [{ id: 'branches', label: `By ${wordBranch()}` }] : []), { id: 'trend', label: 'Trend' }] : [];
 
   return (
     <ReportFrame
@@ -238,7 +239,7 @@ const TherapistPerformanceReport = ({ periodId, onPeriod, custom, onCustom, reop
           <InsightList insights={insights} canOpen={(v) => isReportOpenable(v, role)} onOpen={onOpenView} />
           <div className="flex items-center gap-3 flex-wrap print:hidden">
             {searchBox}
-            <span className="text-xs text-text-tertiary">{activeTab === 'branches' ? `${data.branches.length - emptyBranches.length} branches with activity${emptyBranches.length ? ` · ${emptyBranches.length} without` : ''}` : `${visibleRows.length} ${visibleRows.length === 1 ? staffLabel.toLowerCase() : staffLabelPlural.toLowerCase()}`}</span>
+            <span className="text-xs text-text-tertiary">{activeTab === 'branches' ? `${data.branches.length - emptyBranches.length} ${wordBranches()} with activity${emptyBranches.length ? ` · ${emptyBranches.length} without` : ''}` : `${visibleRows.length} ${visibleRows.length === 1 ? staffLabel.toLowerCase() : staffLabelPlural.toLowerCase()}`}</span>
           </div>
           {activeTab === 'ranking' && rankingTable}
           {activeTab === 'branches' && branchBlocks}

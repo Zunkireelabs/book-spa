@@ -3,7 +3,8 @@ import CustomSelect from '../../../../components/ui/CustomSelect';
 import { PanelShell, FormBody, Field, SwitchRow, TextInput, InlineError, controlA11y } from '../../../../components/ui/PanelFormKit';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useIndustry } from '../../../../hooks/useIndustry';
-import { grantStaffAccess, updateStaffAccess, grantableRolesFor, directDiscountPercent } from '../../../../services/api';
+import { grantStaffAccess, updateStaffAccess, grantableRolesFor, directDiscountPercent, staffCanRequestDiscountApproval } from '../../../../services/api';
+import { maskCustomerName, maskPhone } from '../../../../services/dataMasking';
 import { friendlyError } from '../../../../utils/friendlyError';
 import {
   ROLE_LABELS, CALENDAR_OPTIONS, initialAccessForm, branchIdsToSave, showsHideOptions, validateAccessForm, saveErrorCopy,
@@ -12,18 +13,19 @@ import {
 const SEC = 'text-[11.5px] font-medium uppercase tracking-[.05em] text-[#8A8A90]';
 const HELP = 'mt-1.5 text-xs text-text-secondary leading-snug';
 
-const roleDetail = (role) => ({
+const roleDetail = (role, bw) => ({
   staff: `Gives discounts up to ${directDiscountPercent('staff')}%${directDiscountPercent('staff') >= 50 ? ' directly, with no approval step' : '; asks a manager above that'}.`,
-  manager: `Gives discounts up to ${directDiscountPercent('manager')}%; approves staff requests.`,
-  admin: 'Full control across every branch.',
-  admin_viewer: 'Read-only across every branch: no edits to appointments, payments or settings.',
+  manager: `Gives discounts up to ${directDiscountPercent('manager')}%${staffCanRequestDiscountApproval ? '; approves staff requests' : ''}.`,
+  admin: `Full control across every ${bw}.`,
+  admin_viewer: `Read-only across every ${bw}: no edits to appointments, payments or settings.`,
 }[role]);
 
 // "Edit access" (existing login, B1.2) and "Give login access" (no login yet, B1.3): one form, two modes.
 // Writes go through Anish's grantStaffAccess / updateStaffAccess; the roles offered are grantableRolesFor(viewer), the list those functions enforce.
 const AccessEditPanel = ({ therapistId, personName, homeBranchId, branches, access, onClose, onSaved }) => {
   const { profile } = useAuth();
-  const { staffLabel } = useIndustry();
+  const { staffLabel, branchWord, branchWordPlural } = useIndustry();
+  const bwpCap = branchWordPlural.charAt(0).toUpperCase() + branchWordPlural.slice(1);
   const isNew = !access.user;
   const first = (personName || '').split(' ')[0] || personName;
   const initial = useMemo(() => initialAccessForm({ user: access.user, branches, grantedIds: access.branchIds, homeBranchId }), [access, branches, homeBranchId]);
@@ -116,7 +118,7 @@ const AccessEditPanel = ({ therapistId, personName, homeBranchId, branches, acce
               <button key={r} type="button" role="radio" aria-checked={form.role === r} disabled={roleLocked(r)} onClick={() => set({ role: r })}
                 className={`w-full text-left flex items-start gap-2.5 px-3 py-2.5 rounded-spa border disabled:opacity-60 ${form.role === r ? 'border-primary bg-primary/5' : 'border-border hover:bg-background'}`}>
                 <span className={`mt-0.5 w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0 ${form.role === r ? 'border-primary' : 'border-border'}`} aria-hidden="true">{form.role === r && <span className="w-2 h-2 rounded-full bg-primary" />}</span>
-                <span><b className="block text-[13.5px] font-semibold text-text-primary">{ROLE_LABELS[r]}</b><span className="block text-xs text-text-secondary">{roleDetail(r)}</span></span>
+                <span><b className="block text-[13.5px] font-semibold text-text-primary">{ROLE_LABELS[r]}</b><span className="block text-xs text-text-secondary">{roleDetail(r, branchWord)}</span></span>
               </button>
             ))}
           </div>
@@ -131,7 +133,7 @@ const AccessEditPanel = ({ therapistId, personName, homeBranchId, branches, acce
           {showsHideOptions(form.role) && (
             <>
               <label className="flex items-start gap-2.5 text-[13px] cursor-pointer"><input type="checkbox" className="mt-0.5 w-4 h-4 accent-primary" checked={form.hideClientDetails} onChange={(e) => set({ hideClientDetails: e.target.checked })} />
-                <span>Hide client names and numbers<span className="block text-xs text-text-secondary mt-0.5">Names show as A***** B***, phones as ******655. Email and notes are withheld.</span></span></label>
+                <span>Hide client names and numbers<span className="block text-xs text-text-secondary mt-0.5">Names show as {maskCustomerName('Sadin Shrestha')}, phones as {maskPhone('9812345094')}. Email and notes are withheld.</span></span></label>
               <label className="flex items-start gap-2.5 text-[13px] cursor-pointer"><input type="checkbox" className="mt-0.5 w-4 h-4 accent-primary" checked={form.hidePrices} onChange={(e) => set({ hidePrices: e.target.checked })} />
                 <span>Hide prices<span className="block text-xs text-text-secondary mt-0.5">All money hidden everywhere, including at payment.</span></span></label>
               <p className={HELP}>Shown for the Staff role only. Enforced by not sending the data, not by hiding it on screen.</p>
@@ -141,15 +143,15 @@ const AccessEditPanel = ({ therapistId, personName, homeBranchId, branches, acce
 
         {profile?.role !== 'admin' ? (
           <section className="space-y-1">
-            <h3 className={SEC}>Branches</h3>
-            <p className={HELP}>Access at other branches is set by an admin.</p>
+            <h3 className={SEC}>{bwpCap}</h3>
+            <p className={HELP}>Access at other {branchWordPlural} is set by an admin.</p>
           </section>
         ) : (
         <section className="space-y-2.5">
-          <h3 className={SEC}>Branches</h3>
-          <label className="flex items-start gap-2.5 text-[13px] cursor-pointer"><input type="radio" name="access-br" className="mt-0.5 accent-primary" checked={form.branchMode === 'all'} onChange={() => set({ branchMode: 'all' })} /><span>All branches</span></label>
+          <h3 className={SEC}>{bwpCap}</h3>
+          <label className="flex items-start gap-2.5 text-[13px] cursor-pointer"><input type="radio" name="access-br" className="mt-0.5 accent-primary" checked={form.branchMode === 'all'} onChange={() => set({ branchMode: 'all' })} /><span>All {branchWordPlural}</span></label>
           <label className="flex items-start gap-2.5 text-[13px] cursor-pointer"><input type="radio" name="access-br" className="mt-0.5 accent-primary" checked={form.branchMode === 'selected'} onChange={() => set({ branchMode: 'selected' })} />
-            <span>Selected branches<span className="block text-xs text-text-secondary mt-0.5">The home branch is always included.</span></span></label>
+            <span>Selected {branchWordPlural}<span className="block text-xs text-text-secondary mt-0.5">The home {branchWord} is always included.</span></span></label>
           {form.branchMode === 'selected' && (
             <div className="grid grid-cols-2 gap-2 pl-6">
               {branches.map((b) => {

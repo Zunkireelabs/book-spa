@@ -13,6 +13,7 @@ import LinkConflictsNotice from './LinkConflictsNotice';
 import TherapistPositionsPanel from './TherapistPositionsPanel';
 import TherapistTransferLogPanel from './TherapistTransferLogPanel';
 import RosterPanel from './RosterPanel';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 const positionParts = (p) => (p ? p.split('/').map((x) => x.trim()).filter(Boolean) : []);
 const LIST_VIEWS = ['therapists', 'therapists-inactive'];
@@ -75,7 +76,7 @@ const TherapistsPage = ({ view }) => {
     const service = activeList.filter((t) => t.isServiceStaff);
     const working = service.filter((t) => ['checked-in', 'not-checked-in', 'upcoming'].includes(t.status.key));
     const checkedIn = service.filter((t) => t.status.key === 'checked-in').length;
-    const where = isOverall ? `across ${branches.length} branch${branches.length === 1 ? '' : 'es'}` : `at ${branchName || 'this branch'}`;
+    const where = isOverall ? `across ${branches.length} ${wordBranch()}${branches.length === 1 ? '' : 'es'}` : `at ${branchName || 'this branch'}`;
     const parts = [{ strong: String(activeList.length) }, { text: ` ${(activeList.length === 1 ? staffLabel : staffLabelPlural).toLowerCase()} ${where}` }];
     const visiting = (ov.visitors || []).length;
     if (visiting > 0 && !isOverall) parts.push({ text: ' · ' }, { strong: String(visiting) }, { text: ' visiting' });

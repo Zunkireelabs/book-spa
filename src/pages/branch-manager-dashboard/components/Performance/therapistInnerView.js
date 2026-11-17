@@ -4,6 +4,7 @@ import { computeDelta, addDays } from 'utils/reportPeriod';
 import { durationText } from 'utils/durationText';
 import { WEIGHTS } from '../Reports/therapistPerformanceView';
 import { deriveRow } from 'services/attendanceView';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 const ratio = (a, b) => (Number(b) > 0 ? Number(a) / Number(b) : null);
 const r1 = (n) => Math.round(n * 10) / 10;
@@ -261,7 +262,7 @@ export function attendanceDays({ shifts = [], rows = [], from, to, now = Date.no
     const offLabel = (s?.off || []).map((y) => y.label || y.reason).find(Boolean);
     const day = { date, rostered, rosteredMin: net, shiftStart: rostered ? secToMin(s.start_time) : null, shiftEnd: rostered ? secToMin(s.end_time) : null, reason: rostered ? null : (offLabel || 'no shift'),
       kind: 'notRostered', label: 'Not rostered', marked: !!r, checkIn: null, checkOut: null, workedMin: null, lateMin: null, earlyMin: null, longerMin: null,
-      branchHoursUsed: false, half: null, workedAt: r && r.worked_at_branch_id && r.worked_at_branch_id !== r.branch_id ? (r.worked_at?.name || 'another branch') : null, rawStatus: r?.status || null };
+      branchHoursUsed: false, half: null, workedAt: r && r.worked_at_branch_id && r.worked_at_branch_id !== r.branch_id ? (r.worked_at?.name || `another ${wordBranch()}`) : null, rawStatus: r?.status || null };
     if (r) {
       const inMs = isoMs(r.check_in_time); const outMs = isoMs(r.check_out_time);
       const inMin = nepalMin(inMs); const outMin = nepalMin(outMs);
@@ -357,7 +358,7 @@ export function dayChips(d) {
     else if (!d.checkOut) notes.push('no check-out recorded');
     else if (!d.checkIn) notes.push('no check-in recorded');
   }
-  if (d.branchHoursUsed) notes.push('no roster, branch hours used');
+  if (d.branchHoursUsed) notes.push(`no roster, ${wordBranch()} hours used`);
   return { chips, note: notes.join(' · ') };
 }
 

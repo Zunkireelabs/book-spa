@@ -18,6 +18,7 @@ import { MEMBERSHIP_ENABLED } from '../../../../lib/featureFlags';
 import { nepalNow } from '../../../../utils/customerDirectory';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { KindTag } from './voucherBits';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 const formatNPR = (amount) => `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -360,7 +361,7 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
         <FormBody>
           <div className="py-10 text-center">
             <Icon name="Ticket" size={28} className="text-text-tertiary mx-auto mb-3" />
-            <p className="text-[13px] text-text-secondary">Vouchers are handed out from one branch. Switch branch in the header to continue.</p>
+            <p className="text-[13px] text-text-secondary">Vouchers are handed out from one {wordBranch()}. Switch {wordBranch()} in the header to continue.</p>
           </div>
         </FormBody>
       ) : (

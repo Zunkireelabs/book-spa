@@ -1,9 +1,10 @@
 import { createBooking, createComboBookingItems } from '../../../../services/api';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 // Create the booking(s) from the QuickCreatePanel form. Shared by the Calendar and the Dashboard so both host the panel identically.
 // Resolves { error } (a message: the panel stays open) or { toast: { msg, type? } } (done: the caller closes the panel and refreshes).
 export async function submitQuickCreate({ formData, branchId, guard }) {
-  if (!branchId) return { error: 'Missing branch info.' };
+  if (!branchId) return { error: `Missing ${wordBranch()} info.` };
   const date = formData.bookingDate;
   const startTime = formData.bookingTime;
   if (!date || !startTime) return { error: 'Date and time are required.' };

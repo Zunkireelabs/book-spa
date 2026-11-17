@@ -7,6 +7,7 @@ import TransferHoursWarning from '../../../../components/ui/TransferHoursWarning
 import {
   PanelShell, FormBody, Field, TextInput, NumberInput, SelectField, Segmented, DateField, TimeField, InlineError,
 } from '../../../../components/ui/PanelFormKit';
+import { staffWord, wordBranch } from '../../../../utils/industryTerms';
 
 // Transfer-creation entry point reachable from the Calendar's empty-slot choice menu — mirrors the Attendance panel's
 // transfer form (creation half only) so both entry points call the exact same transferTherapist() API and produce identical
@@ -51,7 +52,7 @@ const TransferFromCalendarModal = ({
   useEffect(() => () => onDraftChange?.(null), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSubmit = async () => {
-    if (!toBranch) { setError('Select a destination branch.'); return; }
+    if (!toBranch) { setError(`Select a destination ${wordBranch()}.`); return; }
     if (!startDate) { setError('Select a start date.'); return; }
     if (!isPermanent) {
       if (!startTime) { setError('Select a start time.'); return; }
@@ -70,8 +71,8 @@ const TransferFromCalendarModal = ({
         toTs: revertDate ? `${toYmd(revertDate)}T${toHm(revertDate)}:00+05:45` : null,
         toBranchId: toBranch,
       }),
-      summary: `Moving ${therapistName} to another branch from ${startDate}${isPermanent ? '' : ` ${startTime}`}.`,
-      titleFor: (n) => `${n} upcoming booking${n === 1 ? '' : 's'} at this branch while away`,
+      summary: `Moving ${therapistName} to another ${wordBranch()} from ${startDate}${isPermanent ? '' : ` ${startTime}`}.`,
+      titleFor: (n) => `${n} upcoming booking${n === 1 ? '' : 's'} at this ${wordBranch()} while away`,
       saveLabel: 'Transfer anyway',
     });
     if (!proceed) { setSubmitting(false); return; }
@@ -97,7 +98,7 @@ const TransferFromCalendarModal = ({
     onSuccess?.({ applied: result.data?.applied, startDate, startTime: isPermanent ? null : startTime });
   };
 
-  const reason = !toBranch ? 'Select a destination branch' : !startDate ? 'Pick a start date'
+  const reason = !toBranch ? `Select a destination ${wordBranch()}` : !startDate ? 'Pick a start date'
     : !isPermanent && !startTime ? 'Pick a start time'
     : !isPermanent && !durationUnit ? 'Pick a duration unit'
     : !isPermanent && !(Number(durationValue) > 0) ? 'Enter a duration' : '';
@@ -107,7 +108,7 @@ const TransferFromCalendarModal = ({
     <>
     <PanelShell
       variant={variant}
-      title={`Transfer therapist · ${therapistName}`}
+      title={`Transfer ${staffWord()} · ${therapistName}`}
       onClose={onClose}
       dirty={dirty}
       guardRef={guardRef}
@@ -120,15 +121,15 @@ const TransferFromCalendarModal = ({
 
         <p className="font-body text-[13px] text-text-secondary">
           {isPermanent
-            ? <>Move {therapistName} to another branch permanently.</>
-            : <>Move {therapistName} to another branch for a set duration. They'll automatically return once it elapses.</>}
+            ? <>Move {therapistName} to another {wordBranch()} permanently.</>
+            : <>Move {therapistName} to another {wordBranch()} for a set duration. They'll automatically return once it elapses.</>}
         </p>
 
         <InlineError message={error} />
 
-        <Field label="Destination branch" required>
+        <Field label={`Destination ${wordBranch()}`} required>
           <SelectField
-            placeholder="Select a branch..."
+            placeholder={`Select a ${wordBranch()}...`}
             options={orgBranches.filter((b) => b.id !== currentBranchId).map((b) => ({ value: b.id, label: b.name }))}
             value={toBranch}
             onChange={setToBranch}

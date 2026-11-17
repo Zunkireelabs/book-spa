@@ -3,6 +3,7 @@
 // health rule) and busy = the dashboard working rule.
 import { computeDelta } from 'utils/reportPeriod';
 import { num, pctText } from './businessHealthView';
+import { wordBranchCap } from '../../../../utils/industryTerms';
 
 export { num, pctText };
 
@@ -143,14 +144,14 @@ export function buildTiles(data) {
 
 /** CSV of the table on screen. Ranking = one line per therapist plus the team; By branch = the same per branch; Trend = sales per week. */
 export function exportRows(data, tab, rowsFor, staffLabel = 'Therapist') {
-  const head = [staffLabel, 'Branch', 'Score', 'Tier', 'Attendance', 'Service sales', 'Completed', 'Avg ticket', 'Busy', 'Rebook', 'No-show', 'Customers served'];
+  const head = [staffLabel, `${wordBranchCap()}`, 'Score', 'Tier', 'Attendance', 'Service sales', 'Completed', 'Avg ticket', 'Busy', 'Rebook', 'No-show', 'Customers served'];
   const line = (r) => [r.name, r.branch_name, r.score, r.tier.label, pctText(r.attendance) ?? '', r.service_sales, r.completed, r.avg_ticket ?? '', pctText(r.busy) ?? '', pctText(r.rebook_rate) ?? '', pctText(r.noShowRate) ?? '', r.customers];
   if (tab === 'trend') {
     const weeks = data.weeks || [];
     return [[staffLabel, ...weeks, 'Total'], ...rowsFor.map((r) => [r.name, ...(r.sales_by_week || []).map(Number), r.service_sales])];
   }
   if (tab === 'branches') {
-    return [['Branch', ...head], ...(data.branches || []).flatMap((b) => buildRows(b.current).map((r) => [b.name, ...line(r)]))];
+    return [[`${wordBranchCap()}`, ...head], ...(data.branches || []).flatMap((b) => buildRows(b.current).map((r) => [b.name, ...line(r)]))];
   }
   const t = data.current.team;
   return [

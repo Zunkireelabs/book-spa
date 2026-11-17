@@ -29,6 +29,7 @@ import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
 import WaitlistPanel, { useWaitlistEntries } from './WaitlistPanel';
 import { todayStr, addDays, addMonths, getStepDays } from './calendarDates';
+import { staffWord } from '../../../../utils/industryTerms';
 
 // ── Component ────────────────────────────────────────────────
 
@@ -523,7 +524,7 @@ const OperationalCalendar = ({ branchId }) => {
             // Transfer is a therapist-column action for managers/admins only (the RPC enforces it too).
             ...(!isOverallBranch(branchId) && transfersAvailable && choiceMenuSlot.colType === 'therapist' && ['manager', 'admin'].includes(profile?.role) ? [{
               key: 'transfer',
-              label: 'Transfer therapist',
+              label: `Transfer ${staffWord()}`,
               icon: 'ArrowRightLeft',
               onSelect: () => openOnlyPanel(() => setTransferModalTarget({
                 therapistId: choiceMenuSlot.colId,

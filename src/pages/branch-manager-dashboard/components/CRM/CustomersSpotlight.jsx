@@ -3,6 +3,7 @@ import Spotlight from '../../../../components/ui/Spotlight';
 import { fetchMembershipTiers } from '../../../../services/api';
 import { MEMBERSHIP_ENABLED } from '../../../../lib/featureFlags';
 import { daysBetween } from '../../../../utils/customerDirectory';
+import { staffWord } from '../../../../utils/industryTerms';
 
 // The day the "Balance now shows only what's owed for visits that happened" rule shipped. The notice shows for the 14 days after.
 // (Set to the local date this was built; update it to the real release date when it ships.)
@@ -85,7 +86,7 @@ const CustomersSpotlight = ({ customers, today, role, orgId, branchName, onSeeOw
       out.push({
         id: 'win-back-v1', version: 1, eyebrow: 'New · Win-back',
         title: `${stats.atRisk.length} returning guest${stats.atRisk.length === 1 ? '' : 's'} ${stats.atRisk.length === 1 ? 'hasn’t' : 'haven’t'} been back in 60+ days.`,
-        body: 'Reach out with a personal note and their favourite therapist, while they’re still easy to win back.',
+        body: 'Reach out with a personal note and their favourite ' + staffWord() + ', while they’re still easy to win back.',
         primary: { label: 'Review at-risk guests', onClick: onReviewAtRisk },
         secondary: { label: 'How it works →', popover: <><b>At risk</b> means a guest with 2 or more visits whose last visit was more than 60 days ago and who has nothing booked. They are shown in amber in the list so you can reach out before they lapse (6+ months).</> },
         art: <MessageArt customer={pick} branchName={branchName} />,

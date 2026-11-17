@@ -15,6 +15,7 @@ import {
   longDate, shortDate, relativeUntil, npr, csvDownload, EmptyBlock, ErrorBlock,
 } from '../Area/listKit';
 import { TierPill } from './memberBits';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 const uniqueOptions = (list, idOf, labelOf) => {
   const seen = new Map();
@@ -126,7 +127,7 @@ const MembershipsPanel = ({ members, tiers, today, error, onRetry, readOnly, isO
 
   const exportCsv = useCallback(() => {
     csvDownload(`members-${seg || 'all'}-${today}.csv`,
-      ['Member', 'Phone', 'Card', 'Tier', 'Status', 'Balance', 'Deposited this cycle', 'Tier deposit', 'Valid until', 'Joined', 'Home branch'],
+      ['Member', 'Phone', 'Card', 'Tier', 'Status', 'Balance', 'Deposited this cycle', 'Tier deposit', 'Valid until', 'Joined', `Home ${wordBranch()}`],
       filtered.map((m) => [m.customerName, m.customerPhone, m.membershipNumber, m.tierName, DISPLAY_STATUS[displayStatus(m, today)].label, m.balance,
         m.cycleDeposited, tierDeposit(m), m.expiryDate || '', m.activationDate || '', m.customerBranchName || '']));
   }, [filtered, seg, today]);
@@ -165,7 +166,7 @@ const MembershipsPanel = ({ members, tiers, today, error, onRetry, readOnly, isO
   const chips = (
     <>
       <FilterChip label="Tier" value={filters.tier} options={options.tier} onChange={(v) => patch({ tier: v })} selectedLabel={chipValue('tier')} />
-      <FilterChip label="Home branch" value={filters.home} options={options.home} onChange={(v) => patch({ hb: v })} selectedLabel={chipValue('home')} />
+      <FilterChip label={`Home ${wordBranch()}`} value={filters.home} options={options.home} onChange={(v) => patch({ hb: v })} selectedLabel={chipValue('home')} />
       {bday
         ? <ClearableChip label={BIRTHDAY_FILTER.label} onClear={() => patch({ bday: '' })} />
         : (
@@ -305,7 +306,7 @@ const MembershipsPanel = ({ members, tiers, today, error, onRetry, readOnly, isO
               {showTier && <th scope="col" className={`${th} text-left`} style={thTop}>Tier</th>}
               <th scope="col" className={`${th} text-left`} style={thTop}>Wallet</th>
               {showValid && <th scope="col" className={`${th} text-left`} style={thTop}>Valid until</th>}
-              {showHome && <th scope="col" className={`${th} text-left`} style={thTop}>Home branch</th>}
+              {showHome && <th scope="col" className={`${th} text-left`} style={thTop}>Home {wordBranch()}</th>}
               {isSm && <th scope="col" className={`${th} text-left pl-2`} style={thTop}>Status</th>}
               <th scope="col" className={th} style={thTop}><span className="sr-only">Actions</span></th>
             </tr>

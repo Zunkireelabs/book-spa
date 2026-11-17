@@ -6,10 +6,11 @@ import { isNoShow, toDbStatus, to12h } from '../../../../services/bookingTransfo
 import { formatPhoneGrouped } from '../../../../utils/phone';
 import { initials } from '../../../../utils/customerDirectory';
 import { formatLate, groupInfo } from '../../../../utils/bookingsList';
+import { teamMemberWord } from '../../../../utils/industryTerms';
 
 export const COLUMN_DEFS = [
   { id: 'service', label: 'Service' },
-  { id: 'therapist', label: 'Team member' },
+  { id: 'therapist', get label() { return teamMemberWord(); } },
   { id: 'amount', label: 'Amount' },
 ];
 

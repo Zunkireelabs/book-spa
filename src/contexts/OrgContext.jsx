@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import { getOrgPaymentMethods } from '../services/paymentMethods';
+import { setIndustryTerms } from '../utils/industryTerms';
 
 const OrgContext = createContext(null);
 
@@ -73,6 +74,13 @@ export const OrgProvider = ({ children }) => {
 
     fetchIndustry();
   }, [org?.industry_type]);
+
+  // Plain modules (api.js messages, friendlyError) read the org's own words from here; idempotent, so safe in render.
+  setIndustryTerms({
+    staff: industry?.staff_label, staffPlural: industry?.staff_label_plural,
+    room: industry?.location_label, roomPlural: industry?.location_label_plural,
+    spa: (org?.industry_type || 'spa') === 'spa',
+  });
 
   const value = {
     // Existing org values

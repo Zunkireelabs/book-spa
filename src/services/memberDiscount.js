@@ -25,7 +25,8 @@ export function isActiveMember(m, today) {
 }
 
 /** "Premium Club member · 45% spa" — saved as the booking's discount_reason. */
-export const memberReason = (tierName, pct, key) => `${tierName} member · ${pct}% ${categoryLabel(key).toLowerCase()}`;
+// A tier already named "... Member" must not read "Glow Member member".
+export const memberReason = (tierName, pct, key) => `${/\bmember$/i.test(String(tierName).trim()) ? tierName : `${tierName} member`} · ${pct}% ${categoryLabel(key).toLowerCase()}`;
 
 /**
  * What checkout should show for one booking.

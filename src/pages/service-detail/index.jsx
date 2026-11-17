@@ -33,6 +33,7 @@ import {
   setServiceTierPrices,
   deleteService,
 } from '../../services/api';
+import { wordBranch } from '../../utils/industryTerms';
 
 const EMPTY_FORM = {
   name: '', priceNpr: '', priceType: 'fixed', durationMinutes: '', description: '', imageUrl: '', category: '',
@@ -76,7 +77,7 @@ const ServiceDetailPage = () => {
   const staffScopeBranchId = branchId && branchId !== OVERALL_BRANCH_ID ? branchId : null;
   const savingRef = useRef(false);
   const { orgId } = useOrg();
-  const { isBeauty, staffLabel, staffLabelPlural } = useIndustry();
+  const { isBeauty, staffLabel, staffLabelPlural, locationLabel, enableRooms, examples, branchWord, branchWordPlural } = useIndustry();
   const userRole = profile?.role || 'staff';
   const isEdit = !!serviceId;
 
@@ -398,7 +399,7 @@ const ServiceDetailPage = () => {
     if (tierPriceResult.error) return failStep(tierPriceResult.error, 'its tier prices');
 
     const branchScopeResult = await setServiceBranches(targetId, restrictBranches ? eligibleBranchIds : []);
-    if (branchScopeResult.error) return failStep(branchScopeResult.error, 'its branch scope');
+    if (branchScopeResult.error) return failStep(branchScopeResult.error, `its ${wordBranch()} scope`);
 
     setSaving(false);
     goBack();
@@ -447,7 +448,7 @@ const ServiceDetailPage = () => {
                   <Icon name="Info" size={14} />
                   {isEdit
                     ? `Changes apply to new appointments. Booked ones keep their price unless their ${staffLabel.toLowerCase()} or time changes before payment.`
-                    : 'New services will be immediately available for booking across all branches.'}
+                    : `New services will be immediately available for booking across all ${branchWordPlural}.`}
                 </p>
               </div>
 
@@ -455,7 +456,7 @@ const ServiceDetailPage = () => {
                 <SettingsRow title="Basics" description="Name, category and duration shown to customers when booking.">
                   <div className="space-y-4 max-w-xl">
                     <Field label="Name" id="svc-name">
-                      <TextInput id="svc-name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="e.g. Deep Tissue Massage" />
+                      <TextInput id="svc-name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder={`e.g. ${examples.service}`} />
                     </Field>
                     <div className="grid grid-cols-2 gap-3">
                       <Field label="Category">
@@ -573,10 +574,10 @@ const ServiceDetailPage = () => {
                   </div>
                 </SettingsRow>
 
-                <SettingsRow title="Branches" description="Make this service available everywhere, or restrict it to specific branches.">
+                <SettingsRow title={branchWordPlural.charAt(0).toUpperCase() + branchWordPlural.slice(1)} description={`Make this service available everywhere, or restrict it to specific ${branchWordPlural}.`}>
                   <div className="space-y-2 p-3 bg-background rounded-spa border border-border max-w-xl">
                     <div className="flex items-center justify-between">
-                      <span className="font-body font-body-medium text-sm text-text-primary">Restrict to specific branches?</span>
+                      <span className="font-body font-body-medium text-sm text-text-primary">Restrict to specific {branchWordPlural}?</span>
                       <button
                         type="button"
                         onClick={() => {
@@ -602,7 +603,7 @@ const ServiceDetailPage = () => {
                         <Input
                           value={branchSearchQuery}
                           onChange={(e) => setBranchSearchQuery(e.target.value)}
-                          placeholder="Search branches..."
+                          placeholder={`Search ${branchWordPlural}...`}
                         />
                         <div className="border border-border rounded-spa bg-surface max-h-[220px] overflow-y-auto p-2 space-y-1">
                           {(() => {
@@ -611,10 +612,10 @@ const ServiceDetailPage = () => {
                               ? allBranches.filter((b) => b.name.toLowerCase().includes(query))
                               : allBranches;
                             if (allBranches.length === 0) {
-                              return <p className="text-xs text-text-secondary px-2 py-1">No branches found.</p>;
+                              return <p className="text-xs text-text-secondary px-2 py-1">No {branchWordPlural} found.</p>;
                             }
                             if (filtered.length === 0) {
-                              return <p className="text-xs text-text-secondary px-2 py-1">No branches match "{branchSearchQuery}".</p>;
+                              return <p className="text-xs text-text-secondary px-2 py-1">No {branchWordPlural} match "{branchSearchQuery}".</p>;
                             }
                             return filtered.map((b) => (
                               <label key={b.id} className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-primary/5 ${eligibleBranchIds.includes(b.id) ? 'bg-primary/5' : ''}`}>
@@ -645,7 +646,7 @@ const ServiceDetailPage = () => {
                     <label className="flex items-start gap-2.5 cursor-pointer">
                       <input type="checkbox" checked={formData.requiresTherapist} onChange={(e) => setFormData({ ...formData, requiresTherapist: e.target.checked })} className="accent-primary w-4 h-4 rounded mt-0.5" />
                       <span className="font-body font-body-medium text-sm text-text-primary">Needs a {staffLabel.toLowerCase()}
-                        <span className="block text-xs font-normal text-text-secondary mt-0.5">Turn off for self-service items (a room only). They show in the calendar's unassigned column.</span>
+                        <span className="block text-xs font-normal text-text-secondary mt-0.5">Turn off for self-service items{enableRooms ? ` (a ${locationLabel.toLowerCase()} only)` : ''}. They show in the calendar's unassigned column.</span>
                       </span>
                     </label>
                     {formData.requiresTherapist && !staffScopeBranchId && (
@@ -921,7 +922,7 @@ const ServiceDetailPage = () => {
                 </SettingsRow>
 
                 {formData.isCombo && (
-                  <SettingsRow title="Combo Components" description="Which services make up this combo, how long each one takes, and whether each one needs its own staff member, room, and time slot.">
+                  <SettingsRow title="Combo Components" description={`Which services make up this combo, how long each one takes, and whether each one needs its own staff member${enableRooms ? `, ${locationLabel.toLowerCase()},` : ''} and time slot.`}>
                     <div className="space-y-3">
                       {comboComponents.length > 0 && (() => {
                         // Walk components in the order they were added, computing each one's
@@ -1052,7 +1053,8 @@ const ServiceDetailPage = () => {
                                         ))}
                                       </div>
                                     </div>
-                                    <div className="flex items-center gap-1.5">
+                                    {enableRooms && (
+                                      <div className="flex items-center gap-1.5">
                                       <span className="font-caption text-[11px] text-text-tertiary">Room:</span>
                                       <div className="inline-flex rounded-spa border border-border p-0.5 bg-surface">
                                         {[[true, 'Same room'], [false, 'Different room']].map(([val, label]) => (
@@ -1069,6 +1071,7 @@ const ServiceDetailPage = () => {
                                         ))}
                                       </div>
                                     </div>
+                                      )}
                                   </div>
                                 )}
                               </div>

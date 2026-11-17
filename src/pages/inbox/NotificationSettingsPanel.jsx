@@ -7,6 +7,7 @@ import CustomSelect from '../../components/ui/CustomSelect';
 import { playSound, SOUND_CHOICES, normalizeSound } from '../../lib/notificationSound';
 import { useIndustry } from '../../hooks/useIndustry';
 import { bookingWords } from '../../components/ui/NotificationBell';
+import { wordBranch, wordBranches, wordBranchesCap } from '../../utils/industryTerms';
 
 export const CATEGORY_META = {
   bookings: { label: 'Bookings', icon: 'CalendarDays', desc: (w) => `New online ${w.many}, guest cancels or reschedules` },
@@ -47,7 +48,7 @@ const Card = ({ children }) => <div className="border border-border rounded-spa-
 // CustomSelect-style trigger + menu with checkboxes (CustomSelect itself is single-value).
 const BranchMulti = ({ branches, selected, onToggle }) => {
   const n = branches.length;
-  const label = selected.size === n ? `All branches (${n})` : selected.size === 1 ? branches.find((b) => selected.has(b.id))?.name : `${selected.size} of ${n} branches`;
+  const label = selected.size === n ? `All ${wordBranches()} (${n})` : selected.size === 1 ? branches.find((b) => selected.has(b.id))?.name : `${selected.size} of ${n} ${wordBranches()}`;
   return (
     <Menu
       trigger={(open, toggle) => (
@@ -139,7 +140,7 @@ const NotificationSettingsContent = () => {
             <Switch on={settings.sound_enabled} label="Sound" onChange={(v) => setSetting({ sound_enabled: v })} />
           </div>
         </Row>
-        <Row icon="Moon" title="Quiet outside opening hours" desc="No pop-ups or sound when your branch is closed">
+        <Row icon="Moon" title="Quiet outside opening hours" desc={`No pop-ups or sound when your ${wordBranch()} is closed`}>
           <Switch on={settings.quiet_outside_hours} label="Quiet outside opening hours" onChange={(v) => setSetting({ quiet_outside_hours: v })} />
         </Row>
         <Row
@@ -159,7 +160,7 @@ const NotificationSettingsContent = () => {
           )}
         </Row>
         {isAdmin && branches.length > 1 && (
-          <Row icon="Building2" title="Branches I hear from" desc="Admins only. Pop-ups and sound only; the Inbox keeps everything." last>
+          <Row icon="Building2" title={`${wordBranchesCap()} I hear from`} desc="Admins only. Pop-ups and sound only; the Inbox keeps everything." last>
             <BranchMulti branches={branches} selected={heardSet} onToggle={toggleBranch} />
           </Row>
         )}

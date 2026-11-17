@@ -1,5 +1,6 @@
 // Pure view-model for Money owed: raw RPC numbers in, tiles / age bars / CSV rows out (unit-tested; no React).
 import { num } from './businessHealthView';
+import { wordBranch, wordBranchCap } from '../../../../utils/industryTerms';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; // fixed names: some ICU builds print "Sept"
 const day = (iso) => { const [, m, d] = iso.split('-').map(Number); return `${d} ${MONTHS[m - 1]}`; };
@@ -55,7 +56,7 @@ export const statusLabel = (kind) => ({ unpaid: 'Unpaid', partial: 'Part paid', 
 export const TABS = (data, branchCount = 1) => [
   { id: 'booking', label: 'By booking' },
   { id: 'customer', label: 'By customer' },
-  ...(branchCount > 1 ? [{ id: 'branch', label: 'By branch' }] : []),
+  ...(branchCount > 1 ? [{ id: 'branch', label: `By ${wordBranch()}` }] : []),
   { id: 'staff', label: 'By staff' },
   { id: 'responsible', label: 'By responsible person' },
   { id: 'settled', label: 'Settled' },
@@ -67,11 +68,11 @@ export const responsibleOf = (row) => row.responsible || UNASSIGNED;
 /** CSV rows for the tab that is showing. */
 export function owedExportRows(data, tab, staffLabel = 'Staff') {
   if (tab === 'customer') return [['Customer', 'Phone', 'Bookings', 'Last visit', 'Oldest (days)', 'Balance'], ...data.by_customer.map((c) => [c.name, c.phone || '', c.count, c.last_date, c.oldest_days, c.amount])];
-  if (tab === 'branch') return [['Branch', 'Bookings', 'Oldest (days)', 'Balance'], ...data.by_branch.map((b) => [b.name, b.count, b.oldest_days, b.amount])];
+  if (tab === 'branch') return [[`${wordBranchCap()}`, 'Bookings', 'Oldest (days)', 'Balance'], ...data.by_branch.map((b) => [b.name, b.count, b.oldest_days, b.amount])];
   if (tab === 'staff') return [[staffLabel, 'Bookings', 'Balance'], ...data.by_staff.map((s) => [s.name, s.count, s.amount])];
   if (tab === 'responsible') return [['Responsible person', 'Bookings', 'Oldest (days)', 'Balance'], ...data.by_responsible.map((r) => [r.name || UNASSIGNED, r.count, r.oldest_days, r.amount])];
   return [
-    ['Customer', 'Phone', 'Reference', 'Branch', 'Date', 'Age (days)', 'Service', staffLabel, 'Responsible', 'Total', 'Paid', 'Balance', 'Status'],
+    ['Customer', 'Phone', 'Reference', `${wordBranchCap()}`, 'Date', 'Age (days)', 'Service', staffLabel, 'Responsible', 'Total', 'Paid', 'Balance', 'Status'],
     ...data.rows.map((r) => [r.customer_name, r.customer_phone || '', r.ref || '', r.branch_name, r.date, r.age_days, r.service, r.staff || '', responsibleOf(r), r.total, r.paid, r.balance, statusLabel(r.kind)]),
   ];
 }

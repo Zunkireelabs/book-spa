@@ -9,6 +9,7 @@ import {
 } from '../../../../services/productsView';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { useMinWidth, useSlashFocus, useStickyBlock, thClass, SearchBox, csvDownload, EmptyBlock, ErrorBlock } from '../Area/listKit';
+import { wordBranchCap, wordBranches } from '../../../../utils/industryTerms';
 
 // Stock history (V25): the one ledger. One row per change: when, product + size, ±change, reason, by, details, left after. Read-only;
 // a mistake is fixed with a new "Count corrected" line. One month at a time (branch = the page's branch). Managers/admins/viewers only.
@@ -48,7 +49,7 @@ const StockHistoryPanel = ({ catalog, branchId, branchName, isOverall, today, ca
   }, [month, branchId, isOverall]);
   useEffect(() => { setMoves(null); load(); }, [load, refreshKey]);
 
-  const branchLabel = isOverall ? 'across all branches' : `at ${branchName}`;
+  const branchLabel = isOverall ? `across all ${wordBranches()}` : `at ${branchName}`;
   const totals = useMemo(() => movementTotals(moves || []), [moves]);
   useEffect(() => {
     if (!moves) { onLead(' '); return; }
@@ -93,7 +94,7 @@ const StockHistoryPanel = ({ catalog, branchId, branchName, isOverall, today, ca
   };
 
   const exportCsv = useCallback(() => {
-    csvDownload(`stock-history-${month}.csv`, ['Date', 'Time', 'Branch', 'Product', 'Size', 'Change', 'Reason', 'By', 'Details', 'Left after'],
+    csvDownload(`stock-history-${month}.csv`, ['Date', 'Time', `${wordBranchCap()}`, 'Product', 'Size', 'Change', 'Reason', 'By', 'Details', 'Left after'],
       filtered.map((m) => [nepalDate(m.createdAt), nepalTime(m.createdAt), m.branchName, m.productName, m.variantName, m.delta, reasonText(m), m.byName, detailsOf(m), m.qtyAfter]));
   }, [filtered, month]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { registerExport({ run: exportCsv, disabled: !moves || filtered.length === 0 }); }, [exportCsv, moves, filtered.length, registerExport]);

@@ -3,11 +3,12 @@ import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import { useOrg } from '../../../../contexts/OrgContext';
 import { updateOrgProfileSetting, updateOrgBranding, uploadOrgBrandingImage } from '../../../../services/api';
+import { useIndustry } from '../../../../hooks/useIndustry';
 
 const LIST_FIELDS = [
   { key: 'amenities', label: 'Amenities', placeholder: 'e.g. Free WiFi' },
   { key: 'included_with_visit', label: 'Included With Every Visit', placeholder: 'e.g. Welcome drink' },
-  { key: 'optional_extras', label: 'Optional Extras', placeholder: 'e.g. Hot towel upgrade' },
+  { key: 'optional_extras', label: 'Optional Extras', placeholder: null },
 ];
 
 const ListFieldEditor = ({ label, placeholder, items, onChange }) => {
@@ -128,6 +129,7 @@ const BrandingImageField = ({ label, hint, preview, onFileSelected, onRemove, up
 };
 
 const ProviderProfilePanel = () => {
+  const { examples } = useIndustry();
   const org = useOrg();
   const { refreshOrg } = org;
   const [saving, setSaving] = useState(null);
@@ -281,7 +283,7 @@ const ProviderProfilePanel = () => {
         <div key={field.key} className="p-4 border border-border rounded-spa">
           <ListFieldEditor
             label={field.label}
-            placeholder={field.placeholder}
+            placeholder={field.placeholder || `e.g. ${examples.extra}`}
             items={settingsLists[field.key]}
             onChange={(next) => saveSetting(field.key, next)}
           />

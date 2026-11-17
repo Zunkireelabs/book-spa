@@ -66,7 +66,7 @@ const FrontDeskView = ({ data, dataError, branchId, today, nowMin, role, staffLa
   const slotAt = (m, t) => ({ day: today, colType: t ? 'therapist' : null, colId: t ? t.therapist_id : null, hour: Math.floor(m / 60), minute: m % 60 });
   const bookAt = (t) => setPanel({ type: 'create', slot: slotAt(Math.ceil(nowMin / 10) * 10, t) });
   const bookNew = () => setPanel({ type: 'create', slot: slotAt(Math.ceil(nowMin / 10) * 10, null) });
-  const walkIn = () => setPanel({ type: 'create', slot: slotAt(Math.floor(nowMin / 5) * 5, free[0] || null) }); // right now, with whoever has been free longest
+  const walkIn = () => setPanel({ type: 'create', slot: { ...slotAt(Math.floor(nowMin / 5) * 5, free[0] || null), walkIn: true } }); // right now, with whoever has been free longest
 
   const rowFor = (b) => {
     const a = ACTION[b.action];

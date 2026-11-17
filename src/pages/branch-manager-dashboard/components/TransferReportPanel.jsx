@@ -7,6 +7,7 @@ import TransferPill from '../../../components/ui/TransferPill';
 import { describeTransfer, toTransferInput } from '../../../utils/transferText';
 import { useAutoRefresh } from '../../../hooks/useAutoRefresh';
 import { fetchStaffTransfers } from '../../../services/api';
+import { wordBranch } from '../../../utils/industryTerms';
 
 function formatDateTime(d) {
   if (!d) return '—';
@@ -189,7 +190,7 @@ const TransferReportPanel = () => {
       {/* Filters */}
       <FilterBar
         count={{ value: filtered.length, label: filtered.length === 1 ? 'Transfer' : 'Transfers' }}
-        search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search by staff, branch, or person…' }}
+        search={{ value: searchQuery, onChange: setSearchQuery, placeholder: `Search by staff, ${wordBranch()}, or person…` }}
         presets={PERIOD_PRESETS.map((p) => ({
           label: p.label,
           active: mode === 'preset' && activePreset === p.id,

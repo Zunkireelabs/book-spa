@@ -18,6 +18,7 @@ import { useAvailabilityGuard } from '../../../../../contexts/AvailabilityOverri
 import { friendlyError, isNetworkError, NETWORK_CHECK_CALENDAR_COPY } from '../../../../../utils/friendlyError';
 import { submitQuickCreate } from '../quickCreateSubmit';
 import { isCheckedOutBlockedSlot, DEFAULT_SLOT_MINUTES } from '../calendarSlots';
+import { teamMemberLower } from '../../../../../utils/industryTerms';
 
 // Panel routing for the calendar: which panel is open (booking details, quick-create, block / transfer forms), the
 // dirty-guard refs and open/switch/close helpers, the empty-slot / drag-to-create / new-booking entry points, the
@@ -222,7 +223,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   const handleDragCreate = useCallback((slotInfo) => {
     if (rebookSource) return;
     if (slotInfo.colType === 'therapist' && isCheckedOutBlockedSlot(calendarData?.checkedOutByTherapistAndDate, slotInfo.colId, slotInfo.day, slotInfo.hour, slotInfo.minute)) {
-      showToast('This team member has already checked out for the day and is not bookable after their check-out time.', 'error');
+      showToast(`This ${teamMemberLower()} has already checked out for the day and is not bookable after their check-out time.`, 'error');
       return;
     }
     // Starting inside a block is already prevented (blocks swallow the press); a range that runs into one opens with the warning.
@@ -253,7 +254,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
 
     if (slotInfo.colType === 'therapist') {
       if (isCheckedOutBlockedSlot(calendarData?.checkedOutByTherapistAndDate, slotInfo.colId, slotInfo.day, slotInfo.hour, slotInfo.minute)) {
-        showToast('This team member has already checked out for the day and is not bookable after their check-out time.', 'error');
+        showToast(`This ${teamMemberLower()} has already checked out for the day and is not bookable after their check-out time.`, 'error');
         return;
       }
     }
