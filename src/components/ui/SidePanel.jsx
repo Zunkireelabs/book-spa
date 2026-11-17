@@ -82,7 +82,7 @@ const SidePanel = ({ isOpen, title, onClose, onBack, children, footer, headerExt
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="w-8 h-8 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background spa-transition-fast"
+            className="w-8 h-8 max-lg:w-11 max-lg:h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background spa-transition-fast"
           >
             <Icon name="X" size={18} />
           </button>

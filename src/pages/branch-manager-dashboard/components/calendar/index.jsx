@@ -26,7 +26,7 @@ import { isOverallBranch } from '../../../../services/api';
 import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
-import WaitlistPanel from './WaitlistPanel';
+import WaitlistPanel, { useWaitlistEntries } from './WaitlistPanel';
 import { todayStr, addDays, addMonths, getStepDays } from './calendarDates';
 
 // ── Component ────────────────────────────────────────────────
@@ -171,6 +171,8 @@ const OperationalCalendar = ({ branchId }) => {
     handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,
   } = useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, gridRef, canViewCustomerDetails });
+  const waitlist = useWaitlistEntries(branchId, waitlistRefreshToken);
+  const [waitlistSheetOpen, setWaitlistSheetOpen] = useState(false);
 
   const {
     handleStatusUpdate, handleAssignTherapist, handleBookingResize, handleEditBooking, handleApplyDiscount, handleRecordPayment, handleGroupPaymentRecorded,
@@ -273,6 +275,8 @@ const OperationalCalendar = ({ branchId }) => {
             setSelectedPositions={setSelectedPositions}
             calendarPositionOptions={calendarPositionOptions}
             onNewBooking={isOverallBranch(branchId) ? undefined : handleNewBooking}
+            onOpenWaitlist={() => setWaitlistSheetOpen(true)}
+            waitlistCount={waitlist.entries.length}
             branchId={branchId}
             userRole={userRole}
             onPrint={() => setPrintReportOpen(true)}
@@ -364,13 +368,15 @@ const OperationalCalendar = ({ branchId }) => {
             </div>
 
             <WaitlistPanel
+              wl={waitlist}
+              sheetOpen={waitlistSheetOpen}
+              onCloseSheet={() => setWaitlistSheetOpen(false)}
               branchId={branchId}
               services={servicesCache || []}
               therapists={calendarData?.therapists || []}
               collapsed={waitlistCollapsed}
               onToggleCollapse={() => setWaitlistCollapsed((v) => !v)}
-              onBookIn={handleBookInFromWaitlist}
-              refreshToken={waitlistRefreshToken}
+              onBookIn={(entry) => { setWaitlistSheetOpen(false); handleBookInFromWaitlist(entry); }}
               canViewCustomerDetails={canViewCustomerDetails}
             />
 

@@ -68,7 +68,17 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   }, []);
   // Which waitlist entry (if any) the open quick-create panel is converting; it flips to 'booked' only once the booking saves.
   const [bookingWaitlistEntryId, setBookingWaitlistEntryId] = useState(null);
-  const [waitlistCollapsed, setWaitlistCollapsed] = useState(true);
+  // Remembers the choice on this device (collapsed by default).
+  const [waitlistCollapsed, setWaitlistCollapsedRaw] = useState(() => {
+    try { return localStorage.getItem('calendar.waitlistCollapsed') !== '0'; } catch { return true; }
+  });
+  const setWaitlistCollapsed = useCallback((next) => {
+    setWaitlistCollapsedRaw((prev) => {
+      const v = typeof next === 'function' ? next(prev) : next;
+      try { localStorage.setItem('calendar.waitlistCollapsed', v ? '1' : '0'); } catch { /* private mode: not remembered */ }
+      return v;
+    });
+  }, []);
   const [waitlistRefreshToken, setWaitlistRefreshToken] = useState(0);
   const [servicesCache, setServicesCache] = useState(null);
   const [servicesLoading, setServicesLoading] = useState(false);

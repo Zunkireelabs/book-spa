@@ -53,7 +53,7 @@ const CalendarToolbar = ({
   currentDate, setCurrentDate, viewMode, setViewMode, goToday, goPrev, goNext,
   tipOpen, setTipOpen,
   showServiceOnly, setShowServiceOnly, selectedPositions, setSelectedPositions, calendarPositionOptions,
-  onNewBooking, branchId,
+  onNewBooking, onOpenWaitlist, waitlistCount = 0, branchId,
   userRole, onPrint, onEditRoster, onBlockWholeCalendar, onCalendarSettings, onClosedDates,
   zoomScale, onZoomChange, minZoom, maxZoom, use24h, setUse24h, hideSensitive, setHideSensitive,
 }) => {
@@ -287,7 +287,7 @@ const CalendarToolbar = ({
       </div>
 
       {/* Right: tip + position filter + view toggle */}
-      <div className="flex items-center gap-2 ml-auto lg:flex-1 lg:basis-0 lg:min-w-max lg:justify-end">
+      <div className="flex flex-wrap items-center gap-2 ml-auto max-w-full lg:flex-wrap lg:flex-1 lg:basis-0 lg:min-w-max lg:justify-end">
         <div className="relative" ref={tipRef}>
           <button
             type="button"
@@ -458,16 +458,27 @@ const CalendarToolbar = ({
             )}
           </div>
         )}
+        {onOpenWaitlist && (
+        <button
+          type="button"
+          onClick={onOpenWaitlist}
+          className="lg:hidden h-[var(--control-h)] flex items-center gap-1.5 px-3 text-[13px] font-body font-body-medium text-text-primary bg-surface border border-border hover:bg-background rounded-spa whitespace-nowrap"
+        >
+          Waitlist
+          {waitlistCount > 0 && <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-primary text-white text-xs flex items-center justify-center">{waitlistCount}</span>}
+        </button>
+        )}
         {onNewBooking && (
         <button
           type="button"
           onClick={onNewBooking}
           title="New booking (N)"
           aria-keyshortcuts="n"
-          className="h-[var(--control-h)] flex items-center gap-1.5 px-3.5 text-[13px] font-body font-body-medium text-white bg-primary hover:bg-primary/90 rounded-spa spa-transition-fast whitespace-nowrap"
+          aria-label="New booking"
+          className="h-[var(--control-h)] max-sm:w-[var(--control-h)] max-sm:justify-center max-sm:px-0 flex items-center gap-1.5 px-3.5 text-[13px] font-body font-body-medium text-white bg-primary hover:bg-primary/90 rounded-spa spa-transition-fast whitespace-nowrap"
         >
           <Icon name="Plus" size={14} />
-          New booking
+          <span className="max-sm:hidden">New booking</span>
         </button>
         )}
       </div>
