@@ -1,13 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
-import Button from '../../../../components/ui/Button';
-import { fetchBranchesForManagement } from '../../../../services/api';
+import { fetchBranchesForManagement, fetchBranchOpeningHours } from '../../../../services/api';
+import { summarizeHours } from '../../../location-detail/components/BranchHoursEditor';
 
+const PRIMARY_BTN = 'h-10 max-lg:h-11 px-4 inline-flex items-center justify-center gap-1.5 rounded-spa bg-primary text-white text-[13px] font-body font-body-medium hover:bg-primary/90 spa-transition-fast';
+
+// Settings → Locations (board B7): one card per location with the one-line hours summary and an Active / Inactive chip.
+// The whole card opens the edit page; the empty state points at the single action that fixes it.
 const LocationsPanel = ({ orgId }) => {
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   const [branches, setBranches] = useState([]);
+  const [hoursById, setHoursById] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -17,11 +22,19 @@ const LocationsPanel = ({ orgId }) => {
     setError(null);
     const result = await fetchBranchesForManagement(orgId);
     if (result.error) {
-      setError(result.error.message || 'Failed to load locations.');
-    } else {
-      setBranches(result.data || []);
+      setError(`Couldn't load your locations.`);
+      setLoading(false);
+      return;
     }
+    const list = result.data || [];
+    setBranches(list);
     setLoading(false);
+    // Summaries load after the list is on screen; a failed one just reads "Hours not set".
+    const entries = await Promise.all(list.map(async (b) => {
+      const r = await fetchBranchOpeningHours(b.id);
+      return [b.id, summarizeHours(r.data)];
+    }));
+    setHoursById(Object.fromEntries(entries));
   }, [orgId]);
 
   useEffect(() => { loadBranches(); }, [loadBranches]);
@@ -29,73 +42,61 @@ const LocationsPanel = ({ orgId }) => {
   const handleOpenCreate = () => navigate(`/${orgSlug}/locations/new`);
   const handleOpenEdit = (branch) => navigate(`/${orgSlug}/locations/${branch.id}`);
 
-  if (loading) {
-    return (
-      <div className="text-center py-12">
-        <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
-        <p className="text-sm text-text-secondary">Loading locations...</p>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Locations</h3>
-          <p className="font-body text-sm text-text-secondary">{branches.length} location{branches.length === 1 ? '' : 's'} configured</p>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          {!loading && !error && <p className="font-body text-[13px] text-text-secondary">{branches.length} {branches.length === 1 ? 'location' : 'locations'}</p>}
         </div>
-        <Button variant="primary" size="sm" iconName="Plus" onClick={handleOpenCreate}>
-          Add Location
-        </Button>
+        <button type="button" onClick={handleOpenCreate} className={PRIMARY_BTN}>
+          <Icon name="Plus" size={14} />
+          Add location
+        </button>
       </div>
 
       {error && (
-        <div className="p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm flex items-center gap-2">
-          <Icon name="AlertCircle" size={16} />
+        <div role="alert" className="flex items-center justify-between gap-2 px-3 py-2 bg-error/10 border border-error/20 rounded-spa text-error text-[13px]">
           <span>{error}</span>
-          <button onClick={() => setError(null)} className="ml-auto"><Icon name="X" size={14} /></button>
+          <button type="button" onClick={loadBranches} className="underline font-body-medium h-9 max-lg:h-11 px-2">Retry</button>
         </div>
       )}
 
-      <div className="bg-surface border border-border rounded-spa overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="bg-background border-b border-border">
-              <th className="text-left px-4 py-3 text-sm text-text-secondary">Name</th>
-              <th className="text-left px-4 py-3 text-sm text-text-secondary">Address</th>
-              <th className="text-left px-4 py-3 text-sm text-text-secondary">Phone</th>
-              <th className="text-left px-4 py-3 text-sm text-text-secondary">Status</th>
-              <th className="text-right px-4 py-3 text-sm text-text-secondary">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {branches.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-text-secondary text-sm">
-                  No locations found.
-                </td>
-              </tr>
-            ) : (
-              branches.map((branch) => (
-                <tr key={branch.id} className="border-b border-border last:border-b-0 hover:bg-background/50">
-                  <td className="px-4 py-3 font-medium text-sm">{branch.name}</td>
-                  <td className="px-4 py-3 text-sm text-text-secondary">{branch.address || '—'}</td>
-                  <td className="px-4 py-3 text-sm text-text-secondary">{branch.phone || '—'}</td>
-                  <td className="px-4 py-3">
-                    <span className={"px-2 py-0.5 rounded text-xs " + (branch.is_active ? 'bg-success/10 text-success' : 'bg-gray-100 text-gray-500')}>
+      {loading ? (
+        <div className="space-y-2.5">{[0, 1].map(i => <div key={i} className="h-[84px] rounded-spa-lg bg-background animate-pulse" />)}</div>
+      ) : branches.length === 0 && !error ? (
+        <div className="border border-border rounded-spa-lg p-8 text-center">
+          <p className="text-[13.5px] font-body-semibold text-text-primary">No locations yet</p>
+          <p className="mt-1 text-xs text-text-secondary">Add your first location so customers can book and your team can be placed.</p>
+          <button type="button" onClick={handleOpenCreate} className={`${PRIMARY_BTN} mt-4`}>
+            <Icon name="Plus" size={14} /> Add location
+          </button>
+        </div>
+      ) : (
+        <ul className="space-y-2.5">
+          {branches.map((branch) => (
+            <li key={branch.id}>
+              <button
+                type="button"
+                onClick={() => handleOpenEdit(branch)}
+                aria-label={`Edit ${branch.name}`}
+                className="w-full text-left border border-border rounded-spa-lg bg-surface p-3.5 hover:bg-background/60 spa-transition-fast flex items-start gap-3 min-h-[44px]"
+              >
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-body font-body-semibold text-[13.5px] text-text-primary">{branch.name}</p>
+                    <span className={`px-2 py-0.5 rounded-full text-[11px] font-body-medium ${branch.is_active ? 'bg-success/10 text-success' : 'bg-background text-text-secondary border border-border'}`}>
                       {branch.is_active ? 'Active' : 'Inactive'}
                     </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button onClick={() => handleOpenEdit(branch)} className="p-1 hover:text-primary"><Icon name="Pencil" size={16} /></button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+                  </div>
+                  <p className="text-xs text-text-secondary">{hoursById[branch.id] || 'Loading hours…'}</p>
+                  <p className="text-xs text-text-secondary truncate">{[branch.address, branch.phone].filter(Boolean).join(' · ') || 'No address or phone yet'}</p>
+                </div>
+                <Icon name="ChevronRight" size={16} className="text-text-tertiary mt-1 flex-shrink-0" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 };
