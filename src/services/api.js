@@ -11607,7 +11607,7 @@ export async function fetchCustomerProfile(customerId) {
         id, customer_id, booking_number, date, start_time, status, payment_status,
         final_amount, discount_amount,
         service_name_snapshot, therapist_id, therapist_name_snapshot,
-        is_locked, payments(amount), payment_refunds(amount)
+        is_locked, payments(amount, payment_mode, created_at), payment_refunds(amount, created_at)
       `)
       .eq('customer_id', customerId)
       .order('date', { ascending: false });
@@ -11632,7 +11632,7 @@ export async function fetchCustomerProfile(customerId) {
       today,
       nowHM,
     })[0];
-    const toAppointmentSummary = (v) => v ? { date: v.date, serviceName: v.service || '—', therapistName: v.therapist || 'Unassigned' } : null;
+    const toAppointmentSummary = (v) => v ? { date: v.date, serviceName: v.service || '—', therapistName: v.therapist || '' } : null;
     const lastAppointment = toAppointmentSummary(row.lastVisit);
     const nextAppointment = toAppointmentSummary(row.nextBooking);
 
@@ -11643,7 +11643,13 @@ export async function fetchCustomerProfile(customerId) {
       date: b.date,
       startTime: b.start_time,
       serviceName: b.service_name_snapshot || '—',
-      therapistName: b.therapist_name_snapshot || 'Unassigned',
+      therapistName: b.therapist_name_snapshot || '',
+      // Every payment and refund with the moment it happened, so the Payments tab dates by when the money moved (not the visit).
+      paymentEvents: (b.payments || []).map((x) => ({ amount: Number(x.amount || 0), mode: x.payment_mode || '', at: x.created_at })),
+      refundEvents: (b.payment_refunds || []).map((x) => ({ amount: Number(x.amount || 0), at: x.created_at })),
+      paidByMode: (b.payments || []).reduce((m, x) => { const k = x.payment_mode || 'Other'; m[k] = (m[k] || 0) + Number(x.amount || 0); return m; }, {}),
+      paidTotal: (b.payments || []).reduce((t, x) => t + Number(x.amount || 0), 0),
+      refundTotal: (b.payment_refunds || []).reduce((t, r) => t + Number(r.amount || 0), 0),
       finalAmount: Number(b.final_amount),
       discountAmount: Number(b.discount_amount),
       paymentStatus: b.payment_status,
@@ -11682,6 +11688,16 @@ export async function fetchCustomerProfile(customerId) {
           amountOwing: row.balance, // owed now: rendered visits only
           segment: row.segment,
           vip: row.vip,
+          // Straight from the same directory row (no new maths): the customer page's tiles and About card read these.
+          upcoming: row.upcoming, // scheduled, not owed (price − paid)
+          deposit: row.deposit, // already paid toward scheduled bookings
+          lockedDue: row.lockedDue,
+          unpaidVisits: row.unpaidVisits,
+          lastVisit: row.lastVisit,
+          nextBooking: row.nextBooking,
+          usualTherapist: row.usualTherapist,
+          usualTherapistVisits: row.usualTherapistVisits,
+          favouriteService: row.favouriteService,
         },
         membership,
         history,
@@ -20517,7 +20533,7 @@ export async function fetchInvoiceDialogInfo(bookingId) {
 }
 
 // Which of these bookings already has an invoice — one query for the whole
-// set, not one per row. Lets a list (CustomerSalesTab) keep the "Print
+// set, not one per row. Lets a list (CustomerPaymentsTab) keep the "Print
 // invoice" entry point visible for a booking that was invoiced before billing
 // got disabled, without an N+1 lookup across every paid booking in the list.
 export async function fetchInvoiceExistenceForBookingIds(bookingIds) {
