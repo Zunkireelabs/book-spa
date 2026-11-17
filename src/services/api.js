@@ -7370,6 +7370,9 @@ export async function createBooking({
       if (insertError.code === 'P0003') {
         return { data: null, error: { code: 'ROOMS_FULL', message: 'Scheduling conflict. Please try a different time or room.' } };
       }
+      if (insertError.message?.includes('BRANCH_CLOSED_ONLINE')) {
+        return { data: null, error: { code: 'BRANCH_CLOSED', message: 'We are closed on that date. Please choose another day.' } };
+      }
       if (insertError.code === 'P0005') {
         return { data: null, error: { code: 'BRANCH_ONLINE_CAPACITY', message: 'This time is fully booked — no therapists available. Please choose another time.' } };
       }
@@ -9448,6 +9451,33 @@ export async function fetchClosedDateRanges(branchId) {
     return { data: ranges, error: null };
   } catch (error) {
     console.error('[API] fetchClosedDateRanges error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Customer-facing closed days (ZNLY-224). Anon can't read manual_blocks, so this goes through the public RPC
+// (mig 390), which returns bare dates already expanded for recurrence. Consecutive dates merge into one
+// { startDate, endDate } range, the same shape fetchClosedDateRanges returns for staff.
+export async function fetchPublicClosedDateRanges(branchId, { days = 400 } = {}) {
+  try {
+    const resolvedBranchId = resolveBranchId(branchId);
+    const start = new Date();
+    const end = new Date(start.getTime() + days * 86400000);
+    const iso = (d) => d.toISOString().split('T')[0];
+    const { data, error } = await supabase.rpc('public_get_closed_dates', {
+      p_branch_id: resolvedBranchId, p_start: iso(start), p_end: iso(end),
+    });
+    if (error) throw error;
+    const dates = (data || []).map((r) => r.closed_date).sort();
+    const ranges = [];
+    for (const d of dates) {
+      const last = ranges[ranges.length - 1];
+      if (last && daysBetweenInclusive(last.endDate, d) === 2) { last.endDate = d; last.days += 1; }
+      else ranges.push({ blockId: null, startDate: d, endDate: d, days: 1, description: null });
+    }
+    return { data: ranges, error: null };
+  } catch (error) {
+    console.error('[API] fetchPublicClosedDateRanges error:', error.message);
     return { data: null, error };
   }
 }

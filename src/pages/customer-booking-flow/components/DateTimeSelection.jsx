@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
-import { fetchBranchAvailabilityWindow, fetchTherapistAvailabilityWindow, fetchClosedDateRanges, fetchServiceEligibleGenderHeadcount, getRoomCapacity } from '../../../services/api';
+import { fetchBranchAvailabilityWindow, fetchTherapistAvailabilityWindow, fetchPublicClosedDateRanges, fetchServiceEligibleGenderHeadcount, getRoomCapacity } from '../../../services/api';
 import { useTenant } from '../../../contexts/TenantContext';
 import {
   START_HOUR,
@@ -107,7 +107,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
   // enableRooms (the capacity RPC only folds these in for room-based tenants).
   useEffect(() => {
     if (!selectedBranch?.id) { setClosedRanges([]); return; }
-    fetchClosedDateRanges(selectedBranch.id)
+    fetchPublicClosedDateRanges(selectedBranch.id)
       .then(({ data }) => setClosedRanges(data || []))
       .catch((err) => console.error('[DateTimeSelection] closed-dates fetch failed:', err.message));
   }, [selectedBranch?.id]);

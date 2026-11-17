@@ -139,6 +139,7 @@ const BookingConfirmation = ({
           'NO_SERVICES',
           'THERAPIST_CONFLICT',
           'BRANCH_ONLINE_CAPACITY',
+          'BRANCH_CLOSED',
           'BOOKING_CROSSES_MIDNIGHT',
           'BOOKING_CONFIRMATION_UNAVAILABLE',
         ];

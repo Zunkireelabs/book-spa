@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { useTenant } from '../../../../contexts/TenantContext';
-import { fetchBranchAvailabilityWindow, fetchTherapistAvailabilityWindow, fetchClosedDateRanges } from '../../../../services/api';
+import { fetchBranchAvailabilityWindow, fetchTherapistAvailabilityWindow, fetchPublicClosedDateRanges } from '../../../../services/api';
 import { isDateInRanges } from '../../../customer-booking-flow/utils/availability';
 import { computeGroupSlots } from '../../utils/groupAvailability';
 
@@ -67,7 +67,7 @@ const GroupTimeStep = ({ selectedBranch, orgSlug, people, therapists, selectedDa
 
   useEffect(() => {
     if (!selectedBranch?.id) { setClosedRanges([]); return; }
-    fetchClosedDateRanges(selectedBranch.id)
+    fetchPublicClosedDateRanges(selectedBranch.id)
       .then(({ data }) => setClosedRanges(data || []))
       .catch((err) => console.error('[GroupTimeStep] closed-dates fetch failed:', err.message));
   }, [selectedBranch?.id]);
