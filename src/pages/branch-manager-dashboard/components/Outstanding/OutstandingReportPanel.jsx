@@ -377,7 +377,7 @@ const OutstandingReportPanel = ({ branchId }) => {
       </div>
 
       {lockedTotal > 0 && !loading && (
-        <p className="font-caption text-xs text-text-tertiary -mt-2">{formatNPR(lockedTotal)} on closed days can’t be collected here.</p>
+        <p className="font-caption text-xs text-text-tertiary -mt-2">{formatNPR(lockedTotal)} is on closed days. You can still collect it: the payment is recorded today and the closed day’s report does not change.</p>
       )}
       {noticeSlides.length > 0 && <Spotlight slides={noticeSlides} label="Outstanding notice" />}
 
@@ -515,8 +515,8 @@ const OutstandingReportPanel = ({ branchId }) => {
                       {formatNPR(r.amountDue)}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {canAct && r.isLocked && <span className="font-body text-xs text-text-tertiary" title="The day is closed; payments can't be recorded here">Closed day</span>}
-                      {canAct && !r.isLocked && <button
+                      {canAct && r.isLocked && <span className="mr-2 font-body text-xs text-text-tertiary" title="The day was closed; the payment is recorded today and the closed report does not change">Closed day</span>}
+                      {canAct && <button
                         onClick={() => openPay(r)}
                         className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-spa bg-success text-white text-xs font-body-medium hover:bg-success/90 spa-transition-fast"
                       >

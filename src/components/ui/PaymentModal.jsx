@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, forwardRef } from 'react';
+import { supabase } from '../../lib/supabase';
 import { createPortal } from 'react-dom';
 import Icon from '../AppIcon';
 import Button from './Button';
@@ -354,8 +355,26 @@ const PaymentModal = ({
   // Products at checkout (V26): paid first, in full; only the treatment can stay due. `treatmentDue` is what the bookings still owe.
   const [bookingRowInfo, setBookingRowInfo] = useState(null); // guest name/phone/therapist for the header + receipt (and the seller default)
   const productBranchId = booking.branchId || booking.branch_id;
+  // ZNLY-234: products cannot be added to a closed-day booking or once today is closed at the branch (the server refuses both), so the button is not offered.
+  // null = still checking: nothing is offered until we know.
+  const [productsBlocked, setProductsBlocked] = useState(null);
+  useEffect(() => {
+    let live = true;
+    if (!savesProducts || !mainBookingId || !productBranchId) { setProductsBlocked(null); return undefined; }
+    (async () => {
+      try {
+        const today = new Date(Date.now() + 5.75 * 3600 * 1000).toISOString().slice(0, 10);   // Nepal day
+        const [{ data: b }, { data: r }] = await Promise.all([
+          supabase.from('bookings').select('is_locked').eq('id', mainBookingId).maybeSingle(),
+          supabase.from('daily_reports').select('id').eq('branch_id', productBranchId).eq('report_date', today).maybeSingle(),
+        ]);
+        if (live) setProductsBlocked(!!b?.is_locked || !!r);
+      } catch (e) { if (live) setProductsBlocked(true); }
+    })();
+    return () => { live = false; };
+  }, [savesProducts, mainBookingId, productBranchId]);
   const cp = useCheckoutProducts({
-    enabled: PRODUCTS_ENABLED && savesProducts && !!mainBookingId && !!productBranchId,
+    enabled: PRODUCTS_ENABLED && savesProducts && productsBlocked === false && !!mainBookingId && !!productBranchId,
     branchId: productBranchId,
     customerId: bookingRowInfo?.customer_id || null,
     defaultSellerId: bookingRowInfo?.therapist?.id || bookingRowInfo?.therapist_id || null,

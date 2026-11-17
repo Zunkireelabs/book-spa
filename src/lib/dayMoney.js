@@ -52,3 +52,17 @@ export function addTender(byMode, mode, amount) {
   byMode[m] = (byMode[m] || 0) + Number(amount);
   return byMode;
 }
+
+// What a day's money panels show (ZNLY-234). An OPEN day: one set of figures. A CLOSED day: three that never mix, so the rows always add up:
+//   at close  = what the day held when it was closed (rows taken at or before closed_at)  -> the cards and the first rows
+//   after     = money collected after the close (it is NOT in the closed report)
+//   now       = at close + after (live), so "Taken now" and "Cash in the drawer now"
+// d: { isClosed, byMode, refunds (live), afterClose: {amount, cash}, atClose: {byMode, refunds, closedAt} | null }
+export function dayMoneyView(d) {
+  const live = foldDayMoney({ byMode: d?.byMode, refunds: d?.refunds });
+  if (d?.isClosed && d?.atClose) {
+    const at = foldDayMoney({ byMode: d.atClose.byMode, refunds: d.atClose.refunds });
+    return { closed: true, headline: at, at, after: { amount: Number(d.afterClose?.amount || 0), cash: Number(d.afterClose?.cash || 0) }, now: live, closedAt: d.atClose.closedAt || null };
+  }
+  return { closed: false, headline: live, live };
+}

@@ -1334,7 +1334,7 @@ const BookingActionModal = ({
   const nextStatuses = isViewer ? [] : getNextStatuses(booking.status);
   // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).
   // Only day-lock and already-paid block it — not terminal status.
-  const canPay = !isViewer && ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && booking.paymentStatus !== 'refunded' && !isLocked;
+  const canPay = !isViewer && ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && booking.paymentStatus !== 'refunded';   // ZNLY-234: a closed day's balance can still be collected
   // Allow discounts on completed-but-unpaid bookings (standard cash-spa flow: service done → apply discount → pay).
   // Once the booking is fully paid, the price is locked — the discount can no longer move retroactively
   // against money already collected. 'partial' stays discountable so a discount can still be applied

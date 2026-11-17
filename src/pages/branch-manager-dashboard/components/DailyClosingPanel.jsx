@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { foldDayMoney } from '../../../lib/dayMoney';
+import { dayMoneyView } from '../../../lib/dayMoney';
+import DayMoneyRows from '../../../components/ui/DayMoneyRows';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import ConfirmDialog from '../../../components/ui/ConfirmDialog';
-import { getDailySummary, closeDay } from '../../../services/api';
+import { getDailySummary, closeDay, getDayUnfinishedBookings } from '../../../services/api';
+import { closeDayBlock, unpaidCloseWarning } from '../../../lib/closeDay';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -14,10 +16,11 @@ function formatDate(dateStr) {
   return d.toLocaleDateString('en-GB', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-const DailyClosingPanel = ({ branchId }) => {
+const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
   const today = new Date().toISOString().split('T')[0];
   const [selectedDate, setSelectedDate] = useState(today);
   const [summary, setSummary] = useState(null);
+  const [unfinished, setUnfinished] = useState([]);   // ZNLY-234: bookings that block the close
   const [loading, setLoading] = useState(false);
   const [closing, setClosing] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -31,6 +34,8 @@ const DailyClosingPanel = ({ branchId }) => {
     setSuccessMsg(null);
 
     const { data, error: fetchError } = await getDailySummary(branchId, selectedDate);
+    const { data: openRows } = await getDayUnfinishedBookings(branchId, selectedDate);
+    setUnfinished(openRows || []);
 
     if (fetchError) {
       setError(fetchError.message || 'Failed to load daily summary.');
@@ -60,7 +65,16 @@ const DailyClosingPanel = ({ branchId }) => {
     setClosing(false);
   };
 
+  const block = closeDayBlock(unfinished);
+  // ZNLY-234: open day = one set of figures; closed day = at close / after close / now, never mixed
+  const view = dayMoneyView(summary);
+  const headline = view.headline;
+  const openLink = (id) => (onOpenBooking
+    ? <button type="button" onClick={() => onOpenBooking(id)} className="text-primary underline text-sm">Open</button>
+    : <a href={`${window.location.pathname.split('/').slice(0, 2).join('/')}/bookings/${id}`} target="_blank" rel="noreferrer" className="text-primary underline text-sm">Open</a>);
+
   const handleCloseDayClick = () => {
+    if (block.blocked) return;
     if (summary?.unpaidCount > 0) {
       setShowConfirmModal(true);
     } else {
@@ -167,7 +181,7 @@ const DailyClosingPanel = ({ branchId }) => {
                 <span className="font-caption font-caption-medium text-xs text-text-secondary uppercase tracking-wider">Money in</span>
               </div>
               <p className="font-heading font-heading-semibold text-xl text-text-primary">
-                {formatNPR(summary.netRevenue + (summary.refunds || 0))}
+                {formatNPR(headline.moneyIn)}
               </p>
             </div>
 
@@ -177,17 +191,17 @@ const DailyClosingPanel = ({ branchId }) => {
                 <span className="font-caption font-caption-medium text-xs text-text-secondary uppercase tracking-wider">Refunds</span>
               </div>
               <p className="font-heading font-heading-semibold text-xl text-error">
-                − {formatNPR(summary.refunds || 0)}
+                − {formatNPR(headline.refunds)}
               </p>
             </div>
 
             <div className="bg-surface rounded-spa-lg spa-shadow-resting p-5 border border-border border-l-4 border-l-success">
               <div className="flex items-center space-x-2 mb-2">
                 <Icon name="IndianRupee" size={16} className="text-success" />
-                <span className="font-caption font-caption-medium text-xs text-text-secondary uppercase tracking-wider">Taken today</span>
+                <span className="font-caption font-caption-medium text-xs text-text-secondary uppercase tracking-wider">{view.closed ? 'Taken at close' : 'Taken today'}</span>
               </div>
               <p className="font-heading font-heading-semibold text-xl text-success">
-                {formatNPR(summary.netRevenue)}
+                {formatNPR(headline.taken)}
               </p>
             </div>
           </div>
@@ -241,28 +255,7 @@ const DailyClosingPanel = ({ branchId }) => {
                 <span>Payment Breakdown</span>
               </h3>
               <div className="space-y-3">
-                {(() => {
-                  const m = foldDayMoney({ byMode: summary.byMode, refunds: summary.refunds });
-                  return (<>
-                    {m.byMethod.length === 0 && <p className="text-sm text-text-secondary">No money taken yet.</p>}
-                    {m.byMethod.map((r) => (
-                      <div key={r.method} className="flex items-center justify-between" data-method-row>
-                        <span className="font-body font-body-normal text-sm text-text-secondary">{r.label}</span>
-                        <span className="font-body font-body-semibold text-sm text-text-primary">{formatNPR(r.amount)}</span>
-                      </div>
-                    ))}
-                    {m.refunds > 0 && (
-                      <div className="flex items-center justify-between" data-refunds-row>
-                        <span className="font-body font-body-normal text-sm text-text-secondary">Refunds</span>
-                        <span className="font-body font-body-semibold text-sm text-text-primary text-error">− {formatNPR(m.refunds)}</span>
-                      </div>
-                    )}
-                    <div className="border-t border-border pt-2 flex items-center justify-between">
-                      <span className="font-body font-body-normal text-sm text-text-secondary">Cash expected in the drawer</span>
-                      <span className="font-body font-body-semibold text-sm text-text-primary">{formatNPR(m.cashExpected)}</span>
-                    </div>
-                  </>);
-                })()}
+                <DayMoneyRows data={summary} fmt={formatNPR} lab="font-body font-body-normal text-sm text-text-secondary" val="font-body font-body-semibold text-sm text-text-primary" head="font-heading font-heading-medium text-sm text-text-primary" />
                 {[['product', 'Products', 'Package'], ['voucher', 'Voucher sales', 'Ticket'], ['membership', 'Membership deposits', 'Wallet'], ['package', 'Package sales', 'Gift']].filter(([k]) => Number(summary.sources?.[k]) > 0).map(([k, label, icon]) => (
                   <div key={k} className="border-t border-border pt-2 flex items-center justify-between" data-source-line={k}>
                     <div className="flex items-center gap-2">
@@ -287,6 +280,19 @@ const DailyClosingPanel = ({ branchId }) => {
                   <p className="font-caption font-caption-normal text-sm text-text-secondary mt-1">
                     Locks all bookings and product sales for {formatDate(selectedDate)}. This action cannot be undone.
                   </p>
+                  {block.blocked && (
+                    <div className="mt-3 p-3 rounded-spa border border-error/30 bg-error/5" data-close-blocked>
+                      <p className="text-sm text-error font-medium">Can't close the day yet</p>
+                      <p className="text-sm text-text-secondary mt-1">{block.message}</p>
+                      <ul className="mt-2 space-y-1">
+                        {block.rows.map((r) => (
+                          <li key={r.bookingId} className="flex items-center gap-2 text-sm text-text-primary">
+                            <span className="font-medium">{r.bookingNumber}</span><span className="text-text-secondary">{r.customerName} · {r.status}</span>{openLink(r.bookingId)}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
                 <Button
                   variant="primary"
@@ -294,6 +300,7 @@ const DailyClosingPanel = ({ branchId }) => {
                   iconPosition="left"
                   onClick={handleCloseDayClick}
                   loading={closing}
+                  disabled={block.blocked}
                 >
                   Close Day
                 </Button>
@@ -315,8 +322,8 @@ const DailyClosingPanel = ({ branchId }) => {
 
       {showConfirmModal && (
         <ConfirmDialog
-          title="Unpaid bookings warning"
-          message={`${summary?.unpaidCount} booking${summary?.unpaidCount !== 1 ? 's' : ''} still ${summary?.unpaidCount !== 1 ? 'have' : 'has'} unpaid status. Closing the day will lock all bookings, preventing further payment recording for these bookings. Do you still want to close the day?`}
+          title="Not fully paid bookings"
+          message={unpaidCloseWarning(summary?.unpaidCount)}
           confirmLabel="Close anyway"
           requireReason={false}
           isSubmitting={closing}

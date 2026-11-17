@@ -99,6 +99,31 @@ If you hit a new one, the fix is normally a free number above the highest applie
 ack. Ack only when a later migration genuinely supersedes the file, or the same change is already
 recorded under another version.
 
+## Before promoting migration 392 (ZNLY-234): check prod history for the card-bucket bug (READ-ONLY)
+
+Until ZNLY-234 the stored `daily_reports.card_total` / `fonepay_total` classified only a method literally containing "Card" as card, so card
+brands (Mastercard, Visa, other sub-methods) were saved under `fonepay_total`. Before promoting, run this **read-only** query on production and
+report the result to the owner (it only counts; it changes nothing). **Do not correct any production row without the owner's decision.**
+
+```sql
+-- closed days whose payments include card-brand methods (Mastercard / Visa / anything with "card" in the name) but whose stored card_total is 0
+SELECT o.slug, br.name AS branch, d.report_date, d.card_total, d.fonepay_total,
+       (SELECT COALESCE(sum(p.amount), 0) FROM public.payments p JOIN public.bookings b ON b.id = p.booking_id
+         WHERE b.branch_id = d.branch_id AND p.created_at >= (d.report_date::timestamp AT TIME ZONE 'Asia/Kathmandu')
+           AND p.created_at <  ((d.report_date + 1)::timestamp AT TIME ZONE 'Asia/Kathmandu')
+           AND p.payment_mode ~* '(card|visa|master)') AS card_brand_payments
+  FROM public.daily_reports d
+  JOIN public.branches br ON br.id = d.branch_id JOIN public.organizations o ON o.id = br.org_id
+ WHERE d.card_total = 0
+   AND EXISTS (SELECT 1 FROM public.payments p JOIN public.bookings b ON b.id = p.booking_id
+                WHERE b.branch_id = d.branch_id AND p.payment_mode ~* '(card|visa|master)'
+                  AND p.created_at >= (d.report_date::timestamp AT TIME ZONE 'Asia/Kathmandu')
+                  AND p.created_at <  ((d.report_date + 1)::timestamp AT TIME ZONE 'Asia/Kathmandu'))
+ ORDER BY d.report_date;
+```
+Zero rows = the bug never affected a production closed day. Any rows = report them to the owner; the new classification only applies to days closed
+after the release.
+
 ## Credentials / seed data (separate from migrations)
 
 Credential and seed syncs are **data**, not schema — they are **not** recorded in

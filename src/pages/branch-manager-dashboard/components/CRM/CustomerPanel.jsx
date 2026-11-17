@@ -87,8 +87,8 @@ const CustomerPanel = ({ customer, today, readOnly, branchId, isAdmin, onClose, 
   // ── Collect: tick the owed visits, then pay them through the same PaymentModal path as the Outstanding report ──
   const [ticked, setTicked] = useState(null); // Set of bookingIds
   // Only owed visits on OPEN days can be collected here; closed (locked) days are reported, never bundled.
-  const owed = useMemo(() => (detail?.owed || []).filter((o) => !o.isLocked), [detail]);
-  const lockedDue = c?.lockedDue || 0;
+  const owed = useMemo(() => detail?.owed || [], [detail]);   // ZNLY-234: closed-day balances are collectable too
+  const lockedDue = 0;
   const collectable = Math.round(((c?.balance || 0) - lockedDue) * 100) / 100;
   useEffect(() => { if (view === 'collect') setTicked(new Set(owed.map((o) => o.bookingId))); }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
   const chosen = useMemo(() => owed.filter((o) => ticked?.has(o.bookingId)), [owed, ticked]);

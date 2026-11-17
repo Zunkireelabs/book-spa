@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { foldDayMoney } from '../../../lib/dayMoney';
+import { dayMoneyView } from '../../../lib/dayMoney';
+import DayMoneyRows from '../../../components/ui/DayMoneyRows';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import ConfirmDialog from '../../../components/ui/ConfirmDialog';
@@ -132,6 +133,10 @@ const DailyOperationalReportPanel = ({ branchId }) => {
     URL.revokeObjectURL(url);
   };
 
+  // ZNLY-234: open day = one set of figures; closed day = at close / after close / now, never mixed
+  const view = dayMoneyView(report);
+  const headline = view.headline;
+
   if (!branchId) {
     return (
       <div className="bg-surface rounded-spa p-6 border border-border text-center">
@@ -246,7 +251,7 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                 <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">Money in</span>
               </div>
               <p className="text-xl font-semibold text-text-primary">
-                {formatNPR(report.totals.netRevenue + (report.refunds || 0))}
+                {formatNPR(headline.moneyIn)}
               </p>
             </div>
 
@@ -256,17 +261,17 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                 <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">Refunds</span>
               </div>
               <p className="text-xl font-semibold text-error">
-                − {formatNPR(report.refunds || 0)}
+                − {formatNPR(headline.refunds)}
               </p>
             </div>
 
             <div className="bg-surface rounded-spa p-5 border border-border border-l-4 border-l-success">
               <div className="flex items-center gap-2 mb-2">
                 <Icon name="IndianRupee" size={16} className="text-success" />
-                <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">Taken today</span>
+                <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">{view.closed ? 'Taken at close' : 'Taken today'}</span>
               </div>
               <p className="text-xl font-semibold text-success">
-                {formatNPR(report.totals.netRevenue)}
+                {formatNPR(headline.taken)}
               </p>
             </div>
           </div>
@@ -332,28 +337,7 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                 <span>Payment Breakdown</span>
               </h3>
               <div className="space-y-3">
-                {(() => {
-                  const m = foldDayMoney({ byMode: report.byMode, refunds: report.refunds });
-                  return (<>
-                    {m.byMethod.length === 0 && <p className="text-sm text-text-secondary">No money taken yet.</p>}
-                    {m.byMethod.map((r) => (
-                      <div key={r.method} className="flex items-center justify-between" data-method-row>
-                        <span className="text-sm text-text-secondary">{r.label}</span>
-                        <span className="text-sm font-semibold text-text-primary">{formatNPR(r.amount)}</span>
-                      </div>
-                    ))}
-                    {m.refunds > 0 && (
-                      <div className="flex items-center justify-between" data-refunds-row>
-                        <span className="text-sm text-text-secondary">Refunds</span>
-                        <span className="text-sm font-semibold text-text-primary text-error">− {formatNPR(m.refunds)}</span>
-                      </div>
-                    )}
-                    <div className="border-t border-border pt-2 flex items-center justify-between">
-                      <span className="text-sm text-text-secondary">Cash expected in the drawer</span>
-                      <span className="text-sm font-semibold text-text-primary">{formatNPR(m.cashExpected)}</span>
-                    </div>
-                  </>);
-                })()}
+                <DayMoneyRows data={report} fmt={formatNPR} lab="text-sm text-text-secondary" val="text-sm font-semibold text-text-primary" head="text-sm font-semibold text-text-primary" />
                 {[['product', 'Products', 'Package'], ['voucher', 'Voucher sales', 'Ticket'], ['membership', 'Membership deposits', 'Wallet'], ['package', 'Package sales', 'Gift']].filter(([k]) => Number(report.sources?.[k]) > 0).map(([k, label, icon]) => (
                   <div key={k} className="border-t border-border pt-2 flex items-center justify-between" data-source-line={k}>
                     <div className="flex items-center gap-2">

@@ -1,5 +1,7 @@
 import { buildQueue, needsOf } from '../lib/dashboardNeeds';
-import { WALLET_MODES, addTender, isTendered, canonicalMode } from '../lib/dayMoney';
+import { WALLET_MODES, addTender, isTendered, canonicalMode, dayMoneyView } from '../lib/dayMoney';
+import { closeDayBlock } from '../lib/closeDay';
+import { cardModeNames, bucketForMode, getOrgPaymentMethods } from './paymentMethods';
 import { toTransferInput } from '../utils/transferText';
 import { workedAtNote } from './visitorAttendance';
 import { computeReferralCommission, payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, computeNetPay, splitServiceRevenueByBranch, visitorPayrollHelpLine } from './payrollCalc';
@@ -1155,11 +1157,27 @@ export async function getProductSalesForDate(branchId, date) {
 // The day's money, ONE source shared with the dashboard Close card (get_day_money -> _dashboard_money_in / _dashboard_refunds, migration 391):
 // everything TAKEN that Nepal day (any booking date) by real method name, minus refunds made that day. ZNLY-232.
 //   { byMode, refunds, taken, cashExpected, serviceIn }
+// The org's own card methods (Card -> Mastercard, Visa ...) so card brands land in the card bucket, not "fonepay" (ZNLY-234).
+async function getOrgCardNames() {
+  try {
+    const { profile } = await getAuthenticatedUser();
+    if (!profile?.org_id) return cardModeNames(null);
+    const { data } = await supabase.from('organizations').select('settings').eq('id', profile.org_id).maybeSingle();
+    return cardModeNames(getOrgPaymentMethods(data?.settings));
+  } catch (e) {
+    return cardModeNames(null);
+  }
+}
+
 export async function getDayMoneyForDate(branchId, date) {
   const { data, error } = await supabase.rpc('get_day_money', { p_branch_id: isOverallBranch(branchId) ? null : resolveBranchId(branchId), p_date: date });
   if (error) throw error;
   const d = data || {};
-  return { byMode: d.by_method || {}, refunds: Number(d.refunds || 0), taken: Number(d.taken || 0), cashExpected: Number(d.cash_expected || 0), serviceIn: Number(d.service_in || 0), sources: d.sources || {} };
+  return { byMode: d.by_method || {}, refunds: Number(d.refunds || 0), taken: Number(d.taken || 0), cashExpected: Number(d.cash_expected || 0), serviceIn: Number(d.service_in || 0), sources: d.sources || {},
+    // money taken AFTER this day was closed (not in the closed daily_reports row), and its cash part (ZNLY-234)
+    afterClose: { amount: Number(d.after_close?.amount || 0), cash: Number(d.after_close?.cash || 0) },
+    // what the closed day held at close, from rows taken at or before closed_at (null when the day is open or a multi-branch view)
+    atClose: d.at_close ? { byMode: d.at_close.by_method || {}, refunds: Number(d.at_close.refunds || 0), taken: Number(d.at_close.taken || 0), cashExpected: Number(d.at_close.cash_expected || 0), closedAt: d.at_close.closed_at || null } : null };
 }
 
 // Membership top-ups and package purchases on [date] — new cash in from selling
@@ -1453,10 +1471,8 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       throw fetchError;
     }
 
-    // 2. Lock check
-    if (booking.is_locked) {
-      return { data: null, error: { code: 'DAY_LOCKED', message: 'This day has been closed. No further modifications allowed.' } };
-    }
+    // 2. (ZNLY-234) A closed day no longer blocks a payment: a balance on a closed-day booking stays collectable and lands on the day it is
+    //    received; the closed report never changes. Every other edit of a locked booking is still refused by the database.
 
     // 3. Already fully paid check (partial/unpaid may still receive tenders)
     if (booking.payment_status === 'paid') {
@@ -2233,8 +2249,9 @@ const dueSummary = (m) => {
     serviceName: b.service_name_snapshot || '—', finalAmount: b.money.price, amountPaid: b.money.paid, amountDue: b.money.due,
     paymentStatus: b.payment_status, isLocked: !!b.is_locked,
   });
-  const collectable = m.dueBookings.filter((b) => !b.is_locked);
-  const locked = m.dueBookings.filter((b) => b.is_locked);
+  // ZNLY-234: a balance on a closed day is collectable like any other (it is recorded on the day it is received), so nothing is "locked out" any more.
+  const collectable = m.dueBookings;
+  const locked = [];
   return {
     totalDue: m.due, // everything owed (the warning / chip)
     bookingCount: m.dueCount,
@@ -4852,7 +4869,8 @@ export async function getDailySummary(branchId, date) {
     for (const k of Object.keys(byMode)) delete byMode[k];
     Object.assign(byMode, dayMoney.byMode);
     paymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
-    for (const [m, v] of Object.entries(byMode)) paymentBreakdown[classifyPaymentMode(m)] += Number(v);
+    const cardNames = await getOrgCardNames();
+    for (const [m, v] of Object.entries(byMode)) paymentBreakdown[bucketForMode(m, cardNames)] += Number(v);
     paymentBreakdown.cash -= refunds;
     netRevenue = dayMoney.taken;
 
@@ -4900,6 +4918,8 @@ export async function getDailySummary(branchId, date) {
         noShowBookings,
         notFinishedBookings,
         sources: dayMoney.sources,
+        afterClose: dayMoney.afterClose,
+        atClose: dayMoney.atClose,
         paymentBreakdown,
         voucherSalesTotal,
         productSales,
@@ -5235,6 +5255,18 @@ export async function getTodayInsights(branchId, from, to) {
   }
 }
 
+// Bookings of [date] at a branch that are still Pending / Confirmed / In-Progress: they block Close Day (ZNLY-234, migration 392).
+export async function getDayUnfinishedBookings(branchId, date) {
+  try {
+    const { data, error } = await supabase.rpc('day_unfinished_bookings', { p_branch_id: resolveBranchId(branchId), p_date: date });
+    if (error) throw error;
+    return { data: (data || []).map((r) => ({ bookingId: r.booking_id, bookingNumber: r.booking_number, customerName: r.customer_name, status: r.status, startTime: r.start_time })), error: null };
+  } catch (error) {
+    console.error('[API] getDayUnfinishedBookings error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function closeDay(branchId, date) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);
@@ -5268,6 +5300,11 @@ export async function closeDay(branchId, date) {
     if (existingReport) {
       return { data: null, error: { code: 'ALREADY_CLOSED', message: 'Day has already been closed.' } };
     }
+
+    // 2b. Refused while any booking of the day is unfinished (the database refuses it too, so this cannot be skipped).
+    const { data: unfinished } = await getDayUnfinishedBookings(resolvedBranchId, date);
+    const block = closeDayBlock(unfinished);
+    if (block.blocked) return { data: null, error: { code: 'DAY_HAS_UNFINISHED', message: block.message, bookings: block.rows } };
 
     // 3. Get the summary
     const { data: summary, error: summaryError } = await getDailySummary(resolvedBranchId, date);
@@ -5530,7 +5567,8 @@ export async function getDailyOperationalReport(branchId, date) {
       };
     } else {
       paymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
-      for (const [m, v] of Object.entries(byMode)) paymentBreakdown[classifyPaymentMode(m)] += Number(v);
+      const cardNames = await getOrgCardNames();
+      for (const [m, v] of Object.entries(byMode)) paymentBreakdown[bucketForMode(m, cardNames)] += Number(v);
       paymentBreakdown.cash -= refunds;
     }
 
@@ -5630,6 +5668,8 @@ export async function getDailyOperationalReport(branchId, date) {
         voucherSalesTotal,
         productSales,
         sources: dayMoney.sources,
+        afterClose: dayMoney.afterClose,
+        atClose: dayMoney.atClose,
         refunds,
         byMode,
         tipsTotal,
@@ -5684,9 +5724,25 @@ export function exportDailyReportCSV(reportData) {
   rows.push(`Completed,${totals.completedBookings}`);
   rows.push(`Cancelled,${totals.cancelledBookings}`);
   rows.push(`No Show,${totals.noShowBookings}`);
-  rows.push(`Money In,${(totals.netRevenue + (reportData.refunds || 0)).toFixed(2)}`);
-  rows.push(`Refunds,${(reportData.refunds || 0).toFixed(2)}`);
-  rows.push(`Taken Today,${totals.netRevenue.toFixed(2)}`);
+  const dm = dayMoneyView(reportData);
+  if (dm.closed) {
+    // closed day: at close / after close / now (ZNLY-234), never mixed
+    rows.push(`Money In (at close),${dm.at.moneyIn.toFixed(2)}`);
+    rows.push(`Refunds (at close),${dm.at.refunds.toFixed(2)}`);
+    rows.push(`Taken at close,${dm.at.taken.toFixed(2)}`);
+    for (const r of dm.at.byMethod) rows.push(`"${r.label} (at close)",${r.amount.toFixed(2)}`);
+    rows.push(`Cash expected at close,${dm.at.cashExpected.toFixed(2)}`);
+    rows.push(`Collected after close (not in the closed report),${dm.after.amount.toFixed(2)}`);
+    rows.push(`of which cash collected after close,${dm.after.cash.toFixed(2)}`);
+    rows.push(`Taken now,${dm.now.taken.toFixed(2)}`);
+    rows.push(`Cash in the drawer now,${dm.now.cashExpected.toFixed(2)}`);
+  } else {
+    rows.push(`Money In,${dm.live.moneyIn.toFixed(2)}`);
+    rows.push(`Refunds,${dm.live.refunds.toFixed(2)}`);
+    rows.push(`Taken Today,${dm.live.taken.toFixed(2)}`);
+    for (const r of dm.live.byMethod) rows.push(`"${r.label}",${r.amount.toFixed(2)}`);
+    rows.push(`Cash expected in the drawer,${dm.live.cashExpected.toFixed(2)}`);
+  }
   rows.push(`Discounts given (today's bookings),${totals.totalDiscount.toFixed(2)}`);
   if (reportData.productSales) {
     rows.push(`Products sold (${reportData.productSales.count}),${Number(reportData.productSales.total).toFixed(2)}`);

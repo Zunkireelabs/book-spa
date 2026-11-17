@@ -211,6 +211,8 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
                     {m.byMethod.map((r) => <div key={r.method} className="flex justify-between py-1.5"><span className="text-gray-600">{r.label}</span><b className="font-data">{npr(r.amount)}</b></div>)}
                     {m.refunds > 0 && <div className="flex justify-between py-1.5"><span className="text-gray-600">Refunds</span><b className="font-data text-error">−{npr(m.refunds)}</b></div>}
                     <div className="flex justify-between py-1.5"><span className="text-gray-600">Taken today</span><b className="font-data">{npr(m.taken)}</b></div>
+                    {data.money.after_close?.amount ? <div className="flex justify-between py-1.5"><span className="text-gray-600">of which collected after close <span className="text-gray-400">(not in the closed report)</span></span><b className="font-data">{npr(data.money.after_close.amount)}{data.money.after_close.cash ? ` (cash ${npr(data.money.after_close.cash)})` : ''}</b></div> : null}
+                    
                   </>); })()}
                   <div className="flex justify-between py-1.5"><span className="text-gray-600">Tips (passed to staff, not revenue)</span><b className="font-data">{npr(data.money.tips)}</b></div>
                   <div className="flex justify-between py-2"><b>Cash expected in the drawer</b><b className="font-data">{npr(data.money.cash_expected)}</b></div>
@@ -222,7 +224,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
                 )}
               </Card>
             )}
-            {closing && !closed && <DailyClosingPanel branchId={branchId} />}
+            {closing && !closed && <DailyClosingPanel branchId={branchId} onOpenBooking={openBooking} />}
             <Card icon="Sun" title="Tomorrow" error={bad} onRetry={refresh} meta={data?.tomorrow ? `${data.tomorrow.working} ${(staffLabelPlural || 'staff').toLowerCase()} working` : null}>
               <Row icon="CalendarDays" tone="text-primary" title={plural(data?.tomorrow?.bookings ?? 0, 'booking')} actions={<Button size="sm" variant="outline" onClick={() => go('calendar')}>Open calendar</Button>} />
               {data?.tomorrow?.unconfirmed > 0 && <Row icon="Clock" tone="text-warning" title={`${data.tomorrow.unconfirmed} not confirmed for tomorrow`} />}
@@ -243,7 +245,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
       <>
         {bad ? <Card icon="CalendarDays" title="Today so far" error onRetry={refresh} /> : <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
           <Tile label="Bookings today" value={pulse.bookings ?? 0} sub={splitLine(split)} icon="CalendarDays" onClick={() => go('bookings')} />
-          <Tile label="Taken today" value={canMoney ? npr(pulse.revenue) : '—'} sub={canMoney ? (newTenant ? 'No comparison yet' : <Delta now={pulse.revenue} prev={pulse.revenue_prev} unit="%" />) : 'Managers see this'} icon="Banknote" onClick={() => go('all-reports')} />
+          <Tile label="Taken today" value={canMoney ? npr(pulse.revenue) : '—'} sub={canMoney ? (data?.money?.after_close?.amount ? `incl. ${npr(data.money.after_close.amount)} after close` : (newTenant ? 'No comparison yet' : <Delta now={pulse.revenue} prev={pulse.revenue_prev} unit="%" />)) : 'Managers see this'} icon="Banknote" onClick={() => go('all-reports')} />
           <Tile label="Free time left" value={newTenant ? '—' : fmtFreeTotal(free.total)} sub={newTenant ? 'Fills in once you take bookings' : free.biggest ? `${free.total >= 24 * 60 ? `across ${plural(free.people, (staffLabel || 'person').toLowerCase(), (staffLabelPlural || 'people').toLowerCase())} · ` : ''}Biggest gap ${fmtRange(free.biggest.from_min, free.biggest.to_min)}` : 'No gaps of 1h or more'} icon="Clock" onClick={() => go('calendar')} />
           <Tile label="Booked hours" value={newTenant || share == null ? '—' : `${sharePct(share)}%`} sub={newTenant ? 'No comparison yet' : <>Of {(staffLabel || 'staff').toLowerCase()} hours · <Delta now={share} prev={pulse.booked_share_prev} unit="pts" /></>} icon="Users" onClick={() => go('all-reports')} />
         </div>}
