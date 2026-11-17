@@ -1,4 +1,5 @@
 // Staff-availability rule (ZNLY-100): error mapping + a data-driven pre-check over the rows
+import { wordBranch } from '../utils/industryTerms';
 // therapist_shifts_for_range (migration-354) returns. The database is the only place the rule is enforced
 // (check_therapist_booking_guards, migration-353); this module only turns its stable error codes into
 // messages and shows the same verdict early, while a form is being filled in.
@@ -39,7 +40,7 @@ export function formatAvailabilityMessage(code, detail = {}, { staffLabel = 'sta
     case 'BLOCKED':
       return `${who} is blocked ${range}${detail.label ? ` (${detail.label})` : ''}`;
     case 'OTHER_BRANCH':
-      return `${who} is at ${detail.label || 'another branch'} at this time`;
+      return `${who} is at ${detail.label || `another ${wordBranch()}`} at this time`;
     case 'OVERLAP':
       return `${who} already has a booking ${range}`;
     case 'OFF_SHIFT':

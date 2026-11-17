@@ -3,6 +3,7 @@
 // This module is the pure half: build the change payload, turn rows into display lines, and the half-day rules.
 // Bookings are never moved or cancelled by any of this; the manager only gets to see them before saving.
 import { hhmmToMinutes, minutesToHHMM } from './availability';
+import { wordBranch } from '../utils/industryTerms';
 
 const hhmm = (t) => (t ? String(t).slice(0, 5) : '');
 
@@ -15,7 +16,7 @@ export function conflictReasonLabel(reason) {
     case 'break': return 'during a break';
     case 'block': return 'inside the block';
     case 'leave': return 'during leave';
-    case 'other_branch': return 'while at another branch';
+    case 'other_branch': return `while at another ${wordBranch()}`;
     default: return 'outside availability';
   }
 }

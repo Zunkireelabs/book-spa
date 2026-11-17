@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Icon from 'components/AppIcon';
+import { localizeBranch } from 'utils/industryTerms';
 import CustomSelect from 'components/ui/CustomSelect';
 import { REPORT_PERIODS, getReportRange } from 'utils/reportPeriod';
 
@@ -99,7 +100,7 @@ const HowWeCount = ({ items }) => {
       </button>
       {open && (
         <div className="grid md:grid-cols-2 gap-x-6 gap-y-1 px-4 pb-4 text-xs text-text-secondary leading-relaxed">
-          {items.map((d) => <div key={d.term}><b className="text-text-primary font-semibold">{d.term}</b>: {d.text}</div>)}
+          {items.map((d) => <div key={d.term}><b className="text-text-primary font-semibold">{localizeBranch(d.term)}</b>: {localizeBranch(d.text)}</div>)}
         </div>
       )}
     </div>

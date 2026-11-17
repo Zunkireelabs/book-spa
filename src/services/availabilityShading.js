@@ -4,6 +4,7 @@
 import { evaluateAvailability, hhmmToMinutes, minutesToHHMM } from './availability';
 import { hoursFromShiftRow } from '../utils/staffDay';
 import { todayStatusLine } from '../utils/todayStatusLine';
+import { wordBranch } from '../utils/industryTerms';
 
 const stripes = (a, b) => `repeating-linear-gradient(135deg, ${a} 0 6px, ${b} 6px 7px)`;
 
@@ -64,7 +65,7 @@ export function buildShadeSegments(shiftDay, fmt = (t) => t) {
     } else if (o.code === 'OTHER_BRANCH') {
       out.push({
         kind: 'branch', startMin: o.start_min, endMin: o.end_min, code: 'OTHER_BRANCH', reason: o.reason,
-        label: `At ${o.label || 'another branch'} ${range(o.start_min, o.end_min, fmt)}`,
+        label: `At ${o.label || `another ${wordBranch()}`} ${range(o.start_min, o.end_min, fmt)}`,
       });
     }
   });
@@ -107,6 +108,6 @@ export function outsideNote(verdict, fmt = (t) => t) {
 }
 export function outsideReasonText(verdict) {
   if (!verdict) return null;
-  if (verdict.code === 'OTHER_BRANCH') return `at ${verdict.detail?.label || 'another branch'}`;
+  if (verdict.code === 'OTHER_BRANCH') return `at ${verdict.detail?.label || `another ${wordBranch()}`}`;
   return OUTSIDE_REASON_TEXT[verdict.code] || 'outside hours';
 }

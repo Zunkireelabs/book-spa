@@ -1,4 +1,5 @@
 // The ONE place Payroll's money maths lives. generatePayroll() (api.js) and the therapist profile both call these, so a
+import { wordBranch, staffWord, staffWordPlural } from '../utils/industryTerms';
 // number on the profile is the number Payroll would produce. Pure functions only: no Supabase, no Date.now.
 //
 // Extracted verbatim from generatePayroll -- order of operations and every Math.round(x * 100) / 100 are unchanged on purpose.
@@ -129,5 +130,5 @@ export function visitorPayrollHelpLine({ visitors, revenue }) {
   const n = Number(visitors) || 0;
   if (n === 0) return null;
   const amount = Math.round(Number(revenue) || 0).toLocaleString('en-IN');
-  return `${n} visiting therapist${n === 1 ? '' : 's'} did NPR ${amount} here. Paid by their home branch.`;
+  return `${n} visiting ${n === 1 ? staffWord() : staffWordPlural()} did NPR ${amount} here. Paid by their home ${wordBranch()}.`;
 }

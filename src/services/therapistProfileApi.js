@@ -9,6 +9,7 @@ import { dbDowOfDate, effectiveHoursForDate, hoursFromShiftRow, timeToMinutes, D
 import { nextWorkingDay, isClosedDate } from '../utils/todayStatusLine';
 import { nepalNow } from '../utils/customerDirectory';
 import { describeTransfer, toTransferInput, transferTitle, transferWindowLine, transferDurationText } from '../utils/transferText';
+import { wordBranch } from '../utils/industryTerms';
 
 const PAY_ROLES = ['admin', 'admin_viewer'];
 export const canSeePay = (role) => PAY_ROLES.includes(role);
@@ -96,7 +97,7 @@ function profileClauses(oldD, newD, { staffLabel = 'Therapist', supportLabel = '
   if (had(newD, 'photo_url')) out.push(newD.photo_url ? 'Photo changed' : 'Photo removed');
   if (had(newD, 'experience_years')) out.push(`Experience ${oldD?.experience_years ?? 0} → ${newD.experience_years ?? 0} years`);
   if (had(newD, 'rating')) out.push(`Rating ${oldD?.rating ?? '—'} → ${newD.rating ?? '—'}`);
-  if (had(newD, 'branch_id')) out.push('Moved to another branch');
+  if (had(newD, 'branch_id')) out.push(`Moved to another ${wordBranch()}`);
   return out;
 }
 
@@ -117,7 +118,7 @@ export function formatActivityText(row, labels = {}) {
   const { table_name: t, action_type: a, old_data: o, new_data: n } = row;
   if (t === 'staff_transfers') {
     const note = n?.is_return_leg ? 'Returned' : 'Transferred';
-    return `${note} from ${row.from_branch_name || 'a branch'} to ${row.to_branch_name || 'a branch'}${n?.is_permanent ? ' (permanent)' : ''}${n?.reverted ? ' — reverted' : ''}`;
+    return `${note} from ${row.from_branch_name || `a ${wordBranch()}`} to ${row.to_branch_name || `a ${wordBranch()}`}${n?.is_permanent ? ' (permanent)' : ''}${n?.reverted ? ' — reverted' : ''}`;
   }
   if (t === 'therapists') {
     if (a === 'INSERT') return 'Profile created';

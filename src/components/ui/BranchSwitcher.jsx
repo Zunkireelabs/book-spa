@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
+import { wordBranch, wordBranches, wordBranchesCap } from '../../utils/industryTerms';
 import Icon from '../AppIcon';
 import { useBranch, OVERALL_BRANCH_ID } from 'contexts/BranchContext';
 import { useMenuNav } from './useMenuNav';
@@ -55,7 +56,7 @@ const BranchSwitcher = () => {
         <div
           ref={menuRef}
           role="menu"
-          aria-label="Switch branch"
+          aria-label={`Switch ${wordBranch()}`}
           className="absolute left-0 top-[calc(50%+32px)] min-w-[240px] bg-surface border border-border rounded-spa-lg shadow-spa-elevated z-dropdown p-1.5"
         >
           {withOverall && (
@@ -70,14 +71,14 @@ const BranchSwitcher = () => {
                 <Icon name="Globe" size={16} className="text-text-tertiary flex-shrink-0" />
                 <span className="flex-1 min-w-0">
                   <span className="block text-sm leading-tight">Overall</span>
-                  <span className="block text-xs text-text-tertiary leading-tight mt-0.5">All branches · read-only</span>
+                  <span className="block text-xs text-text-tertiary leading-tight mt-0.5">All {wordBranches()} · read-only</span>
                 </span>
                 {isOverall && <Icon name="Check" size={16} className="text-text-primary flex-shrink-0" />}
               </button>
               <div className="my-1.5 h-px bg-border" />
             </>
           )}
-          <p className="px-2.5 pt-1 pb-1.5 text-[11px] font-body font-body-medium uppercase tracking-wider text-text-tertiary">Branches</p>
+          <p className="px-2.5 pt-1 pb-1.5 text-[11px] font-body font-body-medium uppercase tracking-wider text-text-tertiary">{wordBranchesCap()}</p>
           <div className="max-h-72 overflow-y-auto">
             {branches.map((b) => {
               const selected = !isOverall && branchId === b.id;

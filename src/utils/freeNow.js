@@ -7,6 +7,7 @@
 // set is open inside branch hours (the clamp is already in the shift), shown as "No hours set · open".
 import { lateMinutes } from './bookingsList';
 import { todayStatusLine } from './todayStatusLine';
+import { wordBranchCap } from './industryTerms';
 
 export const toMin = (t) => { if (t == null || t === '') return null; const [h, m] = String(t).slice(0, 5).split(':').map(Number); return h * 60 + (m || 0); };
 export const fromMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -24,7 +25,7 @@ export function shiftSource(attendance = []) {
 
 /** { on, from, to, reason } — `from`/`to` null = open ended. Leave/absent always win. */
 function shiftOf(t, ctx) {
-  if (ctx.branchClosed) return { on: false, reason: 'Branch closed' };
+  if (ctx.branchClosed) return { on: false, reason: `${wordBranchCap()} closed` };
   const att = ctx.attendanceById?.[t.id];
   if (att?.status === 'Absent') return { on: false, reason: 'Absent today' };
   if (att && LEAVE.includes(att.status)) return { on: false, reason: att.status === 'Day Off' ? 'Day off' : 'On leave' };

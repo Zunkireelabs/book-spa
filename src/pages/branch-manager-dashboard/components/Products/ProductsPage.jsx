@@ -21,7 +21,7 @@ import ImportPanel from './ImportPanel';
 import ProductCategories from './ProductCategories';
 import { ReceivePanel, RemovePanel, MovePanel, SellPanel } from './ProductActionPanels';
 import { ghostBtn } from './productBits';
-import { wordBranches } from '../../../../utils/industryTerms';
+import { wordBranch, wordBranches } from '../../../../utils/industryTerms';
 
 const nextMonthStart = (today) => {
   const [y, m] = today.slice(0, 7).split('-').map(Number);
@@ -85,7 +85,7 @@ const ProductsPage = ({ view, readOnly = false }) => {
     setSp(next, { replace: true });
   }, [sp, setSp]);
 
-  const branchLabel = isOverall ? `across all ${wordBranches()}` : `at ${branchName || 'this branch'}`;
+  const branchLabel = isOverall ? `across all ${wordBranches()}` : `at ${branchName || `this ${wordBranch()}`}`;
   const lead = view === 'products'
     ? (rows ? leadNodes(leadParts(rows, { canCost, branchLabel, monthName: monthName(today.slice(0, 7)), month, sessionsLabel: sessionLabelPlural.toLowerCase() })) : ' ')
     : view === 'stock-history' ? (Array.isArray(historyLead) ? leadNodes(historyLead) : historyLead)

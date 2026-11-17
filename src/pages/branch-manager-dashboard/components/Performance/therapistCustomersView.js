@@ -1,6 +1,7 @@
 // Pure view-model for the therapist inner page's Customers tab (ZNLY-172): rows of get_therapist_customers (migration 374) in, groups / pills / tiles /
 // ✦ suggestions / sentences / CSV out. Unit-tested; no React. Owner rule: no number may be readable two ways, so a row carries labels, not visit counts.
 import { shortDate, dayRange } from './therapistInnerView';
+import { staffWord, staffWordPlural, localizeTerms } from '../../../../utils/industryTerms';
 
 const BOOKED = ['completed', 'not_closed', 'upcoming'];
 const num = (n) => Number(n || 0).toLocaleString('en-IN');
@@ -49,7 +50,7 @@ export function tiles(v, first) {
   const top = owedRows.reduce((a, c) => (!a || c.owed > a.owed ? c : a), null);
   const parts = [];
   parts.push(`${sp.withMe} with ${first}`);
-  if (sp.other) parts.push(`${sp.other} with ${sp.other === 1 && !sp.withMe ? 'another therapist' : 'other therapists'}`);
+  if (sp.other) parts.push(`${sp.other} with ${sp.other === 1 && !sp.withMe ? `another ${staffWord()}` : `other ${staffWordPlural()}`}`);
   if (sp.unassigned) parts.push(`${sp.unassigned} not assigned yet`);
   const cancelledNote = v.counts.cancelled ? ` · ${v.counts.cancelled} only cancelled` : '';
   return {
@@ -115,7 +116,7 @@ export function openDates(c) {
 
 /** The right side of the expanded row: sentences, no totals. */
 export function elsewhere(c, first) {
-  const who = (t) => (t ? ` with ${t}` : ' (no therapist yet)');
+  const who = (t) => (t ? ` with ${t}` : ` (no ${staffWord()} yet)`);
   const lines = [];
   lines.push(c.first_visit ? { k: 'First visit', v: `${shortDate(c.first_visit.date)}, ${c.first_visit.service}${c.first_visit.therapist ? ` with ${c.first_visit.therapist}` : ''}` } : { k: 'First visit', v: 'none yet' });
   lines.push(c.booked_again ? { k: 'Booked again', v: `${shortDate(c.booked_again.date)}, ${c.booked_again.service}${who(c.booked_again.therapist)}` } : { k: 'Booked again', v: c.served ? 'not within 60 days' : 'not applicable until served' });
@@ -126,15 +127,15 @@ export function elsewhere(c, first) {
 /** The Booked again cell: "Yes · 17 Oct · Anil T." / "No · served today" / "—". */
 export function againCell(c, today) {
   if (!c.served) return { yes: false, text: '—' };
-  if (c.booked_again) return { yes: true, text: `Yes · ${shortDate(c.booked_again.date)} · ${c.booked_again.therapist || 'no therapist yet'}`, me: c.booked_again.with_this_therapist === true };
+  if (c.booked_again) return { yes: true, text: `Yes · ${shortDate(c.booked_again.date)} · ${c.booked_again.therapist || `no ${staffWord()} yet`}`, me: c.booked_again.with_this_therapist === true };
   return { yes: false, text: c.last_served === today ? 'No · served today' : 'No' };
 }
 
 export const CSV_HEAD = ['Customer', 'Phone', 'Bookings with therapist', 'Completed', 'Not closed', 'Sales', 'Owed', 'Last served', 'Booked again', 'Booked again with', 'Customer type'];
 /** One row per customer, as on screen (every customer of the tab, whatever the filter). */
-export const csvRows = (rows) => [CSV_HEAD, ...rows.map((c) => [
+export const csvRows = (rows) => [CSV_HEAD.map(localizeTerms), ...rows.map((c) => [
   c.name, c.phone || '', (c.bookings || []).length, c.by.completed.length, c.by.not_closed.length, c.sales, c.owed, c.last_served || '',
-  c.booked_again?.date || '', c.booked_again ? (c.booked_again.therapist || 'no therapist yet') : '', TYPE_LABEL[c.type] || '',
+  c.booked_again?.date || '', c.booked_again ? (c.booked_again.therapist || `no ${staffWord()} yet`) : '', TYPE_LABEL[c.type] || '',
 ])];
 
 export { dayRange };

@@ -10,6 +10,7 @@
 //   back:       nextWorkingDay(...) result | null, the wording for "back Tue 09:00"
 //   -> { key, row, full, parts: [title, sub], short, dot: 'grey'|'amber'|'green'|'purple', tone }
 import { timeToMinutes, hoursFromShiftRow } from './staffDay';
+import { wordBranch, wordBranchCap } from './industryTerms';
 
 const LEAVE_STATUSES = new Set(['Leave', 'Annual Leave', 'Sick Leave']);
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -60,7 +61,7 @@ export function todayStatusLine({ hours, attendance = null, nowMin = 0, branchCl
   const backDay = back ? `${weekdayOf(back.date)}${back.startTime ? ` ${back.startTime}` : ''}` : null;
   const backLeave = back ? weekdayOf(back.date) : null;
 
-  if (branchClosed) return line('closed', 13, ['Branch closed today'], 'Closed', 'grey', 'off');
+  if (branchClosed) return line('closed', 13, [`${wordBranchCap()} closed today`], 'Closed', 'grey', 'off');
   if (h.missing && !att) return line('no-roster', null, ['No shift set', 'Set hours in their profile'], 'No shift', 'grey', 'none');
 
   const off = h.off || [];
@@ -77,7 +78,7 @@ export function todayStatusLine({ hours, attendance = null, nowMin = 0, branchCl
 
   const away = off.find((o) => o.code === 'OTHER_BRANCH' && o.start_min <= nowMin && nowMin < o.end_min);
   if (away) {
-    const where = away.label || 'another branch';
+    const where = away.label || `another ${wordBranch()}`;
     return line('other-branch', 9, [`At ${where} until ${hhmm(Math.min(away.end_min, 1439))}`], `At ${where}`, 'grey', 'off');
   }
   const half = off.find((o) => o.code === 'ON_LEAVE' && o.reason === 'leave_half');
@@ -106,8 +107,8 @@ export function todayStatusLine({ hours, attendance = null, nowMin = 0, branchCl
   }
 
   if (noHours) {
-    const branch = startS && endS ? `bookable in branch hours ${range(startS, endS)}` : 'bookable in branch hours';
-    if (start != null && end != null && (nowMin < start || nowMin >= end)) return line('no-hours-closed', 12, ['No hours set', 'branch closed now'], 'No set hours', 'grey', 'none');
+    const branch = startS && endS ? `bookable in ${wordBranch()} hours ${range(startS, endS)}` : `bookable in ${wordBranch()} hours`;
+    if (start != null && end != null && (nowMin < start || nowMin >= end)) return line('no-hours-closed', 12, ['No hours set', `${wordBranch()} closed now`], 'No set hours', 'grey', 'none');
     return line('no-hours', checkedIn ? 11 : 10, [checkedIn ? `Checked in ${checkedIn}` : null, 'No hours set', branch], 'No set hours', 'green', 'none');
   }
 

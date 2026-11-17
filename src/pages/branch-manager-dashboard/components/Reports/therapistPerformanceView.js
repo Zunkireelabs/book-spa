@@ -3,7 +3,7 @@
 // health rule) and busy = the dashboard working rule.
 import { computeDelta } from 'utils/reportPeriod';
 import { num, pctText } from './businessHealthView';
-import { wordBranchCap } from '../../../../utils/industryTerms';
+import { wordBranchCap, localizeTerms } from '../../../../utils/industryTerms';
 
 export { num, pctText };
 
@@ -133,8 +133,8 @@ export function buildTiles(data) {
   const salesNow = perHead(c);
   const salesPrev = p ? perHead(p) : null;
   return [
-    { key: 'per_head', label: 'Service sales per therapist', value: num(salesNow), lead: true, delta: computeDelta(salesNow, salesPrev), prevText: salesPrev == null ? '' : `vs ${num(salesPrev)}` },
-    { key: 'active', label: 'Active therapists', value: num(c.active), delta: null, prevText: !p ? '' : Number(p.active) === Number(c.active) ? 'same as before' : `vs ${num(p.active)}` },
+    { key: 'per_head', label: localizeTerms('Service sales per therapist'), value: num(salesNow), lead: true, delta: computeDelta(salesNow, salesPrev), prevText: salesPrev == null ? '' : `vs ${num(salesPrev)}` },
+    { key: 'active', label: localizeTerms('Active therapists'), value: num(c.active), delta: null, prevText: !p ? '' : Number(p.active) === Number(c.active) ? 'same as before' : `vs ${num(p.active)}` },
     { key: 'busy', label: 'Busy', value: c.busy == null ? 'No hours set' : pctText(c.busy), delta: computeDelta(c.busy, p?.busy, { unit: 'pts' }), prevText: p?.busy == null ? '' : `vs ${pctText(p.busy)}` },
     { key: 'rebook', label: 'Rebook rate', value: c.rebook_rate == null ? '—' : pctText(c.rebook_rate), delta: computeDelta(c.rebook_rate, p?.rebook_rate, { unit: 'pts' }), prevText: p?.rebook_rate == null ? '' : `vs ${pctText(p.rebook_rate)}` },
     { key: 'no_show', label: 'No-show rate', value: pct1(nsNow), delta: computeDelta(nsNow, nsPrev, { unit: 'pts', goodWhen: 'down' }), prevText: nsPrev == null ? '' : `vs ${pct1(nsPrev)}` },

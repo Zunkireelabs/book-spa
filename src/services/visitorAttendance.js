@@ -1,4 +1,5 @@
 // Attendance of a visiting therapist (ZNLY-113 / V33c). One row per person per day, owned by HOME; worked_at_branch_id says where it
+import { wordBranch } from '../utils/industryTerms';
 // was checked in. Home's Attendance and the profile History show "Worked at Sanepa 12:02 – 3:30 pm" from that row.
 
 /** "12:02" -> "12:02 pm", "15:30" -> "3:30 pm" (the app's 12-hour style). */
@@ -14,7 +15,7 @@ export function hmTo12h(hm) {
  */
 export function workedAtNote({ row, homeBranchId, branchNameById }) {
   if (!row || !row.workedAtBranchId || row.workedAtBranchId === homeBranchId) return null;
-  const name = branchNameById?.[row.workedAtBranchId] || 'another branch';
+  const name = branchNameById?.[row.workedAtBranchId] || `another ${wordBranch()}`;
   const span = row.checkInTime
     ? ` ${hmTo12h(row.checkInTime)}${row.checkOutTime ? ` – ${hmTo12h(row.checkOutTime)}` : ''}`
     : '';

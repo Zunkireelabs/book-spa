@@ -1,4 +1,5 @@
 // Pure rules for the Access section (ZNLY-198 step 4b / ZNLY-205 UI half). No React, no Supabase: unit-tested in staffAccessRules.test.js.
+import { wordBranches } from '../utils/industryTerms';
 // The roles a viewer may hand out is NOT redefined here: it is api.js grantableRolesFor (the same list assertCanGrantRole enforces).
 
 export const ROLE_LABELS = { staff: 'Staff', manager: 'Manager', admin: 'Admin', admin_viewer: 'Admin viewer' };
@@ -27,7 +28,7 @@ export const loginIsOn = (user) => !!user && user.login_access !== 'none';
 export function branchSummary({ branches, grantedIds, homeBranchId }) {
   const all = (branches || []).map((b) => b.id);
   const granted = new Set([...(grantedIds || []), homeBranchId].filter(Boolean));
-  if (all.length > 1 && all.every((id) => granted.has(id))) return 'All branches';
+  if (all.length > 1 && all.every((id) => granted.has(id))) return `All ${wordBranches()}`;
   const names = (branches || []).filter((b) => granted.has(b.id)).sort((a, b) => (b.id === homeBranchId) - (a.id === homeBranchId))
     .map((b) => (b.id === homeBranchId ? `${b.name} (home)` : b.name));
   return names.join(', ') || '—';

@@ -3,6 +3,7 @@
 // No React, no Supabase. A "row" is what buildRows() makes from fetchProductCatalog(): one product with its sizes (variants), the
 // stock at the current branch (or in total when no branch is picked) and, for managers/admins only, the costs.
 import { npr } from './packagesView';
+import { wordBranches } from '../utils/industryTerms';
 
 export { npr };
 
@@ -198,7 +199,7 @@ export function needsItems(rows, { canManage = false, canSendFrom = () => true }
     const p = out[0]; const src = source(p);
     items.push({ id: 'out', text: `${p.name} is out · ${src.qty} at ${src.name}`, action: 'Move here', dot: '#DC2626', product: p, from: src.branchId });
   } else if (out.length >= 1) {
-    items.push({ id: 'out', text: `${out.length === 1 ? `${out[0].name} is out here` : `${out.length} out here`} · stocked at other branches`, action: 'See', dot: '#DC2626' });
+    items.push({ id: 'out', text: `${out.length === 1 ? `${out[0].name} is out here` : `${out.length} out here`} · stocked at other ${wordBranches()}`, action: 'See', dot: '#DC2626' });
   }
   return items;
 }

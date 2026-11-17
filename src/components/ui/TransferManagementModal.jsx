@@ -631,8 +631,8 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
         <Segmented options={[['temporary', 'Temporary'], ['permanent', 'Permanent']]} value={transferMode} onChange={setTransferMode} />
         <p className="font-body text-[13px] text-text-secondary">
           {isPermanentTransfer
-            ? <>Move {therapistName} to another branch permanently. They'll stay there until transferred again.</>
-            : <>Move {therapistName} to another branch for a set duration. They'll automatically return to their current branch once it elapses.</>}
+            ? <>Move {therapistName} to another {wordBranch()} permanently. They'll stay there until transferred again.</>
+            : <>Move {therapistName} to another {wordBranch()} for a set duration. They'll automatically return to their current {wordBranch()} once it elapses.</>}
         </p>
         <InlineError message={transferError} />
         <Field label={`Destination ${wordBranch()}`} required>

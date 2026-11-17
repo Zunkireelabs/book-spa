@@ -2,6 +2,7 @@
 // hours that day, or outside the receiving branch's opening hours. Inside a window the person counts as working at the receiving
 // branch (ZNLY-113 A+), so this only tells the manager what will actually be bookable. Pure; the form passes in the data.
 import { dbDowOfDate, timeToMinutes } from './staffDay';
+import { wordBranch } from './industryTerms';
 
 const h12 = (min) => { const h = Math.floor(min / 60) % 24; const m = min % 60; return `${h % 12 === 0 ? 12 : h % 12}${m ? `:${String(m).padStart(2, '0')}` : ''}`; };
 const ap = (min) => (Math.floor(min / 60) % 24 >= 12 ? 'pm' : 'am');
@@ -23,7 +24,7 @@ const addDays = (ymd, n) => { const [y, m, d] = ymd.split('-').map(Number); cons
 export function transferHoursWarning({ name, windowStart, windowEnd, weeklyRows, branch, use24h = false }) {
   if (!windowStart?.date || !windowStart.time || !windowEnd?.date || !windowEnd.time) return null;
   const who = name || 'They';
-  const place = branch?.name || 'the other branch';
+  const place = branch?.name || `the other ${wordBranch()}`;
   const open = timeToMinutes(branch?.openTime);
   const close = timeToMinutes(branch?.closeTime);
   for (let d = windowStart.date, guard = 0; d <= windowEnd.date && guard < 8; d = addDays(d, 1), guard += 1) {

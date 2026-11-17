@@ -344,7 +344,7 @@ const DueReportPanel = () => {
                 <tr className="bg-background border-b border-border">
                   <th className="text-left px-4 py-2.5">
                     <button onClick={() => handleSort('branch')} className="inline-flex items-center gap-1 font-body font-body-medium text-xs text-text-secondary hover:text-text-primary spa-transition-fast">
-                      Branch <Icon name={sortIcon('branch')} size={13} />
+                      {wordBranchCap()} <Icon name={sortIcon('branch')} size={13} />
                     </button>
                   </th>
                   <th className="text-left px-4 py-2.5">

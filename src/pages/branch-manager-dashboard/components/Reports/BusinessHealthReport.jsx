@@ -169,7 +169,7 @@ const BusinessHealthReport = ({ periodId, onPeriod, custom, onCustom, reopen, on
       {empty && (
         <div className="border border-dashed border-border rounded-spa-lg bg-surface p-7 text-center text-sm text-text-secondary leading-relaxed">
           <b className="block text-text-primary mb-1">Nothing recorded for {range.label.toLowerCase()}</b>
-          No bookings, sales or payments fall between {fmtDay(range.from)} and {fmtDay(range.to)}. Pick a longer period or another branch.
+          No bookings, sales or payments fall between {fmtDay(range.from)} and {fmtDay(range.to)}. Pick a longer period or another {wordBranch()}.
         </div>
       )}
       {ready && activeTab === 'summary' && (

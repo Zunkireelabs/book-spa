@@ -13,7 +13,7 @@ import {
   buildRows, buildTiles, sortRows, searchRows, exportRows, isEmptyPerformance, hasPrevious, scoreFormula, num, pctText,
   BUSY_LOW, DEFAULT_SORT, DEFINITIONS,
 } from './therapistPerformanceView';
-import { wordBranch, wordBranches } from '../../../../utils/industryTerms';
+import { wordBranch, wordBranches, localizeTerms, localizeBranch } from '../../../../utils/industryTerms';
 
 const th = 'px-3 py-2 text-[11px] font-medium text-text-tertiary bg-background border-b border-border whitespace-nowrap';
 const td = 'px-3 py-2.5 border-b border-border text-[12.5px] font-data tabular-nums text-right whitespace-nowrap';
@@ -180,7 +180,7 @@ const TherapistPerformanceReport = ({ periodId, onPeriod, custom, onCustom, reop
         );
       })}
       {emptyBranches.length > 0 && <p className="text-xs text-text-tertiary">No activity: {emptyBranches.map((b) => b.name).join(', ')}</p>}
-      <p className="text-xs text-text-tertiary flex items-center gap-1.5"><Icon name="MousePointerClick" size={12} /> Figures are for work done at each branch; the score is the same everywhere (ranked across all branches). A lent {staffLabel.toLowerCase()} counts where they worked. Click a row for the full breakdown.</p>
+      <p className="text-xs text-text-tertiary flex items-center gap-1.5"><Icon name="MousePointerClick" size={12} /> Figures are for work done at each {wordBranch()}; the score is the same everywhere (ranked across all {wordBranches()}). A lent {staffLabel.toLowerCase()} counts where they worked. Click a row for the full breakdown.</p>
     </div>
   );
 
@@ -222,7 +222,7 @@ const TherapistPerformanceReport = ({ periodId, onPeriod, custom, onCustom, reop
       previousNote={ready && !hp ? `No data for the previous ${range.days} days yet.` : null}
       tiles={ready ? buildTiles(data) : []}
       tabs={tabs} activeTab={activeTab} onTab={setTab}
-      definitions={DEFINITIONS}
+      definitions={DEFINITIONS.map((d) => ({ ...d, text: localizeBranch(localizeTerms(d.text)) }))}
       isFavourite={isFavourite} onToggleFav={onToggleFav}
       onExport={ready ? () => downloadCsv(`${staffLabel.toLowerCase()}-performance-${range.from}-to-${range.to}${activeTab === 'ranking' ? '' : `-${activeTab}`}.csv`, exportRows(data, activeTab, activeTab === 'trend' ? sortRows(ranked, { key: 'sales', dir: 'desc' }) : visibleRows, staffLabel)) : null}
     >
@@ -231,7 +231,7 @@ const TherapistPerformanceReport = ({ periodId, onPeriod, custom, onCustom, reop
       {empty && (
         <div className="border border-dashed border-border rounded-spa-lg bg-surface p-7 text-center text-sm text-text-secondary leading-relaxed">
           <b className="block text-text-primary mb-1">No {staffLabel.toLowerCase()} activity in {range.label.toLowerCase()}</b>
-          No bookings or working hours fall between {fmtWeek(range.from)} and {fmtWeek(range.to)}. Pick a longer period or another branch.
+          No bookings or working hours fall between {fmtWeek(range.from)} and {fmtWeek(range.to)}. Pick a longer period or another {wordBranch()}.
         </div>
       )}
       {ready && (

@@ -4,7 +4,7 @@ import { computeDelta, addDays } from 'utils/reportPeriod';
 import { durationText } from 'utils/durationText';
 import { WEIGHTS } from '../Reports/therapistPerformanceView';
 import { deriveRow } from 'services/attendanceView';
-import { wordBranch } from '../../../../utils/industryTerms';
+import { wordBranch, localizeTerms } from '../../../../utils/industryTerms';
 
 const ratio = (a, b) => (Number(b) > 0 ? Number(a) / Number(b) : null);
 const r1 = (n) => Math.round(n * 10) / 10;
@@ -178,7 +178,7 @@ export function kpiTiles(row, team, prevRow, data, staffWord = 'therapist') {
       line: 'booked time ÷ rostered hours (same rule as the report)', marker: mark(row.busy, team?.busy), markerText: team?.busy == null ? '' : `team ${Math.round(team.busy * 1000) / 10}%`, markerLabel: row.busy == null ? '' : `you ${pct(row.busy)}` },
     { key: 'rebook', label: 'Rebook', value: row.rebook_rate == null ? '—' : pct(row.rebook_rate), sub: row.rebook_rate == null ? `· ${row.customers} customer${row.customers === 1 ? '' : 's'} (needs 5)` : `· ${row.rebooked} of ${row.customers} customers`,
       delta: hasPrev && row.rebook_rate != null ? computeDelta(row.rebook_rate, prevRow.rebook_rate, { unit: 'pts' }) : null,
-      line: 'booked again within 60 days (any therapist)', marker: mark(row.rebook_rate, team?.rebook_rate), markerText: team?.rebook_rate == null ? '' : `team ${pct(team.rebook_rate)}`, markerLabel: row.rebook_rate == null ? '' : `you ${pct(row.rebook_rate)}` },
+      line: localizeTerms('booked again within 60 days (any therapist)'), marker: mark(row.rebook_rate, team?.rebook_rate), markerText: team?.rebook_rate == null ? '' : `team ${pct(team.rebook_rate)}`, markerLabel: row.rebook_rate == null ? '' : `you ${pct(row.rebook_rate)}` },
   ];
 }
 

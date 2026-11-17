@@ -4,6 +4,7 @@
 // All times are Nepal time, whatever the viewer's browser zone.
 import { toKathmanduParts } from '../pages/branch-manager-dashboard/components/calendar/calendarDates';
 import { formatClockTime } from '../pages/branch-manager-dashboard/components/calendar/timeFormat';
+import { wordBranch } from './industryTerms';
 
 const DAY_FMT = { timeZone: 'Asia/Kathmandu', weekday: 'short', day: 'numeric', month: 'short' };
 
@@ -202,8 +203,8 @@ export function transferTitle(t, { labels = {}, now = new Date() } = {}) {
   const word = labels.transfer || 'transfer';
   const state = transferState(t, now);
   const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-  if (state === 'permanent-done' || state === 'permanent-upcoming') return `Moved from ${t.fromBranch || 'another branch'} to ${t.toBranch || 'another branch'}`;
-  return `Temporary ${word} to ${t.toBranch || 'another branch'}`.replace(/^./, (c) => cap(c));
+  if (state === 'permanent-done' || state === 'permanent-upcoming') return `Moved from ${t.fromBranch || `another ${wordBranch()}`} to ${t.toBranch || `another ${wordBranch()}`}`;
+  return `Temporary ${word} to ${t.toBranch || `another ${wordBranch()}`}`.replace(/^./, (c) => cap(c));
 }
 
 // The calendar column / profile shapes -> { input, viewpoint } for describeTransfer, or null when the column has no transfer.

@@ -60,7 +60,7 @@ const Row = ({ t, cols, rosterReadable, selected, sortable, canManage, busy, bra
               {!t.isServiceStaff && <span className="h-[18px] px-1.5 rounded bg-[#F1F1EF] text-[10px] font-semibold uppercase text-[#8A8A90] inline-flex items-center flex-shrink-0">Support</span>}
             </div>
             <div className="text-[12.5px] text-[#8A8A90] mt-0.5 truncate">
-              {visitor && t.transfer ? `From ${t.transfer.input.fromBranch || 'another branch'}` : (subLine(t) || '—')}{!cols.today && t.isActive ? ` · ${todayLabels(t).title}` : ''}
+              {visitor && t.transfer ? `From ${t.transfer.input.fromBranch || `another ${wordBranch()}`}` : (subLine(t) || '—')}{!cols.today && t.isActive ? ` · ${todayLabels(t).title}` : ''}
             </div>
           </div>
         </div>

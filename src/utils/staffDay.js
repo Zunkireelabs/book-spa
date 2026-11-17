@@ -1,4 +1,5 @@
 // Shared pure helpers for a staff member's day: day-of-week mapping, hours minus breaks, which hours apply on a date,
+import { wordBranchCap } from './industryTerms';
 // and today's status. Used by the Therapists list and the therapist profile so they agree with each other.
 //
 // DAY-OF-WEEK: the database (therapist_working_hours.day_of_week, migration-275) uses 0 = MONDAY .. 6 = SUNDAY, while
@@ -151,7 +152,7 @@ export function todayLabels(t) {
       if (t.hours.source === 'weekly' && t.hours.isDayOff) return { title: 'Off today', sub: t.worksTomorrow ? 'Weekly day off · back tomorrow' : 'Weekly day off' };
       return { title: 'Off today', sub: shift ? `Shift ended ${s.shift.end}` : null };
     }
-    case 'no-hours-open': return { title: NO_HOURS_LABEL, sub: shift ? `Branch hours ${s.shift.start} – ${s.shift.end}` : 'Set hours in their profile' };
+    case 'no-hours-open': return { title: NO_HOURS_LABEL, sub: shift ? `${wordBranchCap()} hours ${s.shift.start} – ${s.shift.end}` : 'Set hours in their profile' };
     default: return { title: 'No shift set', sub: 'Set hours in their profile' };
   }
 }

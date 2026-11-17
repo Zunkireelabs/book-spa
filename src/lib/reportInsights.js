@@ -4,6 +4,7 @@
 // `view` is the report an "Open ..." button would go to; the UI hides the button when that report is not openable (still `soon`).
 
 import { durationText } from 'utils/durationText';
+import { wordBranch } from 'utils/industryTerms';
 
 export const REPORT_INSIGHT_MAX = 3;
 
@@ -121,7 +122,7 @@ export function therapistPerformanceInsights(data, { staffLabel = 'therapist', s
       rule: 'low_busy',
       score: low.length,
       headline: `${low.length} ${low.length === 1 ? one : many} ${low.length === 1 ? 'was' : 'were'} busy less than ${pct(BUSY_LOW)}% of their hours`,
-      detail: ` (${low[0].name} ${pct(low[0].busy)}%${low.length > 1 ? ` + ${low.length - 1} more` : ''}${branches.length === 1 && low.length > 1 ? `, all ${branches[0]}` : ''}). Moving a shift to a busier day or branch, or trimming it, may fit better.`,
+      detail: ` (${low[0].name} ${pct(low[0].busy)}%${low.length > 1 ? ` + ${low.length - 1} more` : ''}${branches.length === 1 && low.length > 1 ? `, all ${branches[0]}` : ''}). Moving a shift to a busier day or ${wordBranch()}, or trimming it, may fit better.`,
       why: low.map((t) => `${t.name}: ${pct(t.busy)}% (${hrs(t.booked_min)} of ${hrs(t.working_min)})`).join('; ') + '.',
       source,
       view: 'utilization',

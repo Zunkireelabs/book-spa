@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useLayoutEffect, useRef } from 're
 import Icon from '../../../../components/AppIcon';
 import { getBookingDayCounts } from '../../../../services/api';
 import { useBranch } from '../../../../contexts/BranchContext';
+import { wordBranchCap } from '../../../../utils/industryTerms';
 
 const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -266,7 +267,7 @@ const MiniMonthCalendar = ({ selectedDate, onDateSelect, branchId }) => {
           ))}
           {/* Legend; the row keeps its height while counts load so the picker doesn't grow */}
           <div className={`mt-2 pt-2 h-7 text-[11px] text-text-tertiary ${counts ? 'border-t border-border' : ''}`}>
-            {counts ? `Bar shows bookings per day · ${branchName || 'Branch'}` : ''}
+            {counts ? `Bar shows bookings per day · ${branchName || wordBranchCap()}` : ''}
           </div>
         </>
       )}

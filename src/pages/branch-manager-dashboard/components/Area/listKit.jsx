@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { viewerAccess } from 'services/dataMasking';
 import { Link } from 'react-router-dom';
+import { localizeBranch } from '../../../../utils/industryTerms';
 import Icon from '../../../../components/AppIcon';
 import { Menu } from '../../../../components/ui/ListToolbarKit';
 import { useAuth } from '../../../../contexts/AuthContext';
@@ -205,11 +206,11 @@ SearchBox.displayName = 'SearchBox';
 export const SortMenu = ({ sorts, value, onChange, label = 'Sort' }) => (
   <Menu trigger={(open, toggle) => (
     <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} className="h-7 px-2 rounded-md text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:bg-[#FAFAF9] whitespace-nowrap">
-      {label} <b className="text-text-primary font-medium">{sorts[value].label}</b><Icon name="ChevronDown" size={13} />
+      {label} <b className="text-text-primary font-medium">{localizeBranch(sorts[value].label)}</b><Icon name="ChevronDown" size={13} />
     </button>)}>
     {(close) => Object.entries(sorts).map(([id, s]) => (
       <button key={id} type="button" onClick={() => { onChange(id); close(); }} className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-[#FAFAF9] flex justify-between ${value === id ? 'font-medium' : ''}`}>
-        {s.label}{value === id && <Icon name="Check" size={13} />}
+        {localizeBranch(s.label)}{value === id && <Icon name="Check" size={13} />}
       </button>))}
   </Menu>
 );

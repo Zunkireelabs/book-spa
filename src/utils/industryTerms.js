@@ -47,6 +47,8 @@ export const wordBranch = () => terms.site;
 export const wordBranches = () => terms.sitePlural;
 export const wordBranchCap = () => capFirst(terms.site);
 export const wordBranchesCap = () => capFirst(terms.sitePlural);
+/** "1 location" / "2 locations": the count with the right whole-word form (never a suffix swap). */
+export const wordBranchCount = (n) => `${n} ${n === 1 ? terms.site : terms.sitePlural}`;
 /** Swap "branch" in a ready-made string (e.g. report registry copy) for this org's site word. Identity for a spa org. */
 export const localizeBranch = (text) => {
   if (typeof text !== 'string' || !text || terms.site === 'branch') return text;
