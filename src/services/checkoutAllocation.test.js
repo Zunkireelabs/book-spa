@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   isTreatmentOnly, moneyEntered, treatmentOnlyEntered, allocateProductsFirst, splitAcrossLines, capQty, canAddOne, lineTotal, productsTotalOf, dueState,
-  treatmentOnlyOverflow, collectLabel, stockLeft, parseStockError,
+  treatmentOnlyOverflow, collectLabel, stockLeft, parseStockError, friendlyCheckoutError, ALREADY_PAID_MESSAGE, CHECKOUT_FALLBACK_MESSAGE,
 } from './checkoutAllocation';
 
 const cash = (amount) => ({ paymentMode: 'Cash', amount });
@@ -137,5 +137,25 @@ describe('stock errors from the server', () => {
     expect(parseStockError(e)).toEqual({ variantId: '11111111-2222-3333-4444-555555555555', left: 1, message: 'Herbal Balm: only 1 left at Lazimpat' });
     expect(parseStockError({ message: 'x' })).toBeNull();
     expect(parseStockError(null)).toBeNull();
+  });
+});
+
+describe('friendlyCheckoutError', () => {
+  const uuid = '3f2b8c1e-9a4d-4e7b-8c5a-1d2e3f4a5b6c';
+  it('maps the already-paid refusal to plain words', () => {
+    for (const fn of ['record_group_payment', 'record_group_payment_standard']) {
+      const r = friendlyCheckoutError({ message: `${fn}: booking ${uuid} has already been paid` });
+      expect(r).toEqual({ message: ALREADY_PAID_MESSAGE, alreadyPaid: true });
+    }
+  });
+  it('keeps plain server text, minus the function prefix', () => {
+    expect(friendlyCheckoutError({ message: 'Enter a payment amount.' }).message).toBe('Enter a payment amount.');
+  });
+  it('never leaks a uuid or function name', () => {
+    for (const m of [`record_group_payment: booking ${uuid} is locked`, 'permission denied for function record_tender', 'duplicate key violates unique constraint', '']) {
+      const r = friendlyCheckoutError({ message: m });
+      expect(r.message).toBe(CHECKOUT_FALLBACK_MESSAGE);
+      expect(r.alreadyPaid).toBe(false);
+    }
   });
 });

@@ -28,7 +28,7 @@ import { computeChange, quickCashOptions, buildReceiptText, buildReceiptHtml, bu
 import { useAuth } from '../../contexts/AuthContext';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, PRODUCTS_ENABLED } from '../../lib/featureFlags';
 import {
-  allocateProductsFirst, dueState, isTreatmentOnly, treatmentOnlyEntered, treatmentOnlyOverflow, splitAcrossLines, lineTotal, parseStockError,
+  allocateProductsFirst, dueState, isTreatmentOnly, treatmentOnlyEntered, treatmentOnlyOverflow, splitAcrossLines, lineTotal, parseStockError, friendlyCheckoutError,
 } from '../../services/checkoutAllocation';
 import { useCheckoutProducts, ProductsBlock, BusyNotice } from './CheckoutProducts';
 
@@ -380,6 +380,7 @@ const PaymentModal = ({
   const [tipRecipients, setTipRecipients] = useState([{ key: 0, receivedBy: '', amount: '' }]);
   const [branchStaffOptions, setBranchStaffOptions] = useState([]);
   const [error, setError] = useState(null);
+  const [paidElsewhere, setPaidElsewhere] = useState(false); // someone else collected this booking first: Collect is replaced by Close
 
   // Split payment — one or more tenders, always available (even when a previous
   // due is bundled in) so staff can pay across multiple methods or leave part
@@ -910,7 +911,10 @@ const PaymentModal = ({
     if (result?.error) {
       const stock = parseStockError(result.error);
       if (stock) { cp.markBusy(stock.variantId, stock.left, stock.message); setError(null); return; }
-      setError(result.error.message || 'Failed to record payment.');
+      console.error('[Checkout] payment failed:', result.error);
+      const friendly = friendlyCheckoutError(result.error);
+      setError(friendly.message);
+      if (friendly.alreadyPaid) setPaidElsewhere(true);
       return;
     }
     setReceipt(buildReceipt(cleanedTenders, tipAmount, tipSplits, { split: productSplit, sales: result?.data?.sales || null }));
@@ -1238,7 +1242,7 @@ const PaymentModal = ({
     if (tipActive && Math.abs(tipRecipientsTotal - round2(Number(tip))) > 0.001) return 'Tip split must add up to the tip';
     return '';
   })();
-  const canSubmit = !blockReason && !busy;
+  const canSubmit = !blockReason && !busy && !paidElsewhere;
   const primaryLabel = memberOnly ? 'Save member discount' : qrSingle
     ? `Confirm NPR ${fmt(entered)} received${leftover > 0 ? ` · ${fmt(leftover)} due` : ''}`
     : entered > 0 ? (leftover > 0 ? `Collect ${fmt(entered)} · ${fmt(leftover)} due` : `Collect NPR ${fmt(entered)}`) : `Leave NPR ${fmt(leftover)} due`;
@@ -1252,6 +1256,7 @@ const PaymentModal = ({
   const requestClose = () => {
     if (busy) return;
     if (receipt) { onClose?.({ paid: true }); return; }
+    if (paidElsewhere) { onClose?.({ alreadyPaid: true }); return; }
     if (touched) { setConfirmDiscard(true); return; }
     onClose?.();
   };
@@ -1837,7 +1842,7 @@ const PaymentModal = ({
 
          {error && (
            <div role="alert" className="mx-6 mt-3 flex-none flex items-start gap-2 px-3 py-2.5 rounded-lg bg-error/5 border border-error/20 text-[12.5px] text-error">
-             <Icon name="AlertCircle" size={14} className="mt-0.5 flex-none" /><span>{error}</span>
+             <Icon name="AlertCircle" size={14} className="mt-0.5 flex-none" /><span>{friendlyCheckoutError(error).message}</span>
            </div>
          )}
 
@@ -2071,12 +2076,16 @@ const PaymentModal = ({
         </span>
         {blockReason && <span className="ml-auto text-[12px] text-[#B45309] text-right" data-testid="checkout-reason">{blockReason}</span>}
         <div className={`${blockReason ? '' : 'ml-auto'} flex items-center gap-2.5`}>
-          <button type="button" onClick={requestClose} disabled={busy} className="h-9 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white font-medium hover:bg-[#F7F7F5]">Cancel</button>
+          {!paidElsewhere && <button type="button" onClick={requestClose} disabled={busy} className="h-9 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white font-medium hover:bg-[#F7F7F5]">Cancel</button>}
+          {paidElsewhere ? (
+            <button type="button" autoFocus onClick={requestClose} className="h-9 px-4 rounded-[7px] bg-primary border border-primary text-white font-medium">Close</button>
+          ) : (
           <button type="button" onClick={doSubmit} disabled={!canSubmit} title={blockReason || undefined}
             className="h-9 pl-4 pr-3 rounded-[7px] bg-primary border border-primary text-white font-medium inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(45,90,39,.25),inset_0_1px_0_rgba(255,255,255,.15)] disabled:opacity-45 disabled:cursor-not-allowed">
             {busy ? 'Recording…' : primaryLabel}
             {!busy && <kbd className="text-[10.5px] px-1.5 rounded border border-white/25 bg-white/10 font-sans">↵</kbd>}
           </button>
+          )}
         </div>
       </div>
 

@@ -3996,7 +3996,9 @@ const BookingActionModal = ({
           onConfirm={handlePaymentConfirm}
           onClose={(res) => {
             setShowPaymentModal(false);
-            if (res?.paid) setSelectedPreviousDueIds(new Set());
+            if (res?.paid || res?.alreadyPaid) setSelectedPreviousDueIds(new Set());
+            // Someone else collected: refresh only. onGroupPaymentRecorded toasts "Payment recorded", which this tab did not do.
+            if (res?.alreadyPaid) onRefreshBooking?.(booking.bookingId);
           }}
           isSubmitting={paymentSubmitting}
         />

@@ -414,6 +414,10 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
         onUpdateStatus={onStatusUpdate}
         onRecordPayment={handleRecordPaymentWrapper}
         onGroupPaymentRecorded={handleGroupPaymentRecordedWrapper}
+        onRefreshBooking={async (id) => {
+          const refreshed = await fetchBookingById(id);
+          if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
+        }}
         onApplyDiscount={onApplyDiscount}
         userRole={userRole}
         canViewCustomerDetails={canViewCustomerDetails}

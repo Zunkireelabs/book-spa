@@ -259,7 +259,7 @@ const CollectPaymentPanel = ({ onSuccess }) => {
           onConfirm={handleRecordPayment}
           onClose={(res) => {
             setPayingBookings(null);
-            if (res?.paid) {
+            if (res?.paid || res?.alreadyPaid) {
               resetLookup();
               if (pendingFailureRef.current) setError(pendingFailureRef.current);
               pendingFailureRef.current = null;

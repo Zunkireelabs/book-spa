@@ -122,3 +122,21 @@ export function parseStockError(error) {
   if (!m) return null;
   return { variantId: m[1], left: Number(m[2]), message: String(error.message || '').replace(/^\s*[a-z][a-z0-9_]*:\s+/, '') };
 }
+
+export const ALREADY_PAID_MESSAGE = 'This booking was already paid by someone else. Nothing more was charged.';
+export const CHECKOUT_FALLBACK_MESSAGE = 'Something went wrong recording this payment. Nothing was charged. Please check the booking and try again.';
+
+/**
+ * Turns a checkout error (server / RPC / thrown) into words staff can read. Never returns a UUID or a SQL function name:
+ * the raw detail is the caller's to log. Returns { message, alreadyPaid }.
+ */
+export function friendlyCheckoutError(error) {
+  const raw = String((error && (error.message ?? error)) || '');
+  if (/has already been paid/i.test(raw) && /record_group_payment/i.test(raw)) {
+    return { message: ALREADY_PAID_MESSAGE, alreadyPaid: true };
+  }
+  // Server messages are "<function_name>: <text>"; keep plain text only when it carries no id / function name.
+  const text = raw.replace(/^\s*[a-z][a-z0-9_]*:\s+/, '').trim();
+  const leaky = !text || /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(text) || /\b[a-z]+_[a-z_]+\b/.test(text) || /\b(SQLSTATE|PGRST|violates|relation|function)\b/i.test(text);
+  return { message: leaky ? CHECKOUT_FALLBACK_MESSAGE : text, alreadyPaid: false };
+}
