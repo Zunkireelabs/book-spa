@@ -47,7 +47,7 @@ import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideH
 import { getPeriodRange, getTodayISO } from '../utils/periodPresets';
 import { transferOccurrencesForDate } from '../utils/transferOccurrences';
 import { inChunks, failOpenAfter, IN_CHUNK, customerSearchFilter } from './queryHelpers';
-import { buildCustomerDirectory, buildPanelDetail, nepalNow } from '../utils/customerDirectory';
+import { buildCustomerDirectory, buildPanelDetail, nepalNow, avgPaidPerVisit } from '../utils/customerDirectory';
 import { addDays as addDaysISO } from '../utils/reportPeriod';
 import { attendanceDays, busyMinutesInSpans } from '../pages/branch-manager-dashboard/components/Performance/therapistInnerView';
 import { summarizeMoney, classifyBooking, roundMoney, paidPaisa } from '../utils/bookingMoney';
@@ -11604,10 +11604,10 @@ export async function fetchCustomerProfile(customerId) {
     const { data: bookings, error: bookingsError } = await supabase
       .from('bookings')
       .select(`
-        id, booking_number, date, start_time, status, payment_status,
+        id, customer_id, booking_number, date, start_time, status, payment_status,
         final_amount, discount_amount,
-        service_name_snapshot, therapist_name_snapshot,
-        is_locked
+        service_name_snapshot, therapist_id, therapist_name_snapshot,
+        is_locked, payments(amount), payment_refunds(amount)
       `)
       .eq('customer_id', customerId)
       .order('date', { ascending: false });
@@ -11623,98 +11623,18 @@ export async function fetchCustomerProfile(customerId) {
       : { data: null };
     const membership = membershipResult.data || null;
 
-    // 3. Compute aggregates
-    let totalVisits = all.length;
-    let completedVisits = 0;
-    let totalRevenue = 0;
-    let totalDiscount = 0;
-    let unpaidCount = 0;
-    let lastVisitDate = null;
-    const serviceCount = {};
-
-    for (const b of all) {
-      if (b.status === 'Completed') {
-        completedVisits++;
-      }
-
-      if (b.payment_status === 'paid') {
-        totalRevenue += Number(b.final_amount);
-      }
-
-      totalDiscount += Number(b.discount_amount);
-
-      if (b.payment_status === 'unpaid' && ['Confirmed', 'Completed'].includes(b.status)) {
-        unpaidCount++;
-      }
-
-      if (!lastVisitDate || b.date > lastVisitDate) {
-        lastVisitDate = b.date;
-      }
-
-      // Most booked service
-      const svc = b.service_name_snapshot || 'Unknown';
-      serviceCount[svc] = (serviceCount[svc] || 0) + 1;
-    }
-
-    // avgSpend: safe divide
-    const avgSpend = completedVisits > 0
-      ? Math.round((totalRevenue / completedVisits) * 100) / 100
-      : 0;
-
-    // Most booked service
-    let mostBookedService = null;
-    let maxSvcCount = 0;
-    for (const [svc, count] of Object.entries(serviceCount)) {
-      if (count > maxSvcCount) {
-        maxSvcCount = count;
-        mostBookedService = svc;
-      }
-    }
-
-    // 4. Loyalty classification (computed dynamically, never persisted)
-    let loyaltyTier = 'Standard';
-
-    if (completedVisits === 0) {
-      loyaltyTier = 'New';
-    } else if (completedVisits >= 8 && totalRevenue >= 25000) {
-      loyaltyTier = 'VIP';
-    } else if (completedVisits >= 4 && totalRevenue >= 10000) {
-      loyaltyTier = 'Regular';
-    } else if (completedVisits >= 1 && completedVisits <= 3) {
-      loyaltyTier = 'Occasional';
-    }
-
-    // At Risk overrides Regular/Occasional (but not VIP or New)
-    if (completedVisits >= 2 && lastVisitDate && loyaltyTier !== 'VIP' && loyaltyTier !== 'New') {
-      const daysSinceLastVisit = Math.floor(
-        (new Date().setHours(0, 0, 0, 0) - new Date(lastVisitDate).getTime()) / 86400000
-      );
-      if (daysSinceLastVisit > 60) {
-        loyaltyTier = 'At Risk';
-      }
-    }
-
-    // 4b. Amount owing (unpaid bookings) + last/next appointment, for the
-    // Timely-style Summary tab — no extra query, `all` is already sorted by
-    // date descending.
-    const todayStr = new Date().toISOString().slice(0, 10);
-    let amountOwing = 0;
-    for (const b of all) {
-      if (b.payment_status !== 'paid') amountOwing += Number(b.final_amount);
-    }
-    const toAppointmentSummary = (b) => b ? {
-      bookingId: b.id,
-      bookingNumber: b.booking_number,
-      date: b.date,
-      startTime: b.start_time,
-      serviceName: b.service_name_snapshot || '—',
-      therapistName: b.therapist_name_snapshot || 'Unassigned',
-      status: b.status,
-    } : null;
-    const pastBookings = all.filter(b => b.date <= todayStr);
-    const futureBookings = all.filter(b => b.date > todayStr && !['Cancelled', 'No Show'].includes(b.status));
-    const lastAppointment = toAppointmentSummary(pastBookings[0]);
-    const nextAppointment = toAppointmentSummary(futureBookings[futureBookings.length - 1]);
+    // 3. Every figure comes from the same derivation the Customers list and panel use (one money model),
+    // so this page cannot disagree with them. "Today" is Nepal wall-clock, never toISOString().
+    const { today, hm: nowHM } = nepalNow();
+    const row = buildCustomerDirectory({
+      customers: [customer],
+      bookings: all,
+      today,
+      nowHM,
+    })[0];
+    const toAppointmentSummary = (v) => v ? { date: v.date, serviceName: v.service || '—', therapistName: v.therapist || 'Unassigned' } : null;
+    const lastAppointment = toAppointmentSummary(row.lastVisit);
+    const nextAppointment = toAppointmentSummary(row.nextBooking);
 
     // 5. Build history list
     const history = all.map(b => ({
@@ -11755,16 +11675,13 @@ export async function fetchCustomerProfile(customerId) {
           tags: customer.tags || [],
         },
         stats: {
-          totalVisits,
-          completedVisits,
-          totalRevenue,
-          totalDiscount,
-          avgSpend,
-          lastVisitDate,
-          unpaidCount,
-          mostBookedService,
-          loyaltyTier,
-          amountOwing,
+          completedVisits: row.completedVisits,
+          totalRevenue: row.spent, // paid to date (payments − refunds)
+          avgSpend: avgPaidPerVisit(all, { today }), // null when there are no rendered visits
+          lastVisitDate: row.lastVisit?.date || null,
+          amountOwing: row.balance, // owed now: rendered visits only
+          segment: row.segment,
+          vip: row.vip,
         },
         membership,
         history,

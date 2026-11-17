@@ -1,21 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import { fetchCustomerPhotos, uploadCustomerPhoto } from '../../../services/api';
+import { LIFECYCLE } from '../../../utils/customerDirectory';
 
 const MEMBERSHIP_STATUS_COLORS = {
   active: 'bg-success/10 text-success',
   depleted: 'bg-amber-100 text-amber-800',
   pending: 'bg-amber-100 text-amber-800',
   lapsed: 'bg-error/10 text-error',
-};
-
-const LOYALTY_CONFIG = {
-  VIP:        { color: 'bg-amber-100 text-amber-800', icon: 'Crown' },
-  Regular:    { color: 'bg-primary/10 text-primary', icon: 'Star' },
-  Occasional: { color: 'bg-blue-100 text-blue-700', icon: 'UserCheck' },
-  'At Risk':  { color: 'bg-error/10 text-error', icon: 'AlertTriangle' },
-  New:        { color: 'bg-success/10 text-success', icon: 'UserPlus' },
-  Standard:   { color: 'bg-background text-text-secondary', icon: 'User' },
 };
 
 function formatDate(d, opts = { day: 'numeric', month: 'short', year: 'numeric' }) {
@@ -27,7 +19,7 @@ function formatNPR(amount) {
 }
 
 const CustomerSummaryTab = ({ data, onNavigateTab }) => {
-  const loyaltyCfg = LOYALTY_CONFIG[data.stats.loyaltyTier] || LOYALTY_CONFIG.Standard;
+  const segment = LIFECYCLE.find((x) => x.id === data.stats.segment);
   const [photo, setPhoto] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [photoError, setPhotoError] = useState(null);
@@ -58,9 +50,14 @@ const CustomerSummaryTab = ({ data, onNavigateTab }) => {
     <div className="space-y-8">
       {/* Loyalty badge */}
       <div className="flex items-center justify-end -mb-4">
-        <span className={`inline-flex items-center space-x-1 px-3 py-1.5 rounded-full text-sm font-caption font-caption-medium ${loyaltyCfg.color}`}>
-          <Icon name={loyaltyCfg.icon} size={14} />
-          <span>{data.stats.loyaltyTier}</span>
+        <span className="inline-flex items-center gap-2">
+          {data.stats.vip && <span className="h-5 rounded-full px-[7px] text-[11.5px] font-medium inline-flex items-center gap-1 bg-[#FBF3DF] text-[#9A6B0B]">★ VIP</span>}
+          {segment && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-caption font-caption-medium bg-background text-text-secondary">
+              <span className="w-2 h-2 rounded-full" style={{ background: segment.color }} />
+              {segment.label}
+            </span>
+          )}
         </span>
       </div>
 
@@ -90,12 +87,12 @@ const CustomerSummaryTab = ({ data, onNavigateTab }) => {
           <div className="py-3.5 flex items-center justify-between gap-3 border-b border-border">
             <span className="font-body text-base text-text-secondary">Membership balance</span>
             <span className="font-data font-data-medium text-base text-primary">
-              {data.membership ? formatNPR(data.membership.balance) : '—'}
+              {data.membership?.status === 'active' ? formatNPR(data.membership.balance) : '—'}
             </span>
           </div>
           <div className="py-3.5 flex items-center justify-between gap-3 border-b border-border">
-            <span className="font-body text-base text-text-secondary">Loyalty tier</span>
-            <span className="font-body font-body-medium text-base text-text-primary">{data.stats.loyaltyTier}</span>
+            <span className="font-body text-base text-text-secondary">Customer type</span>
+            <span className="font-body font-body-medium text-base text-text-primary">{segment?.label}{data.stats.vip ? ' · VIP' : ''}</span>
           </div>
         </div>
 
@@ -157,13 +154,12 @@ const CustomerSummaryTab = ({ data, onNavigateTab }) => {
         </div>
         <div className="bg-background rounded-spa p-3">
           <p className="font-caption font-caption-normal text-[11px] text-text-tertiary mb-1">Avg Spend</p>
-          <p className="font-heading font-heading-semibold text-base text-text-primary">{formatNPR(data.stats.avgSpend)}</p>
+          <p className="font-heading font-heading-semibold text-base text-text-primary">{data.stats.avgSpend == null ? '—' : formatNPR(data.stats.avgSpend)}</p>
         </div>
         <div className="bg-background rounded-spa p-3">
           <p className="font-caption font-caption-normal text-[11px] text-text-tertiary mb-1">Visits</p>
           <p className="font-heading font-heading-semibold text-base text-text-primary">
             {data.stats.completedVisits}
-            <span className="font-body font-body-normal text-xs text-text-secondary ml-1">/ {data.stats.totalVisits} total</span>
           </p>
         </div>
         <div className="bg-background rounded-spa p-3">

@@ -3,7 +3,7 @@
 // so the boundaries can be tested. All money comes from ./bookingMoney (the one model); only the "Before" figure of the V12 notice still
 // uses the old rule (legacyDue).
 
-import { summarizeMoney, classifyBooking } from './bookingMoney';
+import { summarizeMoney, classifyBooking, paidPaisa } from './bookingMoney';
 
 export const NEW_DAYS = 30;
 export const AT_RISK_DAYS = 60;
@@ -54,6 +54,17 @@ export function lifecycleSegment({ completedVisits, firstVisitDate, lastVisitDat
   if (completedVisits >= 2 && since != null && since > AT_RISK_DAYS && !hasNext) return 'at-risk';
   if (completedVisits >= REGULAR_MIN_VISITS) return 'regular';
   return 'occasional';
+}
+
+/**
+ * Average money actually paid per rendered visit (Completed / In-Progress, on or before today) — the same visits that count as
+ * `completedVisits`, so numerator and denominator cover the same bookings. Payments minus refunds (never payment_status). null = no visits.
+ */
+export function avgPaidPerVisit(bookings = [], { today } = {}) {
+  const visits = bookings.filter((b) => classifyBooking(b, { today }).kind === 'rendered' && String(b.date).slice(0, 10) <= today);
+  if (visits.length === 0) return null;
+  const paise = visits.reduce((sum, b) => sum + paidPaisa(b), 0);
+  return round2(paise / 100 / visits.length);
 }
 
 /**

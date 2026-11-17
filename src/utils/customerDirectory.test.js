@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildPanelDetail, legacyDue, buildCustomerDirectory, lifecycleSegment, nepalNow, tabCounts, lifecycleCounts, matchesSearch, sortCustomers,
+  buildPanelDetail, avgPaidPerVisit, legacyDue, buildCustomerDirectory, lifecycleSegment, nepalNow, tabCounts, lifecycleCounts, matchesSearch, sortCustomers,
   phoneSearchDigits, relativeDayLabel, daysBetween, TABS,
 } from './customerDirectory';
 
@@ -281,5 +281,25 @@ describe('Spotlight inputs', () => {
     const d = one([cust('a')], [v(5, 'Anil T.', 'Hot Stone'), v(15, 'Asha T.', 'Facial'), v(25, 'Vina O.', 'Foot')])[0];
     expect(d.usualTherapist).toBeNull();
     expect(d.favouriteService).toBeNull();
+  });
+});
+
+describe('avgPaidPerVisit', () => {
+  const avg = (bookings) => avgPaidPerVisit(bookings, { today: TODAY });
+  it('is null with no rendered visit (only a Pending future booking)', () => {
+    expect(avg([bk('a', ahead(3), 'Pending', { payment_status: 'unpaid' })])).toBeNull();
+  });
+  it('averages paid money over rendered visits (1000 paid + 500 of 1000 → 750)', () => {
+    expect(avg([bk('a', ago(5)), bk('a', ago(9), 'Completed', { payment_status: 'partial', payments: [{ amount: 500 }] })])).toBe(750);
+  });
+  it('subtracts refunds', () => {
+    expect(avg([bk('a', ago(5), 'Completed', { payment_refunds: [{ amount: 400 }] })])).toBe(600);
+  });
+  it('ignores a paid Cancelled booking and a deposit on a future booking', () => {
+    expect(avg([
+      bk('a', ago(5)),
+      bk('a', ago(8), 'Cancelled'),
+      bk('a', ahead(3), 'Confirmed', { payment_status: 'partial', payments: [{ amount: 300 }] }),
+    ])).toBe(1000);
   });
 });
