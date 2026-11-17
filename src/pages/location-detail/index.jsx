@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useBranch } from '../../contexts/BranchContext';
 import Icon from '../../components/AppIcon';
 import { Field, TextInput, InlineError } from '../../components/ui/PanelFormKit';
 import StaffSidebar from '../../components/ui/StaffSidebar';
@@ -35,6 +36,7 @@ const DEFAULT_HOURS = Array.from({ length: 7 }, (_, dayOfWeek) => ({
 const LocationDetailPage = () => {
   const navigate = useNavigate();
   const { orgSlug, branchId } = useParams();
+  const { refreshBranches } = useBranch();
   const { profile } = useAuth();
   const { orgId } = useOrg();
   const userRole = profile?.role || 'staff';
@@ -138,6 +140,8 @@ const LocationDetailPage = () => {
     }
 
     const targetBranchId = isEdit ? branchId : result.data?.id;
+    // The location row exists now (even if the photo/hours steps below fail): refresh the header's location list.
+    await refreshBranches();
 
     let finalPhotoUrl = photoPreview;
     if (photoFile) {

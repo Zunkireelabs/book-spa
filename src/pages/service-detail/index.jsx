@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
@@ -7,7 +7,8 @@ import AppShell from '../../components/ui/AppShell';
 import { Field, TextInput, NumberInput } from '../../components/ui/PanelFormKit';
 import CustomSelect from '../../components/ui/CustomSelect';
 import { useAuth } from '../../contexts/AuthContext';
-import { useBranch } from '../../contexts/BranchContext';
+import { useBranch, OVERALL_BRANCH_ID } from '../../contexts/BranchContext';
+import { friendlyError } from '../../utils/friendlyError';
 import { useOrg } from '../../contexts/OrgContext';
 import { useIndustry } from '../../hooks/useIndustry';
 import {
@@ -30,6 +31,7 @@ import {
   fetchTherapistsForTierAssignment,
   fetchServiceTierPrices,
   setServiceTierPrices,
+  deleteService,
 } from '../../services/api';
 
 const EMPTY_FORM = {
@@ -69,6 +71,10 @@ const ServiceDetailPage = () => {
   const { orgSlug, serviceId } = useParams();
   const { profile } = useAuth();
   const { branchId } = useBranch();
+  // The staff allow-list is stored per location (uuid). Under "All locations" ('__overall__') or before any
+  // location exists (null) there is no single location to write it to, so staff scope is left untouched there.
+  const staffScopeBranchId = branchId && branchId !== OVERALL_BRANCH_ID ? branchId : null;
+  const savingRef = useRef(false);
   const { orgId } = useOrg();
   const { isBeauty, staffLabel, staffLabelPlural } = useIndustry();
   const userRole = profile?.role || 'staff';
@@ -113,14 +119,14 @@ const ServiceDetailPage = () => {
   }, []);
 
   const loadTherapists = useCallback(async () => {
-    if (!branchId) return;
-    const result = await fetchTherapistsForManagement(branchId);
+    if (!staffScopeBranchId) return;
+    const result = await fetchTherapistsForManagement(staffScopeBranchId);
     // Eligible Staff only makes sense for staff who actually perform services —
     // fetchTherapistsForManagement returns every staff row (service staff and
     // front-desk/admin alike) for the broader staff-management pages that share
     // it; filter to service staff here, scoped to this one picker.
     if (!result.error) setAllTherapists((result.data || []).filter(t => t.is_service_staff !== false));
-  }, [branchId]);
+  }, [staffScopeBranchId]);
 
   const loadAllServices = useCallback(async () => {
     const result = await fetchServicesForManagement();
@@ -157,7 +163,7 @@ const ServiceDetailPage = () => {
     // list the Service Management page already loads, so reusing it here needs no new API.
     const [servicesResult, eligibleResult, comboResult, addonsResult, branchScopeResult, tierPricesResult] = await Promise.all([
       fetchServicesForManagement(),
-      fetchServiceTherapists(serviceId, branchId),
+      staffScopeBranchId ? fetchServiceTherapists(serviceId, staffScopeBranchId) : Promise.resolve({ data: [], error: null }),
       fetchServiceComboComponents(serviceId),
       fetchServiceAddons(serviceId),
       fetchServiceBranches(serviceId),
@@ -222,7 +228,7 @@ const ServiceDetailPage = () => {
     setRestrictBranches(branchIds.length > 0);
 
     setPageLoading(false);
-  }, [isEdit, serviceId, branchId]);
+  }, [isEdit, serviceId, staffScopeBranchId]);
 
   useEffect(() => { loadService(); }, [loadService]);
   useEffect(() => { window.scrollTo(0, 0); document.querySelectorAll('main, [data-scroll-root]').forEach((el) => { el.scrollTop = 0; }); }, [serviceId]);
@@ -272,6 +278,12 @@ const ServiceDetailPage = () => {
   })();
 
   const handleSave = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    try { await doSave(); } finally { savingRef.current = false; }
+  };
+
+  const doSave = async () => {
     const price = priceNeedsAmount ? Number(formData.priceNpr) : 0;
     const duration = Number(formData.durationMinutes);
 
@@ -281,6 +293,7 @@ const ServiceDetailPage = () => {
       return;
     }
     if (!duration || duration <= 0 || !Number.isInteger(duration)) { setFormError('Duration must be a positive whole number.'); return; }
+    if (restrictStaff && formData.requiresTherapist && !staffScopeBranchId) { setFormError('Pick a single location in the switcher at the top to choose which staff can do this service.'); return; }
     if (formData.isCombo && comboComponents.length === 0) { setFormError('Select at least one component service for this combo.'); return; }
 
     let offerValueNum = null;
@@ -333,7 +346,7 @@ const ServiceDetailPage = () => {
       : await createService(payload);
 
     if (result.error) {
-      setFormError(result.error.message || 'Save failed.');
+      setFormError(friendlyError(result.error, 'Save failed.'));
       setSaving(false);
       return;
     }
@@ -345,28 +358,33 @@ const ServiceDetailPage = () => {
       return;
     }
 
-    const staffResult = await setServiceTherapists(targetId, restrictStaff ? eligibleTherapistIds : [], branchId);
-    if (staffResult.error) {
-      setFormError(staffResult.error.message || 'Service saved, but failed to save eligible staff.');
+    // Anything after the service row exists must not leave a half-saved service behind. On create the new row
+    // (children cascade) is removed so a retry cannot duplicate it; on edit the row already existed, so say what failed.
+    const failStep = async (err, what) => {
+      if (!isEdit) {
+        const rollback = await deleteService({ serviceId: targetId });
+        const why = friendlyError(err, `Could not save ${what}.`).replace(/[.!?]?$/, '.');
+        setFormError(`${why}${rollback.error ? ' A partly saved service may remain in Services - check before retrying.' : ' Nothing was saved.'}`);
+      } else {
+        setFormError(`Saved, but ${what} failed: ${friendlyError(err, 'please try again.')}`);
+      }
       setSaving(false);
-      return;
+    };
+
+    // Staff allow-list: nothing to write for a brand-new unrestricted service, and no single location to write it
+    // to under "All locations" - an existing per-location list is left as it is there.
+    if (staffScopeBranchId && (isEdit || restrictStaff)) {
+      const staffResult = await setServiceTherapists(targetId, restrictStaff ? eligibleTherapistIds : [], staffScopeBranchId);
+      if (staffResult.error) return failStep(staffResult.error, 'eligible staff');
     }
 
     // Always write the combo bundle (even an empty list when isCombo was turned off) —
     // otherwise toggling combo off after having set components would leave stale rows.
     const comboResult = await setServiceComboComponents(targetId, formData.isCombo ? comboComponents : []);
-    if (comboResult.error) {
-      setFormError(comboResult.error.message || 'Service saved, but failed to save the combo bundle.');
-      setSaving(false);
-      return;
-    }
+    if (comboResult.error) return failStep(comboResult.error, 'the combo bundle');
 
     const addonsResult = await setServiceAddons(targetId, serviceAddonIds);
-    if (addonsResult.error) {
-      setFormError(addonsResult.error.message || 'Service saved, but failed to save its add-ons.');
-      setSaving(false);
-      return;
-    }
+    if (addonsResult.error) return failStep(addonsResult.error, 'its add-ons');
 
     // Always write the tier price set (even empty when price type isn't tiered
     // anymore) — otherwise switching away from Tiered would leave stale rows
@@ -377,18 +395,10 @@ const ServiceDetailPage = () => {
           .map((t) => ({ priceTierId: t.id, priceNpr: tierPrices[t.id] }))
       : [];
     const tierPriceResult = await setServiceTierPrices(targetId, tierPriceEntries);
-    if (tierPriceResult.error) {
-      setFormError(tierPriceResult.error.message || 'Service saved, but failed to save its tier prices.');
-      setSaving(false);
-      return;
-    }
+    if (tierPriceResult.error) return failStep(tierPriceResult.error, 'its tier prices');
 
     const branchScopeResult = await setServiceBranches(targetId, restrictBranches ? eligibleBranchIds : []);
-    if (branchScopeResult.error) {
-      setFormError(branchScopeResult.error.message || 'Service saved, but failed to save its branch scope.');
-      setSaving(false);
-      return;
-    }
+    if (branchScopeResult.error) return failStep(branchScopeResult.error, 'its branch scope');
 
     setSaving(false);
     goBack();
@@ -408,7 +418,7 @@ const ServiceDetailPage = () => {
           <h1 className="flex-1 min-w-[200px] font-heading font-heading-semibold text-2xl text-text-primary truncate">{isEdit ? (formData.name || 'Edit service') : 'New service'}</h1>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={goBack} disabled={saving}>Cancel</Button>
-            <Button variant="primary" size="sm" onClick={handleSave} loading={saving}>{isEdit ? 'Save service' : 'Create service'}</Button>
+            <Button variant="primary" size="sm" onClick={handleSave} loading={saving} disabled={saving}>{isEdit ? 'Save service' : 'Create service'}</Button>
           </div>
         </header>
 
@@ -638,7 +648,14 @@ const ServiceDetailPage = () => {
                         <span className="block text-xs font-normal text-text-secondary mt-0.5">Turn off for self-service items (a room only). They show in the calendar's unassigned column.</span>
                       </span>
                     </label>
-                    {formData.requiresTherapist && (
+                    {formData.requiresTherapist && !staffScopeBranchId && (
+                      <p className="p-3 bg-background rounded-spa border border-border max-w-xl font-caption text-xs text-text-secondary">
+                        {isEdit
+                          ? `${staffLabelPlural} limits are set per location. Pick a location in the switcher at the top to see or change them; saving here leaves them as they are.`
+                          : `Pick a location in the switcher at the top to choose which ${staffLabelPlural.toLowerCase()} can do this service. Until then it stays open to everyone.`}
+                      </p>
+                    )}
+                    {formData.requiresTherapist && !!staffScopeBranchId && (
                       <>
                   <div className="space-y-2 p-3 bg-background rounded-spa border border-border max-w-xl">
                     <div className="flex items-center justify-between">

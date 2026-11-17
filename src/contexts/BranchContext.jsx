@@ -59,8 +59,8 @@ export const BranchProvider = ({ children }) => {
     }
   }, [profile?.id, profile?.role, authLoading]);
 
-  const loadAdminBranches = async () => {
-    setLoading(true);
+  const loadAdminBranches = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     const result = await fetchAllBranches();
     const allBranches = result.data || [];
     if (allBranches.length === 0) {
@@ -114,8 +114,8 @@ export const BranchProvider = ({ children }) => {
     setLoading(false);
   };
 
-  const loadManagerBranches = async () => {
-    setLoading(true);
+  const loadManagerBranches = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     const result = await fetchManagerBranches();
     const accessible = result.data || [];
     setBranches(accessible);
@@ -143,6 +143,15 @@ export const BranchProvider = ({ children }) => {
     }
     setLoading(false);
   };
+
+  // Re-read the location list after one is added or edited, so the header and branchId follow without a reload.
+  // Keeps the current selection (including "Overall"); an admin who had no location yet gets the new one selected
+  // by loadAdminBranches' own default. Managers/staff have fixed branches, so re-run their loaders only.
+  const refreshBranches = useCallback(async () => {
+    if (!profile) return;
+    if (isAdmin) await loadAdminBranches({ silent: true });
+    else if (isManager) await loadManagerBranches({ silent: true });
+  }, [profile?.id, profile?.role, profile?.org_id]);
 
   const switchBranch = useCallback((newBranchId) => {
     if (isAdmin) {
@@ -190,6 +199,7 @@ export const BranchProvider = ({ children }) => {
       isManager,
       isOverall,
       switchBranch,
+      refreshBranches,
       loading,
     }}>
       {children}
