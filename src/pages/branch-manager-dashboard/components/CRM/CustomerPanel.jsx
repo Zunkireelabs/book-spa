@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import SidePanel from '../../../../components/ui/SidePanel';
 import PaymentModal from '../../../../components/ui/PaymentModal';
+import { submitCheckout } from '../../../../services/checkoutSubmit';
 import { PanelShell, FormBody, InfoRows } from '../../../../components/ui/PanelFormKit';
 import MembershipDetailPanel from '../Memberships/MembershipDetailPanel';
 import PackageDetailPanel from '../Packages/PackageDetailPanel';
@@ -95,7 +96,9 @@ const CustomerPanel = ({ customer, today, readOnly, branchId, isAdmin, onClose, 
   const [paying, setPaying] = useState(null); // { primary, others }
   const [paySubmitting, setPaySubmitting] = useState(false);
 
-  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes, tipSplits }) => {
+  // ZNLY-233: every checkout goes through the one shared submit, so products on the bill are saved (never dropped); no products => the treatment-only path below.
+  const handleRecordPayment = (payload) => submitCheckout({ bookingId: paying?.primary?.bookingId, payload, treatment: recordTreatmentOnly, onSaved: () => { setNotice(`Payment recorded for ${c.fullName}.`); refresh(); } });
+  const recordTreatmentOnly = async ({ tenders, additionalAllocations, dueHolderName, notes, tipSplits }) => {
     setPaySubmitting(true);
     const result = await recordPayment({ bookingId: paying.primary.bookingId, tenders, dueHolderName, notes });
     if (result.error) { setPaySubmitting(false); return { error: result.error }; }
@@ -146,6 +149,7 @@ const CustomerPanel = ({ customer, today, readOnly, branchId, isAdmin, onClose, 
             }}
             additionalBookings={paying.others}
             onConfirm={handleRecordPayment}
+          savesProducts
             onClose={(res) => { if (paySubmitting) return; setPaying(null); if (res?.paid) setView('main'); }}
             isSubmitting={paySubmitting}
           />

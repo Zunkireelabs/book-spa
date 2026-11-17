@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from 'components/AppIcon';
 import PaymentModal from 'components/ui/PaymentModal';
+import { submitCheckout } from 'services/checkoutSubmit';
 import { useAuth } from 'contexts/AuthContext';
 import { useBranch } from 'contexts/BranchContext';
 import { useIndustry } from 'hooks/useIndustry';
@@ -111,7 +112,9 @@ const MoneyOwedReport = ({ reopen, onBack, onHome, onOpenView, titleExtra, isFav
     const { data: d } = await getCustomerOutstandingBalance({ customerPhone: row.customer_phone, branchId: row.branch_id, excludeBookingId: row.id });
     setOthers(d?.bookings || []);
   };
-  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes, tipSplits }) => {
+  // ZNLY-233: every checkout goes through the one shared submit, so products on the bill are saved (never dropped); no products => the treatment-only path below.
+  const handleRecordPayment = (payload) => submitCheckout({ bookingId: paying?.id, payload, treatment: recordTreatmentOnly, onSaved: () => load() });
+  const recordTreatmentOnly = async ({ tenders, additionalAllocations, dueHolderName, notes, tipSplits }) => {
     if (!paying) return { error: { message: 'No booking selected.' } };
     setSubmitting(true);
     const result = await recordPayment({ bookingId: paying.id, tenders, dueHolderName, notes });
@@ -304,6 +307,7 @@ const MoneyOwedReport = ({ reopen, onBack, onHome, onOpenView, titleExtra, isFav
           additionalBookings={others}
           dueHolderSuggestions={suggestions}
           onConfirm={handleRecordPayment}
+          savesProducts
           onClose={() => { setPaying(null); setOthers([]); }}
           isSubmitting={submitting}
         />

@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
 import PaymentModal from './PaymentModal';
+import { submitCheckout } from '../../services/checkoutSubmit';
 import ConfirmDialog, { CANCEL_REASON_OPTIONS } from './ConfirmDialog';
 import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
@@ -13,7 +14,7 @@ import TimeBoxInput from './TimeBoxInput';
 import { paymentStatusLabel } from '../../utils/paymentStatusLabel';
 const payTone = (b) => ({ success: 'text-success', neutral: 'text-text-secondary', warning: 'text-warning' })[paymentStatusLabel(b).tone];
 import InvoicePrintModal from './InvoicePrintModal';
-import { adminCorrectBooking, correctPaymentMode, adminDeleteBooking, correctPaymentAmount, fetchMemberDiscountContext, applyMemberDiscount, fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, checkoutWithProducts, fetchBookingProductSales, refundProductSale, recordTip, getCustomerFirstBookingFlag, fetchInvoiceByBookingId } from '../../services/api';
+import { adminCorrectBooking, correctPaymentMode, adminDeleteBooking, correctPaymentAmount, fetchMemberDiscountContext, applyMemberDiscount, fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, fetchBookingProductSales, refundProductSale, recordTip, getCustomerFirstBookingFlag, fetchInvoiceByBookingId } from '../../services/api';
 import { excludeRelatedFromPreviousDue, toDbStatus } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
@@ -1138,7 +1139,8 @@ const BookingActionModal = ({
     }
   };
 
-  const handlePaymentConfirm = async ({ tenders, additionalAllocations, dueHolderName, notes: paymentNotes, tipSplits, products = [], productTenders = [] }) => {
+  const handlePaymentConfirm = async (payload) => {
+    const { tenders, additionalAllocations, dueHolderName, notes: paymentNotes, tipSplits } = payload;
     if (!booking || !onRecordPayment) return { error: { message: 'No payment handler available.' } };
     setPaymentSubmitting(true);
     setActionError(null);
@@ -1150,74 +1152,62 @@ const BookingActionModal = ({
       // fails partway through (payments rows are immutable). This closes
       // the partial-bundle failure mode, not just the stale-related-list
       // display bug the BK-20260915-0025/-0026/-0027 incident also had.
-      // Products on the bill (V26): ONE database call writes the product sales, their stock and the treatment payment together, so
-      // "payment saved but stock not taken" cannot happen. `productTenders` first, then the treatment's tenders: the server pays the
-      // products first, in that order, and rejects anything that does not cover them in full.
-      if (products.length > 0) {
-        const { data, error } = await checkoutWithProducts({
-          bookingId: booking.bookingId,
-          tenders: [...productTenders, ...tenders],
-          products,
-          dueHolderName,
-          notes: paymentNotes,
-          additional: (additionalAllocations || []).map((alloc) => ({ bookingId: alloc.bookingId, tenders: alloc.tenders })),
-        });
-        if (error) return { error };
-        for (const split of (tipSplits || [])) {
-          const tipResult = await recordTip({ bookingId: booking.bookingId, amount: split.amount, receivedBy: split.receivedBy });
-          if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
-        }
-        if (onGroupPaymentRecorded) onGroupPaymentRecorded(); else await onRefreshBooking?.(booking.bookingId);
-        return { data, error: null };
-      }
+      // Products on the bill (V26) go through the one shared submit (services/checkoutSubmit.js, ZNLY-233): with products it is ONE call
+      // (products + stock + treatment payment); without, `treatment` below runs as it always did.
+      return await submitCheckout({
+        bookingId: booking.bookingId,
+        payload,
+        onSaved: async () => { if (onGroupPaymentRecorded) onGroupPaymentRecorded(); else await onRefreshBooking?.(booking.bookingId); },
+        treatment: async () => {
+        if (onGroupPaymentRecorded) {
+          const { data, error } = await recordGroupPayment([
+            { bookingId: booking.bookingId, tenders, dueHolderName, notes: paymentNotes },
+            ...(additionalAllocations || []).map((alloc) => ({ bookingId: alloc.bookingId, tenders: alloc.tenders, notes: paymentNotes })),
+          ]);
+          if (error) return { error };
 
-      if (onGroupPaymentRecorded) {
-        const { data, error } = await recordGroupPayment([
-          { bookingId: booking.bookingId, tenders, dueHolderName, notes: paymentNotes },
-          ...(additionalAllocations || []).map((alloc) => ({ bookingId: alloc.bookingId, tenders: alloc.tenders, notes: paymentNotes })),
-        ]);
-        if (error) return { error };
+          // Tip is a separate, independent write (booking_tips, migration-240) with
+          // no FK/trigger relationship to `payments` — safe to log here too, even
+          // though the payments themselves went through the atomic group RPC.
+          // Best-effort, attributed to the primary booking only (never split across
+          // the bundle) — a failure here must never undo the payment that already
+          // succeeded.
+          for (const split of (tipSplits || [])) {
+            const tipResult = await recordTip({ bookingId: booking.bookingId, amount: split.amount, receivedBy: split.receivedBy });
+            if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
+          }
 
-        // Tip is a separate, independent write (booking_tips, migration-240) with
-        // no FK/trigger relationship to `payments` — safe to log here too, even
-        // though the payments themselves went through the atomic group RPC.
-        // Best-effort, attributed to the primary booking only (never split across
-        // the bundle) — a failure here must never undo the payment that already
-        // succeeded.
-        for (const split of (tipSplits || [])) {
-          const tipResult = await recordTip({ bookingId: booking.bookingId, amount: split.amount, receivedBy: split.receivedBy });
-          if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
+          // Checkout stays open on its success state until staff press Done (see onClose below).
+          onGroupPaymentRecorded();
+          return { data: data?.[0], error: null };
         }
 
-        // Checkout stays open on its success state until staff press Done (see onClose below).
-        onGroupPaymentRecorded();
-        return { data: data?.[0], error: null };
-      }
+        const result = await onRecordPayment(booking.bookingId, { tenders, dueHolderName, notes: paymentNotes, tipSplits });
+        if (result?.error) return result;
 
-      const result = await onRecordPayment(booking.bookingId, { tenders, dueHolderName, notes: paymentNotes, tipSplits });
-      if (result?.error) return result;
-
-      // Pay each bundled previous-due/related booking with its own allocated
-      // tenders (PaymentModal splits the entered amount across bookings and
-      // methods). The parent above already succeeded — a failure here must be
-      // surfaced, not swallowed, since staff would otherwise see "Paid" on the
-      // parent and wrongly assume the whole bundle settled (see BK-20260913-0037
-      // incident: a bundled Jacuzzi payment failed silently and stayed unpaid).
-      const failedAllocations = [];
-      for (const alloc of (additionalAllocations || [])) {
-        const allocResult = await onRecordPayment(alloc.bookingId, { tenders: alloc.tenders, notes: paymentNotes });
-        if (allocResult?.error) {
-          failedAllocations.push(alloc.bookingNumber || alloc.bookingId);
+        // Pay each bundled previous-due/related booking with its own allocated
+        // tenders (PaymentModal splits the entered amount across bookings and
+        // methods). The parent above already succeeded — a failure here must be
+        // surfaced, not swallowed, since staff would otherwise see "Paid" on the
+        // parent and wrongly assume the whole bundle settled (see BK-20260913-0037
+        // incident: a bundled Jacuzzi payment failed silently and stayed unpaid).
+        const failedAllocations = [];
+        for (const alloc of (additionalAllocations || [])) {
+          const allocResult = await onRecordPayment(alloc.bookingId, { tenders: alloc.tenders, notes: paymentNotes });
+          if (allocResult?.error) {
+            failedAllocations.push(alloc.bookingNumber || alloc.bookingId);
+          }
         }
-      }
 
-      // Stay open on the Payment tab (rather than closing the whole modal) so
-      // staff immediately see the refreshed status, balance, and — for members —
-      // the updated wallet amount, instead of having to reopen the booking.
-      if (failedAllocations.length > 0) {
-        setActionError(`Payment recorded for this booking, but failed for: ${failedAllocations.join(', ')}. Open ${failedAllocations.length > 1 ? 'those bookings' : 'that booking'} directly and record payment again.`);
-      }
-      return result;
+        // Stay open on the Payment tab (rather than closing the whole modal) so
+        // staff immediately see the refreshed status, balance, and — for members —
+        // the updated wallet amount, instead of having to reopen the booking.
+        if (failedAllocations.length > 0) {
+          setActionError(`Payment recorded for this booking, but failed for: ${failedAllocations.join(', ')}. Open ${failedAllocations.length > 1 ? 'those bookings' : 'that booking'} directly and record payment again.`);
+        }
+        return result;
+        },
+      });
     } finally {
       setPaymentSubmitting(false);
     }
@@ -3958,6 +3948,7 @@ const BookingActionModal = ({
       {/* Payment Modal */}
       {showPaymentModal && (
         <PaymentModal
+          savesProducts
           booking={{
             id: booking.id,
             bookingId: booking.bookingId,

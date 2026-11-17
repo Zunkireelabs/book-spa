@@ -4,6 +4,7 @@ import Icon from '../../../../components/AppIcon';
 import FilterBar from '../../../../components/ui/FilterBar';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import PaymentModal from '../../../../components/ui/PaymentModal';
+import { submitCheckout } from '../../../../services/checkoutSubmit';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
 import { getDueReportByBranch, recordPayment, recordTip, getCustomerOutstandingBalance } from '../../../../services/api';
 import { useIndustry } from '../../../../hooks/useIndustry';
@@ -183,7 +184,9 @@ const DueReportPanel = () => {
     setOtherDueBookings(data?.bookings || []);
   };
 
-  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes, tipSplits }) => {
+  // ZNLY-233: every checkout goes through the one shared submit, so products on the bill are saved (never dropped); no products => the treatment-only path below.
+  const handleRecordPayment = (payload) => submitCheckout({ bookingId: payingRow?.bookingId, payload, treatment: recordTreatmentOnly, onSaved: () => load() });
+  const recordTreatmentOnly = async ({ tenders, additionalAllocations, dueHolderName, notes, tipSplits }) => {
     if (!payingRow) return { error: { message: 'No booking selected.' } };
     setPaymentSubmitting(true);
     const result = await recordPayment({ bookingId: payingRow.bookingId, tenders, dueHolderName, notes });
@@ -426,6 +429,7 @@ const DueReportPanel = () => {
           }}
           additionalBookings={otherDueBookings}
           onConfirm={handleRecordPayment}
+          savesProducts
           onClose={() => { setPayingRow(null); setOtherDueBookings([]); }}
           isSubmitting={paymentSubmitting}
         />

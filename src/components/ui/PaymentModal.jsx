@@ -273,6 +273,9 @@ const PaymentModal = ({
   onClose,
   isSubmitting,
   dueHolderSuggestions = [],
+  // ZNLY-233: true ONLY when the host's onConfirm goes through services/checkoutSubmit (so products on the bill are saved). Without it the
+  // "Add a product" block is not offered, so a bill can never say "paid" while the product sale, stock and commission were dropped.
+  savesProducts = false,
 }) => {
   const { paymentMethods, orgName } = useOrg();
   const { branchName } = useBranch();
@@ -352,7 +355,7 @@ const PaymentModal = ({
   const [bookingRowInfo, setBookingRowInfo] = useState(null); // guest name/phone/therapist for the header + receipt (and the seller default)
   const productBranchId = booking.branchId || booking.branch_id;
   const cp = useCheckoutProducts({
-    enabled: PRODUCTS_ENABLED && !!mainBookingId && !!productBranchId,
+    enabled: PRODUCTS_ENABLED && savesProducts && !!mainBookingId && !!productBranchId,
     branchId: productBranchId,
     customerId: bookingRowInfo?.customer_id || null,
     defaultSellerId: bookingRowInfo?.therapist?.id || bookingRowInfo?.therapist_id || null,
@@ -917,7 +920,8 @@ const PaymentModal = ({
       if (friendly.alreadyPaid) setPaidElsewhere(true);
       return;
     }
-    setReceipt(buildReceipt(cleanedTenders, tipAmount, tipSplits, { split: productSplit, sales: result?.data?.sales || null }));
+    // The receipt is built from what the SERVER saved (sales, stock, tenders), never from the cart on screen.
+    setReceipt(buildReceipt(cleanedTenders, tipAmount, tipSplits, { split: productSplit, sales: result?.data?.sales || null, productsTotal: result?.data?.productsTotal, productPayments: result?.data?.productPayments || null }));
   };
 
   // ───────────────────────── Checkout UI state (no money logic below this line) ─────────────────────────
@@ -1294,7 +1298,8 @@ const PaymentModal = ({
     if (voucherPoolUsable && voucherPoolCommitted > 0) walletAfter.push({ label: 'Voucher balance now', amount: round2(voucherPoolBalance - voucherPoolCommitted) });
     // Products (V26): the receipt is one document in two parts; the treatment keeps its methods, the products get theirs.
     let productPart = null;
-    if (cp.count > 0 && extra?.split) {
+    if (cp.count > 0 && extra?.split && (extra.sales || []).length > 0) {
+      const sales = extra.sales;
       const shortSeller = (id) => { const w = String(cp.sellerName(id) || '').trim().split(/\s+/); return w.length > 1 ? `${w[0]} ${w[w.length - 1][0]}.` : (w[0] || ''); };
       const sums = (list, labelOf) => {
         const m = new Map();
@@ -1302,20 +1307,18 @@ const PaymentModal = ({
         return [...m].map(([label, amount]) => ({ label, amount }));
       };
       const labelFor = (e) => tenderLabel(tenders.find((t) => t.paymentMode === e.paymentMode && (e.paymentMode !== 'VoucherWallet' || t.voucherId === e.voucherId)) || e);
-      const sales = extra.sales || [];
-      const stockBits = cp.lines.map((l) => {
-        const sale = sales.find((x) => x.variantId === l.variantId);
-        return sale ? `${l.name}${l.size ? ` ${l.size}` : ''} ${sale.stockBefore} → ${sale.stockAfter}` : null;
-      }).filter(Boolean);
-      const sellerIds = [...new Set(cp.lines.map((l) => cp.sellerOf(l)).filter(Boolean))];
+      const name = (x) => `${x.productName}${x.variantName ? ` ${x.variantName}` : ''}`;
+      const stockBits = sales.map((x) => `${name(x)} ${x.stockBefore} → ${x.stockAfter}`);
+      const sellerIds = [...new Set(sales.map((x) => x.soldByTherapistId).filter(Boolean))];
+      const lineAmounts = sales.map((x) => round2(x.total));
       productPart = {
-        lines: cp.lines.map((l) => ({ label: `${l.name}${l.size ? ` · ${l.size}` : ''}`, qty: l.qty, amount: lineTotal(l.price, l.qty) })),
-        tenders: sums(extra.split.product, (e) => labelFor(e)),
+        lines: sales.map((x) => ({ label: `${x.productName}${x.variantName ? ` · ${x.variantName}` : ''}`, qty: x.quantity, amount: round2(x.total) })),
+        tenders: sums(extra.productPayments?.length ? extra.productPayments : extra.split.product, (e) => labelFor(e)),
         treatmentTenders: sums(extra.split.treatment, (e) => labelFor(e)),
-        total: productsTotal,
+        total: extra.productsTotal ?? productsTotal,
         stockLine: stockBits.length ? `Stock updated at ${branchName || 'this branch'}: ${stockBits.join(', ')}.` : '',
         creditLine: sellerIds.length ? (() => { const names = sellerIds.map(shortSeller).join(' and '); return `The sale is credited to ${names}${names.endsWith('.') ? '' : '.'}`; })() : 'No commission on this sale.',
-        perLine: splitAcrossLines(cp.lines.map((l) => lineTotal(l.price, l.qty)), extra.split.product),
+        perLine: splitAcrossLines(lineAmounts, extra.split.product),
       };
     }
     return {
@@ -1323,7 +1326,7 @@ const PaymentModal = ({
       dateLabel: new Date().toLocaleString('en-GB', { timeZone: 'Asia/Kathmandu', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
       lines, tenders: productPart ? productPart.treatmentTenders : tenderRows, total: entered, leftover, extraCount: additionalBookings.length,
       products: productPart,
-      hasMember: lines.some((l) => l.member), lineTotal: round2(grandTotal - productsTotal),
+      hasMember: lines.some((l) => l.member), lineTotal: round2(grandTotal - (extra?.productsTotal ?? productsTotal)),
       tipTotal: tipAmount,
       tipLabel: tipAmount > 0 ? `Tip to ${tipSplits.map((s) => staffName(s.receivedBy)).join(', ')}` : '',
       walletAfter,

@@ -3,6 +3,7 @@ import InboxBookingPanel from '../inbox/InboxBookingPanel';
 import QuickCreatePanel from '../branch-manager-dashboard/components/calendar/QuickCreatePanel';
 import { submitQuickCreate } from '../branch-manager-dashboard/components/calendar/quickCreateSubmit';
 import PaymentModal from '../../components/ui/PaymentModal';
+import { submitCheckout } from '../../services/checkoutSubmit';
 import { useAvailabilityGuard } from '../../contexts/AvailabilityOverrideContext';
 import { fetchAttendance, fetchServices, getCalendarBookings, recordPayment, recordTip } from '../../services/api';
 
@@ -58,7 +59,9 @@ export const CollectHost = ({ booking, branchId, onClose, onPaid }) => {
   const [submitting, setSubmitting] = useState(false);
   if (!booking) return null;
 
-  const confirm = async ({ tenders, dueHolderName, notes, tipSplits }) => {
+  // ZNLY-233: every checkout goes through the one shared submit, so products on the bill are saved (never dropped); no products => the treatment-only path below.
+  const confirm = (payload) => submitCheckout({ bookingId: booking.id, payload, treatment: recordTreatmentOnly, onSaved: () => onPaid?.() });
+  const recordTreatmentOnly = async ({ tenders, dueHolderName, notes, tipSplits }) => {
     setSubmitting(true);
     const result = await recordPayment({ bookingId: booking.id, tenders, dueHolderName, notes });
     if (result.error) { setSubmitting(false); return { error: result.error }; }
@@ -79,6 +82,7 @@ export const CollectHost = ({ booking, branchId, onClose, onPaid }) => {
       }}
       additionalBookings={[]}
       onConfirm={confirm}
+          savesProducts
       onClose={(res) => { if (!submitting) onClose(res); }}
       isSubmitting={submitting}
     />

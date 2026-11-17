@@ -3,6 +3,7 @@ import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import CountryCodeSelect from '../../../components/ui/CountryCodeSelect';
 import PaymentModal from '../../../components/ui/PaymentModal';
+import { submitCheckout } from '../../../services/checkoutSubmit';
 import { getCustomerOutstandingBalance, recordPayment, recordTip, fetchDueHolderNames, recordBundledAllocations } from '../../../services/api';
 import { useBranch } from '../../../contexts/BranchContext';
 
@@ -87,7 +88,9 @@ const CollectPaymentPanel = ({ onSuccess }) => {
     setPayingBookings(selected);
   };
 
-  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes, tipSplits }) => {
+  // ZNLY-233: every checkout goes through the one shared submit, so products on the bill are saved (never dropped); no products => the treatment-only path below.
+  const handleRecordPayment = (payload) => submitCheckout({ bookingId: payingBookings?.[0]?.bookingId, payload, treatment: recordTreatmentOnly, onSaved: () => onSuccess?.('Payment recorded successfully.') });
+  const recordTreatmentOnly = async ({ tenders, additionalAllocations, dueHolderName, notes, tipSplits }) => {
     if (!payingBookings || payingBookings.length === 0) {
       return { error: { message: 'No booking selected.' } };
     }
@@ -257,6 +260,7 @@ const CollectPaymentPanel = ({ onSuccess }) => {
           additionalBookings={additionalBookings}
           dueHolderSuggestions={dueHolderSuggestions}
           onConfirm={handleRecordPayment}
+          savesProducts
           onClose={(res) => {
             setPayingBookings(null);
             if (res?.paid || res?.alreadyPaid) {
