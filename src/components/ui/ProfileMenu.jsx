@@ -5,6 +5,7 @@ import { useAuth } from 'contexts/AuthContext';
 import { useBranch } from 'contexts/BranchContext';
 import { useLock } from 'contexts/LockContext';
 import { useMenuNav } from './useMenuNav';
+import { pinHint } from './pinHint';
 
 const ROLE_LABELS = {
   admin: 'Admin',
@@ -98,9 +99,9 @@ const ProfileMenu = () => {
           )}
           <div className="my-1.5 h-px bg-border" />
           <button type="button" role="menuitem" className={`${row} ${canLock ? '' : 'opacity-60 cursor-not-allowed'}`} aria-label="Lock screen" aria-disabled={!canLock}
-            title={canLock ? undefined : 'Needs a PIN. Ask your manager to set one for you.'} onClick={canLock ? run(() => lock()) : undefined} data-lock-item data-lock-off={canLock ? undefined : 'true'}>
+            title={canLock ? undefined : pinHint(role, true)} onClick={canLock ? run(() => lock()) : undefined} data-lock-item data-lock-off={canLock ? undefined : 'true'}>
             <Icon name="Lock" size={16} className="text-text-tertiary" />
-            <span className="flex-1">Lock screen{canLock ? '' : <span className="block text-[11px] font-normal text-text-tertiary">Needs a PIN. Ask your manager to set one.</span>}</span>
+            <span className="flex-1">Lock screen{canLock ? '' : <span className="block text-[11px] font-normal text-text-tertiary">{pinHint(role)}</span>}</span>
           </button>
           <button type="button" role="menuitem" className={row} onClick={run(() => signOut())}>
             <Icon name="LogOut" size={16} className="text-text-tertiary" />

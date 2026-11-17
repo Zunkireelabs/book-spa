@@ -13,6 +13,7 @@ import { fetchPendingApprovalCount } from 'services/api';
 import { useOptionalCommandPalette, SHORTCUT_LABEL } from 'components/CommandPalette/useCommandPalette';
 import { getNav, navPath, isNavItemActive } from 'navigation/navRegistry';
 import { useNotifications } from 'contexts/NotificationsContext';
+import { pinHint } from './pinHint';
 
 const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch, onCollapseChange, collapsed }) => {
   const location = useLocation();
@@ -445,13 +446,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
               onClick={canLock ? () => { setMobileMoreOpen(false); lock(); } : undefined}
               aria-label="Lock screen"
               aria-disabled={!canLock}
-              title={canLock ? undefined : 'Needs a PIN. Ask your manager to set one for you.'}
+              title={canLock ? undefined : pinHint(userRole, true)}
               data-lock-item
               data-lock-off={canLock ? undefined : 'true'}
               className={`flex items-center gap-3 px-4 py-3 w-full text-text-primary hover:bg-background transition-colors border-t border-border ${canLock ? '' : 'opacity-60 cursor-not-allowed'}`}
             >
               <Icon name="Lock" size={20} className="flex-shrink-0" />
-              <span className="flex-1 text-left font-body font-body-medium text-sm">Lock Screen{canLock ? null : <span className="block text-[11px] font-normal text-text-tertiary">Needs a PIN. Ask your manager to set one.</span>}</span>
+              <span className="flex-1 text-left font-body font-body-medium text-sm">Lock Screen{canLock ? null : <span className="block text-[11px] font-normal text-text-tertiary">{pinHint(userRole)}</span>}</span>
               {canLock && <Icon name="ChevronRight" size={16} className="flex-shrink-0" />}
             </button>
 

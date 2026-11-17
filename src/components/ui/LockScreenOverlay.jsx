@@ -129,10 +129,10 @@ const LockScreenOverlay = () => {
         </div>
 
         <h1 id="lock-screen-title" className="font-heading font-heading-semibold text-lg text-text-primary">
-          Screen Locked
+          Screen locked
         </h1>
         <p className="font-body font-body-normal text-sm text-text-secondary mt-1 mb-6">
-          {userName} <span className="capitalize">({userRole})</span>
+          {userName} <span className="capitalize">({userRole.replace('_', ' ')})</span>
         </p>
 
         <form onSubmit={handleSubmit} className="w-full">
@@ -149,7 +149,7 @@ const LockScreenOverlay = () => {
             disabled={isVerifying}
             placeholder="Enter PIN"
             aria-describedby={error ? 'lock-pin-error' : undefined}
-            className={`w-full px-3.5 py-3 text-center text-lg tracking-[0.5em] font-data bg-surface border rounded-[10px] text-text-primary placeholder:text-text-secondary placeholder:tracking-normal placeholder:text-sm outline-none transition-all duration-150 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-background disabled:cursor-not-allowed ${
+            className={`w-full h-12 px-3.5 text-center text-lg tracking-[0.5em] font-data bg-surface border rounded-spa text-text-primary placeholder:text-text-secondary placeholder:tracking-normal placeholder:text-sm outline-none transition-all duration-150 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-background disabled:cursor-not-allowed ${
               error ? 'border-error' : 'border-border'
             }`}
           />
@@ -163,7 +163,7 @@ const LockScreenOverlay = () => {
           <button
             type="submit"
             disabled={!isPinValid || isVerifying}
-            className="mt-4 w-full px-4 py-3 rounded-spa bg-primary text-white font-body font-body-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="mt-4 w-full h-12 px-4 rounded-spa bg-primary text-white font-body font-body-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isVerifying ? (
               <>
@@ -181,7 +181,7 @@ const LockScreenOverlay = () => {
         <button
           type="button"
           onClick={handleLoginAsSomeoneElse}
-          className="font-body font-body-medium text-sm text-text-secondary hover:text-primary transition-colors underline underline-offset-2"
+          className="h-11 px-3 font-body font-body-medium text-[13px] text-text-secondary hover:text-primary transition-colors underline underline-offset-2"
         >
           Log in as someone else
         </button>
