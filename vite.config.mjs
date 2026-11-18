@@ -2,7 +2,15 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tsconfigPaths from "vite-tsconfig-paths";
 
+// Where this app is mounted. Defaults to the root, which is how it has always been served at
+// app.zennly.io. Set VITE_BASE_PATH (e.g. "/book/") to serve it under a path prefix instead —
+// used when the marketplace proxies the customer booking flow through its own origin, so the
+// customer never sees the host change mid-journey. Must match BrowserRouter's basename in
+// src/Routes.jsx, which reads the same variable.
+const BASE_PATH = process.env.VITE_BASE_PATH || "/";
+
 export default defineConfig({
+  base: BASE_PATH,
   build: {
     outDir: "build",
     // Lowered from 2000 deliberately. The old limit was set high enough to
