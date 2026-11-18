@@ -289,7 +289,7 @@ const PlatformOrgDetail = () => {
     setDetailExportingId(c.id);
     try {
       const rows = await fetchPeriodDetailRows(c.period_start, c.period_end);
-      exportRowsToExcel(`commission-detail-${orgId}-${c.period_start}_to_${c.period_end}`, rows, 'Detail');
+      await exportRowsToExcel(`commission-detail-${orgId}-${c.period_start}_to_${c.period_end}`, rows, 'Detail');
     } catch (e) {
       setError(e.message || 'Detail export failed');
     } finally {
@@ -309,7 +309,7 @@ const PlatformOrgDetail = () => {
           rows: await fetchPeriodDetailRows(c.period_start, c.period_end),
         }))
       );
-      exportSheetsToExcel(`commission-detail-all-${orgId}`, [
+      await exportSheetsToExcel(`commission-detail-all-${orgId}`, [
         { name: 'Summary', rows: buildCollectionSummaryRows(collections) },
         ...perPeriod,
       ]);

@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import * as XLSX from 'xlsx';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import { PanelShell, FormBody, Field, InlineError } from '../../../../components/ui/PanelFormKit';
@@ -40,6 +39,7 @@ const ImportPanel = ({ branches, branchId, onClose, onDone, width }) => {
     if (!f) return;
     setError(null); setPreview(null); setSheet(null); setFile(f);
     try {
+      const XLSX = await import('xlsx');
       const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const table = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
