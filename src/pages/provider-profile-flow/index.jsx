@@ -166,25 +166,30 @@ const ProviderProfileFlow = () => {
   useEffect(() => {
     if (!orgSlug || !selectedBranch) return;
     fetchBookableServicesByOrgSlug(orgSlug, selectedBranch.id).then(({ data }) => {
-      const list = data || [];
-      setServices(list);
-
-      // A customer arriving from the marketplace already picked a service there; don't make
-      // them pick it again. The id is book-spa's own, since the marketplace reads this same
-      // RPC. Applied once: re-applying on every branch switch would silently re-add a service
-      // the customer had deliberately removed, and would fight handleBranchSelect's reset.
-      // Silently ignored when the param is absent, the id is unknown, or the service isn't
-      // bookable at this branch — the customer just picks normally.
-      if (preselectApplied.current) return;
-      const wanted = new URLSearchParams(window.location.search).get('service');
-      if (!wanted) { preselectApplied.current = true; return; }
-      const match = list.find((s) => String(s.id) === wanted);
-      if (match) {
-        preselectApplied.current = true;
-        setSelectedServices([match]);
-      }
+      setServices(data || []);
     });
   }, [orgSlug, selectedBranch]);
+
+  // A customer arriving from the marketplace already picked a service there; don't make them
+  // pick it again. The id is book-spa's own, since the marketplace reads this same RPC.
+  //
+  // Keyed on `services` rather than done inside the fetch above, deliberately: picking a branch
+  // calls handleBranchSelect, which clears selectedServices. Applying the preselect inside the
+  // fetch callback races that clear and loses. Running it as its own effect on the resulting
+  // state guarantees it lands after.
+  //
+  // Applied once per visit: re-applying on every branch switch would silently re-add a service
+  // the customer had deliberately removed. Absent param, unknown id, or a service not bookable
+  // at the chosen branch all fall through to normal picking rather than erroring.
+  useEffect(() => {
+    if (preselectApplied.current || services.length === 0) return;
+    const wanted = new URLSearchParams(window.location.search).get('service');
+    if (!wanted) { preselectApplied.current = true; return; }
+    const match = services.find((s) => String(s.id) === wanted);
+    if (!match) return; // another branch's list may still contain it
+    preselectApplied.current = true;
+    setSelectedServices([match]);
+  }, [services]);
 
   const handleServiceToggle = useCallback((service) => {
     setSelectedServices((prev) => (
