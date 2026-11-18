@@ -35,6 +35,7 @@ import { nepalNow } from '../../utils/customerDirectory';
 import { MEMBERSHIP_ENABLED, PRODUCTS_ENABLED } from '../../lib/featureFlags';
 import { humanizePaymentMethod } from '../../services/paymentMethods';
 import { wordBranchCap } from '../../utils/industryTerms';
+import { canonicalMode } from 'lib/dayMoney';
 
 function getNepalNow() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
@@ -3239,7 +3240,7 @@ const BookingActionModal = ({
               const combinedTotal = (booking.finalAmount || 0) + relatedBookingsTotal + previousDueTotal;
               const selectedCount = selectedRelatedIds.size + selectedPreviousDueIds.size;
               const paidThisVisit = (booking.payments || [])
-                .filter(p => p.paymentMode === 'Membership')
+                .filter(p => canonicalMode(p.paymentMode) === 'Membership')
                 .reduce((s, p) => s + p.amount, 0);
               // relatedBookings is always same-day as the booking being viewed — label it
               // "Today's" only when that day actually IS today, so a staffer looking at a

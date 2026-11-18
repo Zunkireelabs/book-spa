@@ -1150,7 +1150,7 @@ export async function getProductSalesForDate(branchId, date) {
   for (const sale of (data || [])) {
     out.gross += Number(sale.total_amount);
     for (const p of (sale.product_sale_payments || [])) {
-      if (WALLET_MODES.has(p.payment_mode)) continue;
+      if (WALLET_MODES.has(canonicalMode(p.payment_mode))) continue;
       const amount = Number(p.amount);
       out.total += amount;
       out.breakdown[classifyPaymentMode(p.payment_mode)] += amount;
@@ -4815,7 +4815,7 @@ export async function getDailySummary(branchId, date) {
         // today, so it's excluded here. Wallet modes (Membership/Referral/Voucher
         // balances, WALLET_MODES) have this identical "already-recognized-elsewhere"
         // property and are excluded the same way.
-        if (p.payment_mode === 'SessionPackage' || WALLET_MODES.has(p.payment_mode)) continue;
+        if (canonicalMode(p.payment_mode) === 'SessionPackage' || WALLET_MODES.has(canonicalMode(p.payment_mode))) continue;
         const amount = Number(p.amount);
         netRevenue += amount;
         paymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
@@ -4847,7 +4847,7 @@ export async function getDailySummary(branchId, date) {
         // Membership-tendered voucher sales are a wallet deduction, not new
         // cash collected today — same "already-recognized-elsewhere" policy
         // as the booking-payments loop above (WALLET_MODES).
-        if (WALLET_MODES.has(p.payment_mode)) continue;
+        if (WALLET_MODES.has(canonicalMode(p.payment_mode))) continue;
         const amount = Number(p.amount);
         voucherSalesTotal += amount;
         netRevenue += amount;
@@ -5129,10 +5129,10 @@ export async function getTodayInsights(branchId, from, to) {
         // purchased or earned (same policy as getDailySummary/getDailyOperationalReport).
         // Skip entirely, don't fold into totalSales or any bucket — the "Redeemed" figures
         // shown elsewhere on the dashboard (membershipRedeemed etc.) are where this belongs.
-        if (p.payment_mode === 'SessionPackage' || WALLET_MODES.has(p.payment_mode)) continue;
+        if (canonicalMode(p.payment_mode) === 'SessionPackage' || WALLET_MODES.has(canonicalMode(p.payment_mode))) continue;
         const amount = Number(p.amount);
         totalSales += amount;
-        modeTotals[p.payment_mode] = (modeTotals[p.payment_mode] || 0) + amount;
+        modeTotals[canonicalMode(p.payment_mode)] = (modeTotals[canonicalMode(p.payment_mode)] || 0) + amount;
       }
     }
 
@@ -5147,10 +5147,10 @@ export async function getTodayInsights(branchId, from, to) {
       if (voucherPaymentsError) throw voucherPaymentsError;
 
       for (const p of (voucherPayments || [])) {
-        if (WALLET_MODES.has(p.payment_mode)) continue;
+        if (WALLET_MODES.has(canonicalMode(p.payment_mode))) continue;
         const amount = Number(p.amount);
         totalSales += amount;
-        modeTotals[p.payment_mode] = (modeTotals[p.payment_mode] || 0) + amount;
+        modeTotals[canonicalMode(p.payment_mode)] = (modeTotals[canonicalMode(p.payment_mode)] || 0) + amount;
       }
     }
 
@@ -5233,10 +5233,10 @@ export async function getTodayInsights(branchId, from, to) {
     };
     for (const sale of activeProductSales) {
       for (const p of (sale.product_sale_payments || [])) {
-        if (WALLET_MODES.has(p.payment_mode)) continue;
+        if (WALLET_MODES.has(canonicalMode(p.payment_mode))) continue;
         const amount = Number(p.amount);
         totalSales += amount;
-        modeTotals[p.payment_mode] = (modeTotals[p.payment_mode] || 0) + amount;
+        modeTotals[canonicalMode(p.payment_mode)] = (modeTotals[canonicalMode(p.payment_mode)] || 0) + amount;
       }
     }
 
@@ -5488,11 +5488,11 @@ export async function getDailyOperationalReport(branchId, date) {
       for (const p of (voucherPayments || [])) {
         // Membership-tendered voucher sales are a wallet deduction, not new
         // cash collected today — same policy as the booking paymentRows loop below.
-        if (WALLET_MODES.has(p.payment_mode)) continue;
+        if (WALLET_MODES.has(canonicalMode(p.payment_mode))) continue;
         const amount = Number(p.amount);
         voucherSalesTotal += amount;
         voucherPaymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
-        voucherByMode[p.payment_mode] = (voucherByMode[p.payment_mode] || 0) + amount;
+        voucherByMode[canonicalMode(p.payment_mode)] = (voucherByMode[canonicalMode(p.payment_mode)] || 0) + amount;
       }
     }
 

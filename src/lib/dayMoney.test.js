@@ -68,6 +68,14 @@ describe('dayMoney: the one money-today rule (ZNLY-232)', () => {
     expect(d.cashExpected).toBe(24750);
     expect(foldDayMoney({ byMode: { membership: 9 } }).moneyIn).toBe(0);
   });
+
+  it('ZNLY-248: cash, "CASH ", eSewa/Esewa and membership/Membership each fold to one canonical mode', () => {
+    ['cash', 'CASH ', 'Cash'].forEach((m) => expect(canonicalMode(m)).toBe('Cash'));
+    ['eSewa', 'Esewa', 'ESEWA'].forEach((m) => expect(canonicalMode(m)).toBe('Esewa'));
+    ['membership', 'Membership'].forEach((m) => expect(canonicalMode(m)).toBe('Membership'));
+    const d = foldDayMoney({ byMode: { eSewa: 76628, Esewa: 23400, membership: 4200, Membership: 100 } });
+    expect(d.byMethod).toEqual([{ method: 'Esewa', label: 'eSewa', amount: 100028 }]);
+  });
 });
 
 describe('closed day: at close / after close / now never mix (ZNLY-234, Nuad 17 Nov)', () => {

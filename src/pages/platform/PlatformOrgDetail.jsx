@@ -9,6 +9,7 @@ import {
 } from 'services/platformApi';
 import { getTodayISO, toISO } from 'utils/periodPresets';
 import { exportRowsToExcel, exportSheetsToExcel } from 'utils/exportExcel';
+import { canonicalMode } from 'lib/dayMoney';
 
 const BASIS_OPTIONS = [
   { value: 'vat_inclusive', label: 'VAT inclusive (rate on full amount)' },
@@ -24,7 +25,7 @@ const WALLET_PAYMENT_MODES = ['Membership', 'ReferralWallet', 'VoucherWallet', '
 
 const nonWalletAmount = (booking) =>
   (booking.payments || [])
-    .filter((p) => !WALLET_PAYMENT_MODES.includes(p.payment_mode))
+    .filter((p) => !WALLET_PAYMENT_MODES.includes(canonicalMode(p.payment_mode)))
     .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
 // Pure row-shapers, reused both for the currently-loaded period (via useMemo
