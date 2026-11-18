@@ -83,6 +83,8 @@ const ProviderProfileFlow = () => {
     agreeToTerms: false,
   });
   const prefilledFromProfile = useRef(false);
+  // Guards the ?service= preselect so it fires once per visit, not on every branch switch.
+  const preselectApplied = useRef(false);
 
   useEffect(() => {
     if (!customerProfile || prefilledFromProfile.current) return;
@@ -164,7 +166,23 @@ const ProviderProfileFlow = () => {
   useEffect(() => {
     if (!orgSlug || !selectedBranch) return;
     fetchBookableServicesByOrgSlug(orgSlug, selectedBranch.id).then(({ data }) => {
-      setServices(data || []);
+      const list = data || [];
+      setServices(list);
+
+      // A customer arriving from the marketplace already picked a service there; don't make
+      // them pick it again. The id is book-spa's own, since the marketplace reads this same
+      // RPC. Applied once: re-applying on every branch switch would silently re-add a service
+      // the customer had deliberately removed, and would fight handleBranchSelect's reset.
+      // Silently ignored when the param is absent, the id is unknown, or the service isn't
+      // bookable at this branch — the customer just picks normally.
+      if (preselectApplied.current) return;
+      const wanted = new URLSearchParams(window.location.search).get('service');
+      if (!wanted) { preselectApplied.current = true; return; }
+      const match = list.find((s) => String(s.id) === wanted);
+      if (match) {
+        preselectApplied.current = true;
+        setSelectedServices([match]);
+      }
     });
   }, [orgSlug, selectedBranch]);
 
