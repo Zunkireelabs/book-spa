@@ -6,7 +6,7 @@
 //   transferredIn   -> visiting: not here before arriving (whole day) or after leaving the visit window that day
 //                      (label "At <home-branch> <range>"); after the visit has ended nothing is shaded
 import { toKathmanduParts } from '../pages/branch-manager-dashboard/components/calendar/calendarDates';
-import { wordBranch } from './industryTerms';
+import { awayLabel } from './awayLabel';
 
 const toMin = (hm) => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5));
 
@@ -17,11 +17,7 @@ export function transferShadeSegments(col, day, { openMin, closeMin, fmt = (t) =
   const clip = (a, b, place) => {
     const startMin = Math.max(a, openMin); const endMin = Math.min(b, closeMin);
     if (endMin <= startMin) return [];
-    const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-    // never print the day's edge (it would read as a midnight boundary): "from 3:30pm" / "until 12:00pm" / just the place
-    const where = `At ${place || `another ${wordBranch()}`}`;
-    const toEdge = endMin >= closeMin; const fromEdge = startMin <= openMin;
-    const label = toEdge && fromEdge ? where : toEdge ? `${where} from ${fmt(hm(startMin))}` : fromEdge ? `${where} until ${fmt(hm(endMin))}` : `${where} ${fmt(hm(startMin))}–${fmt(hm(endMin))}`;
+    const label = awayLabel(place, startMin, endMin, { openMin, closeMin, fmt });
     return [{ startMin, endMin, label }];
   };
   if (col.transferredOut) {

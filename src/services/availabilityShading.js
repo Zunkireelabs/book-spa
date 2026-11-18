@@ -5,6 +5,7 @@ import { evaluateAvailability, hhmmToMinutes, minutesToHHMM } from './availabili
 import { hoursFromShiftRow } from '../utils/staffDay';
 import { todayStatusLine } from '../utils/todayStatusLine';
 import { wordBranch } from '../utils/industryTerms';
+import { awayLabel } from '../utils/awayLabel';
 
 const stripes = (a, b) => `repeating-linear-gradient(135deg, ${a} 0 6px, ${b} 6px 7px)`;
 
@@ -65,7 +66,10 @@ export function buildShadeSegments(shiftDay, fmt = (t) => t) {
     } else if (o.code === 'OTHER_BRANCH') {
       out.push({
         kind: 'branch', startMin: o.start_min, endMin: o.end_min, code: 'OTHER_BRANCH', reason: o.reason,
-        label: `At ${o.label || `another ${wordBranch()}`} ${range(o.start_min, o.end_min, fmt)}`,
+        // Every OTHER_BRANCH range the RPC emits comes from a transfer window (therapist_unavailable_ranges: the destination window for the
+        // home branch, and the gaps outside a visit window for the receiving branch), already cut to this day (0..1440). So the label
+        // reads the window, not the day's cut: a middle day is "At X", the return day "At X until 10:00am" (never "…–12:00pm").
+        label: awayLabel(o.label, o.start_min, o.end_min, { fmt }),
       });
     }
   });
