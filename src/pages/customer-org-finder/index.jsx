@@ -95,7 +95,7 @@ const CustomerOrgFinder = () => {
       <footer className="flex-shrink-0 py-5 flex flex-col items-center gap-3">
         <div className="flex items-center gap-1.5 text-[13px]">
           <span className="text-text-secondary">from</span>
-          <img src="/zunkireelabs-icon.png" alt="Zunkireelabs" className="w-[18px] h-[18px]" />
+          <img src={import.meta.env.BASE_URL + "zunkireelabs-icon.png"} alt="Zunkireelabs" className="w-[18px] h-[18px]" />
           <span className="font-medium text-text-primary">zunkireelabs</span>
         </div>
       </footer>

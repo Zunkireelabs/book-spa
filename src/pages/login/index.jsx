@@ -100,7 +100,7 @@ const StaffLoginAuthentication = () => {
         <div className="flex items-center gap-1.5 text-[13px]">
           <span className="text-text-secondary">from</span>
           <img
-            src="/zunkireelabs-icon.png"
+            src={import.meta.env.BASE_URL + "zunkireelabs-icon.png"}
             alt="Zunkireelabs"
             className="w-[18px] h-[18px]"
           />
