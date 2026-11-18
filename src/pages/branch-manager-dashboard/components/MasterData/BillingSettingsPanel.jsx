@@ -90,7 +90,7 @@ const BillingSettingsPanel = ({ readOnly = false }) => {
     await load();
     // OrgContext caches organizations.settings for the whole app, and the
     // invoice entry points (BookingActionModal's "Print invoice",
-    // CustomerSalesTab's receipt icon) gate on billing_enabled from that
+    // CustomerPaymentsTab's receipt icon) gate on billing_enabled from that
     // cache. Reloading only this panel's own copy left those reading a
     // stale false, so enabling billing appeared to do nothing until a full
     // page reload. Refresh the shared copy too.

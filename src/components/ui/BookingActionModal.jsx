@@ -313,7 +313,7 @@ const BookingActionModal = ({
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   // Keeps "Print invoice" reachable for a booking invoiced before billing was
   // later disabled — the invoice data isn't orphaned, only this button would
-  // be if it hid unconditionally on the toggle. See CustomerSalesTab for the
+  // be if it hid unconditionally on the toggle. See CustomerPaymentsTab for the
   // batched equivalent over a list; this is a single booking.
   const [hasExistingInvoice, setHasExistingInvoice] = useState(false);
   // Admin correction — inline mode replacing the tab bar/content with an

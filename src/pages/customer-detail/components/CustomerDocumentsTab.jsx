@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
+import ConfirmDialog from '../../../components/ui/ConfirmDialog';
 import { fetchCustomerDocuments, uploadCustomerDocument, deleteCustomerDocument } from '../../../services/api';
 
 function formatDate(d) {
@@ -11,6 +12,7 @@ const CustomerDocumentsTab = ({ customerId, branchId }) => {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [confirmId, setConfirmId] = useState(null);
   const [error, setError] = useState(null);
 
   const load = useCallback(async () => {
@@ -40,6 +42,7 @@ const CustomerDocumentsTab = ({ customerId, branchId }) => {
     setDeletingId(documentId);
     const result = await deleteCustomerDocument(documentId);
     setDeletingId(null);
+    setConfirmId(null);
     if (result.error) {
       setError(result.error.message || 'Failed to delete document.');
       return;
@@ -98,7 +101,7 @@ const CustomerDocumentsTab = ({ customerId, branchId }) => {
                 <span className="font-caption text-xs text-text-tertiary">{formatDate(d.created_at)}</span>
                 <button
                   type="button"
-                  onClick={() => handleDelete(d.id)}
+                  onClick={() => setConfirmId(d.id)}
                   disabled={deletingId === d.id}
                   title="Remove document"
                   className="w-6 h-6 rounded-full flex items-center justify-center text-error/70 hover:text-error hover:bg-error/10 spa-transition-fast"
@@ -109,6 +112,17 @@ const CustomerDocumentsTab = ({ customerId, branchId }) => {
             </div>
           ))}
         </div>
+      )}
+      {confirmId && (
+        <ConfirmDialog
+          title="Delete this document?"
+          message="It can't be undone."
+          confirmLabel="Delete"
+          requireReason={false}
+          onConfirm={() => handleDelete(confirmId)}
+          onClose={() => setConfirmId(null)}
+          isSubmitting={deletingId === confirmId}
+        />
       )}
     </div>
   );

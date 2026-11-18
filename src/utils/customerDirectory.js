@@ -140,6 +140,7 @@ export function buildCustomerDirectory({ customers = [], bookings = [], memberId
       unclosed: money.unclosed.map((b) => ({ id: b.id, date: String(b.date).slice(0, 10), service: b.service_name_snapshot || '', status: b.status, atStake: b.money.atStake, isLocked: !!b.is_locked })),
       legacyBalance,
       usualTherapist: topOf(therapistCounts, completedVisits)?.name || null,
+      usualTherapistVisits: topOf(therapistCounts, completedVisits)?.n || 0,
       favouriteService: topOf(serviceCounts, completedVisits)?.name || null,
       vip: completedVisits >= VIP_MIN_VISITS && spent >= VIP_MIN_SPENT,
       member: memberIds.has(c.id),
