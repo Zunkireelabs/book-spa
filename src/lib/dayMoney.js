@@ -3,7 +3,7 @@
 //   moneyIn      = every real tender taken that Nepal day: booking payments + product sales + voucher sales + membership top-ups + package sales
 //   refunds      = money handed back that day (booking refunds + product sales refunded today that were sold on an earlier day)
 //   taken        = moneyIn - refunds
-//   cashExpected = cash in - refunds
+//   cashExpected = cash in - CASH refunds only (ZNLY-258: a refund of a card / online payment goes back to the card, not out of the drawer)
 //   byMethod     = one row per real method name, so  sum(byMethod) - refunds = taken  and the rows on screen always add up.
 //
 // Wallet / voucher-balance / package tenders are NOT money in: their value was recognised when the credit was bought.
@@ -31,8 +31,9 @@ export function methodLabel(mode) {
   return LABELS[canonicalMode(mode)] || String(mode || 'Other');
 }
 
-// byMode: { 'Cash': 900, 'Khalti': 500, ... } (non-tendered modes are ignored), refunds: number.
-export function foldDayMoney({ byMode = {}, refunds = 0 } = {}) {
+// byMode: { 'Cash': 900, 'Khalti': 500, ... } (non-tendered modes are ignored), refunds: number (all refunds), cashRefunds: the part paid out in cash.
+// cashRefunds missing = unknown, so every refund is treated as cash (the old, cautious figure) rather than hiding it.
+export function foldDayMoney({ byMode = {}, refunds = 0, cashRefunds } = {}) {
   const merged = {};
   for (const [m, v] of Object.entries(byMode || {})) if (isTendered(m)) merged[canonicalMode(m)] = (merged[canonicalMode(m)] || 0) + Number(v);
   const rows = Object.entries(merged)
@@ -41,8 +42,9 @@ export function foldDayMoney({ byMode = {}, refunds = 0 } = {}) {
     .sort((a, b) => (a.method === 'Cash' ? -1 : b.method === 'Cash' ? 1 : b.amount - a.amount));
   const moneyIn = rows.reduce((s, r) => s + r.amount, 0);
   const refunded = Number(refunds) || 0;
+  const cashRefunded = cashRefunds == null ? refunded : Math.min(Number(cashRefunds) || 0, refunded);
   const cashIn = rows.find((r) => r.method === 'Cash')?.amount || 0;
-  return { byMethod: rows, moneyIn, refunds: refunded, taken: moneyIn - refunded, cashExpected: cashIn - refunded };
+  return { byMethod: rows, moneyIn, refunds: refunded, taken: moneyIn - refunded, cashRefunds: cashRefunded, cashExpected: cashIn - cashRefunded };
 }
 
 // Adds one tender into a { mode: amount } map (skipping non-tendered modes). Returns the same map.
@@ -57,11 +59,11 @@ export function addTender(byMode, mode, amount) {
 //   at close  = what the day held when it was closed (rows taken at or before closed_at)  -> the cards and the first rows
 //   after     = money collected after the close (it is NOT in the closed report)
 //   now       = at close + after (live), so "Taken now" and "Cash in the drawer now"
-// d: { isClosed, byMode, refunds (live), afterClose: {amount, cash}, atClose: {byMode, refunds, closedAt} | null }
+// d: { isClosed, byMode, refunds (live), cashRefunds (live), afterClose: {amount, cash}, atClose: {byMode, refunds, closedAt} | null }
 export function dayMoneyView(d) {
-  const live = foldDayMoney({ byMode: d?.byMode, refunds: d?.refunds });
+  const live = foldDayMoney({ byMode: d?.byMode, refunds: d?.refunds, cashRefunds: d?.cashRefunds });
   if (d?.isClosed && d?.atClose) {
-    const at = foldDayMoney({ byMode: d.atClose.byMode, refunds: d.atClose.refunds });
+    const at = foldDayMoney({ byMode: d.atClose.byMode, refunds: d.atClose.refunds, cashRefunds: d.atClose.cashRefunds });
     return { closed: true, headline: at, at, after: { amount: Number(d.afterClose?.amount || 0), cash: Number(d.afterClose?.cash || 0) }, now: live, closedAt: d.atClose.closedAt || null };
   }
   return { closed: false, headline: live, live };

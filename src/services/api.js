@@ -1162,7 +1162,7 @@ export async function getProductSalesForDate(branchId, date) {
 
 // The day's money, ONE source shared with the dashboard Close card (get_day_money -> _dashboard_money_in / _dashboard_refunds, migration 391):
 // everything TAKEN that Nepal day (any booking date) by real method name, minus refunds made that day. ZNLY-232.
-//   { byMode, refunds, taken, cashExpected, serviceIn }
+//   { byMode, refunds, cashRefunds, taken, cashExpected, serviceIn }   cashRefunds = the part of refunds paid out in cash (ZNLY-258)
 // The org's own card methods (Card -> Mastercard, Visa ...) so card brands land in the card bucket, not "fonepay" (ZNLY-234).
 async function getOrgCardNames() {
   try {
@@ -1179,11 +1179,11 @@ export async function getDayMoneyForDate(branchId, date) {
   const { data, error } = await supabase.rpc('get_day_money', { p_branch_id: isOverallBranch(branchId) ? null : resolveBranchId(branchId), p_date: date });
   if (error) throw error;
   const d = data || {};
-  return { byMode: d.by_method || {}, refunds: Number(d.refunds || 0), taken: Number(d.taken || 0), cashExpected: Number(d.cash_expected || 0), serviceIn: Number(d.service_in || 0), sources: d.sources || {},
+  return { byMode: d.by_method || {}, refunds: Number(d.refunds || 0), cashRefunds: Number(d.cash_refunds || 0), taken: Number(d.taken || 0), cashExpected: Number(d.cash_expected || 0), serviceIn: Number(d.service_in || 0), sources: d.sources || {},
     // money taken AFTER this day was closed (not in the closed daily_reports row), and its cash part (ZNLY-234)
     afterClose: { amount: Number(d.after_close?.amount || 0), cash: Number(d.after_close?.cash || 0) },
     // what the closed day held at close, from rows taken at or before closed_at (null when the day is open or a multi-branch view)
-    atClose: d.at_close ? { byMode: d.at_close.by_method || {}, refunds: Number(d.at_close.refunds || 0), taken: Number(d.at_close.taken || 0), cashExpected: Number(d.at_close.cash_expected || 0), closedAt: d.at_close.closed_at || null } : null };
+    atClose: d.at_close ? { byMode: d.at_close.by_method || {}, refunds: Number(d.at_close.refunds || 0), cashRefunds: Number(d.at_close.cash_refunds || 0), taken: Number(d.at_close.taken || 0), cashExpected: Number(d.at_close.cash_expected || 0), closedAt: d.at_close.closed_at || null } : null };
 }
 
 // Membership top-ups and package purchases on [date] — new cash in from selling
@@ -4883,7 +4883,9 @@ export async function getDailySummary(branchId, date) {
     paymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
     const cardNames = await getOrgCardNames();
     for (const [m, v] of Object.entries(byMode)) paymentBreakdown[bucketForMode(m, cardNames)] += Number(v);
-    paymentBreakdown.cash -= refunds;
+    // Only refunds paid out in cash leave the cash bucket; the rest went back to card / online (ZNLY-258). The buckets still add up to taken.
+    paymentBreakdown.cash -= dayMoney.cashRefunds;
+    paymentBreakdown.card -= refunds - dayMoney.cashRefunds;
     netRevenue = dayMoney.taken;
 
     // 4d. Tips collected today — NOT revenue (migration-240). Reported separately,
@@ -4926,6 +4928,7 @@ export async function getDailySummary(branchId, date) {
         totalDiscounts,
         netRevenue,
         refunds,
+        cashRefunds: dayMoney.cashRefunds,
         byMode,
         noShowBookings,
         notFinishedBookings,
@@ -5581,7 +5584,9 @@ export async function getDailyOperationalReport(branchId, date) {
       paymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
       const cardNames = await getOrgCardNames();
       for (const [m, v] of Object.entries(byMode)) paymentBreakdown[bucketForMode(m, cardNames)] += Number(v);
-      paymentBreakdown.cash -= refunds;
+      // Only refunds paid out in cash leave the cash bucket; the rest went back to card / online (ZNLY-258). The buckets still add up to taken.
+    paymentBreakdown.cash -= dayMoney.cashRefunds;
+    paymentBreakdown.card -= refunds - dayMoney.cashRefunds;
     }
 
     // Step 5 — Staff discount summary
@@ -5683,6 +5688,7 @@ export async function getDailyOperationalReport(branchId, date) {
         afterClose: dayMoney.afterClose,
         atClose: dayMoney.atClose,
         refunds,
+        cashRefunds: dayMoney.cashRefunds,
         byMode,
         tipsTotal,
         staffDiscountSummary,

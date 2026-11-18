@@ -60,6 +60,32 @@ describe('dayMoney: the one money-today rule (ZNLY-232)', () => {
     expect(d.cashExpected).toBe(1900);
   });
 
+  it('ZNLY-258 (BK-20261115-0021): a 2,000 refund of a CARD payment does not reduce the cash drawer, but still reduces taken', () => {
+    const d = foldDayMoney({ byMode: { Cash: 41520, Mastercard: 1500, Cheque: 1000 }, refunds: 2000, cashRefunds: 0 });
+    expect(d.refunds).toBe(2000);
+    expect(d.cashRefunds).toBe(0);
+    expect(d.taken).toBe(42020);          // every refund still comes off the takings
+    expect(d.cashExpected).toBe(41520);   // ...but only cash refunds come off the drawer
+  });
+
+  it('ZNLY-258: a split refund (cash 1,000 + card 1,500) takes only the 1,000 cash off the drawer', () => {
+    const d = foldDayMoney({ byMode: { Cash: 5000, Card: 3000 }, refunds: 2500, cashRefunds: 1000 });
+    expect(d.taken).toBe(5500);
+    expect(d.cashExpected).toBe(4000);
+  });
+
+  it('ZNLY-258: cashRefunds missing = every refund counted as cash (cautious); never more than the refunds', () => {
+    expect(foldDayMoney({ byMode: { Cash: 100 }, refunds: 30 }).cashExpected).toBe(70);
+    expect(foldDayMoney({ byMode: { Cash: 100 }, refunds: 30, cashRefunds: 99 }).cashExpected).toBe(70);
+  });
+
+  it('ZNLY-258: the closed-day view carries cash refunds for "at close" and "now" separately', () => {
+    const v = dayMoneyView({ isClosed: true, byMode: { Cash: 900 }, refunds: 300, cashRefunds: 100, afterClose: { amount: 0, cash: 0 },
+      atClose: { byMode: { Cash: 900 }, refunds: 200, cashRefunds: 0, closedAt: 'x' } });
+    expect(v.at.cashExpected).toBe(900);   // 200 refunded to cards at close
+    expect(v.now.cashExpected).toBe(800);  // 100 cash refunded afterwards
+  });
+
   it('mixed-case modes fold into one row (seed wrote lowercase "cash")', () => {
     expect(canonicalMode('cash')).toBe('Cash');
     expect(canonicalMode('Nabil Card')).toBe('Nabil Card');
