@@ -49,9 +49,10 @@ SELECT 'product_sales', o.slug || ':' || CASE WHEN ps.refunded_at IS NULL THEN '
 FROM product_sales ps JOIN organizations o ON o.id = ps.org_id
 GROUP BY 2 ORDER BY 2;
 
--- 6. Vouchers per org: value issued and amount paid.
+-- 6. Vouchers per org: count and value issued. (amount_paid is NOT here: migration 344 creates it, so a pre-344
+--    database has no such column; it would make the "before" snapshot fail. CP8 checks its backfill separately.)
 SELECT 'vouchers', o.slug,
-       count(*) || '|' || coalesce(sum(v.total_amount_issued), 0) || '|' || coalesce(sum(v.amount_paid), 0)
+       count(*) || '|' || coalesce(sum(v.total_amount_issued), 0)
 FROM vouchers v JOIN organizations o ON o.id = v.org_id
 GROUP BY o.slug ORDER BY 2;
 
