@@ -96,7 +96,7 @@ const formatAmountDisplay = (raw) => {
   const intPart = i === '' ? '' : Number(i).toLocaleString('en-IN');
   return d === undefined ? intPart : `${intPart || '0'}.${d}`;
 };
-const AmountInput = forwardRef(({ value, onChange, ...rest }, ref) => {
+const AmountInput = forwardRef(function AmountInput({ value, onChange, ...rest }, ref) {
   const innerRef = useRef(null);
   const caretRef = useRef(null); // count of digits/dots left of the caret after the last edit
   const display = formatAmountDisplay(value);

@@ -73,7 +73,7 @@ export const controlA11y = (id, error) => ({
 });
 export const CONTROL_ERROR = 'border-error focus:border-error focus:ring-error/30';
 
-export const TextInput = React.forwardRef(({ error, ...props }, ref) => <input ref={ref} type="text" {...props} className={`${CONTROL} ${error ? CONTROL_ERROR : ''} ${props.className || ''}`} />);
+export const TextInput = React.forwardRef(function TextInput({ error, ...props }, ref) { return <input ref={ref} type="text" {...props} className={`${CONTROL} ${error ? CONTROL_ERROR : ''} ${props.className || ''}`} />; });
 
 // Money amount: "NPR" prefix inside the field, tabular figures, no negatives, at most 2 decimals. `value` is the raw string.
 export const sanitizeMoney = (raw) => {
@@ -81,7 +81,7 @@ export const sanitizeMoney = (raw) => {
   const [int, ...rest] = cleaned.split('.');
   return rest.length ? `${int}.${rest.join('').slice(0, 2)}` : int;
 };
-export const MoneyInput = React.forwardRef(({ value, onChange, error, className = '', ...props }, ref) => (
+export const MoneyInput = React.forwardRef(function MoneyInput({ value, onChange, error, className = '', ...props }, ref) { return (
   <div className="relative">
     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[13px] text-text-tertiary pointer-events-none">NPR</span>
     <input
@@ -95,7 +95,7 @@ export const MoneyInput = React.forwardRef(({ value, onChange, error, className 
       className={`${CONTROL} pl-11 font-data tabular-nums ${error ? CONTROL_ERROR : ''} ${className}`}
     />
   </div>
-));
+); });
 export const NumberInput = (props) => <input type="number" {...props} className={`${CONTROL} ${props.className || ''}`} />;
 
 export const SelectField = ({ value, onChange, options, placeholder, disabled }) => (

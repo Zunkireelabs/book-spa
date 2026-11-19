@@ -31,4 +31,7 @@ describe('htmlToText', () => {
   it('collapses runs of whitespace and blank lines', () => {
     expect(htmlToText('<p>a    b</p>\n\n\n\n<p>c</p>')).toBe('a b\n\nc');
   });
+  it('collapses a non-breaking space (U+00A0) like any other space', () => {
+    expect(htmlToText('a\u00a0\u00a0b')).toBe('a b');
+  });
 });

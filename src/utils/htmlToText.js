@@ -17,7 +17,7 @@ export const htmlToText = (html) => {
     .replace(/<[^>]*>/g, '');
   // Decode last so an escaped "&lt;b&gt;" stays the literal text "<b>" instead of being treated as a tag.
   return decodeEntities(text)
-    .replace(/[ \t\f\v ]+/g, ' ')
+    .replace(/[ \t\f\v\u00a0]+/g, ' ')
     .replace(/ *\n */g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
