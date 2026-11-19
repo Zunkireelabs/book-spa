@@ -12,6 +12,7 @@ import MyDayView from './MyDayView';
 import { isNewTenant, setupSteps } from '../../lib/dashboardTenant';
 import { useSearchParams } from 'react-router-dom';
 import { nepalNow } from '../../utils/customerDirectory';
+import { Card } from './dashKit';
 import { VIEWS, availableViews, defaultView, dayPhase, readRememberedView, rememberView } from '../../lib/dashboardViews';
 import { localizeBranch, wordBranch, wordBranches } from '../../utils/industryTerms';
 import ScrollRow from '../../components/ui/ScrollRow';
@@ -102,6 +103,8 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
     if (!error) setDash(data); // a failed refresh keeps the last good data under the error notice
   }, [branchId, isOverall, branches]);
   useEffect(() => { loadDash(); }, [loadDash]);
+  // First load: no data yet and no error. Every view shows placeholders, never zeros or a "nothing left" tick.
+  const dashLoading = !dash && !dashError && (isOverall ? branches.length > 0 : !!branchId);
   useEffect(() => {
     const id = setInterval(loadDash, 60000);
     window.addEventListener('pending-approvals-changed', loadDash);
@@ -181,7 +184,15 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
         )}
       </header>
 
-      {view === 'business' && isOverall ? (
+      {dashLoading ? (
+        <div className="space-y-3 sm:space-y-4" aria-busy="true">
+          <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-400 animate-pulse">Loading today…</div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
+            <Card title="Today" loading />
+            <Card title="Needs action" loading />
+          </div>
+        </div>
+      ) : view === 'business' && isOverall ? (
         <BusinessView
           data={dash} dataError={dashError} branchIds={branches.map((b) => b.id)} today={now.today}
           role={role} onOpenBranch={openBranch} onReload={loadDash}

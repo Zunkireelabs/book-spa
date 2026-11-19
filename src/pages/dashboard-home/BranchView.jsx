@@ -50,7 +50,7 @@ const WeekStrip = ({ week }) => (
 const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLabel, staffLabelPlural, highlight, onReload, dataError = false, newTenant = false, setup = null, nowHm = null, onOpenMyDay }) => {
   const [, setSearchParams] = useSearchParams();
   const [panel, setPanel] = useState(null); // { type: 'booking', id } | { type: 'create', slot } | { type: 'collect', booking }
-  const [needs, setNeeds] = useState([]); // every booking that needs someone, tagged with its kind (lib/dashboardNeeds)
+  const [needs, setNeeds] = useState(null); // null = still loading (never shown as 0 / "nothing left") // every booking that needs someone, tagged with its kind (lib/dashboardNeeds)
   const [needsError, setNeedsError] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [closing, setClosing] = useState(false);
@@ -120,10 +120,11 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
   const notClosedRow = notClosed.length > 0 && (
     <Row icon="History" tone="text-warning" title={`${plural(notClosed.length, 'booking')} never closed`} sub={`oldest ${shortDay(oldestOpen)}`} actions={<Button size="sm" variant="outline" onClick={() => go('bookings')}>Open</Button>} />
   );
-  const needCount = needs.length; // the one rule: every kind, so Live, Close and Business show the same total
+  const needsLoading = needs === null && !needsError;
+  const needCount = needs ? needs.length : 0; // the one rule: every kind, so Live, Close and Business show the same total
 
   const needsCard = (
-    <Card icon="Inbox" title="Needs action" count={needCount} error={badNeeds} onRetry={refresh}>
+    <Card icon="Inbox" title="Needs action" count={needCount} error={badNeeds} onRetry={refresh} loading={needsLoading}>
       {needCount === 0 && <p className="text-sm text-gray-500">Nothing needs you right now ✓</p>}
       {discounts}
       {unpaidRows}{unconfirmedRows}{unassignedRows}{notClosedRow}
@@ -199,7 +200,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
         {brief('Moon', <>
           <b>{pulse.completed || 0} of {pulse.bookings || 0}</b> done{pulse.no_show > 0 && <> ({pulse.no_show} no-show)</>}
           {canMoney && <>{sep}<b>{npr(taken)}</b> taken</>}
-          {sep}<span className={needCount ? 'text-warning' : ''}>{needCount} loose ends</span>
+          {sep}{needsLoading ? <span className="text-gray-400">loose ends…</span> : <span className={needCount ? 'text-warning' : ''}>{needCount} loose ends</span>}
           {sep}tomorrow {data?.tomorrow?.bookings ?? 0} booked
         </>)}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
@@ -231,7 +232,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
             </Card>
           </div>
           <div className="space-y-3 sm:space-y-4">
-            <Card icon="CheckCheck" title="Loose ends" count={needCount} error={badNeeds} onRetry={refresh}>
+            <Card icon="CheckCheck" title="Loose ends" count={needCount} error={badNeeds} onRetry={refresh} loading={needsLoading}>
               {needCount === 0 && <p className="text-sm text-success font-medium">Nothing left open ✓</p>}
               {discounts}{unpaidRows}{unconfirmedRows}{unassignedRows}{notClosedRow}
             </Card>

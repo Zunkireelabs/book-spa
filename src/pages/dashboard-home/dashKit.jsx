@@ -25,15 +25,22 @@ export const LoadError = ({ onRetry }) => (
   <p className="text-sm text-error flex items-center gap-2 flex-wrap">Couldn't load. <button type="button" onClick={onRetry} className="font-medium underline">Retry</button></p>
 );
 
-export const Card = ({ icon, title, count, meta, children, className = '', error = false, onRetry }) => (
+/** Grey placeholder bars shown instead of numbers while a card's data is still loading (never a zero or a green tick). */
+export const Skeleton = ({ rows = 2 }) => (
+  <div className="space-y-2 animate-pulse" aria-busy="true" aria-label="Loading">
+    {Array.from({ length: rows }).map((_, i) => <div key={i} className={`h-4 rounded bg-gray-100 ${i % 2 ? 'w-2/3' : 'w-full'}`} />)}
+  </div>
+);
+
+export const Card = ({ icon, title, count, meta, children, className = '', error = false, onRetry, loading = false }) => (
   <section className={`bg-white rounded-lg border border-gray-200 ${className}`}>
     <header className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
       {icon && <Icon name={icon} size={16} className="text-gray-500" />}
       <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
-      {!error && count > 0 && <span className="text-[11px] font-medium bg-error/10 text-error rounded-full px-1.5 min-w-[18px] text-center">{count}</span>}
-      {!error && meta && <span className="ml-auto text-xs text-gray-500">{meta}</span>}
+      {!error && !loading && count > 0 && <span className="text-[11px] font-medium bg-error/10 text-error rounded-full px-1.5 min-w-[18px] text-center">{count}</span>}
+      {!error && !loading && meta && <span className="ml-auto text-xs text-gray-500">{meta}</span>}
     </header>
-    <div className="p-4">{error ? <LoadError onRetry={onRetry} /> : children}</div>
+    <div className="p-4">{error ? <LoadError onRetry={onRetry} /> : loading ? <Skeleton /> : children}</div>
   </section>
 );
 
