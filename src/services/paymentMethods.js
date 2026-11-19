@@ -47,3 +47,29 @@ export function buildPaymentMethodTree(paymentMethods) {
     return { value: m.name, label: humanizePaymentMethod(m.name), subMethods };
   });
 }
+
+// Which bucket a payment mode belongs to in the day's cash / card / digital split (ZNLY-234). Card brands the org configured under a card group
+// (Card -> Mastercard, Visa ...) are cards, not "fonepay"; so is any method whose own name says card (Nabil Card ...).
+const CARD_NAME = /\b(cards?|visa|master ?card|amex|american express|union ?pay|rupay)\b/i;
+const sameName = (a) => String(a || '').trim().toLowerCase();
+
+// The lower-cased names that count as card, from the org's method tree (strings and { name, subMethods }).
+export function cardModeNames(methods) {
+  const out = new Set();
+  for (const m of (Array.isArray(methods) ? methods : [])) {
+    if (typeof m === 'string') { if (CARD_NAME.test(m)) out.add(sameName(m)); continue; }
+    if (!m || typeof m !== 'object') continue;
+    const subs = Array.isArray(m.subMethods) ? m.subMethods : [];
+    if (CARD_NAME.test(m.name || '')) { out.add(sameName(m.name)); subs.forEach((x) => out.add(sameName(x))); }
+    else subs.forEach((x) => { if (CARD_NAME.test(x)) out.add(sameName(x)); });
+  }
+  return out;
+}
+
+// 'cash' | 'card' | 'fonepay' (digital / other) for one payment mode.
+export function bucketForMode(mode, cardNames = new Set()) {
+  const m = sameName(mode);
+  if (m === 'cash') return 'cash';
+  if (cardNames.has(m) || CARD_NAME.test(m)) return 'card';
+  return 'fonepay';
+}

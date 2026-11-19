@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import { fetchBranchAdvanceBookingWindow, updateBranchAdvanceBookingWindow } from '../../../../services/api';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 const UNIT_OPTIONS = [
   { value: 'day', label: 'Day(s)' },
@@ -73,7 +74,7 @@ const AdvanceBookingWindowPanel = ({ branchId }) => {
         <h3 className="font-accent text-3xl text-text-primary leading-tight">Advance booking window</h3>
         <p className="font-body text-sm text-text-secondary mt-1 max-w-xl">
           How far ahead can customers book online for{' '}
-          {branch?.name ? <span className="font-body-semibold text-text-primary">{branch.name}</span> : 'this branch'}.
+          {branch?.name ? <span className="font-body-semibold text-text-primary">{branch.name}</span> : `this ${wordBranch()}`}.
           Leave it blank to use the default (30 days).
         </p>
       </div>

@@ -9,6 +9,7 @@ import {
 } from 'services/platformApi';
 import { getTodayISO, toISO } from 'utils/periodPresets';
 import { exportRowsToExcel, exportSheetsToExcel } from 'utils/exportExcel';
+import { canonicalMode } from 'lib/dayMoney';
 
 const BASIS_OPTIONS = [
   { value: 'vat_inclusive', label: 'VAT inclusive (rate on full amount)' },
@@ -24,7 +25,7 @@ const WALLET_PAYMENT_MODES = ['Membership', 'ReferralWallet', 'VoucherWallet', '
 
 const nonWalletAmount = (booking) =>
   (booking.payments || [])
-    .filter((p) => !WALLET_PAYMENT_MODES.includes(p.payment_mode))
+    .filter((p) => !WALLET_PAYMENT_MODES.includes(canonicalMode(p.payment_mode)))
     .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
 // Pure row-shapers, reused both for the currently-loaded period (via useMemo
@@ -256,14 +257,18 @@ const PlatformOrgDetail = () => {
   });
 
   // Whole-table summary export — every past collection period, one row each.
-  const handleExportAllSummary = () => {
-    exportRowsToExcel(`commission-collection-history-${orgId}`, buildCollectionSummaryRows(collections), 'Collection History');
+  const handleExportAllSummary = async () => {
+    try {
+      await exportRowsToExcel(`commission-collection-history-${orgId}`, buildCollectionSummaryRows(collections), 'Collection History');
+    } catch (e) { setError(e.message || 'Export failed'); }
   };
 
   // Single-period summary export — same shape, one row.
-  const handleExportRowSummary = (c) => {
-    exportRowsToExcel(`commission-summary-${orgId}-${c.period_start}_to_${c.period_end}`,
-      buildCollectionSummaryRows([c]), 'Summary');
+  const handleExportRowSummary = async (c) => {
+    try {
+      await exportRowsToExcel(`commission-summary-${orgId}-${c.period_start}_to_${c.period_end}`,
+        buildCollectionSummaryRows([c]), 'Summary');
+    } catch (e) { setError(e.message || 'Export failed'); }
   };
 
   // Single-period detail export — itemized bookings/memberships/vouchers for
@@ -288,7 +293,7 @@ const PlatformOrgDetail = () => {
     setDetailExportingId(c.id);
     try {
       const rows = await fetchPeriodDetailRows(c.period_start, c.period_end);
-      exportRowsToExcel(`commission-detail-${orgId}-${c.period_start}_to_${c.period_end}`, rows, 'Detail');
+      await exportRowsToExcel(`commission-detail-${orgId}-${c.period_start}_to_${c.period_end}`, rows, 'Detail');
     } catch (e) {
       setError(e.message || 'Detail export failed');
     } finally {
@@ -308,7 +313,7 @@ const PlatformOrgDetail = () => {
           rows: await fetchPeriodDetailRows(c.period_start, c.period_end),
         }))
       );
-      exportSheetsToExcel(`commission-detail-all-${orgId}`, [
+      await exportSheetsToExcel(`commission-detail-all-${orgId}`, [
         { name: 'Summary', rows: buildCollectionSummaryRows(collections) },
         ...perPeriod,
       ]);
@@ -321,8 +326,9 @@ const PlatformOrgDetail = () => {
 
   // Present-period export — the not-yet-collected numbers currently shown in
   // the Collect Commission panel, for whatever Period start/end is selected.
-  const handleExportPresentPeriodSummary = () => {
-    exportRowsToExcel(`commission-present-period-summary-${orgId}`, [{
+  const handleExportPresentPeriodSummary = async () => {
+    try {
+    await exportRowsToExcel(`commission-present-period-summary-${orgId}`, [{
       'Period Start': wizFrom,
       'Period End': wizTo,
       'Sales (Period)': grossSales,
@@ -330,17 +336,20 @@ const PlatformOrgDetail = () => {
       'Collected To Date': orgRollup?.collected_to_date == null ? '' : Number(orgRollup.collected_to_date),
       'Net Owed': orgRollup?.net_owed == null ? '' : Number(orgRollup.net_owed),
     }], 'Present Period Summary');
+    } catch (e) { setError(e.message || 'Export failed'); }
   };
 
   // Itemized export for the present period — exactly what's on screen in the
   // Paid Bookings/Memberships/Vouchers table below (already loaded, no extra
   // fetch), respecting the current branch/type filters (what you see is what
   // you download).
-  const handleExportPresentPeriodDetail = () => {
+  const handleExportPresentPeriodDetail = async () => {
     const rows = drillRows.map((r) => ({
       Date: r.date, Type: r.type, Branch: r.branch_name, Description: r.description, Amount: r.amount,
     }));
-    exportRowsToExcel(`commission-present-period-detail-${orgId}-${wizFrom}_to_${wizTo}`, rows, 'Present Period Detail');
+    try {
+      await exportRowsToExcel(`commission-present-period-detail-${orgId}-${wizFrom}_to_${wizTo}`, rows, 'Present Period Detail');
+    } catch (e) { setError(e.message || 'Export failed'); }
   };
 
   const submitCollect = async () => {

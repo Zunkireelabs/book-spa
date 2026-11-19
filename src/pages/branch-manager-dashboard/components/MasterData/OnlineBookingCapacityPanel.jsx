@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
+import { useIndustry } from '../../../../hooks/useIndustry';
 import { fetchBranchOnlineCapacity, updateBranchOnlineCapacity } from '../../../../services/api';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 // Per-branch cap on how many bookings customers can place online without a specific staff
 // member assigned (branches.online_booking_capacity, migration-138). The real enforcement is
@@ -12,6 +14,7 @@ import { fetchBranchOnlineCapacity, updateBranchOnlineCapacity } from '../../../
 // Only mounted for orgs with show_staff_selection off — when customers pick a specific person,
 // every online booking carries a therapist_id and the trigger exempts it, so the cap is dead.
 const OnlineBookingCapacityPanel = ({ branchId }) => {
+  const { enableRooms, locationLabel } = useIndustry();
   const [branch, setBranch] = useState(null);
   const [value, setValue] = useState('');
   const [loading, setLoading] = useState(true);
@@ -60,7 +63,7 @@ const OnlineBookingCapacityPanel = ({ branchId }) => {
         <h3 className="font-accent text-3xl text-text-primary leading-tight">Online booking limit</h3>
         <p className="font-body text-sm text-text-secondary mt-1 max-w-xl">
           Caps how many bookings customers can place online at the same time for{' '}
-          {branch?.name ? <span className="font-body-semibold text-text-primary">{branch.name}</span> : 'this branch'},
+          {branch?.name ? <span className="font-body-semibold text-text-primary">{branch.name}</span> : `this ${wordBranch()}`},
           since they don't pick a staff member themselves. Leave it blank for no limit.
         </p>
       </div>
@@ -104,7 +107,7 @@ const OnlineBookingCapacityPanel = ({ branchId }) => {
             />
             <p className="font-caption text-xs text-text-secondary">
               {currentCapacity == null
-                ? 'Currently no limit — customers can book online as long as a room is free.'
+                ? `Currently no limit — customers can book online as long as a ${enableRooms ? locationLabel.toLowerCase() : 'slot'} is free.`
                 : `Currently ${currentCapacity} at a time.`}
             </p>
           </div>

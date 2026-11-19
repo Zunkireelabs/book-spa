@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import Icon from '../AppIcon';
-import { issueInvoice, recordInvoicePrint } from '../../services/api';
+import React, { useState, useEffect } from 'react';
+import Button from './Button';
+import ModalShell from './ModalShell';
+import { RadioCards, InlineError } from './PanelFormKit';
+import { issueInvoice, recordInvoicePrint, fetchInvoiceDialogInfo } from '../../services/api';
 import { formatNPR } from '../../services/bookingTransformers';
 
 // Same posture as calendar/PrintReportModal.jsx: no PDF library, no
@@ -149,96 +151,124 @@ function buildThermalHtml(invoice, copyLabel) {
 </html>`;
 }
 
+const LAYOUT_OPTIONS = [
+  { value: 'a4', title: 'A4 tax invoice', detail: 'Full page. For a customer who asks for a bill with PAN.' },
+  { value: 'thermal', title: 'Thermal receipt (80 mm)', detail: 'Narrow roll printer at the desk.' },
+];
+
+const maskPhone = (phone) => {
+  const d = String(phone || '').replace(/\s/g, '');
+  return d.length > 5 ? `${d.slice(0, 2)}${'•'.repeat(d.length - 5)}${d.slice(-3)}` : d;
+};
+
+// The three failures the board names, in plain words. The raw database text ("issue_invoice: ...") never reaches the screen.
+const friendlyError = (message) => {
+  const m = String(message || '');
+  if (/not set|tax mode|billing/i.test(m)) return 'Billing is not set up. Ask an admin to complete Settings → Billing.';
+  if (/not fully paid/i.test(m)) return 'This booking is not fully paid yet, so no invoice can be issued.';
+  return "Couldn't issue the invoice. Nothing was printed. Try again.";
+};
+
+const FieldLabel = ({ children }) => (
+  <span className="block mb-2 text-xs font-body font-body-medium uppercase tracking-[0.05em] text-text-secondary">{children}</span>
+);
+
 const InvoicePrintModal = ({ bookingId, onClose }) => {
-  const [invoice, setInvoice] = useState(null);
+  const [info, setInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [printing, setPrinting] = useState(null); // 'a4' | 'thermal'
+  const [layout, setLayout] = useState('a4');
+  const [working, setWorking] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    // footer_text (settings-panel label: "footer text... and any terms") is
-    // frozen onto the invoice at issue time, same as every other printed
-    // field — a reprint must never show terms that weren't on what the
-    // customer was handed.
-    const result = await issueInvoice(bookingId);
-    if (result.error) {
-      setError(result.error.message || 'Could not issue the invoice.');
-    } else {
-      setInvoice(result.data);
-    }
-    setLoading(false);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const result = await fetchInvoiceDialogInfo(bookingId);
+      if (!alive) return;
+      if (result.error) setError("Couldn't load this booking. Close and try again.");
+      else setInfo(result.data);
+      setLoading(false);
+    })();
+    return () => { alive = false; };
   }, [bookingId]);
 
-  useEffect(() => { load(); }, [load]);
+  const invoice = info?.invoice;
+  const isDuplicate = (info?.printCount || 0) > 0;
+  const buyerName = invoice?.buyer_name || info?.booking?.customer_name || '';
+  const buyerPhone = invoice?.buyer_phone || info?.booking?.customer_phone || '';
 
-  const handlePrint = async (printType) => {
-    if (!invoice) return;
-    setPrinting(printType);
-    const result = await recordInvoicePrint({ invoiceId: invoice.id, printType });
-    if (result.error) {
-      setError(result.error.message || 'Could not record the print.');
-      setPrinting(null);
-      return;
-    }
-    const html = printType === 'a4' ? buildA4Html(invoice, result.data.copyLabel) : buildThermalHtml(invoice, result.data.copyLabel);
-    const printWindow = window.open('', '_blank', printType === 'a4' ? 'width=900,height=1000' : 'width=400,height=700');
-    setPrinting(null);
-    if (!printWindow) return;
+  // The first click issues the invoice (issue_invoice is idempotent: an existing one is returned) and fixes its number, lines and tax;
+  // record_invoice_print then decides Original vs copy. footer_text is frozen onto the invoice at issue time, so a reprint never shows
+  // terms that were not on what the customer was handed.
+  const handlePrint = async () => {
+    setWorking(true);
+    setError(null);
+    const issued = await issueInvoice(bookingId);
+    if (issued.error) { setError(friendlyError(issued.error.message)); setWorking(false); return; }
+    const inv = issued.data;
+    const recorded = await recordInvoicePrint({ invoiceId: inv.id, printType: layout });
+    if (recorded.error) { setError("Couldn't record the print. Nothing was printed. Try again."); setWorking(false); return; }
+    const html = layout === 'a4' ? buildA4Html(inv, recorded.data.copyLabel) : buildThermalHtml(inv, recorded.data.copyLabel);
+    const printWindow = window.open('', '_blank', layout === 'a4' ? 'width=900,height=1000' : 'width=400,height=700');
+    setWorking(false);
+    if (!printWindow) { setError('The print window was blocked. Allow pop-ups for this site and try again.'); return; }
     printWindow.document.write(html);
     printWindow.document.close();
     printWindow.focus();
     setTimeout(() => printWindow.print(), 150);
+    onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface rounded-spa-lg shadow-spa-modal w-full max-w-sm p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Print invoice</h3>
-          <button onClick={onClose} className="p-1 rounded hover:bg-background"><Icon name="X" size={18} className="text-text-secondary" /></button>
-        </div>
+    <ModalShell onClose={working ? undefined : onClose} className="max-w-md" aria-label="Print invoice">
+      <div className="flex items-center justify-between p-5 border-b border-border">
+        <h3 className="font-heading font-heading-semibold text-base text-text-primary">Print invoice</h3>
+        <span className="text-[13px] text-text-secondary">{info?.booking?.booking_number ? `Session ${info.booking.booking_number}` : ''}</span>
+      </div>
 
-        {loading && (
+      <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
+        {loading ? (
           <div className="text-center py-8">
             <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
             <p className="font-body text-sm text-text-secondary">Preparing invoice...</p>
           </div>
-        )}
-
-        {error && (
-          <div className="flex items-start gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
-            <Icon name="AlertCircle" size={16} className="mt-0.5 flex-shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-
-        {invoice && !loading && (
+        ) : (
           <>
-            <div className="bg-background border border-border rounded-spa p-3 text-sm">
-              <div className="font-body-medium text-text-primary">{invoice.invoice_number}</div>
-              <div className="text-text-secondary text-xs mt-0.5">{formatNPR(invoice.total_amount)} · {invoice.buyer_name}</div>
+            <div>
+              <FieldLabel>Layout</FieldLabel>
+              <RadioCards label="Layout" options={LAYOUT_OPTIONS} value={layout} onChange={setLayout} />
             </div>
-            <div className="flex gap-2">
-              <Button80mm label="Print A4" onClick={() => handlePrint('a4')} loading={printing === 'a4'} />
-              <Button80mm label="Print thermal (80mm)" onClick={() => handlePrint('thermal')} loading={printing === 'thermal'} />
+
+            <div>
+              <FieldLabel>Copy</FieldLabel>
+              <div className="flex gap-2" role="group" aria-label="Copy">
+                {[['Original', !isDuplicate], ['Duplicate', isDuplicate]].map(([label, on]) => (
+                  <span key={label} aria-current={on ? 'true' : undefined} className={`inline-flex items-center h-[30px] px-3.5 rounded-full text-xs ${on ? 'bg-primary/10 text-primary font-body-medium' : 'bg-background text-text-secondary'}`}>{label}</span>
+                ))}
+              </div>
+              <p className="mt-1.5 text-xs text-text-secondary">The first print issues the invoice and fixes its number, lines and tax. Later prints are marked as copies. Nothing on it changes after that.</p>
+            </div>
+
+            <div>
+              <FieldLabel>Bill to</FieldLabel>
+              <div className="border border-border rounded-spa px-3 py-2.5">
+                <p className="text-[13px] font-body-medium text-text-primary">{buyerName || 'Customer'}</p>
+                <p className="text-xs text-text-secondary">{[maskPhone(buyerPhone), invoice?.buyer_pan ? `PAN: ${invoice.buyer_pan}` : ''].filter(Boolean).join(' · ')}</p>
+              </div>
             </div>
           </>
         )}
+        <InlineError message={error} />
       </div>
-    </div>
+
+      <div className="flex justify-end gap-2 p-5 border-t border-border">
+        <Button variant="ghost" size="sm" onClick={onClose} disabled={working}>Cancel</Button>
+        <Button variant="primary" size="sm" onClick={handlePrint} loading={working} disabled={loading || !info}>
+          {invoice ? 'Print' : 'Issue and print'}
+        </Button>
+      </div>
+    </ModalShell>
   );
 };
-
-const Button80mm = ({ label, onClick, loading }) => (
-  <button
-    onClick={onClick}
-    disabled={loading}
-    className="flex-1 py-2 rounded-spa bg-primary text-white text-sm font-body-medium hover:bg-primary/90 disabled:opacity-60"
-  >
-    {loading ? 'Opening…' : label}
-  </button>
-);
 
 export default InvoicePrintModal;

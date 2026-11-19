@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useBranch } from '../../contexts/BranchContext';
 import Icon from '../../components/AppIcon';
-import Button from '../../components/ui/Button';
-import Input from '../../components/ui/Input';
+import { Field, TextInput, InlineError } from '../../components/ui/PanelFormKit';
 import StaffSidebar from '../../components/ui/StaffSidebar';
-import SettingsRow from '../staff-detail/components/SettingsRow';
-import BranchHoursEditor from './components/BranchHoursEditor';
+import BranchHoursEditor, { closesBeforeOpens } from './components/BranchHoursEditor';
 import LocationPhotoField from './components/LocationPhotoField';
 import { useAuth } from '../../contexts/AuthContext';
 import { useOrg } from '../../contexts/OrgContext';
@@ -20,6 +19,10 @@ import {
   updateBranchPhoto,
 } from '../../services/api';
 
+const SECTION = 'border border-border rounded-spa-lg bg-surface p-4 max-lg:p-3.5';
+const SECTION_TITLE = 'font-heading font-heading-semibold text-sm text-text-primary';
+const SECTION_HINT = 'mt-0.5 mb-3 text-xs text-text-secondary';
+
 const EMPTY_FORM = { name: '', address: '', phone: '', mapsUrl: '' };
 
 const DEFAULT_HOURS = Array.from({ length: 7 }, (_, dayOfWeek) => ({
@@ -33,6 +36,7 @@ const DEFAULT_HOURS = Array.from({ length: 7 }, (_, dayOfWeek) => ({
 const LocationDetailPage = () => {
   const navigate = useNavigate();
   const { orgSlug, branchId } = useParams();
+  const { refreshBranches } = useBranch();
   const { profile } = useAuth();
   const { orgId } = useOrg();
   const userRole = profile?.role || 'staff';
@@ -62,14 +66,14 @@ const LocationDetailPage = () => {
     ]);
 
     if (branchesResult.error) {
-      setLoadError(branchesResult.error.message || 'Failed to load location.');
+      setLoadError(`Couldn't load this location. Try again.`);
       setPageLoading(false);
       return;
     }
 
     const branch = (branchesResult.data || []).find(b => b.id === branchId);
     if (!branch) {
-      setLoadError('Location not found.');
+      setLoadError(`This location was not found.`);
       setPageLoading(false);
       return;
     }
@@ -104,7 +108,14 @@ const LocationDetailPage = () => {
 
   const handleSave = async () => {
     if (!formData.name.trim()) {
-      setFormError('Location name is required.');
+      setFormError('Name is required.');
+      return;
+    }
+
+    // B7: refuse before anything is written (hours used to be checked last, after the location was already saved).
+    const badDay = hours.find(closesBeforeOpens);
+    if (badDay) {
+      setFormError(`${badDay.dayLabel} closes before it opens. Fix the hours to save.`);
       return;
     }
 
@@ -129,6 +140,8 @@ const LocationDetailPage = () => {
     }
 
     const targetBranchId = isEdit ? branchId : result.data?.id;
+    // The location row exists now (even if the photo/hours steps below fail): refresh the header's location list.
+    await refreshBranches();
 
     let finalPhotoUrl = photoPreview;
     if (photoFile) {
@@ -161,78 +174,74 @@ const LocationDetailPage = () => {
     goBack();
   };
 
+  const pageTitle = `${isEdit ? 'Edit' : 'Add'} location`;
   return (
-    <div className="min-h-screen bg-surface">
+    <div className="min-h-screen bg-background">
       <StaffSidebar userRole={userRole} onCollapseChange={setSidebarCollapsed} />
 
       <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:mb-0 mb-16 spa-transition-slow`}>
-        <div className="sticky top-0 z-header bg-surface border-b border-border px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3 font-accent text-2xl">
-            <button onClick={goBack} className="text-primary hover:underline">Locations</button>
-            <Icon name="ChevronRight" size={20} className="text-text-tertiary" />
-            <span className="text-text-primary">{isEdit ? 'Edit Location' : 'Add Location'}</span>
+        <div className="sticky top-0 z-header bg-surface border-b border-border px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5 min-w-0 text-[13px] font-body">
+            <button type="button" onClick={goBack} className="text-primary hover:underline h-9 max-lg:h-11 px-1 flex items-center gap-1 flex-shrink-0">
+              <Icon name="ChevronLeft" size={16} />Locations
+            </button>
+            <Icon name="ChevronRight" size={14} className="text-text-tertiary flex-shrink-0" />
+            <h1 className="font-heading font-heading-semibold text-[15px] text-text-primary truncate">{pageTitle}</h1>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={goBack} disabled={saving}>Cancel</Button>
-            <Button variant="primary" size="sm" onClick={handleSave} loading={saving}>Save</Button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button type="button" onClick={goBack} disabled={saving} className="h-9 max-lg:h-11 px-3.5 rounded-spa border border-border text-[13px] font-body-medium text-text-primary hover:bg-background disabled:opacity-50">Cancel</button>
+            <button type="button" onClick={handleSave} disabled={saving || pageLoading || !!loadError} className="h-9 max-lg:h-11 px-4 rounded-spa bg-primary text-white text-[13px] font-body-medium hover:bg-primary/90 disabled:opacity-50">
+              {saving ? 'Saving…' : 'Save'}
+            </button>
           </div>
         </div>
 
-        <div className="max-w-7xl mx-auto px-6 py-6 space-y-4">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-5 space-y-4">
           {pageLoading ? (
-            <div className="text-center py-20">
-              <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
-              <p className="font-body text-sm text-text-secondary">Loading...</p>
-            </div>
+            <div className="space-y-4">{[0, 1, 2].map(i => <div key={i} className="h-32 rounded-spa-lg bg-surface animate-pulse" />)}</div>
           ) : loadError ? (
-            <div className="flex items-center gap-2 p-4 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
-              <Icon name="AlertCircle" size={16} />
+            <div role="alert" className="flex items-center justify-between gap-2 px-3 py-2 bg-error/10 border border-error/20 rounded-spa text-error text-[13px]">
               <span>{loadError}</span>
+              <button type="button" onClick={loadBranch} className="underline font-body-medium h-9 max-lg:h-11 px-2">Retry</button>
             </div>
           ) : (
             <>
-              {formError && (
-                <div className="flex items-center gap-2 p-4 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
-                  <Icon name="AlertCircle" size={16} />
-                  <span>{formError}</span>
+              <InlineError message={formError} />
+
+              <section className={SECTION}>
+                <h2 className={SECTION_TITLE}>Photo</h2>
+                <p className={SECTION_HINT}>Shown on the booking page when customers choose between your locations. Leave empty for a plain icon tile.</p>
+                <LocationPhotoField
+                  preview={photoPreview}
+                  onFileSelected={handlePhotoSelected}
+                  onRemove={handleRemovePhoto}
+                  uploading={uploadingPhoto}
+                />
+              </section>
+
+              <section className={SECTION}>
+                <h2 className={SECTION_TITLE}>Details</h2>
+                <div className="mt-3 space-y-4">
+                  <Field label="Name" required id="loc-name">
+                    <TextInput id="loc-name" value={formData.name} onChange={e => setFormData(f => ({ ...f, name: e.target.value }))} autoFocus />
+                  </Field>
+                  <Field label="Address" id="loc-address">
+                    <TextInput id="loc-address" value={formData.address} onChange={e => setFormData(f => ({ ...f, address: e.target.value }))} />
+                  </Field>
+                  <Field label="Phone" id="loc-phone">
+                    <TextInput id="loc-phone" type="tel" inputMode="tel" value={formData.phone} onChange={e => setFormData(f => ({ ...f, phone: e.target.value }))} />
+                  </Field>
+                  <Field label="Map link" id="loc-map" hint="Optional. Customers get this on their confirmation.">
+                    <TextInput id="loc-map" value={formData.mapsUrl} onChange={e => setFormData(f => ({ ...f, mapsUrl: e.target.value }))} placeholder="https://maps.google.com/..." />
+                  </Field>
                 </div>
-              )}
+              </section>
 
-              <div>
-                <SettingsRow title="Branch Photo" description="Shown on the storefront picker when a customer chooses between this location and your other branches. Leave empty to show a generic icon tile instead.">
-                  <LocationPhotoField
-                    preview={photoPreview}
-                    onFileSelected={handlePhotoSelected}
-                    onRemove={handleRemovePhoto}
-                    uploading={uploadingPhoto}
-                  />
-                </SettingsRow>
-
-                <SettingsRow title="Location Details" description="Name, address, phone, and map link for this location.">
-                  <div className="space-y-4 max-w-md">
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Name</label>
-                      <Input value={formData.name} onChange={e => setFormData(f => ({ ...f, name: e.target.value }))} autoFocus />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Address</label>
-                      <Input value={formData.address} onChange={e => setFormData(f => ({ ...f, address: e.target.value }))} />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Phone</label>
-                      <Input value={formData.phone} onChange={e => setFormData(f => ({ ...f, phone: e.target.value }))} />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Map Link</label>
-                      <Input value={formData.mapsUrl} onChange={e => setFormData(f => ({ ...f, mapsUrl: e.target.value }))} placeholder="https://maps.google.com/..." />
-                    </div>
-                  </div>
-                </SettingsRow>
-
-                <SettingsRow title="Weekly Opening Hours" description="Toggle each day on or off and set its open/close time. Shown to customers on the booking flow.">
-                  <BranchHoursEditor rows={hours} onChange={setHours} />
-                </SettingsRow>
-              </div>
+              <section className={SECTION}>
+                <h2 className={SECTION_TITLE}>Opening hours</h2>
+                <p className={SECTION_HINT}>Turn each day on or off and set when it opens and closes. Customers see these when they book.</p>
+                <BranchHoursEditor rows={hours} onChange={setHours} />
+              </section>
             </>
           )}
         </div>

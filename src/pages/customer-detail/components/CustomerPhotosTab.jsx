@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
+import ConfirmDialog from '../../../components/ui/ConfirmDialog';
 import { fetchCustomerPhotos, uploadCustomerPhoto, deleteCustomerPhoto } from '../../../services/api';
 
 // `compact` is used inside CustomerEditModal's Photo sub-tab (small space,
@@ -10,6 +11,7 @@ const CustomerPhotosTab = ({ customerId, branchId, compact = false }) => {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [confirmId, setConfirmId] = useState(null);
   const [error, setError] = useState(null);
   const fileInputRef = useRef(null);
 
@@ -40,6 +42,7 @@ const CustomerPhotosTab = ({ customerId, branchId, compact = false }) => {
     setDeletingId(photoId);
     const result = await deleteCustomerPhoto(photoId);
     setDeletingId(null);
+    setConfirmId(null);
     if (result.error) {
       setError(result.error.message || 'Failed to delete photo.');
       return;
@@ -111,7 +114,7 @@ const CustomerPhotosTab = ({ customerId, branchId, compact = false }) => {
             <img src={p.photo_url} alt="" className="w-full h-full object-cover" />
             <button
               type="button"
-              onClick={() => handleDelete(p.id)}
+              onClick={() => setConfirmId(p.id)}
               disabled={deletingId === p.id}
               title="Remove photo"
               className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/50 hover:bg-error flex items-center justify-center spa-transition-fast opacity-0 group-hover:opacity-100"
@@ -127,6 +130,17 @@ const CustomerPhotosTab = ({ customerId, branchId, compact = false }) => {
           <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={handleUpload} disabled={uploading} className="hidden" />
         </label>
       </div>
+      {confirmId && (
+        <ConfirmDialog
+          title="Delete this photo?"
+          message="It can't be undone."
+          confirmLabel="Delete"
+          requireReason={false}
+          onConfirm={() => handleDelete(confirmId)}
+          onClose={() => setConfirmId(null)}
+          isSubmitting={deletingId === confirmId}
+        />
+      )}
     </div>
   );
 };

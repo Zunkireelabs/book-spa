@@ -4,6 +4,7 @@ import FilterBar from '../../../components/ui/FilterBar';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../utils/periodPresets';
 import { fetchAllDiscounts } from '../../../services/api';
 import { useAutoRefresh } from '../../../hooks/useAutoRefresh';
+import { wordBranch } from '../../../utils/industryTerms';
 
 const STATUS_FILTER_OPTIONS = [
   { value: 'all', label: 'All Statuses' },
@@ -219,7 +220,7 @@ const DiscountsPanel = ({ branchId }) => {
         {discounts.length === 0 ? (
           <div className="p-8 text-center">
             <Icon name="Percent" size={32} className="text-text-tertiary mx-auto mb-3" />
-            <p className="font-body text-sm text-text-tertiary">No discounts yet for this branch.</p>
+            <p className="font-body text-sm text-text-tertiary">No discounts yet for this {wordBranch()}.</p>
           </div>
         ) : filtered.length === 0 ? (
           <div className="p-8 text-center">

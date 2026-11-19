@@ -3,7 +3,7 @@ import Icon from '../../../components/AppIcon';
 import CustomerHeader from '../../../components/ui/CustomerHeader';
 import ProfileHero from './ProfileHero';
 import { isRealAddress } from '../utils/address';
-import { fetchClosedDateRanges, fetchBranchOpeningHours } from '../../../services/api';
+import { fetchPublicClosedDateRanges, fetchBranchOpeningHours } from '../../../services/api';
 import { isDateInRanges, isBranchOpenNow, formatTime12, getNepalNow, getNepalToday } from '../../customer-booking-flow/utils/availability';
 
 // 0=Monday..6=Sunday, matching branch_working_hours.day_of_week (migration-308) —
@@ -53,7 +53,7 @@ function useBranchStatus(branches) {
 
     Promise.all(
       branches.map((b) => Promise.all([
-        fetchClosedDateRanges(b.id).then(({ data: ranges }) => ranges || []),
+        fetchPublicClosedDateRanges(b.id).then(({ data: ranges }) => ranges || []),
         fetchBranchOpeningHours(b.id).then(({ data: hours }) => hours || []),
       ]))
     ).then((results) => {

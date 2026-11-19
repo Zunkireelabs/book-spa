@@ -107,3 +107,16 @@ export function formatPhoneDisplay(value, fallbackDial = DEFAULT_DIAL) {
   const { dial, national } = splitE164(e164, fallbackDial);
   return national ? `${dial} ${national}` : dial;
 }
+
+/**
+ * Display with a Nepal mobile number grouped 3-3-4: `+977 980-000-0026`. Any other number (other country, other length)
+ * falls back to formatPhoneDisplay's plain `+dial national`. Empty / invalid → ''.
+ */
+export function formatPhoneGrouped(value, fallbackDial = DEFAULT_DIAL) {
+  if (typeof value === 'string' && value.includes('•')) return value; // already masked by the server (ZNLY-235): show as is
+  const e164 = toE164(value, fallbackDial);
+  if (!e164) return '';
+  const { dial, national } = splitE164(e164, fallbackDial);
+  if (dial === '+977' && /^\d{10}$/.test(national)) return `${dial} ${national.slice(0, 3)}-${national.slice(3, 6)}-${national.slice(6)}`;
+  return national ? `${dial} ${national}` : dial;
+}

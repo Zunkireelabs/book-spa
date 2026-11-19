@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { createRetryingFetch } from './supabaseRetry';
 import { captureApiError } from './analytics';
+import { withRestrictedReads } from './restrictedReads';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -35,7 +36,7 @@ export const retryingFetch = createRetryingFetch({ onError: captureApiError });
 // land on these routes with tokens in the URL now.
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { detectSessionInUrl: false },
-  global: { fetch: retryingFetch },
+  global: { fetch: withRestrictedReads(retryingFetch) },  // ZNLY-235: restricted logins read the masked *_safe views
 });
 
 // Separate client for customer-facing auth (own storage key) so a customer

@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Project**: Zenly — Multi-tenant Booking Web App
 **Type**: React 18 + Vite SPA with Supabase backend
 **Tech Stack**: React 18, Vite 5 (`vite.config.mjs`), Tailwind CSS 3, Supabase (Postgres, Auth, RLS, Realtime), Lucide Icons
-**Key Libraries**: date-fns (date handling), Recharts (charts), @dnd-kit (drag-and-drop), FullCalendar (calendar views, resource-timeline), posthog-js (analytics — prod only)
+**Key Libraries**: date-fns (date handling), Recharts (charts), @dnd-kit (drag-and-drop), in-house calendar (@dnd-kit-based day/4-day grid), posthog-js (analytics — prod only)
 
 ---
 

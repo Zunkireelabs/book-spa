@@ -1,9 +1,12 @@
 import React, { useEffect, lazy, Suspense } from "react";
+import { DirtyGuardProvider } from "contexts/DirtyGuardContext";
 import { BrowserRouter, Routes as RouterRoutes, Route, useLocation, useParams, Navigate } from "react-router-dom";
 import ScrollToTop from "components/ScrollToTop";
 import BrandMark from "components/ui/BrandMark";
 import ErrorBoundary from "components/ErrorBoundary";
 import ProtectedRoute from "components/ProtectedRoute";
+import { NotificationsProvider } from "contexts/NotificationsContext";
+import InboxPage from "pages/inbox";
 import { TenantProvider } from "contexts/TenantContext";
 import { useAuth } from "contexts/AuthContext";
 import { PlatformAuthProvider } from 'contexts/PlatformAuthContext';
@@ -133,6 +136,14 @@ const AppRoutes = () => {
           <TenantWrapper>
             <ProtectedRoute allowedRoles={['staff', 'manager', 'admin', 'admin_viewer']}>
               <UnifiedDashboard />
+            </ProtectedRoute>
+          </TenantWrapper>
+        } />
+
+        <Route path="/:orgSlug/inbox" element={
+          <TenantWrapper>
+            <ProtectedRoute allowedRoles={['staff', 'manager', 'admin', 'admin_viewer']}>
+              <InboxPage />
             </ProtectedRoute>
           </TenantWrapper>
         } />
@@ -329,7 +340,11 @@ const LegacyBookingRedirect = () => {
 
 const Routes = () => (
   <BrowserRouter>
-    <AppRoutes />
+    <DirtyGuardProvider>
+      <NotificationsProvider>
+        <AppRoutes />
+      </NotificationsProvider>
+    </DirtyGuardProvider>
   </BrowserRouter>
 );
 

@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useAuth } from '../../../contexts/AuthContext';
+import { viewerAccess } from '../../../services/dataMasking';
+import { useLocation } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import CountryCodeSelect, { parsePhone } from '../../../components/ui/CountryCodeSelect';
@@ -8,7 +11,11 @@ import { fetchServices, createBooking, getCustomerOutstandingBalance, fetchCusto
 import { useBranch } from '../../../contexts/BranchContext';
 import { CUSTOMER_REFERRALS_ENABLED } from '../../../lib/featureFlags';
 
+const toTitleGender = (g) => String(g).charAt(0).toUpperCase() + String(g).slice(1).toLowerCase();
+
 const StaffBookingForm = ({ onBookingCreated }) => {
+  const { profile: viewerProfile } = useAuth();
+  const canViewPrices = viewerAccess(viewerProfile).canViewPrices; // ZNLY-235: no prices for this login
   const { branchId } = useBranch();
 
   // Steps: service → datetime → customer → confirm
@@ -162,6 +169,27 @@ const StaffBookingForm = ({ onBookingCreated }) => {
     setReferringCustomerName('');
     setReferringRewardAmount('');
   }, []);
+
+  // "Book" / "New booking" from the Customers list passes the customer via router state so the customer step is already filled.
+  const prefill = useLocation().state?.prefill;
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (!prefill || prefilled.current) return;
+    prefilled.current = true;
+    handleCustomerSelect({ full_name: prefill.fullName, phone: prefill.phone, email: prefill.email, gender: prefill.gender ? toTitleGender(prefill.gender) : '' });
+    const e164 = toE164(prefill.phone);
+    if (e164 && e164.length >= 11 && branchId) {
+      getCustomerOutstandingBalance({ customerPhone: e164, branchId }).then(({ data }) => setPreviousDue(data && data.totalDue > 0 ? data : null));
+    }
+  }, [prefill, handleCustomerSelect, branchId]);
+  // "Book session" from Packages also passes the package's service: pick it and go straight to the date step.
+  const servicePrefilled = useRef(false);
+  useEffect(() => {
+    if (!prefill?.serviceId || servicePrefilled.current || !services.length) return;
+    servicePrefilled.current = true;
+    const svc = services.find((s) => s.id === prefill.serviceId);
+    if (svc) { setSelectedService(svc); setStep(2); }
+  }, [prefill, services]);
 
   const handleReferringPhoneChange = useCallback((v) => {
     setReferringCustomerPhone(v.replace(/\D/g, '').slice(0, 15));
@@ -349,9 +377,9 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                         <Icon name="Clock" size={12} />
                         <span>{svc.duration_minutes} min</span>
                       </span>
-                      <span className="font-medium text-primary">
+                      {canViewPrices && <span className="font-medium text-primary">
                         NPR {Number(svc.effective_price_npr ?? svc.price_npr).toLocaleString('en-IN')}
-                      </span>
+                      </span>}
                     </div>
                     {svc.description && (
                       <p className="text-xs text-gray-400 mt-1 line-clamp-1">
@@ -476,14 +504,16 @@ const StaffBookingForm = ({ onBookingCreated }) => {
               </div>
             </div>
 
-            {previousDue && (
+            {canViewPrices && previousDue && (
               <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                 <Icon name="AlertTriangle" size={14} className="text-amber-600 flex-shrink-0 mt-0.5" />
                 <p className="text-sm text-amber-800">
                   <span className="font-medium">{customerName.trim() || 'This customer'}</span> has an outstanding
                   balance — NPR {previousDue.totalDue.toLocaleString('en-IN')} across {previousDue.bookingCount} earlier
-                  booking{previousDue.bookingCount > 1 ? 's' : ''}. You'll be able to collect it together with this
-                  booking's payment.
+                  visit{previousDue.bookingCount > 1 ? 's' : ''}.
+                  {previousDue.collectableDue > 0 && <> You'll be able to collect NPR {previousDue.collectableDue.toLocaleString('en-IN')} together with this
+                  booking's payment.</>}
+                  {previousDue.lockedDue > 0 && <> NPR {previousDue.lockedDue.toLocaleString('en-IN')} on closed days can’t be collected here.</>}
                 </p>
               </div>
             )}
@@ -631,12 +661,12 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                   <span className="text-sm text-gray-900 text-right max-w-xs">{specialRequests}</span>
                 </div>
               )}
-              <div className="border-t border-gray-200 pt-3 flex items-center justify-between">
+              {canViewPrices && <div className="border-t border-gray-200 pt-3 flex items-center justify-between">
                 <span className="text-sm font-medium text-gray-900">Total</span>
                 <span className="text-lg font-semibold text-primary">
                   NPR {Number(selectedService?.effective_price_npr ?? selectedService?.price_npr).toLocaleString('en-IN')}
                 </span>
-              </div>
+              </div>}
             </div>
 
             {error && (

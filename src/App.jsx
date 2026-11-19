@@ -5,6 +5,7 @@ import { OrgProvider } from "./contexts/OrgContext";
 import { BranchProvider } from "./contexts/BranchContext";
 import { AIAssistantProvider } from "./contexts/AIAssistantContext";
 import { CustomerAuthProvider } from "./contexts/CustomerAuthContext";
+import { AvailabilityOverrideProvider } from "./contexts/AvailabilityOverrideContext";
 import Routes from "./Routes";
 import { init as initAnalytics } from "./lib/analytics";
 
@@ -18,7 +19,9 @@ function App() {
           <BranchProvider>
             <AIAssistantProvider>
               <CustomerAuthProvider>
-                <Routes />
+                <AvailabilityOverrideProvider>
+                  <Routes />
+                </AvailabilityOverrideProvider>
               </CustomerAuthProvider>
             </AIAssistantProvider>
           </BranchProvider>

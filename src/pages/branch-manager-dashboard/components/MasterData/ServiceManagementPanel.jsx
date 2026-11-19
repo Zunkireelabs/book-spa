@@ -1,26 +1,43 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
+import ConfirmDialog from '../../../../components/ui/ConfirmDialog';
+import { useFlashRow, rowTone, rowBar } from '../../../../components/ui/PanelFormKit';
+import { friendlyError } from '../../../../utils/friendlyError';
 import FilterBar from '../../../../components/ui/FilterBar';
 import {
   fetchServicesForManagement,
   fetchActiveCategories,
   toggleServiceActive,
   deleteService,
+  fetchTierPricesByService,
 } from '../../../../services/api';
+import { useIndustry } from '../../../../hooks/useIndustry';
+import { formatNPR } from '../../../../services/bookingTransformers';
+
+// "NPR 2,500 – NPR 4,000" for a tiered service: its standard price and every tier price (a blank tier charges the standard price).
+const tierRangeLabel = (service, tiers) => {
+  if (service.price_type !== 'tiered' || !tiers || tiers.length === 0) return null;
+  const all = [Number(service.price_npr), ...tiers];
+  const lo = Math.min(...all); const hi = Math.max(...all);
+  return lo === hi ? formatNPR(lo) : `${formatNPR(lo)} \u2013 ${formatNPR(hi)}`;
+};
 
 const ServiceManagementPanel = () => {
   const navigate = useNavigate();
   const { orgSlug } = useParams();
+  const { isSpa } = useIndustry();
   const [services, setServices] = useState([]);
+  const [tierPrices, setTierPrices] = useState({});
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [confirmToggle, setConfirmToggle] = useState(null);
+  const [toggling, setToggling] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [flashId, flash] = useFlashRow();
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -57,15 +74,22 @@ const ServiceManagementPanel = () => {
     }
   }, []);
 
+  const hasLoadedRef = useRef(false);
   const loadServices = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedRef.current) setLoading(true);
     setError(null);
     const result = await fetchServicesForManagement();
     if (result.error) {
       setError(result.error.message || 'Failed to load services.');
     } else {
       setServices(result.data || []);
+      // A tiered service charges by who does it, so the list shows its range, as the online page does.
+      if ((result.data || []).some((x) => x.price_type === 'tiered')) {
+        const tiers = await fetchTierPricesByService();
+        if (!tiers.error) setTierPrices(tiers.data || {});
+      }
     }
+    hasLoadedRef.current = true;
     setLoading(false);
   }, []);
 
@@ -87,9 +111,11 @@ const ServiceManagementPanel = () => {
 
   const executeToggle = async (service, newState) => {
     setError(null);
+    setToggling(true);
     const result = await toggleServiceActive({ serviceId: service.id, isActive: newState });
+    setToggling(false);
     if (result.error) {
-      setError(result.error.message || 'Toggle failed.');
+      setError(friendlyError(result.error, 'Toggle failed.'));
     } else {
       await loadServices();
     }
@@ -104,10 +130,10 @@ const ServiceManagementPanel = () => {
     const result = await deleteService({ serviceId: confirmDelete.id });
 
     if (result.error) {
-      if (result.error.code === 'HAS_BOOKINGS') {
-        setError(`"${confirmDelete.name}" has booking history and cannot be deleted. Use the toggle to deactivate instead.`);
+      if (result.error.code === 'HAS_BOOKINGS' || /foreign key|23503/i.test(`${result.error.code || ''} ${result.error.message || ''}`)) {
+        setError(`"${confirmDelete.name}" has booking history, so it can't be deleted. Deactivate it instead to hide it from new bookings.`);
       } else {
-        setError(result.error.message || 'Delete failed.');
+        setError(friendlyError(result.error, 'Delete failed.'));
       }
     } else {
       await loadServices();
@@ -117,7 +143,6 @@ const ServiceManagementPanel = () => {
     setDeleting(false);
   };
 
-  const formatNPR = (amount) => `NPR ${Number(amount).toLocaleString('en-IN')}`;
 
   if (loading) {
     return (
@@ -138,7 +163,7 @@ const ServiceManagementPanel = () => {
             {services.length} service{services.length !== 1 ? 's' : ''} configured — price changes affect future bookings only
           </p>
         </div>
-        <Button variant="primary" size="sm" iconName="Plus" iconSize={16} onClick={handleOpenCreate}>
+        <Button variant="primary" size="sm" iconName="Plus" iconSize={16} onClick={() => handleOpenCreate()}>
           Add Service
         </Button>
       </div>
@@ -205,16 +230,16 @@ const ServiceManagementPanel = () => {
             {filteredServices.length === 0 ? (
               <tr>
                 <td colSpan={7} className="px-4 py-8 text-center text-text-secondary font-body text-sm">
-                  {services.length === 0
-                    ? 'No services found. Click "Add Service" to create one.'
-                    : 'No services match your filters.'}
+                  {services.length === 0 ? (
+                    <>No services yet. <button type="button" onClick={() => handleOpenCreate()} className="text-primary font-body-medium hover:underline">Add the first service</button></>
+                  ) : 'No services match your filters.'}
                 </td>
               </tr>
             ) : (
               filteredServices.map((s) => (
-                <tr key={s.id} className="border-b border-border last:border-b-0 hover:bg-background/50 spa-transition-fast">
-                  <td className="px-4 py-3 font-body font-body-medium text-sm text-text-primary">{s.name}</td>
-                  <td className="px-4 py-3 font-body text-sm text-text-secondary hidden lg:table-cell">{s.category || 'Spa'}</td>
+                <tr key={s.id} className={`border-b border-border last:border-b-0 ${rowTone(false, flashId === s.id)}`}>
+                  <td className={`px-4 py-3 font-body font-body-medium text-sm text-text-primary ${rowBar(flashId === s.id)}`}>{s.name}</td>
+                  <td className="px-4 py-3 font-body text-sm text-text-secondary hidden lg:table-cell">{s.category || (isSpa ? 'Spa' : '—')}</td>
                   <td className="px-4 py-3 font-body text-sm text-text-secondary">{s.duration_minutes} min</td>
                   <td className="px-4 py-3 font-data text-sm text-text-primary">
                     {s.is_on_offer ? (
@@ -232,7 +257,7 @@ const ServiceManagementPanel = () => {
                         </span>
                       </div>
                     ) : (
-                      formatNPR(s.price_npr)
+                      tierRangeLabel(s, tierPrices[s.id]) || formatNPR(s.price_npr)
                     )}
                   </td>
                   <td className="px-4 py-3 font-body text-sm text-text-secondary hidden md:table-cell max-w-[200px] truncate">
@@ -283,56 +308,31 @@ const ServiceManagementPanel = () => {
         </table>
       </div>
 
-      {/* Deactivation Confirmation Dialog */}
-      {confirmToggle && createPortal(
-        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => setConfirmToggle(null)}>
-          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-sm p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-warning/10 flex items-center justify-center">
-                <Icon name="AlertTriangle" size={20} className="text-warning" />
-              </div>
-              <div>
-                <h3 className="font-heading font-heading-semibold text-text-primary">Deactivate Service?</h3>
-                <p className="font-body text-sm text-text-secondary">
-                  "{confirmToggle.name}" will be hidden from new bookings but remain in historical records.
-                </p>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setConfirmToggle(null)}>Cancel</Button>
-              <Button variant="warning" size="sm" onClick={() => executeToggle(confirmToggle, false)}>Deactivate</Button>
-            </div>
-          </div>
-        </div>,
-        document.body
+      {/* Deactivate / delete: small centred confirms (create / edit open the service detail page) */}
+      {confirmToggle && (
+        <ConfirmDialog
+          title="Deactivate service?"
+          message={`"${confirmToggle.name}" will be hidden from new bookings but remain in historical records.`}
+          confirmLabel="Deactivate"
+          requireReason={false}
+          isSubmitting={toggling}
+          onConfirm={() => executeToggle(confirmToggle, false)}
+          onClose={() => !toggling && setConfirmToggle(null)}
+        />
       )}
 
-      {/* Delete Confirmation Dialog */}
-      {confirmDelete && createPortal(
-        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !deleting && setConfirmDelete(null)}>
-          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-sm p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-error/10 flex items-center justify-center">
-                <Icon name="Trash2" size={20} className="text-error" />
-              </div>
-              <div>
-                <h3 className="font-heading font-heading-semibold text-text-primary">Delete Service?</h3>
-                <p className="font-body text-sm text-text-secondary">
-                  "{confirmDelete.name}" will be permanently deleted. This action cannot be undone.
-                </p>
-              </div>
-            </div>
-            <p className="font-body text-xs text-text-tertiary bg-background rounded-spa p-2">
-              Note: Services with booking history cannot be deleted. Use deactivation instead to hide them from new bookings.
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)} disabled={deleting}>Cancel</Button>
-              <Button variant="danger" size="sm" onClick={handleDelete} loading={deleting}>Delete</Button>
-            </div>
-          </div>
-        </div>,
-        document.body
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete service?"
+          message={`"${confirmDelete.name}" will be permanently deleted. This action cannot be undone. Services with booking history cannot be deleted; deactivate them instead to hide them from new bookings.`}
+          confirmLabel="Delete"
+          requireReason={false}
+          isSubmitting={deleting}
+          onConfirm={handleDelete}
+          onClose={() => !deleting && setConfirmDelete(null)}
+        />
       )}
+
     </div>
   );
 };

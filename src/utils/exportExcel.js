@@ -1,13 +1,13 @@
-import * as XLSX from 'xlsx';
-
+// xlsx is loaded on demand so the ~400KB library is only fetched when an
+// export/import is actually used, not with the dashboards.
 /**
  * Export an array of plain objects to a downloaded .xlsx file.
  * @param {string} filename - without extension
  * @param {Array<Record<string, any>>} rows
  * @param {string} [sheetName]
  */
-export function exportRowsToExcel(filename, rows, sheetName = 'Sheet1') {
-  exportSheetsToExcel(filename, [{ name: sheetName, rows }]);
+export async function exportRowsToExcel(filename, rows, sheetName = 'Sheet1') {
+  await exportSheetsToExcel(filename, [{ name: sheetName, rows }]);
 }
 
 /**
@@ -15,7 +15,8 @@ export function exportRowsToExcel(filename, rows, sheetName = 'Sheet1') {
  * @param {string} filename - without extension
  * @param {Array<{name: string, rows: Array<Record<string, any>>}>} sheets
  */
-export function exportSheetsToExcel(filename, sheets) {
+export async function exportSheetsToExcel(filename, sheets) {
+  const XLSX = await import('xlsx');
   const workbook = XLSX.utils.book_new();
   const usedNames = new Set();
   sheets.forEach(({ name, rows }) => {

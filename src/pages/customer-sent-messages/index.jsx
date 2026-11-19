@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
-import StaffSidebar from '../../components/ui/StaffSidebar';
+import AppShell from '../../components/ui/AppShell';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchCustomerProfile, fetchOutreachMessages } from '../../services/api';
 
@@ -34,7 +34,6 @@ const CustomerSentMessagesPage = () => {
   const { profile } = useAuth();
   const userRole = profile?.role || 'staff';
 
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [customer, setCustomer] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -79,10 +78,8 @@ const CustomerSentMessagesPage = () => {
   const goBack = () => navigate(`/${orgSlug}/customers/${customerId}`);
 
   return (
-    <div className="min-h-screen bg-background">
-      <StaffSidebar userRole={userRole} onCollapseChange={setSidebarCollapsed} />
-
-      <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:mb-0 mb-16 spa-transition-slow`}>
+    <AppShell variant="flush" sidebar={{ userRole }} header={{ realtimeStatus: 'connected' }}>
+      <div className="bg-background min-h-full">
         <div className="sticky top-0 z-header bg-surface border-b border-border px-6 py-3">
           <button onClick={goBack} className="font-body text-sm text-text-secondary hover:text-primary spa-transition-fast">
             ← Back to {customer ? customer.fullName : 'Customer'}
@@ -141,7 +138,7 @@ const CustomerSentMessagesPage = () => {
           )}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 };
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { dedupeTransfersByKey } from './transferDedup';
-import { renderTemplatePreview, submitGroupBooking } from './api';
+import { renderTemplatePreview, submitGroupBooking, getDayMoneyForDate } from './api';
 import { supabase } from '../lib/supabase';
 
 // Regression coverage for the getCalendarBookings dedup fix: a therapist transferred
@@ -201,5 +201,19 @@ describe('submitGroupBooking', () => {
     expect(result.error).toBeNull();
     expect(calls).toHaveLength(1);
     expect(calls[0].bookingGroupId).toBeUndefined();
+  });
+});
+
+// ZNLY-258: a missing cash_refunds (an RPC that predates it) must stay undefined, not 0 — 0 would mean "no refund was cash" and hide it from the drawer.
+describe('getDayMoneyForDate cashRefunds', () => {
+  it('keeps a missing cash_refunds undefined (live and at close) and a real 0 as 0', async () => {
+    vi.spyOn(supabase, 'rpc').mockResolvedValue({ data: { refunds: 50, at_close: { refunds: 20, closed_at: 'x' } }, error: null });
+    const old = await getDayMoneyForDate(null, '2026-11-18');
+    expect(old.cashRefunds).toBeUndefined();
+    expect(old.atClose.cashRefunds).toBeUndefined();
+    vi.spyOn(supabase, 'rpc').mockResolvedValue({ data: { refunds: 50, cash_refunds: 0, at_close: { refunds: 20, cash_refunds: 5, closed_at: 'x' } }, error: null });
+    const now = await getDayMoneyForDate(null, '2026-11-18');
+    expect(now.cashRefunds).toBe(0);
+    expect(now.atClose.cashRefunds).toBe(5);
   });
 });

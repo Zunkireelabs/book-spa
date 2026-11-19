@@ -10,12 +10,14 @@ function formatDate(d) {
   return d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 }
 
+// Human words for the stored status, never the raw value.
 const STATUS_CONFIG = {
-  unused:    'bg-gray-100 text-gray-600',
-  partial:   'bg-warning/10 text-warning',
-  depleted:  'bg-success/10 text-success',
-  expired:   'bg-error/10 text-error',
+  unused:   { label: 'Not used', pill: 'bg-background text-text-secondary border border-border' },
+  partially_used: { label: 'Partly used', pill: 'bg-warning/10 text-warning' },
+  fully_redeemed: { label: 'Fully used', pill: 'bg-success/10 text-success' },
+  expired:  { label: 'Expired', pill: 'bg-error/10 text-error' },
 };
+const statusOf = (s) => STATUS_CONFIG[s] || { label: String(s || '').replace(/[_-]/g, ' ').replace(/^./, (c) => c.toUpperCase()), pill: 'bg-background text-text-secondary' };
 
 const CustomerVouchersTab = ({ customerId }) => {
   const [vouchers, setVouchers] = useState([]);
@@ -54,31 +56,25 @@ const CustomerVouchersTab = ({ customerId }) => {
   }
 
   if (vouchers.length === 0) {
-    return (
-      <div className="text-center py-8">
-        <Icon name="Ticket" size={24} className="text-text-tertiary mx-auto mb-2" />
-        <p className="font-body text-sm text-text-tertiary">No gift vouchers yet</p>
-      </div>
-    );
+    return <p className="text-[13px] text-text-secondary">No gift vouchers for this customer.</p>;
   }
 
   return (
-    <div className="space-y-2">
-      {vouchers.map((v) => (
-        <div key={v.id} className="bg-background rounded-spa p-3">
-          <div className="flex items-center justify-between mb-1">
-            <span className="font-body font-body-medium text-sm text-text-primary">{v.voucherTypeName}</span>
-            <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-medium ${STATUS_CONFIG[v.status] || STATUS_CONFIG.unused}`}>
-              {v.status}
-            </span>
+    <div className="space-y-3">
+      {vouchers.map((v) => {
+        const st = statusOf(v.status);
+        return (
+          <div key={v.id} className="border border-border rounded-spa-lg p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <b className="text-sm font-semibold text-text-primary">{v.voucherTypeName}</b>
+              <span className={`h-[22px] px-2.5 rounded-full text-xs inline-flex items-center ${st.pill}`}>{st.label}</span>
+            </div>
+            <p className="text-[13px] text-text-secondary">
+              {v.voucherCode} · <span className="tabular-nums">{formatNPR(v.remainingBalance)} remaining of {formatNPR(v.totalAmountIssued)}</span>{v.expiryDate ? ` · until ${formatDate(v.expiryDate)}` : ''}
+            </p>
           </div>
-          <p className="font-data text-[11px] tracking-widest text-text-secondary mb-2">{v.voucherCode}</p>
-          <div className="flex items-center justify-between text-xs text-text-secondary">
-            <span>{formatNPR(v.remainingBalance)} remaining of {formatNPR(v.totalAmountIssued)}</span>
-            <span>Expires {formatDate(v.expiryDate)}</span>
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 };

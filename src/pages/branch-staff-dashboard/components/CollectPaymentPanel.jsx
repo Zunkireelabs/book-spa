@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import CountryCodeSelect from '../../../components/ui/CountryCodeSelect';
 import PaymentModal from '../../../components/ui/PaymentModal';
-import { getCustomerOutstandingBalance, recordPayment, recordTip, fetchDueHolderNames } from '../../../services/api';
+import { submitCheckout } from '../../../services/checkoutSubmit';
+import { getCustomerOutstandingBalance, recordPayment, recordTip, fetchDueHolderNames, recordBundledAllocations } from '../../../services/api';
 import { useBranch } from '../../../contexts/BranchContext';
 
 function formatNPR(amount) {
@@ -29,6 +30,7 @@ const CollectPaymentPanel = ({ onSuccess }) => {
 
   const [payingBookings, setPayingBookings] = useState(null); // [primary, ...additional]
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  const pendingFailureRef = useRef(null); // shown once Checkout is dismissed (the lookup reset would otherwise wipe it)
 
   useEffect(() => {
     fetchDueHolderNames(branchId).then(({ data }) => {
@@ -86,7 +88,9 @@ const CollectPaymentPanel = ({ onSuccess }) => {
     setPayingBookings(selected);
   };
 
-  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes, tipSplits }) => {
+  // ZNLY-233: every checkout goes through the one shared submit, so products on the bill are saved (never dropped); no products => the treatment-only path below.
+  const handleRecordPayment = (payload) => submitCheckout({ bookingId: payingBookings?.[0]?.bookingId, payload, treatment: recordTreatmentOnly, onSaved: () => onSuccess?.('Payment recorded successfully.') });
+  const recordTreatmentOnly = async ({ tenders, additionalAllocations, dueHolderName, notes, tipSplits }) => {
     if (!payingBookings || payingBookings.length === 0) {
       return { error: { message: 'No booking selected.' } };
     }
@@ -103,13 +107,12 @@ const CollectPaymentPanel = ({ onSuccess }) => {
       const tipResult = await recordTip({ bookingId: primary.bookingId, amount: split.amount, receivedBy: split.receivedBy });
       if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
     }
-    for (const alloc of (additionalAllocations || [])) {
-      await recordPayment({ bookingId: alloc.bookingId, tenders: alloc.tenders, notes });
-    }
+    // Honest Collect: check every bundled allocation and name any booking that was NOT recorded.
+    const failures = await recordBundledAllocations({ allocations: additionalAllocations, notes, bookings: additionalBookings });
     setPaymentSubmitting(false);
-    setPayingBookings(null);
-    onSuccess?.('Payment recorded successfully.');
-    resetLookup();
+    // Checkout stays open on its success state; it's dismissed via onClose (Done).
+    if (!failures.length) onSuccess?.('Payment recorded successfully.');
+    pendingFailureRef.current = failures.length ? `Payment recorded for ${primary.bookingNumber}, but NOT recorded for: ${failures.join('; ')}. Those bookings still show as owed.` : null;
     return { error: null };
   };
 
@@ -179,7 +182,7 @@ const CollectPaymentPanel = ({ onSuccess }) => {
 
       {/* Results */}
       {searched && !searching && result && (
-        result.bookingCount === 0 ? (
+        result.bookings.length === 0 ? (
           <div className="bg-surface rounded-spa-lg spa-shadow-resting border border-border p-8 text-center">
             <div className="w-12 h-12 bg-success/10 rounded-full flex items-center justify-center mx-auto mb-3">
               <Icon name="CheckCircle" size={20} className="text-success" />
@@ -188,7 +191,9 @@ const CollectPaymentPanel = ({ onSuccess }) => {
               No outstanding balance
             </h3>
             <p className="font-body text-sm text-text-secondary">
-              This phone number doesn't match any outstanding balance.
+              {result.lockedDue > 0
+                ? `${formatNPR(result.lockedDue)} is owed on closed days and can’t be collected here.`
+                : "This phone number doesn't match any outstanding balance."}
             </p>
           </div>
         ) : (
@@ -196,10 +201,11 @@ const CollectPaymentPanel = ({ onSuccess }) => {
             <div className="flex items-center justify-between px-6 py-4 border-b border-border">
               <div>
                 <h3 className="font-heading font-heading-medium text-base text-text-primary">
-                  {formatNPR(result.totalDue)} outstanding
+                  {formatNPR(result.collectableDue)} outstanding
                 </h3>
                 <p className="font-caption text-xs text-text-secondary">
-                  Across {result.bookingCount} booking{result.bookingCount !== 1 ? 's' : ''}
+                  Across {result.bookings.length} booking{result.bookings.length !== 1 ? 's' : ''}
+                  {result.lockedDue > 0 && ` · ${formatNPR(result.lockedDue)} on closed days can’t be collected here`}
                 </p>
               </div>
               <Button
@@ -254,7 +260,15 @@ const CollectPaymentPanel = ({ onSuccess }) => {
           additionalBookings={additionalBookings}
           dueHolderSuggestions={dueHolderSuggestions}
           onConfirm={handleRecordPayment}
-          onClose={() => setPayingBookings(null)}
+          savesProducts
+          onClose={(res) => {
+            setPayingBookings(null);
+            if (res?.paid || res?.alreadyPaid) {
+              resetLookup();
+              if (pendingFailureRef.current) setError(pendingFailureRef.current);
+              pendingFailureRef.current = null;
+            }
+          }}
           isSubmitting={paymentSubmitting}
         />
       )}

@@ -132,6 +132,7 @@ const TherapistPerformancePanel = ({ branchId }) => {
         therapistName={selectedTherapist.name}
         branchId={branchId}
         onBack={() => setSelectedTherapist(null)}
+        backLabel="Back to Performance"
       />
     );
   }

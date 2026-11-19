@@ -124,6 +124,7 @@ const RevenueCards = ({ branchId, period, todayOnly = false }) => {
           {formatNPR(data.netRevenue)}
           <span className="text-xs text-gray-400 font-normal ml-2">Net Revenue</span>
         </p>
+        {data.productRevenue > 0 && <p className="text-xs text-gray-500 -mt-1 mb-2 sm:mb-3" data-products-line>of which Products {formatNPR(data.productRevenue)}</p>}
         <div className="grid grid-cols-3 gap-3 pt-2 border-t border-gray-100">
           <div>
             <p className="text-xs text-gray-500">Gross</p>

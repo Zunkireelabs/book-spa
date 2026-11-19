@@ -3,9 +3,15 @@ import Icon from '../../../../components/AppIcon';
 import FilterBar from '../../../../components/ui/FilterBar';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import PaymentModal from '../../../../components/ui/PaymentModal';
+import { submitCheckout } from '../../../../services/checkoutSubmit';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
-import { getOutstandingByStaff, fetchDueHolderNames, setDueHolder, recordPayment, recordTip, getCustomerOutstandingBalance } from '../../../../services/api';
+import { getOutstandingByStaff, fetchDueHolderNames, setDueHolder, recordPayment, recordTip, getCustomerOutstandingBalance, recordBundledAllocations } from '../../../../services/api';
+import Spotlight from '../../../../components/ui/Spotlight';
+import { SHIPPED_AT, NOTICE_DAYS } from '../CRM/CustomersSpotlight';
+import { daysBetween, nepalNow } from '../../../../utils/customerDirectory';
 import SettledDueHistoryPanel from './SettledDueHistoryPanel';
+import NeedsClosingSection from './NeedsClosingSection';
+import { useAuth } from '../../../../contexts/AuthContext';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -22,6 +28,8 @@ function formatDateOnly(d) {
 const UNASSIGNED_LABEL = 'Unassigned';
 
 const OutstandingReportPanel = ({ branchId }) => {
+  const { profile } = useAuth();
+  const canAct = profile?.role !== 'admin_viewer'; // viewers read the report; no Pay / Assign
   const [view, setView] = useState('outstanding'); // 'outstanding' | 'settled'
   const today = getTodayISO();
   const [groups, setGroups] = useState([]);
@@ -145,8 +153,14 @@ const OutstandingReportPanel = ({ branchId }) => {
     });
   }, [rows, searchQuery, personFilter, sortKey, sortDir]);
 
+  // Summed in paisa so float residue never shows.
   const totalOutstanding = useMemo(
-    () => filtered.reduce((s, r) => s + Number(r.amountDue || 0), 0),
+    () => filtered.reduce((s, r) => s + Math.round(Number(r.amountDue || 0) * 100), 0) / 100,
+    [filtered]
+  );
+  // Owed on closed (locked) days: still in the total, but it can't be collected from here.
+  const lockedTotal = useMemo(
+    () => filtered.filter((r) => r.isLocked).reduce((s, r) => s + Math.round(Number(r.amountDue || 0) * 100), 0) / 100,
     [filtered]
   );
   const totalBookings = filtered.length;
@@ -201,7 +215,9 @@ const OutstandingReportPanel = ({ branchId }) => {
     setOtherDueBookings(data?.bookings || []);
   };
 
-  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes, tipSplits }) => {
+  // ZNLY-233: every checkout goes through the one shared submit, so products on the bill are saved (never dropped); no products => the treatment-only path below.
+  const handleRecordPayment = (payload) => submitCheckout({ bookingId: payingRow?.bookingId, payload, treatment: recordTreatmentOnly, onSaved: async () => { await load(); fetchDueHolderNames(branchId).then(({ data }) => { if (Array.isArray(data)) setSuggestions(data); }); } });
+  const recordTreatmentOnly = async ({ tenders, additionalAllocations, dueHolderName, notes, tipSplits }) => {
     if (!payingRow) return { error: { message: 'No booking selected.' } };
     setPaymentSubmitting(true);
     // Pay the clicked row with its allocated tenders, then pay each bundled
@@ -218,13 +234,13 @@ const OutstandingReportPanel = ({ branchId }) => {
       const tipResult = await recordTip({ bookingId: payingRow.bookingId, amount: split.amount, receivedBy: split.receivedBy });
       if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
     }
-    for (const alloc of (additionalAllocations || [])) {
-      await recordPayment({ bookingId: alloc.bookingId, tenders: alloc.tenders, notes });
-    }
+    // Honest Collect: check every bundled allocation and name any booking that was not recorded.
+    const failures = await recordBundledAllocations({ allocations: additionalAllocations, notes, bookings: otherDueBookings });
+    const failureMessage = failures.length ? `Payment recorded for ${payingRow.bookingNumber}, but NOT recorded for: ${failures.join('; ')}. Those bookings still show as owed.` : null;
     setPaymentSubmitting(false);
-    setPayingRow(null);
-    setOtherDueBookings([]);
+    // Checkout stays open on its success state; onClose (Done) clears payingRow.
     await load();
+    if (failureMessage) setError(failureMessage);
     fetchDueHolderNames(branchId).then(({ data }) => {
       if (Array.isArray(data)) setSuggestions(data);
     });
@@ -267,6 +283,17 @@ const OutstandingReportPanel = ({ branchId }) => {
       onClick: () => { setMode('preset'); setActivePreset(p.id); },
     })),
   ];
+
+  // The money-model notice (one Spotlight per page): Outstanding now lists only what is owed for visits that happened.
+  const isMgrUp = profile?.role === 'admin' || profile?.role === 'manager';
+  const sinceShipped = daysBetween(SHIPPED_AT, nepalNow().today);
+  const noticeSlides = useMemo(() => (isMgrUp && sinceShipped >= 0 && sinceShipped <= NOTICE_DAYS ? [{
+    id: 'balance-rule-2026-10-outstanding', version: 1, eyebrow: "What's changed",
+    title: 'Balance now shows only what’s owed for visits that happened.',
+    body: 'Upcoming bookings no longer count as owed, so some totals are lower. Nothing was lost.',
+    primary: { label: 'See what needs closing', onClick: () => document.getElementById('needs-closing')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) },
+    secondary: { label: 'Got it', onClick: ({ dismiss }) => dismiss() },
+  }] : []), [isMgrUp, sinceShipped]);
 
   return (
     <div className="space-y-4">
@@ -348,6 +375,11 @@ const OutstandingReportPanel = ({ branchId }) => {
           className="w-60"
         />
       </div>
+
+      {lockedTotal > 0 && !loading && (
+        <p className="font-caption text-xs text-text-tertiary -mt-2">{formatNPR(lockedTotal)} is on closed days. You can still collect it: the payment is recorded today and the closed day’s report does not change.</p>
+      )}
+      {noticeSlides.length > 0 && <Spotlight slides={noticeSlides} label="Outstanding notice" />}
 
       {/* Error */}
       {error && (
@@ -466,13 +498,13 @@ const OutstandingReportPanel = ({ branchId }) => {
                               <Icon name="HelpCircle" size={15} />
                               {UNASSIGNED_LABEL}
                             </span>
-                            <button
+                            {canAct && <button
                               onClick={() => startAssign(r.bookingId, '')}
                               className="inline-flex items-center gap-1 px-2 py-1 rounded-spa border border-border bg-surface text-xs font-body-medium text-primary hover:bg-background spa-transition-fast"
                             >
                               <Icon name="UserPlus" size={13} />
                               Assign
-                            </button>
+                            </button>}
                           </div>
                         )
                       ) : (
@@ -483,13 +515,14 @@ const OutstandingReportPanel = ({ branchId }) => {
                       {formatNPR(r.amountDue)}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <button
+                      {canAct && r.isLocked && <span className="mr-2 font-body text-xs text-text-tertiary" title="The day was closed; the payment is recorded today and the closed report does not change">Closed day</span>}
+                      {canAct && <button
                         onClick={() => openPay(r)}
                         className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-spa bg-success text-white text-xs font-body-medium hover:bg-success/90 spa-transition-fast"
                       >
                         <Icon name="CreditCard" size={13} />
                         Pay
-                      </button>
+                      </button>}
                     </td>
                   </tr>
                 ))}
@@ -508,6 +541,7 @@ const OutstandingReportPanel = ({ branchId }) => {
           </div>
         )}
       </div>
+      <NeedsClosingSection branchId={branchId} from={range.from} to={range.to} />
       </>
       )}
 
@@ -525,6 +559,7 @@ const OutstandingReportPanel = ({ branchId }) => {
           additionalBookings={otherDueBookings}
           dueHolderSuggestions={suggestions}
           onConfirm={handleRecordPayment}
+          savesProducts
           onClose={() => { setPayingRow(null); setOtherDueBookings([]); }}
           isSubmitting={paymentSubmitting}
         />

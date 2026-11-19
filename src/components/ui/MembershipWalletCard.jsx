@@ -19,7 +19,7 @@ function formatNPR(amount) {
 // `pendingDeduction` is optional: when provided (>0) — e.g. a Membership tender
 // currently entered but not yet confirmed — shows a live "after this payment"
 // projection right in the card, instead of only as a small caption elsewhere.
-const MembershipWalletCard = ({ membership, paidThisVisit = 0, pendingDeduction = 0 }) => {
+const MembershipWalletCard = ({ membership, paidThisVisit = 0, pendingDeduction = 0, hairline = false }) => {
   if (!membership) return null;
 
   const styleKey = membership.status || 'pending';
@@ -27,7 +27,7 @@ const MembershipWalletCard = ({ membership, paidThisVisit = 0, pendingDeduction 
   const projectedBalance = Math.max(Number(membership.balance) - pendingDeduction, 0);
 
   return (
-    <div className={`rounded-spa border ${styles.container} px-3 py-2.5`}>
+    <div className={`rounded-spa border ${hairline ? 'border-border bg-surface' : styles.container} px-3 py-2.5`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2 min-w-0">
           <Icon name="Wallet" size={14} className="text-primary flex-shrink-0" />

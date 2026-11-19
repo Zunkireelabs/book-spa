@@ -1,251 +1,265 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
-import { fetchPackageOverview, fetchPackageTypes } from '../../../../services/api';
-import { useAuth } from '../../../../contexts/AuthContext';
-import NewPackageModal from './NewPackageModal';
+import { FilterChip, Menu } from '../../../../components/ui/ListToolbarKit';
+import { useMinWidth, useSlashFocus, SearchBox, RowSwitch, MiniButton, npr, csvDownload, ErrorBlock } from '../Area/listKit';
+import { updatePackageType } from '../../../../services/api';
+import { perSession, typeUsage, validityLabel } from '../../../../services/packagesView';
+import { friendlyError } from '../../../../utils/friendlyError';
+import PackageTypePanel from './PackageTypePanel';
 
-function formatNPR(amount) {
-  return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
-}
+const SHOW = { all: 'All', on: 'On sale', hidden: 'Hidden' };
+const typeTitle = (t) => t.name;
+const serviceLine = (t) => [t.service?.name, t.service?.duration_minutes ? `${t.service.duration_minutes} min` : null].filter(Boolean).join(' · ');
 
-// "All Packages" — org-wide session-package dashboard: totals, status
-// breakdown, package-type catalog, and a per-branch table showing how many
-// packages each branch has issued and how many sessions remain outstanding
-// against them. Packages counterpart of VoucherOverviewPanel.
-const PackageOverviewPanel = () => {
-  const { profile } = useAuth();
-  const userRole = profile?.role || 'manager';
-  const [overview, setOverview] = useState(null);
-  const [packageTypes, setPackageTypes] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [showNewPackage, setShowNewPackage] = useState(false);
+// Package types (V20): the packages on offer, what one session costs against a single visit, how many guests hold each, and an
+// admin On sale switch. Turning a type off only hides it from Sell package; packages already sold are untouched.
+const PackageOverviewPanel = ({ packages, types, today, error, onRetry, onChanged, readOnly, role, stickyTop, onSell, notify, registerExport }) => {
+  const isAdmin = role === 'admin' && !readOnly;
+  const [sp, setSp] = useSearchParams();
+  const isSm = useMinWidth(640);
+  const isMd = useMinWidth(768);
+  const isLg = useMinWidth(1024);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    const [{ data, error: fetchError }, { data: types, error: typesError }] = await Promise.all([
-      fetchPackageOverview(),
-      fetchPackageTypes(),
-    ]);
-    if (fetchError) {
-      setError(fetchError.message || 'Failed to load package overview.');
-      setLoading(false);
+  const query = sp.get('q') || '';
+  const service = sp.get('sv') || '';
+  const show = SHOW[sp.get('show')] ? sp.get('show') : 'all';
+  const spRef = useRef(sp);
+  spRef.current = sp;
+  const patch = useCallback((obj) => {
+    const next = new URLSearchParams(spRef.current);
+    Object.entries(obj).forEach(([k, v]) => { if (v == null || v === '') next.delete(k); else next.set(k, String(v)); });
+    spRef.current = next;
+    setSp(next, { replace: true });
+  }, [setSp]);
+  const [searchText, setSearchText] = useState(query);
+  const searchRef = useRef(null);
+  useEffect(() => {
+    const t = setTimeout(() => { if (searchText !== query) patch({ q: searchText }); }, 200);
+    return () => clearTimeout(t);
+  }, [searchText]); // eslint-disable-line react-hooks/exhaustive-deps
+  useSlashFocus(searchRef);
+
+  // Optimistic On sale: the switch flips at once and reverts (with a toast) if the save fails.
+  const [overrides, setOverrides] = useState({});
+  const [busyId, setBusyId] = useState(null);
+  const activeOf = (t) => (overrides[t.id] !== undefined ? overrides[t.id] : !!t.is_active);
+  const toggle = async (t, next) => {
+    setOverrides((o) => ({ ...o, [t.id]: next }));
+    setBusyId(t.id);
+    const { error: err } = await updatePackageType({ id: t.id, isActive: next });
+    setBusyId(null);
+    if (err) {
+      setOverrides((o) => ({ ...o, [t.id]: !next }));
+      notify(friendlyError(err, 'Could not change the package type.'), 'error');
       return;
     }
-    setOverview(data);
-    setPackageTypes(typesError ? [] : types);
-    setLoading(false);
+    notify(next ? `${t.name} is on sale` : `${t.name} is hidden from Sell package`);
+    await onChanged();
+    setOverrides((o) => { const { [t.id]: _drop, ...rest } = o; return rest; });
+  };
+
+  const [editing, setEditing] = useState(null); // null | 'new' | type
+  const usage = useMemo(() => typeUsage(packages || [], today), [packages, today]);
+  const serviceOptions = useMemo(() => {
+    const seen = new Map();
+    (types || []).forEach((t) => { if (t.service?.id && !seen.has(t.service.id)) seen.set(t.service.id, t.service.name); });
+    return [...seen].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [types]);
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return (types || []).filter((t) => {
+      if (service && t.service?.id !== service) return false;
+      const on = overrides[t.id] !== undefined ? overrides[t.id] : !!t.is_active;
+      if (show === 'on' && !on) return false;
+      if (show === 'hidden' && on) return false;
+      return !q || `${t.name} ${t.service?.name || ''}`.toLowerCase().includes(q);
+    });
+  }, [types, query, service, show, overrides]);
+
+  const exportCsv = useCallback(() => {
+    csvDownload(`package-types-${today}.csv`,
+      ['Package', 'Service', 'Minutes', 'Sessions', 'Price', 'Per session', 'Single visit', 'Valid for (days)', 'Active guests', 'Sold', 'On sale'],
+      visible.map((t) => {
+        const ps = perSession(t);
+        return [t.name, t.service?.name || '', t.service?.duration_minutes || '', t.default_sessions ?? 'Open', t.standard_price ?? 'Set at sale',
+          ps.per != null ? Math.round(ps.per) : '', ps.single ?? '', t.validity_days, usage[t.id]?.active || 0, usage[t.id]?.sold || 0, t.is_active ? 'Yes' : 'No'];
+      }));
+  }, [visible, usage, today]);
+  useEffect(() => { registerExport({ run: exportCsv, disabled: !types || visible.length === 0 }); }, [exportCsv, types, visible.length, registerExport]);
+  useEffect(() => () => registerExport(null), [registerExport]);
+
+  // Sticky toolbar; the column headings stick under it.
+  const blockRef = useRef(null);
+  const [blockH, setBlockH] = useState(60);
+  useEffect(() => {
+    const el = blockRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => setBlockH(Math.ceil(el.getBoundingClientRect().height)));
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  const loading = !types && !error;
+  const showSessions = isMd;
+  const showPer = isLg;
+  const showValid = isMd;
+  const showGuests = isLg;
+  const showPrice = isSm;
+  const colCount = 3 + (showSessions ? 1 : 0) + (showPrice ? 1 : 0) + (showPer ? 1 : 0) + (showValid ? 1 : 0) + (showGuests ? 1 : 0);
+  const th = 'h-[34px] text-[12px] font-medium whitespace-nowrap border-b border-border bg-white text-[#8A8A90] sticky z-[5]';
+  const thTop = { top: stickyTop + blockH };
+  const anyFilter = !!(query || service || show !== 'all');
 
+  const showMenu = (
+    <Menu trigger={(open, toggleMenu) => (
+      <button type="button" onClick={toggleMenu} aria-haspopup="menu" aria-expanded={open} className="h-7 px-2 rounded-md text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:bg-[#FAFAF9] whitespace-nowrap">
+        Show <b className="text-text-primary font-medium">{SHOW[show]}</b><Icon name="ChevronDown" size={13} />
+      </button>)}>
+      {(close) => Object.entries(SHOW).map(([id, label]) => (
+        <button key={id} type="button" onClick={() => { patch({ show: id === 'all' ? '' : id }); close(); }} className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-[#FAFAF9] flex justify-between ${show === id ? 'font-medium' : ''}`}>
+          {label}{show === id && <Icon name="Check" size={13} />}
+        </button>))}
+    </Menu>
+  );
+
+  let body = null;
   if (loading) {
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="bg-surface rounded-spa-lg border border-border p-4 animate-pulse">
-              <div className="h-3 bg-background rounded w-16 mb-2" />
-              <div className="h-6 bg-background rounded w-20" />
+    body = Array.from({ length: 5 }).map((_, i) => (
+      <tr key={i}><td colSpan={colCount} className="h-[58px] border-b border-[#F1F1EF]"><div className="h-8 rounded bg-[#F1F1EF] animate-pulse" /></td></tr>
+    ));
+  } else if (!error) {
+    body = visible.map((t) => {
+      const on = activeOf(t);
+      const ps = perSession(t);
+      const u = usage[t.id] || { active: 0, sold: 0 };
+      const fade = on ? '' : 'opacity-[.55]';
+      return (
+        <tr key={t.id} data-type-id={t.id} data-on-sale={on ? '1' : '0'} tabIndex={isAdmin ? 0 : undefined}
+          onClick={isAdmin ? () => setEditing(t) : undefined} onKeyDown={isAdmin ? (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) setEditing(t); } : undefined}
+          className={`group ${isAdmin ? 'cursor-pointer hover:bg-[#FAFAF9] focus:outline-none focus-visible:bg-[#FAFAF9]' : ''}`}>
+          <td className="h-[58px] border-b border-[#F1F1EF] pr-3">
+            <div className={`pl-2 min-w-0 ${fade}`}>
+              <div className="font-medium text-[13px] text-text-primary truncate">{typeTitle(t)}</div>
+              <div className="text-[12.5px] text-[#8A8A90] mt-0.5 truncate">
+                {isSm ? serviceLine(t) || '—' : [t.default_sessions != null ? `${t.default_sessions} sessions` : 'Open sessions', t.standard_price != null ? npr(t.standard_price) : 'Price set at sale'].join(' · ')}
+              </div>
             </div>
-          ))}
-        </div>
-        <div className="bg-surface rounded-spa-lg border border-border p-8 animate-pulse">
-          <div className="h-4 bg-background rounded w-48 mb-4" />
-          <div className="space-y-3">
-            {[0, 1, 2].map((i) => <div key={i} className="h-10 bg-background rounded" />)}
-          </div>
-        </div>
-      </div>
-    );
+          </td>
+          {showSessions && <td className="h-[58px] border-b border-[#F1F1EF] pr-3 text-right text-[13px] font-medium tabular-nums"><span className={fade}>{t.default_sessions ?? <span className="text-[#8A8A90] font-normal">Open</span>}</span></td>}
+          {showPrice && <td className="h-[58px] border-b border-[#F1F1EF] pr-3 text-right text-[13px] font-medium tabular-nums whitespace-nowrap"><span className={fade}>{t.standard_price != null ? npr(t.standard_price) : <span className="text-[#8A8A90] font-normal">Set at sale</span>}</span></td>}
+          {showPer && (
+            <td className="h-[58px] border-b border-[#F1F1EF] pr-4 text-right">
+              <div className={fade}>
+                <div className="text-[13px] font-medium tabular-nums whitespace-nowrap inline-flex items-center justify-end gap-2">
+                  {ps.per != null ? npr(ps.per) : <span className="text-[#8A8A90] font-normal">—</span>}
+                  {ps.saves != null && <span className="h-5 px-[7px] rounded-full bg-[#EEF3EC] text-primary text-[11.5px] font-medium inline-flex items-center" data-saves>saves {ps.saves}%</span>}
+                </div>
+                {ps.per != null && ps.single != null && <div className="text-[12.5px] text-[#8A8A90] mt-0.5 tabular-nums whitespace-nowrap">single visit {npr(ps.single)}</div>}
+              </div>
+            </td>
+          )}
+          {showValid && <td className="h-[58px] border-b border-[#F1F1EF] pr-3 text-[13px] whitespace-nowrap"><span className={fade}>{validityLabel(t.validity_days)}</span></td>}
+          {showGuests && (
+            <td className="h-[58px] border-b border-[#F1F1EF] pr-3">
+              <div className={fade} data-guests>
+                <div className="text-[13px] font-medium tabular-nums">{u.active} active</div>
+                <div className="text-[12.5px] text-[#8A8A90] mt-0.5 tabular-nums">{u.sold} sold</div>
+              </div>
+            </td>
+          )}
+          <td className="h-[58px] border-b border-[#F1F1EF] pr-3">
+            {isAdmin
+              ? <RowSwitch checked={on} busy={busyId === t.id} label={`${t.name} on sale`} onChange={(next) => toggle(t, next)} />
+              : <span className={`text-[12.5px] ${on ? 'text-text-primary' : 'text-[#8A8A90]'}`}>{on ? 'On sale' : 'Hidden'}</span>}
+          </td>
+          <td className="h-[58px] border-b border-[#F1F1EF] pr-1">
+            <div className="flex gap-1.5 justify-end items-center text-[#8A8A90]">
+              {isSm && (on
+                ? (!readOnly && <MiniButton primary data-row-action="Sell" onClick={(e) => { e.stopPropagation(); onSell({ typeId: t.id }); }}>Sell</MiniButton>)
+                : <span className="h-5 px-[7px] rounded-full text-[11.5px] font-medium inline-flex items-center bg-white text-[#8A8A90] shadow-[inset_0_0_0_1px_#E7E8E6] whitespace-nowrap">Hidden from sale</span>)}
+              {isAdmin && <Icon name="ChevronRight" size={15} />}
+            </div>
+          </td>
+        </tr>
+      );
+    });
   }
-
-  if (error) {
-    return (
-      <div className="bg-error/5 border border-error/20 rounded-spa p-4 flex items-center space-x-3">
-        <Icon name="AlertCircle" size={18} className="text-error flex-shrink-0" />
-        <p className="font-body text-sm text-error">{error}</p>
-        <button onClick={loadData} className="ml-auto font-body font-body-medium text-sm text-error underline">
-          Retry
-        </button>
-      </div>
-    );
-  }
-
-  const { totals, branches } = overview;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="font-heading font-heading-semibold text-lg text-text-primary">All Packages</h3>
-          <p className="font-body text-sm text-text-secondary">Org-wide session-package totals and branch breakdown</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setShowNewPackage(true)}
-          className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast flex-shrink-0"
-        >
-          <Icon name="Plus" size={14} />
-          <span>New Package</span>
-        </button>
-      </div>
-
-      {/* Top-line totals */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-surface rounded-spa-lg border border-border p-4">
-          <div className="flex items-center space-x-2 mb-2">
-            <div className="w-6 h-6 rounded flex items-center justify-center bg-primary/10">
-              <Icon name="Layers" size={14} className="text-primary" />
-            </div>
-            <span className="font-caption font-caption-normal text-[11px] text-text-tertiary uppercase tracking-wide">Total Issued</span>
+    <div>
+      <div ref={blockRef} className="sticky z-sticky-filter bg-white" style={{ top: stickyTop }}>
+        <div className="flex items-center gap-2 pt-[18px] pb-2 flex-wrap">
+          <SearchBox ref={searchRef} value={searchText} onChange={setSearchText} placeholder="Search package or service" ariaLabel="Search package types" />
+          <FilterChip label="Service" value={service} options={serviceOptions} onChange={(v) => patch({ sv: v })} selectedLabel={serviceOptions.find((o) => o.id === service)?.label} />
+          <div className="ml-auto flex items-center gap-2">
+            {showMenu}
+            {isAdmin && (
+              <button type="button" onClick={() => setEditing('new')} className="h-8 px-3 rounded-md border border-border bg-white text-[13px] font-medium inline-flex items-center gap-1.5 hover:bg-[#FAFAF9] whitespace-nowrap">
+                <Icon name="Plus" size={14} />New package type
+              </button>
+            )}
           </div>
-          <p className="font-heading font-heading-semibold text-xl text-text-primary">{totals.totalPackages}</p>
-        </div>
-        <div className="bg-surface rounded-spa-lg border border-border p-4">
-          <div className="flex items-center space-x-2 mb-2">
-            <div className="w-6 h-6 rounded flex items-center justify-center bg-primary/10">
-              <Icon name="ArrowDownToLine" size={14} className="text-primary" />
-            </div>
-            <span className="font-caption font-caption-normal text-[11px] text-text-tertiary uppercase tracking-wide">Amount Collected</span>
-          </div>
-          <p className="font-heading font-heading-semibold text-xl text-text-primary">{formatNPR(totals.totalPaidAmount)}</p>
-        </div>
-        <div className="bg-surface rounded-spa-lg border border-border p-4">
-          <div className="flex items-center space-x-2 mb-2">
-            <div className="w-6 h-6 rounded flex items-center justify-center bg-warning/10">
-              <Icon name="ArrowUpFromLine" size={14} className="text-warning" />
-            </div>
-            <span className="font-caption font-caption-normal text-[11px] text-text-tertiary uppercase tracking-wide">Sessions Used</span>
-          </div>
-          <p className="font-heading font-heading-semibold text-xl text-warning">{totals.totalSessionsUsed} / {totals.totalSessionsIssued}</p>
-        </div>
-        <div className="bg-primary/5 rounded-spa-lg border border-primary/20 p-4">
-          <div className="flex items-center space-x-2 mb-2">
-            <div className="w-6 h-6 rounded flex items-center justify-center bg-primary/15">
-              <Icon name="AlertCircle" size={14} className="text-primary" />
-            </div>
-            <span className="font-caption font-caption-normal text-[11px] text-primary uppercase tracking-wide">Sessions Remaining</span>
-          </div>
-          <p className="font-heading font-heading-semibold text-xl text-primary">{totals.totalSessionsRemaining}</p>
         </div>
       </div>
 
-      {/* Package types catalog — the same name + price list used in the New Package dropdown */}
-      <div className="bg-surface rounded-spa-lg border border-border overflow-hidden">
-        <div className="px-4 py-2.5 bg-background border-b border-border">
-          <span className="font-body font-body-medium text-xs text-text-secondary">Package Types</span>
-        </div>
-        {packageTypes.length === 0 ? (
-          <div className="text-center py-12">
-            <Icon name="Layers" size={32} className="text-text-tertiary mx-auto mb-3" />
-            <p className="font-body font-body-medium text-sm text-text-secondary">No package types found</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-background border-b border-border">
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Name</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Service</th>
-                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Sessions</th>
-                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Price</th>
-                </tr>
-              </thead>
-              <tbody>
-                {packageTypes.map((t) => (
-                  <tr key={t.id} className="border-b border-border last:border-0">
-                    <td className="px-4 py-3">
-                      <span className="font-body font-body-medium text-sm text-text-primary">{t.name}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="font-body font-body-normal text-sm text-text-secondary">
-                        {t.service?.name || '—'}
-                        {t.service?.duration_minutes ? ` (${t.service.duration_minutes} min)` : ''}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className="font-data font-data-normal text-sm text-text-secondary">{t.default_sessions ?? '—'}</span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className="font-data font-data-medium text-sm text-text-primary">
-                        {t.standard_price != null ? formatNPR(t.standard_price) : '—'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      {error ? (
+        <ErrorBlock error={error} onRetry={onRetry} />
+      ) : (
+        <table className="w-full border-collapse table-fixed">
+          <colgroup>
+            <col />
+            {showSessions && <col style={{ width: 80 }} />}
+            {showPrice && <col style={{ width: 112 }} />}
+            {showPer && <col style={{ width: 200 }} />}
+            {showValid && <col style={{ width: 96 }} />}
+            {showGuests && <col style={{ width: 96 }} />}
+            <col style={{ width: isAdmin ? 72 : 84 }} />
+            <col style={{ width: isSm ? 150 : 28 }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th scope="col" className={`${th} text-left pl-2`} style={thTop}>Package</th>
+              {showSessions && <th scope="col" className={`${th} text-right pr-3`} style={thTop}>Sessions</th>}
+              {showPrice && <th scope="col" className={`${th} text-right pr-3`} style={thTop}>Price</th>}
+              {showPer && <th scope="col" className={`${th} text-right pr-4`} style={thTop}>Per session</th>}
+              {showValid && <th scope="col" className={`${th} text-left`} style={thTop}>Valid for</th>}
+              {showGuests && <th scope="col" className={`${th} text-left`} style={thTop}>Guests</th>}
+              <th scope="col" className={`${th} text-left`} style={thTop}>On sale</th>
+              <th scope="col" className={th} style={thTop}><span className="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>{body}</tbody>
+        </table>
+      )}
 
-      {/* Branch breakdown */}
-      <div className="bg-surface rounded-spa-lg border border-border overflow-hidden">
-        <div className="px-4 py-2.5 bg-background border-b border-border">
-          <span className="font-body font-body-medium text-xs text-text-secondary">Packages by Branch</span>
+      {!loading && !error && visible.length === 0 && (
+        <div className="text-center py-16">
+          <Icon name="Layers" size={28} className="text-[#B4B4BA] mx-auto mb-3" />
+          {(types || []).length === 0 ? (
+            <>
+              <p className="text-[14px] font-medium text-text-primary">No package types yet</p>
+              <p className="text-[13px] text-[#8A8A90] mt-1">{isAdmin ? 'Create the packages you offer, then sell them to guests.' : 'An admin can add the packages you offer.'}</p>
+              {isAdmin && <button type="button" onClick={() => setEditing('new')} className="mt-3 text-[13px] font-medium text-primary hover:underline">New package type</button>}
+            </>
+          ) : (
+            <>
+              <p className="text-[14px] font-medium text-text-primary">No package types match</p>
+              <p className="text-[13px] text-[#8A8A90] mt-1">Try a different search or clear a filter.</p>
+              {anyFilter && <button type="button" onClick={() => { setSearchText(''); patch({ q: '', sv: '', show: '' }); }} className="mt-3 text-[13px] font-medium text-primary hover:underline">Clear filters</button>}
+            </>
+          )}
         </div>
-        {branches.length === 0 ? (
-          <div className="text-center py-12">
-            <Icon name="Building2" size={32} className="text-text-tertiary mx-auto mb-3" />
-            <p className="font-body font-body-medium text-sm text-text-secondary">No branches found</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-background border-b border-border">
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Branch</th>
-                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Issued (Count)</th>
-                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Amount Collected</th>
-                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Sessions Used</th>
-                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Sessions Remaining</th>
-                </tr>
-              </thead>
-              <tbody>
-                {branches.map((b) => (
-                  <tr key={b.branchId} className="border-b border-border last:border-0">
-                    <td className="px-4 py-3">
-                      <span className="font-body font-body-medium text-sm text-text-primary">{b.branchName}</span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className="font-data font-data-normal text-sm text-text-secondary">{b.issuedCount}</span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className="font-data font-data-normal text-sm text-text-secondary">{formatNPR(b.paidAmount)}</span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className="font-data font-data-medium text-sm text-warning">{b.sessionsUsed}</span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className="font-data font-data-medium text-sm text-primary">{b.sessionsRemaining}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="bg-background border-t-2 border-border">
-                  <td className="px-4 py-3 font-body font-body-semibold text-sm text-text-primary">Total</td>
-                  <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-text-primary">{totals.totalPackages}</td>
-                  <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-text-primary">{formatNPR(totals.totalPaidAmount)}</td>
-                  <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-warning">{totals.totalSessionsUsed}</td>
-                  <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-primary">{totals.totalSessionsRemaining}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        )}
-      </div>
+      )}
+      {!loading && !error && visible.length > 0 && (
+        <p className="text-[12.5px] text-[#8A8A90] mt-3.5">Turning a package off hides it from &ldquo;Sell package&rdquo;. Guests who already bought it keep their sessions.</p>
+      )}
 
-      {showNewPackage && (
-        <NewPackageModal
-          userRole={userRole}
-          onClose={() => setShowNewPackage(false)}
-          onIssued={() => {
-            setShowNewPackage(false);
-            loadData();
-          }}
+      {isAdmin && editing && (
+        <PackageTypePanel
+          type={editing === 'new' ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={async (saved, created) => { setEditing(null); notify(created ? `${saved.name} added` : `${saved.name} saved`); await onChanged(); }}
         />
       )}
     </div>

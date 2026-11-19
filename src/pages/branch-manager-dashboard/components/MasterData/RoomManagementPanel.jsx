@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
-import Input from '../../../../components/ui/Input';
+import ConfirmDialog from '../../../../components/ui/ConfirmDialog';
+import { useFlashRow, rowTone, rowBar } from '../../../../components/ui/PanelFormKit';
+import RoomFormPanel from './RoomFormPanel';
+import { friendlyError } from '../../../../utils/friendlyError';
 import { useIndustry } from '../../../../hooks/useIndustry';
 import {
   fetchRoomsForManagement,
   createRoom,
   updateRoom,
-  toggleRoomActive,
   deleteRoom,
 } from '../../../../services/api';
 
@@ -18,17 +20,10 @@ const RoomManagementPanel = ({ branchId }) => {
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAmenity, setSelectedAmenity] = useState('All');
-  const [showModal, setShowModal] = useState(false);
-  const [editingRoom, setEditingRoom] = useState(null);
-  const [formName, setFormName] = useState('');
-  const [formAmenities, setFormAmenities] = useState('');
-  const [formFloor, setFormFloor] = useState('');
-  const [formCapacity, setFormCapacity] = useState('1');
-  const [formError, setFormError] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [confirmToggle, setConfirmToggle] = useState(null);
+  const [panel, setPanel] = useState(null); // { room? } while the New / Edit panel is open
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [flashId, flash] = useFlashRow();
 
   const allUniqueAmenities = useMemo(() => {
     const amenities = new Set();
@@ -49,9 +44,10 @@ const RoomManagementPanel = ({ branchId }) => {
     return filtered;
   }, [rooms, searchQuery, selectedAmenity]);
 
+  const hasLoadedRef = useRef(false);
   const loadRooms = useCallback(async () => {
     if (!branchId) return;
-    setLoading(true);
+    if (!hasLoadedRef.current) setLoading(true);
     setError(null);
     const result = await fetchRoomsForManagement(branchId);
     
@@ -60,59 +56,11 @@ const RoomManagementPanel = ({ branchId }) => {
     } else {
       setRooms(result.data || []);
     }
+    hasLoadedRef.current = true;
     setLoading(false);
   }, [branchId]);
 
   useEffect(() => { loadRooms(); }, [loadRooms, branchId]);
-
-  const handleOpenCreate = () => {
-    setEditingRoom(null);
-    setFormName('');
-    setFormAmenities('');
-    setFormFloor('');
-    setFormCapacity('1');
-    setFormError(null);
-    setShowModal(true);
-  };
-
-  const handleOpenEdit = (room) => {
-    setEditingRoom(room);
-    setFormName(room.name);
-    setFormAmenities(room.amenities ? room.amenities.join(', ') : '');
-    setFormFloor(room.floor || '');
-    setFormCapacity(String(room.capacity ?? 1));
-    setFormError(null);
-    setShowModal(true);
-  };
-
-  const handleSave = async () => {
-    if (!formName.trim()) {
-      setFormError('Room name is required.');
-      return;
-    }
-    const capacityValue = parseInt(formCapacity, 10);
-    if (!capacityValue || capacityValue < 1) {
-      setFormError('Capacity must be at least 1.');
-      return;
-    }
-    setSaving(true);
-    setFormError(null);
-    const amenitiesArray = formAmenities.split(',').map(s => s.trim()).filter(Boolean);
-    const floorValue = formFloor.trim() || null;
-    let result;
-    if (editingRoom) {
-      result = await updateRoom({ roomId: editingRoom.id, name: formName.trim(), amenities: amenitiesArray, floor: floorValue, capacity: capacityValue });
-    } else {
-      result = await createRoom({ name: formName.trim(), branchId, amenities: amenitiesArray, floor: floorValue, capacity: capacityValue });
-    }
-    if (result.error) {
-      setFormError(result.error.message || 'Operation failed.');
-    } else {
-      setShowModal(false);
-      await loadRooms();
-    }
-    setSaving(false);
-  };
 
   const handleDelete = async () => {
     if (!confirmDelete) return;
@@ -120,7 +68,9 @@ const RoomManagementPanel = ({ branchId }) => {
     setError(null);
     const result = await deleteRoom({ roomId: confirmDelete.id });
     if (result.error) {
-      setError(result.error.code === 'HAS_BOOKINGS' ? 'Cannot delete room with history.' : result.error.message);
+      setError(result.error.code === 'HAS_BOOKINGS' || /foreign key|23503/i.test(`${result.error.code || ''} ${result.error.message || ''}`)
+        ? `"${confirmDelete.name}" has booking history, so it can't be deleted.`
+        : friendlyError(result.error, 'Could not delete.'));
     } else {
       await loadRooms();
     }
@@ -146,7 +96,7 @@ const RoomManagementPanel = ({ branchId }) => {
           <h3 className="font-heading font-heading-semibold text-lg text-text-primary">{locationLabel} Management</h3>
           <p className="font-body text-sm text-text-secondary">{rooms.length} {locationLabelPlural} configured</p>
         </div>
-        <Button variant="primary" size="sm" iconName="Plus" onClick={handleOpenCreate}>
+        <Button variant="primary" size="sm" iconName="Plus" onClick={() => setPanel({})}>
           Add {locationLabel}
         </Button>
       </div>
@@ -202,13 +152,15 @@ const RoomManagementPanel = ({ branchId }) => {
             {filteredRooms.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-4 py-8 text-center text-text-secondary text-sm">
-                  No {locationLabelPlural} found.
+                  {rooms.length === 0 ? (
+                    <>No {locationLabelPlural} yet. <button type="button" onClick={() => setPanel({})} className="text-primary font-body-medium hover:underline">Add the first {locationLabel.toLowerCase()}</button></>
+                  ) : `No ${locationLabelPlural} match your search.`}
                 </td>
               </tr>
             ) : (
               filteredRooms.map((room) => (
-                <tr key={room.id} className="border-b border-border last:border-b-0 hover:bg-background/50">
-                  <td className="px-4 py-3 font-medium text-sm">{room.name}</td>
+                <tr key={room.id} aria-selected={panel?.room?.id === room.id || undefined} className={`border-b border-border last:border-b-0 ${rowTone(panel?.room?.id === room.id, flashId === room.id)}`}>
+                  <td className={`px-4 py-3 font-medium text-sm ${rowBar(panel?.room?.id === room.id || flashId === room.id)}`}>{room.name}</td>
                   <td className="px-4 py-3 text-sm text-text-secondary">{room.floor || '—'}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
@@ -225,8 +177,8 @@ const RoomManagementPanel = ({ branchId }) => {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-2">
-                      <button onClick={() => handleOpenEdit(room)} className="p-1 hover:text-primary"><Icon name="Pencil" size={16} /></button>
-                      <button onClick={() => setConfirmDelete(room)} className="p-1 hover:text-error"><Icon name="Trash2" size={16} /></button>
+                      <button onClick={() => setPanel({ room })} aria-label="Edit" title="Edit" className="p-1 hover:text-primary"><Icon name="Pencil" size={16} /></button>
+                      <button onClick={() => setConfirmDelete(room)} aria-label="Delete" title="Delete" className="p-1 hover:text-error"><Icon name="Trash2" size={16} /></button>
                     </div>
                   </td>
                 </tr>
@@ -236,34 +188,26 @@ const RoomManagementPanel = ({ branchId }) => {
         </table>
       </div>
 
-      {showModal && (
-        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
-          <div className="bg-surface rounded-spa-lg w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-bold mb-4">{editingRoom ? 'Edit' : 'Add'} {locationLabel}</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">{locationLabel} Name</label>
-                <Input value={formName} onChange={e => setFormName(e.target.value)} autoFocus />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Floor</label>
-                <Input value={formFloor} onChange={e => setFormFloor(e.target.value)} placeholder="e.g., Ground Floor, VIP Floor" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Amenities (comma separated)</label>
-                <Input value={formAmenities} onChange={e => setFormAmenities(e.target.value)} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Capacity (concurrent bookings)</label>
-                <Input type="number" min="1" value={formCapacity} onChange={e => setFormCapacity(e.target.value)} />
-              </div>
-              <div className="flex justify-end gap-2 pt-4">
-                <Button variant="ghost" onClick={() => setShowModal(false)}>Cancel</Button>
-                <Button variant="primary" onClick={handleSave} loading={saving}>Save</Button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`Delete ${locationLabel.toLowerCase()}?`}
+          message={`"${confirmDelete.name}" will be permanently deleted. This action cannot be undone.`}
+          confirmLabel="Delete"
+          requireReason={false}
+          isSubmitting={deleting}
+          onConfirm={handleDelete}
+          onClose={() => !deleting && setConfirmDelete(null)}
+        />
+      )}
+
+      {panel && (
+        <RoomFormPanel
+          room={panel.room}
+          branchId={branchId}
+          label={locationLabel}
+          onClose={() => setPanel(null)}
+          onSaved={(id, isNew) => { setPanel(null); loadRooms(); if (isNew && id) flash(id); }}
+        />
       )}
     </div>
   );

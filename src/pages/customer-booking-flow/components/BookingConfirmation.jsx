@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { AVAILABILITY_CODES } from '../../../services/availability';
 import Button from '../../../components/ui/Button';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
@@ -138,9 +139,15 @@ const BookingConfirmation = ({
           'NO_SERVICES',
           'THERAPIST_CONFLICT',
           'BRANCH_ONLINE_CAPACITY',
+          'BRANCH_CLOSED',
           'BOOKING_CROSSES_MIDNIGHT',
           'BOOKING_CONFIRMATION_UNAVAILABLE',
         ];
+        // Staff-availability rule: customers never see the reason (break, leave, other branch...), only that the time is gone.
+        if (AVAILABILITY_CODES.includes(error.code)) {
+          setBookingError('Sorry, that time is no longer available. Please choose another time.');
+          return;
+        }
         setBookingError(
           KNOWN_BOOKING_ERROR_CODES.includes(error.code) && error.message
             ? error.message

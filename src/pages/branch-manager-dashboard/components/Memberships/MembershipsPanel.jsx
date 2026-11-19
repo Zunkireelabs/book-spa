@@ -1,344 +1,325 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
-import CustomSelect from '../../../../components/ui/CustomSelect';
-import { useAuth } from '../../../../contexts/AuthContext';
-import { fetchMemberships } from '../../../../services/api';
-import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
-import EnrollMemberModal from './EnrollMemberModal';
-import MembershipDetailModal from './MembershipDetailModal';
-import TiersModal from './TiersModal';
+import { FilterChip } from '../../../../components/ui/ListToolbarKit';
+import { useOrg } from '../../../../contexts/OrgContext';
+import {
+  SEGMENTS, SORTS, DISPLAY_STATUS, BIRTHDAY_FILTER, segmentById, displayStatus, stripStats, needsItems, sortMembers, matchesMemberSearch, reminderText,
+  isBirthdaySoon, birthdayTag, toActivate, tierDeposit, headlineDiscount, goldTierId, daysUntil, ENDS_SOON_DAYS,
+} from '../../../../services/membershipsView';
+import { buildWhatsAppUrl } from '../../../../utils/checkoutReceipt';
+import { formatPhoneGrouped } from '../../../../utils/phone';
+import NeedsYouNow from '../Bookings/NeedsYouNow';
+import {
+  useMinWidth, useSlashFocus, isTyping, useStickyBlock, thClass, LifecycleStrip, SearchBox, SortMenu, ClearableChip, Avatar, StatusPill, MiniButton, MiniLink,
+  longDate, shortDate, relativeUntil, npr, csvDownload, EmptyBlock, ErrorBlock,
+} from '../Area/listKit';
+import { TierPill } from './memberBits';
+import { wordBranch } from '../../../../utils/industryTerms';
 
-const SORT_OPTIONS = [
-  { value: 'latest', label: 'Latest first' },
-  { value: 'oldest', label: 'Oldest first' },
-];
-
-const STATUS_CONFIG = {
-  active:   { label: 'Active',   pill: 'bg-success/10 text-success',   icon: 'CheckCircle2' },
-  pending:  { label: 'Pending',  pill: 'bg-amber-100 text-amber-800',  icon: 'Clock' },
-  lapsed:   { label: 'Lapsed',   pill: 'bg-warning/10 text-warning',   icon: 'AlertTriangle' },
-  depleted: { label: 'Depleted', pill: 'bg-gray-100 text-gray-600',    icon: 'CircleSlash' },
+const uniqueOptions = (list, idOf, labelOf) => {
+  const seen = new Map();
+  list.forEach((m) => { const id = idOf(m); if (id && !seen.has(id)) seen.set(id, labelOf(m)); });
+  return [...seen].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label));
 };
 
-const SUMMARY_FILTERS = [
-  { key: 'all',      label: 'Total',    icon: 'CreditCard',   color: 'text-text-primary', bg: 'bg-background' },
-  { key: 'active',   label: 'Active',   icon: 'CheckCircle2', color: 'text-success',      bg: 'bg-success/5' },
-  { key: 'pending',  label: 'Pending',  icon: 'Clock',        color: 'text-amber-700',    bg: 'bg-amber-50' },
-  { key: 'lapsed',   label: 'Lapsed',   icon: 'AlertTriangle',color: 'text-warning',      bg: 'bg-warning/5' },
-  { key: 'depleted', label: 'Depleted', icon: 'CircleSlash',  color: 'text-text-tertiary',bg: 'bg-gray-50' },
-];
-
-function formatNPR(amount) {
-  return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
-}
-
-function formatDate(d) {
-  if (!d) return '—';
-  return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-const MembershipsPanel = ({ branchId }) => {
-  const { profile } = useAuth();
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [sortOrder, setSortOrder] = useState('latest');
-  const [showEnroll, setShowEnroll] = useState(false);
-  const [showTiers, setShowTiers] = useState(false);
-  const [selectedId, setSelectedId] = useState(null);
-
-  // Only the very first load shows the full skeleton — background
-  // auto-refresh ticks (see useAutoRefresh below) swap data in silently so
-  // the panel doesn't flash back to a loading state while someone's viewing it.
-  const hasLoadedRef = useRef(false);
-  const loadData = useCallback(async () => {
-    if (!hasLoadedRef.current) setLoading(true);
-    setError(null);
-    const { data, error } = await fetchMemberships();
-    if (error) {
-      setError(error.message || 'Failed to load memberships.');
-      hasLoadedRef.current = true;
-      setLoading(false);
-      return;
-    }
-    setRows(data || []);
-    hasLoadedRef.current = true;
-    setLoading(false);
-  }, []);
-
-  useEffect(() => { loadData(); }, [loadData]);
-
-  useAutoRefresh(loadData, { intervalMs: 90000 });
-
-  // Client-side filter (panel applies both the status pill click and the search box).
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return rows
-      .filter((m) => {
-        if (statusFilter !== 'all' && m.status !== statusFilter) return false;
-        if (q) {
-          const name = (m.customerName || '').toLowerCase();
-          const phone = m.customerPhone || '';
-          const number = (m.membershipNumber || '').toLowerCase();
-          if (!name.includes(q) && !phone.includes(q) && !number.includes(q)) return false;
-        }
-        return true;
-      })
-      .sort((a, b) => sortOrder === 'latest'
-        ? new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
-        : new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
-  }, [rows, search, statusFilter, sortOrder]);
-
-  const summary = useMemo(() => ({
-    all: rows.length,
-    active: rows.filter((m) => m.status === 'active').length,
-    pending: rows.filter((m) => m.status === 'pending').length,
-    lapsed: rows.filter((m) => m.status === 'lapsed').length,
-    depleted: rows.filter((m) => m.status === 'depleted').length,
-    totalBalance: rows.reduce((sum, m) => sum + (m.balance || 0), 0),
-  }), [rows]);
-
-  if (loading) {
+// Wallet meter: green; gold when low; striped blue (paid of deposit) while pending; empty when used up.
+const WalletMeter = ({ m, status, width }) => {
+  const dep = tierDeposit(m);
+  const cycle = Math.max(Number(m.cycleDeposited) || 0, dep);
+  if (status === 'pending') {
+    const paid = Math.min(1, (Number(m.cycleDeposited) || 0) / (dep || 1));
     return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          {[0, 1, 2, 3, 4].map((i) => (
-            <div key={i} className="bg-surface rounded-spa-lg border border-border p-4 animate-pulse">
-              <div className="h-3 bg-background rounded w-12 mb-2" />
-              <div className="h-6 bg-background rounded w-8" />
-            </div>
-          ))}
-        </div>
-        <div className="bg-surface rounded-spa-lg border border-border p-8 animate-pulse">
-          <div className="h-4 bg-background rounded w-48 mb-4" />
-          <div className="space-y-3">
-            {[0, 1, 2].map((i) => <div key={i} className="h-10 bg-background rounded" />)}
-          </div>
-        </div>
+      <div className="h-[5px] rounded-sm bg-[#E4E4E1] overflow-hidden" style={{ width }} aria-hidden="true">
+        <div className="h-full rounded-sm" style={{ width: `${paid * 100}%`, backgroundImage: 'repeating-linear-gradient(135deg,#60A5FA 0 5px,#BFDBFE 5px 9px)' }} />
       </div>
     );
   }
+  const share = cycle > 0 ? Math.min(1, (Number(m.balance) || 0) / cycle) : 0;
+  const color = status === 'lowBalance' ? '#E7B93E' : status === 'lapsed' ? '#9DBF96' : '#6E9A66';
+  return (
+    <div className="h-[5px] rounded-sm bg-[#E4E4E1] overflow-hidden" style={{ width }} aria-hidden="true">
+      {share > 0 && <div className="h-full rounded-sm" style={{ width: `${Math.max(share * 100, 3)}%`, background: color }} />}
+    </div>
+  );
+};
 
-  if (error) {
-    return (
-      <div className="bg-error/5 border border-error/20 rounded-spa p-4 flex items-center space-x-3">
-        <Icon name="AlertCircle" size={18} className="text-error flex-shrink-0" />
-        <p className="font-body text-sm text-error">{error}</p>
-        <button onClick={loadData} className="ml-auto font-body font-body-medium text-sm text-error underline">
-          Retry
-        </button>
-      </div>
-    );
+// Members (V21): lifecycle strip → Needs you now → sticky toolbar + column headings → one row per membership. Row click opens the
+// member in the right-hand panel (page-level, `?open=`). All list state lives in the URL.
+const MembershipsPanel = ({ members, tiers, today, error, onRetry, readOnly, isOverall, stickyTop, registerExport, onOpen, openId }) => {
+  const { orgName } = useOrg();
+  const [sp, setSp] = useSearchParams();
+  const isSm = useMinWidth(640);
+  const isMd = useMinWidth(768);
+  const isLg = useMinWidth(1024);
+
+  // ── URL state ────────────────────────────────────────────────────────────────────────────────────
+  const segParam = sp.get('seg');
+  const seg = segParam === 'all' ? null : (segmentById(segParam) ? segParam : 'active');
+  const query = sp.get('q') || '';
+  const sort = SORTS[sp.get('sort')] ? sp.get('sort') : 'attention';
+  const filters = { tier: sp.get('tier') || '', home: sp.get('hb') || '' };
+  const bday = sp.get('bday') === '1';
+  const spRef = useRef(sp);
+  spRef.current = sp;
+  const patch = useCallback((obj, { push = false } = {}) => {
+    const next = new URLSearchParams(spRef.current);
+    Object.entries(obj).forEach(([k, v]) => { if (v == null || v === '') next.delete(k); else next.set(k, String(v)); });
+    spRef.current = next;
+    setSp(next, { replace: !push });
+  }, [setSp]);
+
+  const [searchText, setSearchText] = useState(query);
+  const searchRef = useRef(null);
+  useEffect(() => {
+    const t = setTimeout(() => { if (searchText !== query) patch({ q: searchText }); }, 200);
+    return () => clearTimeout(t);
+  }, [searchText]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setSearchText(query); }, [query]);
+  useSlashFocus(searchRef);
+
+  // ── Derived ──────────────────────────────────────────────────────────────────────────────────────
+  const all = useMemo(() => members || [], [members]);
+  const gold = useMemo(() => goldTierId(tiers), [tiers]);
+  const stats = useMemo(() => stripStats(all, today), [all, today]);
+  const options = useMemo(() => ({
+    tier: uniqueOptions(all, (m) => m.tierId, (m) => m.tierName || '—'),
+    home: uniqueOptions(all, (m) => m.customerBranchId, (m) => m.customerBranchName || '—'),
+  }), [all]);
+  const filtered = useMemo(() => {
+    const segment = seg ? segmentById(seg) : null;
+    const list = all.filter((m) => {
+      if (segment && !segment.test(m, today)) return false;
+      if (bday && !BIRTHDAY_FILTER.test(m, today)) return false;
+      if (filters.tier && m.tierId !== filters.tier) return false;
+      if (filters.home && m.customerBranchId !== filters.home) return false;
+      return matchesMemberSearch(m, query);
+    });
+    return sortMembers(list, sort, today);
+  }, [all, seg, bday, filters.tier, filters.home, query, sort, today]);
+
+  // ── Actions ──────────────────────────────────────────────────────────────────────────────────────
+  const remindUrl = (m) => (readOnly ? null : buildWhatsAppUrl(m.customerPhone, reminderText(m, today, orgName)));
+  const rowAction = (m, status) => {
+    if (readOnly) return null;
+    if (status === 'pending') return { label: 'Collect', primary: true, run: () => onOpen(m.id, 'topup') };
+    if (status === 'endsSoon') { const url = remindUrl(m); return url ? { label: 'Remind', icon: 'MessageSquare', href: url } : null; }
+    if (status === 'lowBalance' || status === 'usedUp') return { label: 'Top up', primary: true, run: () => onOpen(m.id, 'topup') };
+    if (status === 'lapsed') return Number(m.balance) > 0 ? { label: 'Extend', primary: true, run: () => onOpen(m.id, 'extend') } : { label: 'Renew', primary: true, run: () => onOpen(m.id, 'renew') };
+    return null;
+  };
+
+  // Read-only viewers can't collect or message, so those items just narrow the list ("View").
+  const needs = useMemo(() => needsItems(all, today).map((it) => {
+    if (readOnly) return { ...it, action: 'View' };
+    if (it.id === 'ending' && it.member) { const href = remindUrl(it.member); return href ? { ...it, href } : it; }
+    return it;
+  }), [all, today, readOnly, orgName]); // eslint-disable-line react-hooks/exhaustive-deps
+  const needActive = bday ? 'birthday' : seg === 'pending' ? 'pending' : seg === 'ending' ? 'ending' : '';
+  const onNeed = (id) => {
+    if (!id) { patch({ seg: '', bday: '' }, { push: true }); return; }
+    const it = needs.find((n) => n.id === id);
+    if (id === 'pending' && it?.member && !readOnly) { onOpen(it.member.id, 'topup'); return; }
+    if (id === 'birthday' && it?.member) { onOpen(it.member.id); return; }
+    if (id === 'birthday') patch({ bday: '1', seg: 'all' }, { push: true });
+    else patch({ seg: id, bday: '' }, { push: true });
+  };
+
+  const exportCsv = useCallback(() => {
+    csvDownload(`members-${seg || 'all'}-${today}.csv`,
+      ['Member', 'Phone', 'Card', 'Tier', 'Status', 'Balance', 'Deposited this cycle', 'Tier deposit', 'Valid until', 'Joined', `Home ${wordBranch()}`],
+      filtered.map((m) => [m.customerName, m.customerPhone, m.membershipNumber, m.tierName, DISPLAY_STATUS[displayStatus(m, today)].label, m.balance,
+        m.cycleDeposited, tierDeposit(m), m.expiryDate || '', m.activationDate || '', m.customerBranchName || '']));
+  }, [filtered, seg, today]);
+  useEffect(() => { registerExport({ run: exportCsv, disabled: !members || filtered.length === 0 }); }, [exportCsv, members, filtered.length, registerExport]);
+  useEffect(() => () => registerExport(null), [registerExport]);
+
+  // ── Sticky + keyboard ────────────────────────────────────────────────────────────────────────────
+  const { blockRef, sentinelRef, blockH, stuck, scrollToListTop } = useStickyBlock(stickyTop);
+  const listKey = `${seg}|${bday}|${query}|${sort}|${filters.tier}|${filters.home}`;
+  const firstKey = useRef(true);
+  useEffect(() => {
+    if (firstKey.current) { firstKey.current = false; return; }
+    if (stuck) scrollToListTop();
+  }, [listKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!openId) return undefined;
+    const onKey = (e) => {
+      if ((e.key !== 'ArrowDown' && e.key !== 'ArrowUp') || isTyping(e.target)) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"], .z-modal-overlay')) return;
+      const i = filtered.findIndex((m) => m.id === openId);
+      const nxt = i < 0 ? null : filtered[i + (e.key === 'ArrowDown' ? 1 : -1)];
+      if (!nxt) return;
+      e.preventDefault();
+      onOpen(nxt.id);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [openId, filtered, onOpen]);
+  useEffect(() => {
+    if (openId) document.querySelector(`tr[data-member-id="${openId}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [openId]);
+
+  // ── Render ───────────────────────────────────────────────────────────────────────────────────────
+  const loading = !members && !error;
+  const chipValue = (k) => options[k].find((o) => o.id === filters[k])?.label;
+  const chips = (
+    <>
+      <FilterChip label="Tier" value={filters.tier} options={options.tier} onChange={(v) => patch({ tier: v })} selectedLabel={chipValue('tier')} />
+      <FilterChip label={`Home ${wordBranch()}`} value={filters.home} options={options.home} onChange={(v) => patch({ hb: v })} selectedLabel={chipValue('home')} />
+      {bday
+        ? <ClearableChip label={BIRTHDAY_FILTER.label} onClear={() => patch({ bday: '' })} />
+        : (
+          <button type="button" onClick={() => patch({ bday: '1', seg: 'all' }, { push: true })} className="h-7 px-2.5 rounded-full inline-flex items-center gap-[5px] text-[12.5px] font-medium border border-dashed border-[#D3D5D0] text-[#515152] hover:bg-[#FAFAF9]">
+            <Icon name="Plus" size={13} />{BIRTHDAY_FILTER.label}
+          </button>
+        )}
+    </>
+  );
+  const sortMenu = <SortMenu sorts={SORTS} value={sort} onChange={(id) => patch({ sort: id === 'attention' ? '' : id })} />;
+  const searchBox = <SearchBox ref={searchRef} value={searchText} onChange={setSearchText} placeholder="Search name, phone or card no." ariaLabel="Search members" />;
+  const toolbar = isSm
+    ? <div className="flex items-center gap-2 pt-3.5 pb-2 flex-wrap">{searchBox}{chips}<div className="ml-auto">{sortMenu}</div></div>
+    : <div className="pt-2.5 pb-2">{searchBox}</div>;
+
+  const showTier = isLg;
+  const showValid = isMd;
+  const showHome = isLg && isOverall;
+  const showActions = isLg;
+  const colCount = 3 + (showTier ? 1 : 0) + (showValid ? 1 : 0) + (showHome ? 1 : 0) + (isSm ? 1 : 0);
+  const th = thClass(stuck);
+  const thTop = { top: stickyTop + blockH };
+  const anyFilter = !!(query || filters.tier || filters.home || bday);
+  const clearAll = () => { setSearchText(''); patch({ q: '', tier: '', hb: '', bday: '', seg: 'all' }, { push: true }); };
+
+  let body = null;
+  if (loading) {
+    body = Array.from({ length: 7 }).map((_, i) => (
+      <tr key={i}><td colSpan={colCount} className="h-[58px] border-b border-[#F1F1EF]"><div className="h-8 rounded bg-[#F1F1EF] animate-pulse" /></td></tr>
+    ));
+  } else if (!error) {
+    body = filtered.map((m) => {
+      const status = displayStatus(m, today);
+      const dim = status === 'usedUp' || status === 'lapsed';
+      const fade = dim ? 'opacity-[.55]' : '';
+      const selected = m.id === openId;
+      const action = showActions ? rowAction(m, status) : null;
+      const d = m.expiryDate ? daysUntil(m.expiryDate, today) : null;
+      const warn = status === 'endsSoon' || (m.status === 'active' && d != null && d >= 0 && d <= ENDS_SOON_DAYS);
+      const bdayTag = isBirthdaySoon(m, today) ? birthdayTag(m, today) : '';
+      const dep = tierDeposit(m);
+      const cycle = Math.max(Number(m.cycleDeposited) || 0, dep);
+      const wallet = status === 'pending'
+        ? <>{npr(m.cycleDeposited)} <span className="text-[#8A8A90] font-normal">paid of {npr(dep).replace('NPR ', '')}</span></>
+        : status === 'lapsed' ? <>{npr(m.balance)} <span className="text-[#8A8A90] font-normal">unused</span></>
+          : <>{npr(m.balance)} <span className="text-[#8A8A90] font-normal">of {npr(cycle).replace('NPR ', '')}</span></>;
+      const validMain = status === 'pending' ? 'Starts when paid' : status === 'lapsed' ? `Ended ${shortDate(m.expiryDate, today)}` : longDate(m.expiryDate);
+      const validSub = status === 'pending' ? `${npr(toActivate(m))} to activate`
+        : status === 'lapsed' ? (Number(m.balance) > 0 ? 'extend to use it' : null)
+          : status === 'usedUp' ? null : relativeUntil(m.expiryDate, today);
+      const phone = m.customerPhone ? (formatPhoneGrouped(m.customerPhone) || m.customerPhone) : '';
+      return (
+        <tr key={m.id} data-member-id={m.id} data-status={status} tabIndex={0} aria-selected={selected || undefined}
+          onClick={() => onOpen(m.id)} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(m.id); }}
+          style={{ scrollMarginTop: stickyTop + blockH + 40 }}
+          className={`group cursor-pointer focus:outline-none ${selected ? 'bg-[#F2F6F0]' : 'hover:bg-[#FAFAF9] focus-visible:bg-[#FAFAF9]'}`}>
+          <td className={`h-[58px] border-b border-[#F1F1EF] pr-3 ${selected ? 'shadow-[inset_3px_0_0_0_#2D5A27]' : ''}`}>
+            <div className={`flex items-center gap-3 pl-2 ${fade}`}>
+              <Avatar name={m.customerName} />
+              <div className="min-w-0">
+                <div className="font-medium text-[13.5px] tracking-[-0.1px] text-text-primary flex items-center gap-1.5 min-w-0">
+                  <span className="truncate">{m.customerName || '—'}</span>
+                  {bdayTag && <span className="h-5 rounded-full px-1.5 text-[11.5px] font-medium inline-flex items-center gap-1 bg-[#FDF2F8] text-[#BE185D] flex-shrink-0" data-bday>{<Icon name="Cake" size={11} />}{bdayTag}</span>}
+                </div>
+                <div className="text-[12.5px] text-[#8A8A90] mt-0.5 truncate tabular-nums">
+                  {showTier ? <><span className="font-data">{m.membershipNumber || '—'}</span>{phone ? ` · ${phone}` : ''}</> : <><span className="font-data">{m.membershipNumber || '—'}</span> · {m.tierName}</>}
+                </div>
+              </div>
+            </div>
+          </td>
+          {showTier && (
+            <td className="h-[58px] border-b border-[#F1F1EF] pr-3">
+              <div className={fade}>
+                <TierPill name={m.tierName} gold={m.tierId === gold} />
+                {headlineDiscount(m.tierDiscountRules) && <div className="text-[12.5px] text-[#8A8A90] mt-0.5 truncate">{headlineDiscount(m.tierDiscountRules)}</div>}
+              </div>
+            </td>
+          )}
+          <td className="h-[58px] border-b border-[#F1F1EF] pr-3">
+            <div className={`flex flex-col gap-1.5 ${fade}`}>
+              <div className="text-[13px] font-semibold text-text-primary tabular-nums whitespace-nowrap truncate" data-wallet>{wallet}</div>
+              <WalletMeter m={m} status={status} width={isSm ? 200 : 110} />
+            </div>
+          </td>
+          {showValid && (
+            <td className="h-[58px] border-b border-[#F1F1EF] pr-3">
+              <div className={fade}>
+                <div className="text-[13px] font-medium text-text-primary tabular-nums whitespace-nowrap">{validMain}</div>
+                {validSub && <div className={`text-[12.5px] mt-0.5 whitespace-nowrap ${warn ? 'text-[#B45309] font-medium' : 'text-[#8A8A90]'}`} data-valid-hint>{validSub}</div>}
+              </div>
+            </td>
+          )}
+          {showHome && <td className="h-[58px] border-b border-[#F1F1EF] pr-3 text-[13px] text-[#515152] truncate"><span className={fade}>{m.customerBranchName || '—'}</span></td>}
+          {isSm && <td className="h-[58px] border-b border-[#F1F1EF] pl-2"><span className={fade}><StatusPill status={status} config={DISPLAY_STATUS} /></span></td>}
+          <td className="h-[58px] border-b border-[#F1F1EF] pr-1">
+            <div className="flex gap-1.5 justify-end items-center text-[#8A8A90]">
+              {action && (
+                <span className={`${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'} transition-opacity`}>
+                  {action.href
+                    ? <MiniLink href={action.href} icon={action.icon} data-row-action={action.label}>{action.label}</MiniLink>
+                    : <MiniButton primary={action.primary} data-row-action={action.label} onClick={(e) => { e.stopPropagation(); action.run(); }}>{action.label}</MiniButton>}
+                </span>
+              )}
+              <Icon name="ChevronRight" size={15} />
+            </div>
+          </td>
+        </tr>
+      );
+    });
   }
 
   return (
-    <div className="space-y-4">
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        {SUMMARY_FILTERS.map((card) => (
-          <button
-            key={card.key}
-            onClick={() => setStatusFilter(card.key)}
-            className={`bg-surface rounded-spa-lg border p-4 text-left spa-transition-fast hover:shadow-sm ${
-              statusFilter === card.key ? 'border-primary/30 ring-1 ring-primary/10' : 'border-border'
-            }`}
-          >
-            <div className="flex items-center space-x-2 mb-2">
-              <div className={`w-6 h-6 rounded flex items-center justify-center ${card.bg}`}>
-                <Icon name={card.icon} size={14} className={card.color} />
-              </div>
-              <span className="font-caption font-caption-normal text-[11px] text-text-tertiary uppercase tracking-wide">
-                {card.label}
-              </span>
-            </div>
-            <p className={`font-heading font-heading-semibold text-xl ${card.color}`}>
-              {summary[card.key]}
-            </p>
-          </button>
-        ))}
-      </div>
+    <div>
+      <LifecycleStrip segments={SEGMENTS} stats={stats} selected={seg} loading={loading} ariaLabel="Membership lifecycle"
+        onPick={(id, on) => patch({ seg: on ? 'all' : (id === 'active' ? '' : id), bday: '' }, { push: true })} />
+      {!loading && !error && needs.length > 0 && (
+        <div className="mt-3 -mb-3"><NeedsYouNow items={needs} active={needActive} onPick={onNeed} quietTail /></div>
+      )}
+      <div ref={sentinelRef} aria-hidden="true" className="h-px mt-0.5" />
+      <div ref={blockRef} className="sticky z-sticky-filter bg-white" style={{ top: stickyTop }}>{toolbar}</div>
+      {!isSm && <div className="flex items-center gap-2 pb-2 flex-wrap">{chips}<div className="ml-auto">{sortMenu}</div></div>}
 
-      {/* Total balance strip */}
-      <div className="bg-surface rounded-spa-lg border border-border px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <Icon name="Wallet" size={16} className="text-primary" />
-          <span className="font-body font-body-medium text-sm text-text-secondary">Total wallet balance across all members</span>
-        </div>
-        <span className="font-data font-data-medium text-base text-primary">{formatNPR(summary.totalBalance)}</span>
-      </div>
-
-      {/* Filter + search + new */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
-          <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
-          <input
-            type="text"
-            placeholder="Search by card no., name, or phone..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 bg-surface border border-border rounded-spa text-sm font-body text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-primary/30"
-          />
-        </div>
-        {statusFilter !== 'all' && (
-          <button
-            onClick={() => setStatusFilter('all')}
-            className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-spa bg-primary/10 text-primary text-xs font-caption font-caption-medium spa-transition-fast hover:bg-primary/20"
-          >
-            <span>{STATUS_CONFIG[statusFilter]?.label || statusFilter}</span>
-            <Icon name="X" size={12} />
-          </button>
-        )}
-        <span className="font-caption font-caption-normal text-xs text-text-tertiary">
-          {filtered.length} member{filtered.length !== 1 ? 's' : ''}
-        </span>
-        <CustomSelect
-          value={sortOrder}
-          onChange={setSortOrder}
-          options={SORT_OPTIONS}
-          size="sm"
-          className="w-40"
-        />
-        <div className="ml-auto flex items-center space-x-2">
-          {profile?.role === 'admin' && (
-            <button
-              type="button"
-              onClick={() => setShowTiers(true)}
-              className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa border border-border text-text-secondary text-sm font-body font-body-medium hover:bg-background spa-transition-fast"
-            >
-              <Icon name="Settings" size={14} />
-              <span>Manage tiers</span>
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setShowEnroll(true)}
-            className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast"
-          >
-            <Icon name="Plus" size={14} />
-            <span>New Member</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="bg-surface rounded-spa-lg border border-border overflow-hidden">
-        {filtered.length === 0 ? (
-          <div className="text-center py-12">
-            <Icon name="CreditCard" size={32} className="text-text-tertiary mx-auto mb-3" />
-            <p className="font-body font-body-medium text-sm text-text-secondary">
-              {rows.length === 0 ? 'No members yet' : 'No members match your filter'}
-            </p>
-            {rows.length === 0 && (
-              <p className="font-caption text-xs text-text-tertiary mt-1">
-                Click "New Member" to enroll your first customer.
-              </p>
-            )}
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-background border-b border-border">
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Card no.</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Member Name</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Phone</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Birthdate</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Tier</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Branch</th>
-                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Deposited</th>
-                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Wallet Balance</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Expires</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((m) => {
-                  const cfg = STATUS_CONFIG[m.status] || STATUS_CONFIG.pending;
-                  return (
-                    <tr
-                      key={m.id}
-                      onClick={() => setSelectedId(m.id)}
-                      className="border-b border-border last:border-0 hover:bg-background/50 cursor-pointer spa-transition-fast"
-                    >
-                      <td className="px-4 py-3">
-                        <span className="font-data font-data-medium text-xs text-text-primary tracking-wide">{m.membershipNumber || '—'}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="font-body font-body-medium text-sm text-text-primary">{m.customerName || '—'}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="font-caption font-caption-normal text-sm text-text-secondary">{m.customerPhone || '—'}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="font-caption font-caption-normal text-xs text-text-secondary">
-                          {formatDate(m.customerDateOfBirth)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="font-body font-body-medium text-sm text-text-primary">{m.tierName}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="font-body font-body-normal text-sm text-text-secondary">{m.customerBranchName || '—'}</span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="font-data font-data-normal text-sm text-text-secondary">{formatNPR(m.cycleDeposited)}</span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="font-data font-data-medium text-sm text-primary">{formatNPR(m.balance)}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="font-caption font-caption-normal text-xs text-text-secondary">
-                          {formatDate(m.expiryDate)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-caption font-caption-medium ${cfg.pill}`}>
-                          <Icon name={cfg.icon} size={10} />
-                          <span>{cfg.label}</span>
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {showEnroll && (
-        <EnrollMemberModal
-          onClose={() => setShowEnroll(false)}
-          onEnrolled={(newId) => {
-            setShowEnroll(false);
-            loadData();
-            if (newId) setSelectedId(newId);
-          }}
-          onRenewExisting={(membershipId) => {
-            setShowEnroll(false);
-            setSelectedId(membershipId);
-          }}
-        />
+      {error ? <ErrorBlock error={error} onRetry={onRetry} /> : (
+        <table className="w-full border-collapse table-fixed">
+          <colgroup>
+            <col />
+            {showTier && <col style={{ width: '17%' }} />}
+            <col style={{ width: isSm ? 236 : 132 }} />
+            {showValid && <col style={{ width: 150 }} />}
+            {showHome && <col style={{ width: 104 }} />}
+            {isSm && <col style={{ width: 120 }} />}
+            <col style={{ width: showActions ? 116 : 28 }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th scope="col" className={`${th} text-left pl-2`} style={thTop}>Member</th>
+              {showTier && <th scope="col" className={`${th} text-left`} style={thTop}>Tier</th>}
+              <th scope="col" className={`${th} text-left`} style={thTop}>Wallet</th>
+              {showValid && <th scope="col" className={`${th} text-left`} style={thTop}>Valid until</th>}
+              {showHome && <th scope="col" className={`${th} text-left`} style={thTop}>Home {wordBranch()}</th>}
+              {isSm && <th scope="col" className={`${th} text-left pl-2`} style={thTop}>Status</th>}
+              <th scope="col" className={th} style={thTop}><span className="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>{body}</tbody>
+        </table>
       )}
 
-      {selectedId && (
-        <MembershipDetailModal
-          membershipId={selectedId}
-          isAdmin={profile?.role === 'admin'}
-          branchId={branchId}
-          onClose={() => setSelectedId(null)}
-          onChanged={loadData}
-        />
-      )}
-
-      {showTiers && (
-        <TiersModal
-          orgId={profile?.org_id}
-          onClose={() => setShowTiers(false)}
-          onChanged={loadData}
-        />
+      {!loading && !error && filtered.length === 0 && (all.length === 0
+        ? <EmptyBlock icon="CreditCard" title="No members yet" hint="Members you enroll appear here." />
+        : <EmptyBlock icon="CreditCard" title="No members match" hint={anyFilter ? 'Try a different search or clear a filter.' : `Nobody is in “${segmentById(seg)?.label}” right now.`} action={{ label: 'Clear filters', run: clearAll }} />)}
+      {!loading && !error && filtered.length > 0 && (
+        <div className="flex items-center h-[52px] text-[12.5px] text-[#8A8A90] tabular-nums">{filtered.length} member{filtered.length === 1 ? '' : 's'}</div>
       )}
     </div>
   );

@@ -3,6 +3,7 @@ import Icon from '../../../components/AppIcon';
 import FilterBar from '../../../components/ui/FilterBar';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../utils/periodPresets';
 import { getServiceRevenueByBranch } from '../../../services/api';
+import { wordBranchCap } from '../../../utils/industryTerms';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -106,7 +107,7 @@ const ServiceRevenueReportPanel = ({ branchId }) => {
   const handleExportCSV = () => {
     if (!filtered.length) return;
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Service', 'Branch', 'Revenue', 'Bookings'];
+    const header = ['Service', `${wordBranchCap()}`, 'Revenue', 'Bookings'];
     let csv = header.join(',') + '\n';
     sorted.forEach((s) => {
       data.branches.forEach((b) => {

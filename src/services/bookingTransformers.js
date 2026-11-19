@@ -130,6 +130,8 @@ export function transformBooking(dbBooking) {
         gender: bt.therapist.gender || null,
         roomId: bt.room_id || null,
         roomName: bt.room?.name || null,
+        startTime: bt.start_time || null,
+        endTime: bt.end_time || null,
       }));
   } else if (therapist) {
     therapists = [therapist];
@@ -192,6 +194,13 @@ export function transformBooking(dbBooking) {
     branchId: dbBooking.branch_id || null,
     branchName: dbBooking.branch?.name || null,
     startTime: dbBooking.start_time || null,
+    endTime: dbBooking.end_time || null,
+    // created_by is NULL only for customer self-bookings from the public flow (migration-159), so it marks "Online" rows.
+    createdBy: dbBooking.created_by ?? null,
+    createdAt: dbBooking.created_at || null,
+    // Team-level "seen" (migration-335): NULL on an online booking = nobody has opened it yet.
+    acknowledgedAt: dbBooking.acknowledged_at || null,
+    acknowledgedBy: dbBooking.acknowledged_by || null,
     specialRequests: dbBooking.special_requests || null,
     genderPreference: dbBooking.gender_preference || null,
     referredBy: dbBooking.referred_by || null,

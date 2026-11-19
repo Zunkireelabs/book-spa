@@ -9,6 +9,7 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useAuth } from './AuthContext';
 import { loginWithPin } from '../services/pinAuth';
+import { fetchOwnHasPin } from '../services/api';
 
 const LockContext = createContext(null);
 
@@ -85,13 +86,38 @@ export const LockProvider = ({ children }) => {
     }
   }, [profile]);
 
+  // ZNLY-210: does this person have a PIN? The lock screen needs one to come back from. null = not known yet / could not be checked.
+  // Not known counts as "no": we would rather leave Lock off for a moment than lock someone out of the app.
+  const [hasPin, setHasPin] = useState(null);
+  const refreshHasPin = useCallback(async () => {
+    if (!profile) { setHasPin(null); return null; }
+    const { data } = await fetchOwnHasPin();
+    setHasPin(data);
+    return data;
+  }, [profile]);
+  useEffect(() => {
+    refreshHasPin();
+    const onFocus = () => { refreshHasPin(); };   // a manager may have just set their PIN
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [refreshHasPin]);
+
+  // A lock left in storage (set before this check existed, or before their PIN was removed) must not keep out someone with no PIN.
+  useEffect(() => {
+    if (profile && hasPin === false && isLocked) {
+      try { localStorage.removeItem(lockedKey(profile)); localStorage.removeItem(attemptsKey(profile)); } catch { /* ignore */ }
+      setIsLocked(false);
+      setFailedAttempts(0);
+    }
+  }, [profile, hasPin, isLocked]);
+
   const lock = useCallback(() => {
-    if (!profile) return;
+    if (!profile || hasPin !== true) return;   // never lock someone who has no PIN to come back with
     setIsLocked(true);
     setFailedAttempts(0);
     try { localStorage.setItem(lockedKey(profile), '1'); } catch { /* ignore */ }
     try { localStorage.removeItem(attemptsKey(profile)); } catch { /* ignore */ }
-  }, [profile]);
+  }, [profile, hasPin]);
 
   const clearLockStorage = useCallback(() => {
     if (!profile) return;
@@ -104,6 +130,12 @@ export const LockProvider = ({ children }) => {
 
     const orgSlug = profile?.organizations?.slug;
     const result = await loginWithPin(profile.email, pin, orgSlug);
+
+    // ZNLY-210: only a real "wrong PIN" counts toward the attempts. A dropped connection, a server error or a failed session
+    // is "can't check right now": say so, keep the count where it was.
+    if (!result.success && result.kind !== 'wrong_pin') {
+      return { success: false, error: result.error, unavailable: true, failedAttempts };
+    }
 
     if (result.success) {
       setIsLocked(false);
@@ -140,12 +172,14 @@ export const LockProvider = ({ children }) => {
 
   const value = useMemo(() => ({
     isLocked: !!profile && isLocked,
+    hasPin,
+    refreshHasPin,
     lock,
     unlock,
     clearLock,
     failedAttempts,
     maxFailedAttempts: MAX_FAILED_ATTEMPTS,
-  }), [profile, isLocked, lock, unlock, clearLock, failedAttempts]);
+  }), [profile, isLocked, hasPin, refreshHasPin, lock, unlock, clearLock, failedAttempts]);
 
   return (
     <LockContext.Provider value={value}>

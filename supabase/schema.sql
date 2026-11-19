@@ -96,7 +96,7 @@ CREATE TABLE bookings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   booking_number text UNIQUE,
   branch_id uuid NOT NULL REFERENCES branches(id),
-  room_id uuid NOT NULL REFERENCES rooms(id),
+  room_id uuid REFERENCES rooms(id),
   service_id uuid NOT NULL REFERENCES services(id),
   therapist_id uuid REFERENCES therapists(id),
 
