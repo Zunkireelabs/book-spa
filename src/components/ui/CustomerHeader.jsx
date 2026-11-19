@@ -38,6 +38,20 @@ const CustomerHeader = ({ wide, branch, containerClassName, marketplaceName, mar
 
   const isBookingFlow = location.pathname === bookingPath || location.pathname === `/${orgSlug}`;
 
+  // The Zennly wordmark always means the marketplace, on both deployments -- "Book Service"
+  // right beside it already covers "back to this studio". Branches on VITE_BASE_PATH (a
+  // build-time property of which deployment this is), never on ?source=zennly/isMarketplaceContext
+  // (a one-off entry-URL signal that falls off as the customer moves through the flow -- the
+  // logo's destination must not change mid-session). Proxied build: same origin as the
+  // marketplace, so root-relative "/" is correct. Standalone app.zennly.io: "/" would hit
+  // book-spa's OWN root, which Routes.jsx sends to ExternalRedirect -> zunkireelabs.com -- the
+  // wrong company's site -- so that build needs an absolute marketplace URL instead. Always a
+  // plain <a>, never a router <Link>: basename would resolve <Link to="/"> to "/book/", still
+  // inside book-spa, same trap the /account link above already documents.
+  const marketplaceHome = import.meta.env.VITE_BASE_PATH
+    ? '/'
+    : (import.meta.env.VITE_MARKETPLACE_ORIGIN || 'https://zennly.io');
+
   return (
     <header ref={headerRef} className="fixed top-0 left-0 right-0 z-customer-header bg-surface border-b border-border">
       {/* px-4 and max-w-4xl (widening to max-w-[1600px] only when `wide`) match
@@ -51,9 +65,9 @@ const CustomerHeader = ({ wide, branch, containerClassName, marketplaceName, mar
       <div className={containerClassName ?? `relative mx-auto px-4 ${wide ? 'max-w-4xl lg:max-w-[1600px]' : 'max-w-4xl'}`}>
         <div className="flex items-center justify-between gap-3 h-auto min-h-16 py-3 sm:h-16 sm:py-0">
           {/* Logo */}
-          <Link to={bookingPath} className="flex items-center space-x-2 group min-w-0 flex-1">
+          <a href={marketplaceHome} className="flex items-center space-x-2 group min-w-0 flex-1">
             <BrandMark className="h-7 w-auto flex-shrink-0 spa-transition-fast" />
-          </Link>
+          </a>
 
           {/* Navigation Links */}
           <nav className="hidden md:flex items-center flex-shrink-0">
