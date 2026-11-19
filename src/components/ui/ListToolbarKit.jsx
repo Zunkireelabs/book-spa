@@ -22,14 +22,14 @@ export const FilterChip = ({ label, value, options, onChange, selectedLabel }) =
   const set = value != null && value !== '';
   return (
     <div className="relative" ref={ref}>
-      <span className={`h-7 rounded-full inline-flex items-center text-[12.5px] font-medium ${set ? 'border border-border bg-[#FAFAF9] text-text-primary' : 'border border-dashed border-[#D3D5D0] text-[#515152] hover:bg-[#FAFAF9]'}`}>
+      <span className={`h-7 max-md:h-11 rounded-full inline-flex items-center text-[12.5px] font-medium ${set ? 'border border-border bg-[#FAFAF9] text-text-primary' : 'border border-dashed border-[#D3D5D0] text-[#515152] hover:bg-[#FAFAF9]'}`}>
         <button type="button" onClick={() => setOpen((o) => !o)} className="h-full px-2.5 inline-flex items-center gap-[5px]" aria-haspopup="listbox" aria-expanded={open}>
           {!set && <Icon name="Plus" size={13} />}{set ? `${label}: ${selectedLabel}` : label}
         </button>
         {set && <button type="button" onClick={() => onChange('')} aria-label={`Clear ${label}`} className="h-full pr-2 -ml-1 text-[#8A8A90] hover:text-text-primary"><Icon name="X" size={12} /></button>}
       </span>
       {open && (
-        <div role="listbox" className="absolute left-0 top-9 z-dropdown min-w-[200px] max-h-64 overflow-y-auto bg-white border border-border rounded-lg shadow-[0_8px_24px_rgba(14,13,12,.1)] py-1">
+        <div role="listbox" className="absolute left-0 top-9 z-dropdown min-w-[200px] max-h-64 overflow-y-auto max-md:fixed max-md:inset-x-3 max-md:top-auto max-md:bottom-3 max-md:left-3 max-md:min-w-0 max-md:max-h-[60dvh] bg-white border border-border rounded-lg shadow-[0_8px_24px_rgba(14,13,12,.1)] py-1">
           {options.length === 0 && <p className="px-3 py-2 text-[12.5px] text-[#8A8A90]">Nothing to filter by yet</p>}
           {options.map((o) => (
             <button key={o.id} type="button" role="option" aria-selected={value === o.id} onClick={() => { onChange(o.id); setOpen(false); }}
@@ -50,7 +50,7 @@ export const Menu = ({ trigger, children }) => {
   return (
     <div className="relative" ref={ref}>
       {trigger(open, () => setOpen((o) => !o))}
-      {open && <div className="absolute right-0 top-9 z-dropdown min-w-[190px] bg-white border border-border rounded-lg shadow-[0_8px_24px_rgba(14,13,12,.1)] py-1">{children(() => setOpen(false))}</div>}
+      {open && <div className="absolute right-0 top-9 z-dropdown min-w-[190px] max-md:fixed max-md:inset-x-3 max-md:top-auto max-md:bottom-3 max-md:right-3 max-md:left-3 max-md:min-w-0 bg-white border border-border rounded-lg shadow-[0_8px_24px_rgba(14,13,12,.1)] py-1">{children(() => setOpen(false))}</div>}
     </div>
   );
 };

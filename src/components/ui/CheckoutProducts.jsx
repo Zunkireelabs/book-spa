@@ -361,10 +361,10 @@ export const ProductsBlock = ({ cp, guestName, disabled }) => {
 
       <button ref={addRef} type="button" data-floating-trigger data-add-product aria-haspopup="listbox" aria-expanded={!!picker} disabled={disabled} onClick={openPicker}
         className={hasLines
-          ? 'mt-2 text-[12.5px] text-primary font-medium inline-flex items-center gap-1.5 hover:underline'
-          : 'h-8 px-3 rounded-[7px] border border-dashed border-[#CFD0CC] text-[12.5px] font-medium text-primary inline-flex items-center gap-1.5 hover:bg-[#EEF3EC]'}>
+          ? 'mt-2 max-[959px]:min-h-11 text-[12.5px] text-primary font-medium inline-flex items-center gap-1.5 hover:underline'
+          : 'h-8 max-[959px]:h-11 px-3 rounded-[7px] border border-dashed border-[#CFD0CC] text-[12.5px] font-medium text-primary inline-flex items-center gap-1.5 hover:bg-[#EEF3EC]'}>
         <Icon name="Plus" size={13} strokeWidth={2} />{hasLines ? 'Add a product' : 'Add a product'}
-        {!hasLines && <kbd className="ml-1 text-[10.5px] font-medium text-[#8A8A90] border border-[#E7E8E6] rounded px-1.5 py-px bg-white font-sans">P</kbd>}
+        {!hasLines && <kbd className="ml-1 max-[959px]:hidden text-[10.5px] font-medium text-[#8A8A90] border border-[#E7E8E6] rounded px-1.5 py-px bg-white font-sans">P</kbd>}
       </button>
 
       {picker && <Picker rect={picker} cp={cp} guestName={guestName} onClose={() => setPicker(null)} returnFocus={addRef.current} />}

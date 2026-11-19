@@ -15,6 +15,7 @@ import CustomersSpotlight from './CustomersSpotlight';
 import { useBranch } from '../../../../contexts/BranchContext';
 import { StarIcon, InSpaTag } from './customerBits';
 import { teamMemberWord } from '../../../../utils/industryTerms';
+import ScrollRow from '../../../../components/ui/ScrollRow';
 
 const PAGE_SIZE = 25;
 const LAST_VISIT_OPTIONS = [
@@ -430,7 +431,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
   );
   const toolbar = isSm ? <div className="flex items-center gap-2 py-3.5 flex-wrap">{searchBox}{chips}</div> : <div className="py-2.5">{searchBox}</div>;
   // Below sm only the tabs + search stick; the chips / sort / columns scroll with the page so the pinned block stays compact.
-  const chipsRow = isSm ? null : <div className="flex items-center gap-2 pb-3 flex-wrap">{chips}</div>;
+  const chipsRow = isSm ? null : <ScrollRow className="pb-3">{chips}</ScrollRow>;
 
   const th = { sort, dir, onSort, stuck };
   let body;

@@ -94,10 +94,10 @@ const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
   return (
     <div className="space-y-6">
       {/* Header with Date Selector */}
-      <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
+      <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 max-sm:p-4 border border-border">
+        <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-3 mb-4">
+          <div className="flex items-center space-x-3 min-w-0">
+            <div className="w-10 h-10 flex-none bg-primary/10 rounded-lg flex items-center justify-center">
               <Icon name="FileText" size={20} className="text-primary" />
             </div>
             <div>
@@ -110,19 +110,20 @@ const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
             </div>
           </div>
 
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-3 max-sm:space-x-0 max-sm:gap-3">
             <input
               type="date"
               value={selectedDate}
               max={today}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="px-3 py-2 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
+              className="px-3 py-2 max-sm:min-h-11 max-sm:flex-1 max-sm:min-w-0 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
             />
             <Button
               variant="outline"
               size="sm"
               iconName="RefreshCw"
               iconPosition="left"
+              className="max-sm:min-h-11"
               onClick={loadSummary}
               disabled={loading}
             >

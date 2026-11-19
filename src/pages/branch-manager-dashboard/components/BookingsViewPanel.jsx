@@ -33,6 +33,7 @@ import FreeNowChip from './Bookings/FreeNowChip';
 import BookingRow, { COLUMN_DEFS } from './Bookings/BookingRow';
 import { useIndustry } from '../../../hooks/useIndustry';
 import { teamMemberCap, teamMemberLower, teamMemberWord } from '../../../utils/industryTerms';
+import ScrollRow from '../../../components/ui/ScrollRow';
 
 const COLS_KEY = 'zennly.bookings.columns';
 const readCols = () => { try { return { service: true, therapist: true, amount: true, ...JSON.parse(localStorage.getItem(COLS_KEY) || '{}') }; } catch { return { service: true, therapist: true, amount: true }; } };
@@ -721,7 +722,7 @@ const BookingsViewPanel = ({ branchId }) => {
         </div>
         {viewRow}
       </div>
-      {!isMd && <div className="flex items-center gap-2 py-2.5 flex-wrap">{chips}{sortCols}</div>}
+      {!isMd && <ScrollRow className="py-2.5" wrapperClassName="py-0">{chips}{sortCols}</ScrollRow>}
       <div data-bookings-root>
         {error ? (
           <div className="border border-error/20 bg-error/5 rounded-lg p-4 mt-3 flex items-center gap-3 text-[13px] text-error">

@@ -14,6 +14,7 @@ import { useSearchParams } from 'react-router-dom';
 import { nepalNow } from '../../utils/customerDirectory';
 import { VIEWS, availableViews, defaultView, dayPhase, readRememberedView, rememberView } from '../../lib/dashboardViews';
 import { localizeBranch, wordBranch, wordBranches } from '../../utils/industryTerms';
+import ScrollRow from '../../components/ui/ScrollRow';
 
 const PHASES = [
   { key: 'prep', label: 'Prep', icon: 'Sun' },
@@ -138,7 +139,7 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
   const scope = isOverall ? `${branches.length} ${(branches.length === 1 ? wordBranch() : wordBranches())}` : branchName;
 
   return (
-    <div className="space-y-3 sm:space-y-4">
+    <div className="space-y-3 sm:space-y-4 max-lg:pb-[calc(6rem+env(safe-area-inset-bottom))]">
       <header className="flex flex-wrap items-end gap-x-4 gap-y-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">
@@ -154,7 +155,7 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
                 role="tab"
                 aria-selected={view === v}
                 onClick={() => pickView(v)}
-                className={`px-3 py-1.5 text-[12.5px] whitespace-nowrap rounded-md transition-colors ${view === v ? 'bg-white text-gray-900 shadow-sm font-medium' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`px-3 py-1.5 max-md:min-h-[44px] text-[12.5px] whitespace-nowrap rounded-md transition-colors ${view === v ? 'bg-white text-gray-900 shadow-sm font-medium' : 'text-gray-500 hover:text-gray-700'}`}
               >
                 {localizeBranch(VIEWS[v])}
               </button>
@@ -162,21 +163,21 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
           </div>
         )}
         {showPhases && (
-          <div role="tablist" aria-label="Part of the day" className="flex items-center gap-4 sm:ml-auto self-center">
+          <ScrollRow role="tablist" aria-label="Part of the day" gap="gap-4" wrapperClassName="sm:ml-auto self-center">
             {PHASES.map((p) => (
               <button
                 key={p.key}
                 role="tab"
                 aria-selected={phase === p.key}
                 onClick={() => setManualPhase(p.key)}
-                className={`flex items-center gap-1.5 text-sm font-medium py-1 border-b-2 transition-colors ${phase === p.key ? 'border-primary text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                className={`flex items-center gap-1.5 text-sm font-medium py-1 max-md:px-1 border-b-2 transition-colors ${phase === p.key ? 'border-primary text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
               >
                 <Icon name={p.icon} size={15} />{p.label}
                 {phase === p.key && <i className="w-1.5 h-1.5 rounded-full bg-success" />}
               </button>
             ))}
-            <span className="text-[11.5px] text-gray-400">{manualPhase ? 'chosen by you' : 'auto'}</span>
-          </div>
+            <span className="inline-flex items-center text-[11.5px] text-gray-400">{manualPhase ? 'chosen by you' : 'auto'}</span>
+          </ScrollRow>
         )}
       </header>
 
