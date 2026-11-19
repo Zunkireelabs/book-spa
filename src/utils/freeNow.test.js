@@ -275,3 +275,22 @@ describe('unseen + needs you now', () => {
     expect(rows.filter((b) => matchesNeed(b, 'assign', c)).map((b) => b.bookingId)).toEqual(['1', '2', '3']);
   });
 });
+
+describe('needs you now: finished but not paid (ZNLY-273)', () => {
+  const done = (o) => bk({ status: 'Completed', paymentStatus: 'unpaid', finalAmount: 1000, payments: [], therapists: [{ id: 'a' }], ...o });
+  it('counts today\'s completed bookings that still owe money, with a Collect action', () => {
+    const items = needsYouNow([done({}), done({ payments: [{ amount: 400 }], paymentStatus: 'partial' }), done({ paymentStatus: 'paid', payments: [{ amount: 1000 }] })], ctx());
+    expect(items.find((i) => i.id === 'unpaid')).toEqual({ id: 'unpaid', count: 2, text: '2 finished but not paid', action: 'Collect' });
+  });
+  it('ignores other days, unfinished bookings and fully paid ones', () => {
+    expect(needsYouNow([done({ date: '2026-10-14' }), bk({ status: 'Confirmed', therapists: [{ id: 'a' }], time: '17:00' })], ctx()).find((i) => i.id === 'unpaid')).toBeUndefined();
+  });
+  it('matchesNeed("unpaid") picks exactly those rows', () => {
+    const rows = [done({}), done({ paymentStatus: 'paid', payments: [{ amount: 1000 }] })];
+    expect(rows.filter((b) => matchesNeed(b, 'unpaid', ctx()))).toHaveLength(1);
+  });
+  it('uses the dashboard rule on fallback amount_paid rows', () => {
+    expect(matchesNeed(done({ payments: undefined, amountPaid: 1000, paymentStatus: 'paid' }), 'unpaid', ctx())).toBe(false);
+    expect(matchesNeed(done({ payments: undefined, amountPaid: 0 }), 'unpaid', ctx())).toBe(true);
+  });
+});

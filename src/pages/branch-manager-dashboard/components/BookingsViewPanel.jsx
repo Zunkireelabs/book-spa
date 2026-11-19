@@ -71,7 +71,7 @@ const BookingsViewPanel = ({ branchId }) => {
   const range = useMemo(() => rangeFromParams(sp, today), [sp, today]);
   const viewChip = VIEWS.some((v) => v.id === sp.get('bv')) ? sp.get('bv') : 'all';
   const sort = SORTS[sp.get('sort')] ? sp.get('sort') : 'time';
-  const need = ['online', 'late', 'assign'].includes(sp.get('nf')) ? sp.get('nf') : '';
+  const need = ['online', 'late', 'unpaid', 'assign'].includes(sp.get('nf')) ? sp.get('nf') : '';
   const isTodayView = range.from === range.to && range.from === today && !isOverall;
   const nowMin = toMin(nowHM);
   const needCtx = useMemo(() => ({ date: today, nowMin }), [today, nowMin]);
