@@ -101,6 +101,7 @@ const OperationalCalendar = ({ branchId }) => {
   const [freezeUnassigned, setFreezeUnassigned] = useState(true);
   const [showServiceOnly, setShowServiceOnly] = useState(true);
   const [selectedPositions, setSelectedPositions] = useState([]); // empty = all
+  const [selectedStaffIds, setSelectedStaffIds] = useState([]); // empty = everyone; ANDed with positions + service-staff
   const [tipOpen, setTipOpen] = useState(false);
   const [actionToast, setActionToast] = useState(null);
 
@@ -133,6 +134,14 @@ const OperationalCalendar = ({ branchId }) => {
     return Array.from(positions).sort();
   }, [calendarData?.therapists]);
 
+  // People the Team filter can pick: everyone the calendar would show before any position/team narrowing (not absent; service staff per the checkbox).
+  const staffOptions = useMemo(() => {
+    if (!calendarData?.therapists) return [];
+    return calendarData.therapists
+      .filter(t => attendanceMap[t.id] !== 'Absent' && (!showServiceOnly || t.is_service_staff !== false))
+      .map(t => ({ id: t.id, name: t.name }));
+  }, [calendarData?.therapists, attendanceMap, showServiceOnly]);
+
   // Filter therapists for calendar display (hide absent/leave)
   const filteredTherapists = useMemo(() => {
     if (!calendarData?.therapists) return [];
@@ -146,8 +155,11 @@ const OperationalCalendar = ({ branchId }) => {
     if (selectedPositions.length > 0) {
       list = list.filter(t => t.position && t.position.split('/').some(p => selectedPositions.includes(p.trim())));
     }
+    if (selectedStaffIds.length > 0) {
+      list = list.filter(t => selectedStaffIds.includes(t.id));
+    }
     return list;
-  }, [calendarData?.therapists, showServiceOnly, selectedPositions, attendanceMap, currentDate, focusTherapistId]);
+  }, [calendarData?.therapists, showServiceOnly, selectedPositions, selectedStaffIds, attendanceMap, currentDate, focusTherapistId]);
 
   // Absent / on-leave therapists (hidden from columns) for the toolbar "N away" summary
   const awayList = useMemo(() => {
@@ -279,6 +291,9 @@ const OperationalCalendar = ({ branchId }) => {
             setShowServiceOnly={setShowServiceOnly}
             selectedPositions={selectedPositions}
             setSelectedPositions={setSelectedPositions}
+            staffOptions={staffOptions}
+            selectedStaffIds={selectedStaffIds}
+            setSelectedStaffIds={setSelectedStaffIds}
             calendarPositionOptions={calendarPositionOptions}
             onNewBooking={isOverallBranch(branchId) ? undefined : handleNewBooking}
             onOpenWaitlist={() => setWaitlistSheetOpen(true)}
@@ -304,6 +319,12 @@ const OperationalCalendar = ({ branchId }) => {
             <div className="flex items-center gap-2 px-4 py-1.5 text-[13px] bg-background border-b border-border" data-calendar-focus>
               <span className="text-text-secondary">Showing only <b className="text-text-primary font-medium">{(calendarData?.therapists || []).find(t => t.id === focusTherapistId)?.name || 'one person'}</b></span>
               <button type="button" onClick={clearFocusTherapist} className="text-primary hover:underline">Show everyone</button>
+            </div>
+          )}
+          {columnMode === 'therapist' && viewMode !== 'month' && !focusTherapistId && calendarData && filteredTherapists.length === 0 && (selectedStaffIds.length > 0 || selectedPositions.length > 0) && (
+            <div className="flex items-center gap-2 px-4 py-1.5 text-[13px] bg-background border-b border-border" data-calendar-no-match>
+              <span className="text-text-secondary">No {staffLabelPlural.toLowerCase()} match this filter.</span>
+              <button type="button" onClick={() => { setSelectedStaffIds([]); setSelectedPositions([]); }} className="text-primary hover:underline">Clear filter</button>
             </div>
           )}
           {/* Main content area: Grid */}

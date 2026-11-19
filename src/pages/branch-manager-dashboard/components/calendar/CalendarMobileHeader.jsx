@@ -5,6 +5,7 @@ import ScrollRow from '../../../../components/ui/ScrollRow';
 import MiniMonthCalendar from './MiniMonthCalendar';
 import { addDays, addMonths } from './calendarDates';
 import { horizontalSwipe } from '../../../../utils/gestures';
+import { staffInitials } from './calendarFilter';
 
 // Phone (< md) calendar header: ONE 52px row (date title, Today, Waitlist, Views, +) and the bottom sheets that hold every
 // other control the desktop toolbar shows. Rendered by CalendarToolbar inside `md:hidden`; same props, same handlers.
@@ -70,6 +71,7 @@ const CalendarMobileHeader = ({
   staffLabel, locationLabel, enableRooms, columnMode, onGroupByChange, awayList,
   currentDate, setCurrentDate, viewMode, setViewMode, goToday, goPrev, goNext, setTipOpen,
   showServiceOnly, setShowServiceOnly, selectedPositions, setSelectedPositions, calendarPositionOptions,
+  staffOptions = [], selectedStaffIds = [], setSelectedStaffIds = () => {}, staffLabelPlural = 'Team',
   onNewBooking, onOpenWaitlist, waitlistCount = 0, branchId,
   userRole, onPrint, onEditRoster, onBlockWholeCalendar, onCalendarSettings, onClosedDates,
   zoomScale, onZoomChange, minZoom, maxZoom, use24h, setUse24h, hideSensitive, setHideSensitive,
@@ -77,7 +79,9 @@ const CalendarMobileHeader = ({
   const [sheet, setSheet] = useState(null); // 'views' | 'date' | null
   const [sub, setSub] = useState(null); // 'filters' | 'away' | 'tips' | null (nested over 'views')
   const ZOOM_STEP = 0.2;
-  const filterCount = selectedPositions.length + (showServiceOnly ? 0 : 1);
+  const filterCount = selectedPositions.length + selectedStaffIds.length + (showServiceOnly ? 0 : 1);
+  const [teamQuery, setTeamQuery] = useState('');
+  const shownStaff = staffOptions.filter((p) => p.name.toLowerCase().includes(teamQuery.trim().toLowerCase()));
 
   // Swipe on the date row changes the day (step follows the view).
   const swipe = useRef(null);
@@ -203,9 +207,28 @@ const CalendarMobileHeader = ({
         <SheetSection>
           <SheetRow label="Service staff only" trailing={<Switch checked={showServiceOnly} onChange={() => setShowServiceOnly(!showServiceOnly)} label="Service staff only" />} />
         </SheetSection>
+        {staffOptions.length > 0 && (
+          <SheetSection title={staffLabelPlural}>
+            {staffOptions.length > 8 && (
+              <input type="search" value={teamQuery} onChange={(e) => setTeamQuery(e.target.value)} placeholder={`Search ${staffLabelPlural.toLowerCase()}`} aria-label="Search team"
+                className="w-full h-11 mb-1 px-3 text-[15px] border border-border rounded-spa bg-background focus:outline-none focus:border-primary" />
+            )}
+            {shownStaff.map((p) => {
+              const on = selectedStaffIds.includes(p.id);
+              return (
+                <button key={p.id} type="button" role="checkbox" aria-checked={on}
+                  onClick={() => setSelectedStaffIds((prev) => (on ? prev.filter((x) => x !== p.id) : [...prev, p.id]))}
+                  className="w-full min-h-[44px] flex items-center gap-3 py-1.5 hover:bg-background">
+                  <span className={`w-5 h-5 rounded flex items-center justify-center border ${on ? 'bg-primary border-primary text-white' : 'border-border'}`}>{on && <Icon name="Check" size={14} />}</span>
+                  <span className="w-7 h-7 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center text-[11px] font-medium">{staffInitials(p.name)}</span>
+                  <span className="text-[15px] text-text-primary truncate">{p.name}</span>
+                </button>
+              );
+            })}
+          </SheetSection>
+        )}
         {calendarPositionOptions.length > 0 && (
-          <SheetSection title="Positions">
-            <SheetRow label="Clear all" onClick={() => setSelectedPositions([])} disabled={selectedPositions.length === 0} trailing={<span />} className="text-primary" />
+          <SheetSection title="Position">
             {calendarPositionOptions.map((pos) => {
               const on = selectedPositions.includes(pos);
               return (
@@ -219,6 +242,9 @@ const CalendarMobileHeader = ({
             })}
           </SheetSection>
         )}
+        <SheetSection>
+          <SheetRow label="Clear all" onClick={() => { setSelectedPositions([]); setSelectedStaffIds([]); }} disabled={selectedPositions.length + selectedStaffIds.length === 0} trailing={<span />} className="text-primary" />
+        </SheetSection>
       </BottomSheet>
 
       {/* Nested: Away today */}
