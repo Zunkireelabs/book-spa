@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from 'components/AppIcon';
@@ -92,7 +93,7 @@ const MoneyOwedReport = ({ reopen, onBack, onHome, onOpenView, titleExtra, isFav
     setAssignSaving(true);
     const { error: err } = await setDueHolder({ bookingId: row.id, dueHolderName: name });
     setAssignSaving(false);
-    if (err) { flash(err.message || 'Could not assign the name.'); return; }
+    if (err) { flash(friendlyError(err, 'Could not assign the name.')); return; }
     setAssigning(null); setAssignName('');
     await load();
   };

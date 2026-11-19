@@ -425,7 +425,7 @@ const BranchManagerDashboard = () => {
             onClose={() => setSearchParams({ view: 'bookings' })}
             onEnrolled={(id, info) => {
               setSearchParams({ view: 'bookings' });
-              showSuccess(info?.message || 'Membership created.');
+              showSuccess(info.message || 'Membership created.');
             }}
           />,
         ) : null;

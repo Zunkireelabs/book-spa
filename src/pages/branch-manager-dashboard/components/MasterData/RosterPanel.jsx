@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
@@ -100,8 +101,8 @@ const RosterPanel = ({ branchId }) => {
       fetchTherapistsForManagement(branchId),
       fetchBranchWorkingHours(branchId),
     ]);
-    if (staffErr) { setError(staffErr.message || 'Failed to load staff.'); setStaffLoading(false); return; }
-    if (hoursErr) { setError(hoursErr.message || 'Failed to load working hours.'); setStaffLoading(false); return; }
+    if (staffErr) { setError(friendlyError(staffErr, 'Failed to load staff.')); setStaffLoading(false); return; }
+    if (hoursErr) { setError(friendlyError(hoursErr, 'Failed to load working hours.')); setStaffLoading(false); return; }
     setTherapists(staffData || []);
     setDefaultHours(hoursMap || new Map());
     setStaffLoading(false);
@@ -119,9 +120,9 @@ const RosterPanel = ({ branchId }) => {
       fetchBlocksForRange(branchId, startDate, endDate),
     ]);
     if (fetchErr) {
-      setError(fetchErr.message || 'Failed to load roster.');
+      setError(friendlyError(fetchErr, 'Failed to load roster.'));
     } else if (blocksErr) {
-      setError(blocksErr.message || 'Failed to load calendar blocks.');
+      setError(friendlyError(blocksErr, 'Failed to load calendar blocks.'));
     } else {
       setOverrides(data || new Map());
       setPending(new Map());
@@ -262,7 +263,7 @@ const RosterPanel = ({ branchId }) => {
 
     const { error: saveErr } = await upsertRosterOverrides(payload);
     if (saveErr) {
-      setError(saveErr.message || 'Failed to save roster.');
+      setError(friendlyError(saveErr, 'Failed to save roster.'));
       setSaving(false);
       return;
     }

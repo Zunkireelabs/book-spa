@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
@@ -54,7 +55,7 @@ const CollectPaymentPanel = ({ onSuccess }) => {
     });
     setSearching(false);
     if (err) {
-      setError(err.message || 'Failed to look up customer.');
+      setError(friendlyError(err, 'Failed to look up customer.'));
       setResult(null);
       return;
     }

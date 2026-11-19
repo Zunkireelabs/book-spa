@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
 import Icon from '../../../components/AppIcon';
@@ -19,7 +20,7 @@ const BookingPipelineChart = ({ branchId, period }) => {
     const result = await fetchBookings(branchId, { dateFrom: period?.from || today, dateTo: period?.to || today });
 
     if (result.error) {
-      setError(result.error.message || 'Failed to load booking data.');
+      setError(friendlyError(result.error, 'Failed to load booking data.'));
       setLoading(false);
       return;
     }

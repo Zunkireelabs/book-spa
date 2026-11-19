@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import FilterBar from '../../../../components/ui/FilterBar';
@@ -72,7 +73,7 @@ const ReferralsReportPanel = ({ branchId }) => {
     setError(null);
     const { data, error: err } = await getReferralsReport({ branchId, from: range.from, to: range.to });
     if (err) {
-      setError(err.message || 'Failed to load referrals.');
+      setError(friendlyError(err, 'Failed to load referrals.'));
     } else {
       setGroups(data || []);
     }
@@ -213,7 +214,7 @@ const ReferralsReportPanel = ({ branchId }) => {
     const { error: err } = await setReferralCommission({ bookingId, commissionType: editType, commissionValue: v });
     setSaving(false);
     if (err) {
-      setError(err.message || 'Failed to save commission.');
+      setError(friendlyError(err, 'Failed to save commission.'));
       return;
     }
     setEditing(null);
@@ -225,7 +226,7 @@ const ReferralsReportPanel = ({ branchId }) => {
     const { error: err } = await setReferralCommission({ bookingId, commissionType: null, commissionValue: null });
     setSaving(false);
     if (err) {
-      setError(err.message || 'Failed to clear commission.');
+      setError(friendlyError(err, 'Failed to clear commission.'));
       return;
     }
     setEditing(null);

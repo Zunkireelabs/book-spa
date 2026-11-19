@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import { dayMoneyView } from '../../../lib/dayMoney';
 import DayMoneyRows from '../../../components/ui/DayMoneyRows';
@@ -52,7 +53,7 @@ const DailyOperationalReportPanel = ({ branchId }) => {
     ]);
 
     if (reportRes.error) {
-      setError(reportRes.error.message || 'Failed to load daily report.');
+      setError(friendlyError(reportRes.error, 'Failed to load daily report.'));
     } else {
       setReport(reportRes.data);
     }
@@ -73,7 +74,7 @@ const DailyOperationalReportPanel = ({ branchId }) => {
     const { error: closeError } = await closeDay(branchId, selectedDate);
 
     if (closeError) {
-      setError(closeError.message || 'Failed to close the day.');
+      setError(friendlyError(closeError, 'Failed to close the day.'));
     } else {
       setSuccessMsg('Day closed successfully. All bookings are now locked.');
       await loadReport();

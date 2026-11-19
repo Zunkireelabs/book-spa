@@ -66,3 +66,24 @@ describe('update_org_profile_settings allowlist', () => {
     expect([...earlier].filter((k) => !keys.has(k))).toEqual([]);
   });
 });
+
+// ZNLY-268: same guard for update_org_booking_settings (BookingSettingsPanel toggles).
+describe('update_org_booking_settings allowlist', () => {
+  it('every toggle key the panel sends is allowed by the latest definition', () => {
+    const dir = path.join(root, 'supabase');
+    const files = fs.readdirSync(dir).filter((f) => /^migration-(\d+)-.*\.sql$/.test(f))
+      .sort((a, b) => Number(a.match(/-(\d+)-/)[1]) - Number(b.match(/-(\d+)-/)[1]));
+    let allowed = null;
+    for (let i = files.length - 1; i >= 0 && !allowed; i--) {
+      const sql = fs.readFileSync(path.join(dir, files[i]), 'utf8');
+      if (!/FUNCTION public\.update_org_booking_settings/i.test(sql)) continue;
+      const m = sql.match(/p_key NOT IN \(([\s\S]*?)\)\s*THEN/);
+      if (m) allowed = new Set([...m[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]));
+    }
+    expect(allowed, 'no migration defines update_org_booking_settings').not.toBeNull();
+    const panel = read(`${MASTER}BookingSettingsPanel.jsx`);
+    const ui = [...panel.matchAll(/^\s*key:\s*'([a-z_]+)'/gm)].map((x) => x[1]);
+    expect(ui.length).toBeGreaterThan(0);
+    expect(ui.filter((k) => !allowed.has(k))).toEqual([]);
+  });
+});

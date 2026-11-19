@@ -134,7 +134,7 @@ const ManualMergeCustomersPanel = ({ branchId, isOverall = false }) => {
     if (Object.keys(edited).length > 0) {
       const { error: updateError } = await updateCustomerContact(canonical.id, edited);
       if (updateError) {
-        warning = `The merge succeeded, but saving your edits failed: ${updateError.message || 'unknown error'}. You can retry the edit from the customer's profile.`;
+        warning = `The merge succeeded, but saving your edits failed: ${friendlyError(updateError, 'unknown error')}. You can retry the edit from the customer's profile.`;
       }
     }
 

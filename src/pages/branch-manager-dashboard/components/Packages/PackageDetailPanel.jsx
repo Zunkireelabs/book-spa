@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
@@ -32,7 +33,7 @@ const PackageDetailPanel = ({ packageId, today: todayProp, readOnly = false, can
   const loadData = useCallback(async () => {
     setLoadError(null);
     const [packageRes, redemptionsRes] = await Promise.all([fetchPackage(packageId), fetchPackageRedemptions(packageId)]);
-    if (packageRes.error) { setLoadError(packageRes.error.message || 'Failed to load package.'); return; }
+    if (packageRes.error) { setLoadError(friendlyError(packageRes.error, 'Failed to load package.')); return; }
     setPkg(packageRes.data);
     setRedemptions(redemptionsRes.data || []);
   }, [packageId]);

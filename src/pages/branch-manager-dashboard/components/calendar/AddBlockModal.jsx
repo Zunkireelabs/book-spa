@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useOrg } from '../../../../contexts/OrgContext';
 import { createBlock } from '../../../../services/api';
@@ -147,7 +148,7 @@ const AddBlockModal = ({
     });
 
     if (result.error) {
-      setError(result.error.message || 'Failed to create block.');
+      setError(friendlyError(result.error, 'Failed to create block.'));
       setSubmitting(false);
       return;
     }

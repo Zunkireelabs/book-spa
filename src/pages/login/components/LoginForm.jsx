@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
@@ -65,7 +66,7 @@ const LoginForm = () => {
       });
       if (error) throw error;
     } catch (err) {
-      setErrors({ submit: err.message || 'OAuth failed' });
+      setErrors({ submit: friendlyError(err, 'OAuth failed') });
       setOauthLoading(null);
     }
   };
@@ -154,7 +155,7 @@ const LoginForm = () => {
           ? "We're having trouble reaching the server right now. Please wait a moment and try again."
           : error.message === 'Invalid login credentials'
           ? 'Invalid email or password/PIN. Please try again.'
-          : error.message || 'An unexpected error occurred. Please try again.'
+          : friendlyError(error, 'An unexpected error occurred. Please try again.')
       });
     } finally {
       setIsLoading(false);

@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
@@ -203,7 +204,7 @@ const AttendancePanel = ({ branchId }) => {
     setDayClosed(!!day.data?.isClosed);
     if (set.data) setSettings(set.data);
     setGaps(gp.data || []);
-    if (att.error) { setError(att.error.message || 'Failed to load attendance.'); setLoading(false); hasLoadedRef.current = true; return; }
+    if (att.error) { setError(friendlyError(att.error, 'Failed to load attendance.')); setLoading(false); hasLoadedRef.current = true; return; }
     setTherapists(att.data || []);
     const elsewhere = Object.keys(byP).filter((id) => byP[id].some((q) => q.branchId !== branchId));
     if (elsewhere.length) {
@@ -385,7 +386,7 @@ const AttendancePanel = ({ branchId }) => {
   const handleWriteError = (r, err, preset) => {
     if (err.code === 'ATTENDANCE_DAY_LOCKED') { setDayClosed(true); showToast("This day is closed. Attendance can't be changed.", 'error'); return; }
     if (err.code === 'ATTENDANCE_REASON_REQUIRED') { openPanel(r, { mode: preset || null, focus: 'reason', forceReason: true }); return; }
-    showToast(err.message || 'Could not save attendance.', 'error');
+    showToast(friendlyError(err, 'Could not save attendance.'), 'error');
   };
 
   // One quick DAY action (⋯ menu: Absent / Day off) for one person.
@@ -440,7 +441,7 @@ const AttendancePanel = ({ branchId }) => {
       ? await punchIn({ therapistId: v.therapistId, branchId, at: nowIso(), source: 'visitor' })
       : await punchOut({ punchId: v.openHere?.id, therapistId: v.therapistId, branchId, at: nowIso(), source: 'visitor' });
     setBusyIds((b) => ({ ...b, [v.id]: false }));
-    if (err) { showToast(err.message || 'Could not save attendance.', 'error'); return; }
+    if (err) { showToast(friendlyError(err, 'Could not save attendance.'), 'error'); return; }
     await loadVisitors(); await loadData();
     showToast(`${v.name} ${which === 'in' ? 'checked in' : 'checked out'} at ${fmt(clock.hm)}`, 'success',
       which === 'in' ? { items: [{ type: 'punchIn', punchId: data.id, therapistId: v.therapistId, date: selectedDate, dayCreated: false }] } : null);

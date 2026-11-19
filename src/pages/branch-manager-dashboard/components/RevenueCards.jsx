@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import { getRevenueIntelligence, getRevenueForPeriod } from '../../../services/api';
@@ -51,7 +52,7 @@ const RevenueCards = ({ branchId, period, todayOnly = false }) => {
       : await getRevenueForPeriod({ branchId, from: period.from, to: period.to });
 
     if (result.error) {
-      setError(result.error.message || 'Failed to load revenue data.');
+      setError(friendlyError(result.error, 'Failed to load revenue data.'));
       setLoading(false);
       return;
     }

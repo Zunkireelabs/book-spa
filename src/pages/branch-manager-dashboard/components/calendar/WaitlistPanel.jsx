@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { formatDistanceToNow, format, parseISO } from 'date-fns';
 import Icon from '../../../../components/AppIcon';
@@ -85,7 +86,7 @@ const WaitlistEntryForm = ({ initial, services, therapists, branchId, staffLabel
       ? await updateWaitlistEntry({ id: initial.id, ...payload })
       : await addToWaitlist({ branchId, ...payload });
     setSaving(false);
-    if (result.error) { setError(result.error.message || "Couldn't save. Nothing was changed. Try again."); return; }
+    if (result.error) { setError(friendlyError(result.error, "Couldn't save. Nothing was changed. Try again.")); return; }
     onSaved();
   };
 

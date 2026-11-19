@@ -1,3 +1,4 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, forwardRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { createPortal } from 'react-dom';
@@ -703,12 +704,12 @@ const PaymentModal = ({
         rewardCatalogId: null,
       });
       if (error) {
-        setRewardError(error.message || 'Failed to save reward. Please try again.');
+        setRewardError(friendlyError(error, 'Failed to save reward. Please try again.'));
         return;
       }
       setPendingReferralRewards(prev => prev.filter(r => r.referralId !== activePendingReward.referralId));
     } catch (err) {
-      setRewardError(err?.message || 'Failed to save reward. Please try again.');
+      setRewardError(friendlyError(err, 'Failed to save reward. Please try again.'));
     } finally {
       setRewardSubmitting(false);
     }

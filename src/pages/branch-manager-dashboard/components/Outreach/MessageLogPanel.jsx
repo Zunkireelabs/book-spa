@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
@@ -73,7 +74,7 @@ const MessageLogPanel = () => {
       fetchOutreachAnalytics(),
     ]);
     if (messagesRes.error) {
-      setError(messagesRes.error.message || 'Failed to load the message log.');
+      setError(friendlyError(messagesRes.error, 'Failed to load the message log.'));
       setLoading(false);
       return;
     }

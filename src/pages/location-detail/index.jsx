@@ -1,3 +1,4 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useBranch } from '../../contexts/BranchContext';
@@ -134,7 +135,7 @@ const LocationDetailPage = () => {
       : await createBranch(details);
 
     if (result.error) {
-      setFormError(result.error.message || 'Operation failed.');
+      setFormError(friendlyError(result.error, 'Operation failed.'));
       setSaving(false);
       return;
     }
@@ -149,7 +150,7 @@ const LocationDetailPage = () => {
       const uploadResult = await uploadBranchPhoto(targetBranchId, photoFile);
       setUploadingPhoto(false);
       if (uploadResult.error) {
-        setFormError(uploadResult.error.message || 'Saved location, but failed to upload photo.');
+        setFormError(friendlyError(uploadResult.error, 'Saved location, but failed to upload photo.'));
         setSaving(false);
         return;
       }
@@ -158,14 +159,14 @@ const LocationDetailPage = () => {
 
     const photoResult = await updateBranchPhoto(targetBranchId, finalPhotoUrl || null);
     if (photoResult.error) {
-      setFormError(photoResult.error.message || 'Saved location, but failed to save photo.');
+      setFormError(friendlyError(photoResult.error, 'Saved location, but failed to save photo.'));
       setSaving(false);
       return;
     }
 
     const hoursResult = await upsertBranchOpeningHours(targetBranchId, hours);
     if (hoursResult.error) {
-      setFormError(hoursResult.error.message || 'Saved location, but failed to save hours.');
+      setFormError(friendlyError(hoursResult.error, 'Saved location, but failed to save hours.'));
       setSaving(false);
       return;
     }

@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
@@ -35,7 +36,7 @@ const AdvanceBookingWindowPanel = ({ branchId }) => {
     setLoading(true);
     setError(null);
     const { data, error: fetchErr } = await fetchBranchAdvanceBookingWindow(branchId);
-    if (fetchErr) setError(fetchErr.message || 'Failed to load the advance booking window.');
+    if (fetchErr) setError(friendlyError(fetchErr, 'Failed to load the advance booking window.'));
     else {
       setBranch(data);
       setValue(data?.advance_booking_days == null ? '' : String(data.advance_booking_days));
@@ -59,7 +60,7 @@ const AdvanceBookingWindowPanel = ({ branchId }) => {
     setSavedAt(null);
     const { error: saveErr } = await updateBranchAdvanceBookingWindow(branchId, parsedDays);
     if (saveErr) {
-      setError(saveErr.message || 'Failed to save the advance booking window.');
+      setError(friendlyError(saveErr, 'Failed to save the advance booking window.'));
       setSaving(false);
       return;
     }

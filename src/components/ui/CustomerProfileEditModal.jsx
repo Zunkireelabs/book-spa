@@ -1,3 +1,4 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState } from 'react';
 import Icon from '../AppIcon';
 import { useCustomerAuth } from '../../contexts/CustomerAuthContext';
@@ -36,7 +37,7 @@ const CustomerProfileEditModal = ({ onClose }) => {
       setSaveError(
         err.code === '23505'
           ? 'This phone number is already in use by another account.'
-          : (err.message || 'Failed to save changes.')
+          : (friendlyError(err, 'Failed to save changes.'))
       );
     } finally {
       setSaving(false);
@@ -52,7 +53,7 @@ const CustomerProfileEditModal = ({ onClose }) => {
       await requestEmailChange(newEmail.trim());
       setEmailStep('verify-email');
     } catch (err) {
-      setEmailError(err.message || 'Failed to send verification code.');
+      setEmailError(friendlyError(err, 'Failed to send verification code.'));
     } finally {
       setEmailSubmitting(false);
     }

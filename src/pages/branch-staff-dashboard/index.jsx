@@ -1,3 +1,4 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
@@ -373,7 +374,7 @@ const BranchStaffDashboard = () => {
     const result = await updateBookingStatus({ bookingId, newStatus: dbStatus, reason });
 
     if (result.error) {
-      showError(result.error.message || 'Failed to update status.');
+      showError(friendlyError(result.error, 'Failed to update status.'));
       return;
     }
 
@@ -489,7 +490,7 @@ const BranchStaffDashboard = () => {
             onClose={() => setSearchParams({ view: 'bookings' })}
             onEnrolled={(id, info) => {
               setSearchParams({ view: 'bookings' });
-              showSuccess(info?.message || 'Membership created.');
+              showSuccess(info.message || 'Membership created.');
             }}
           />
         ) : null);

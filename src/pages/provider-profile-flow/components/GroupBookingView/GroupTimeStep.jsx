@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { useTenant } from '../../../../contexts/TenantContext';
@@ -58,7 +59,7 @@ const GroupTimeStep = ({ selectedBranch, orgSlug, people, therapists, selectedDa
       .then(setTherapistWindow)
       .catch((err) => {
         console.error('[GroupTimeStep] therapist availability fetch failed:', err.message);
-        setTherapistWindowError(err.message || 'Could not load availability.');
+        setTherapistWindowError(friendlyError(err, 'Could not load availability.'));
       });
   };
 

@@ -9,7 +9,6 @@ import UnclosedNudge from '../../../../components/ui/UnclosedNudge';
 import { getCustomerPanelDetail } from '../../../../services/api';
 import { formatPhoneGrouped } from '../../../../utils/phone';
 import { initials, monthYear, dayBlock, relativeDayLabel, shortDate } from '../../../../utils/customerDirectory';
-import { friendlyError } from '../../../../utils/friendlyError';
 import { InSpaTag } from './customerBits';
 
 const npr = (n) => `NPR ${Number(n || 0).toLocaleString('en-IN')}`;

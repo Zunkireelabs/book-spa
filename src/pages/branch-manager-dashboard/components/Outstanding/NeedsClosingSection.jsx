@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
@@ -36,7 +37,7 @@ const NeedsClosingSection = ({ branchId, from, to, collapsible = false, therapis
 
   const load = useCallback(async () => {
     const { data: d, error: err } = await getNeedsClosing({ branchId, from, to });
-    if (err) setError(err.message || 'Could not load bookings that need closing.'); else { setError(null); setRaw(d); }
+    if (err) setError(friendlyError(err, 'Could not load bookings that need closing.')); else { setError(null); setRaw(d); }
   }, [branchId, from, to]);
   useEffect(() => { load(); }, [load]);
 

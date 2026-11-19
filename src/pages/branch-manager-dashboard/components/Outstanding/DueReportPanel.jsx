@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
@@ -73,7 +74,7 @@ const DueReportPanel = () => {
     setError(null);
     const { data, error: err } = await getDueReportByBranch({ from: range.from, to: range.to });
     if (err) {
-      setError(err.message || 'Failed to load due report.');
+      setError(friendlyError(err, 'Failed to load due report.'));
     } else {
       setGroups(data || []);
     }

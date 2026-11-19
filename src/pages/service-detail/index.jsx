@@ -172,7 +172,7 @@ const ServiceDetailPage = () => {
     ]);
 
     if (servicesResult.error) {
-      setLoadError(servicesResult.error.message || 'Failed to load service.');
+      setLoadError(friendlyError(servicesResult.error, 'Failed to load service.'));
       setPageLoading(false);
       return;
     }
@@ -314,7 +314,7 @@ const ServiceDetailPage = () => {
       const uploadResult = await uploadServiceImage(imageFile);
       setUploadingImage(false);
       if (uploadResult.error) {
-        setFormError(uploadResult.error.message || 'Failed to upload image.');
+        setFormError(friendlyError(uploadResult.error, 'Failed to upload image.'));
         setSaving(false);
         return;
       }

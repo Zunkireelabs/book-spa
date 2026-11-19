@@ -1,3 +1,4 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { viewerAccess, isRestricted } from '../../services/dataMasking';
@@ -222,7 +223,7 @@ const RestrictedNotes = ({ bookingId, value, onSaved }) => {
     setBusy(true); setErr(null);
     const { error } = await supabaseClient.rpc('restricted_set_booking_notes', { p_booking_id: bookingId, p_notes: text });
     setBusy(false);
-    if (error) setErr(error.message); else onSaved?.();
+    if (error) setErr(friendlyError(error)); else onSaved?.();
   };
   return (
     <div className="space-y-1.5" data-restricted-notes>
@@ -615,13 +616,13 @@ const BookingActionModal = ({
         rewardCatalogId: null,
       });
       if (error) {
-        setRewardError(error.message || 'Failed to save reward. Please try again.');
+        setRewardError(friendlyError(error, 'Failed to save reward. Please try again.'));
         return;
       }
       const refreshed = await fetchCustomerReferralForBooking(booking.bookingId);
       setCustomerReferral(refreshed.data || null);
     } catch (err) {
-      setRewardError(err?.message || 'Failed to save reward. Please try again.');
+      setRewardError(friendlyError(err, 'Failed to save reward. Please try again.'));
     } finally {
       setRewardSubmitting(false);
     }
@@ -739,7 +740,7 @@ const BookingActionModal = ({
     try {
       const result = await onEditBooking(booking.bookingId, { serviceId: option.id });
       if (result?.error) {
-        setExtendError(result.error.message || 'Failed to extend service.');
+        setExtendError(friendlyError(result.error, 'Failed to extend service.'));
       } else {
         setShowExtendPanel(false);
       }
@@ -791,7 +792,7 @@ const BookingActionModal = ({
         referredBy: (editForm.referredBy || '').trim() || null,
       });
       if (result?.error) {
-        setEditError(result.error.message || 'Failed to update booking.');
+        setEditError(friendlyError(result.error, 'Failed to update booking.'));
       } else {
         setIsEditing(false);
       }
@@ -886,7 +887,7 @@ const BookingActionModal = ({
         onClose();
       }
     } catch (err) {
-      setNewBookingError(err?.message || 'Unexpected error. Please try again.');
+      setNewBookingError(friendlyError(err, 'Unexpected error. Please try again.'));
     } finally {
       setNewBookingSubmitting(false);
     }
@@ -1041,7 +1042,7 @@ const BookingActionModal = ({
       });
       setCorrectionSubmitting(false);
       if (rpcError) {
-        setCorrectionError(rpcError.message || 'Failed to delete booking.');
+        setCorrectionError(friendlyError(rpcError, 'Failed to delete booking.'));
         return;
       }
       setCorrectionConfirming(null);
@@ -1059,7 +1060,7 @@ const BookingActionModal = ({
       });
       if (rpcError) {
         setCorrectionSubmitting(false);
-        setCorrectionError(rpcError.message || 'Failed to correct booking.');
+        setCorrectionError(friendlyError(rpcError, 'Failed to correct booking.'));
         return;
       }
       bookingSaved = true;
@@ -1087,7 +1088,7 @@ const BookingActionModal = ({
             setCorrectionSubmitting(false);
             setCorrectionError(
               (bookingSaved ? 'Booking changes saved. ' : '')
-              + `Failed to correct payment ${paymentId}: ${rpcError.message || 'please try again.'}`
+              + `Failed to correct payment ${paymentId}: ${friendlyError(rpcError, 'please try again.')}`
             );
             return;
           }
@@ -1105,7 +1106,7 @@ const BookingActionModal = ({
               (bookingSaved ? 'Booking changes saved. ' : '')
               + (changes.mode ? 'Payment method corrected, but the ' : 'Failed to correct payment ')
               + `${paymentId}${changes.mode ? ' amount correction failed: ' : ': '}`
-              + (rpcError.message || 'please try again.')
+              + (friendlyError(rpcError, 'please try again.'))
             );
             return;
           }
@@ -1151,7 +1152,7 @@ const BookingActionModal = ({
       if (variant === 'panel') await onRefreshBooking?.(booking.bookingId);
       else onClose();
     } catch (error) {
-      setActionError(error?.message || 'Assignment failed. Please try again.');
+      setActionError(friendlyError(error, 'Assignment failed. Please try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -1173,7 +1174,7 @@ const BookingActionModal = ({
         onClose();
       }
     } catch (error) {
-      setActionError(error?.message || 'Status update failed. Please try again.');
+      setActionError(friendlyError(error, 'Status update failed. Please try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -1387,7 +1388,7 @@ const BookingActionModal = ({
     setMemberBusy(true);
     setDiscountError(null);
     const { error } = await applyMemberDiscount({ bookingId: booking.bookingId, remove });
-    if (error) setDiscountError(error.message || 'Could not change the member discount.');
+    if (error) setDiscountError(friendlyError(error, 'Could not change the member discount.'));
     await loadMemberCtx();
     await onRefreshBooking?.(booking.bookingId);
     setMemberBusy(false);
@@ -1495,7 +1496,7 @@ const BookingActionModal = ({
       }
 
       if (failed) {
-        setDiscountError(lastResult?.error?.message || 'Failed to apply discount.');
+        setDiscountError(friendlyError(lastResult?.error, 'Failed to apply discount.'));
       } else if (lastResult?.data?.isPending) {
         setDiscountSuccess('pending');
         setDiscountValue('');
@@ -3039,7 +3040,7 @@ const BookingActionModal = ({
                               discountReason: 'Discount cancelled',
                             });
                             if (result?.error) {
-                              setDiscountError(result.error.message || 'Failed to cancel discount.');
+                              setDiscountError(friendlyError(result.error, 'Failed to cancel discount.'));
                             } else {
                               setDiscountSuccess('removed');
                             }
@@ -3843,7 +3844,7 @@ const BookingActionModal = ({
             const { error } = await refundProductSale({ saleId: visitProductRefund.id, reason: (note || '').trim() || null });
             setIsLoading(false);
             setVisitProductRefund(null);
-            if (error) { setActionError(error.message || 'Could not refund the product.'); return; }
+            if (error) { setActionError(friendlyError(error, 'Could not refund the product.')); return; }
             loadVisitProducts();
           }}
         />

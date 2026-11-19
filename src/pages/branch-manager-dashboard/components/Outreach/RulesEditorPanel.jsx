@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useCallback, useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
@@ -77,7 +78,7 @@ const RulesEditorPanel = () => {
     setError(null);
     const [rulesRes, templatesRes] = await Promise.all([fetchOutreachRules(), fetchOutreachTemplates()]);
     if (rulesRes.error) {
-      setError(rulesRes.error.message || 'Failed to load outreach rules.');
+      setError(friendlyError(rulesRes.error, 'Failed to load outreach rules.'));
       setLoading(false);
       return;
     }
@@ -129,7 +130,7 @@ const RulesEditorPanel = () => {
     setSavingKey(null);
 
     if (saveError) {
-      setRowErrors((prev) => ({ ...prev, [triggerType]: saveError.message || 'Failed to save rule.' }));
+      setRowErrors((prev) => ({ ...prev, [triggerType]: friendlyError(saveError, 'Failed to save rule.') }));
       return;
     }
 
@@ -153,7 +154,7 @@ const RulesEditorPanel = () => {
     const { error: toggleError } = await toggleOutreachRule(existing.id, !existing.enabled);
     setSavingKey(null);
     if (toggleError) {
-      setRowErrors((prev) => ({ ...prev, [triggerType]: toggleError.message || 'Failed to toggle rule.' }));
+      setRowErrors((prev) => ({ ...prev, [triggerType]: friendlyError(toggleError, 'Failed to toggle rule.') }));
       return;
     }
     await loadData();

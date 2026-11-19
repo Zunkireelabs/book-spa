@@ -80,7 +80,7 @@ const ServiceManagementPanel = () => {
     setError(null);
     const result = await fetchServicesForManagement();
     if (result.error) {
-      setError(result.error.message || 'Failed to load services.');
+      setError(friendlyError(result.error, 'Failed to load services.'));
     } else {
       setServices(result.data || []);
       // A tiered service charges by who does it, so the list shows its range, as the online page does.

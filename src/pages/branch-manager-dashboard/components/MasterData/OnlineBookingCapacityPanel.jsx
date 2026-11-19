@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { useIndustry } from '../../../../hooks/useIndustry';
@@ -26,7 +27,7 @@ const OnlineBookingCapacityPanel = ({ branchId }) => {
     setLoading(true);
     setError(null);
     const { data, error: fetchErr } = await fetchBranchOnlineCapacity(branchId);
-    if (fetchErr) setError(fetchErr.message || 'Failed to load the online booking limit.');
+    if (fetchErr) setError(friendlyError(fetchErr, 'Failed to load the online booking limit.'));
     else {
       setBranch(data);
       setValue(data?.online_booking_capacity == null ? '' : String(data.online_booking_capacity));
@@ -48,7 +49,7 @@ const OnlineBookingCapacityPanel = ({ branchId }) => {
     setSavedAt(null);
     const { error: saveErr } = await updateBranchOnlineCapacity(branchId, parsed);
     if (saveErr) {
-      setError(saveErr.message || 'Failed to save the online booking limit.');
+      setError(friendlyError(saveErr, 'Failed to save the online booking limit.'));
       setSaving(false);
       return;
     }

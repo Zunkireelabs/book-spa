@@ -1,3 +1,4 @@
+import { friendlyError } from '../utils/friendlyError';
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
@@ -29,13 +30,13 @@ export const OrgProvider = ({ children }) => {
 
       if (fetchError) {
         console.error('[OrgContext] Error fetching organization:', fetchError.message);
-        setError(fetchError.message);
+        setError(friendlyError(fetchError));
       } else {
         setOrg(data);
       }
     } catch (err) {
       console.error('[OrgContext] Unexpected error:', err.message);
-      setError(err.message);
+      setError(friendlyError(err));
     } finally {
       setLoading(false);
     }

@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useEffect, useState } from 'react';
 import { fetchAttendanceSettings, setAttendanceSettings } from '../../../../services/api';
 
@@ -29,7 +30,7 @@ const AttendanceSettingsPanel = ({ branchId }) => {
     setSaving(true); setMsg(null);
     const { error } = await setAttendanceSettings({ branchId, lateGraceMinutes: g, openCheckoutHours: h, expectCheckIn: expect });
     setSaving(false);
-    if (error) { setMsg({ type: 'error', text: error.message || 'Could not save.' }); return; }
+    if (error) { setMsg({ type: 'error', text: friendlyError(error, 'Could not save.') }); return; }
     setSaved({ lateGraceMinutes: g, openCheckoutHours: h, expectCheckIn: expect });
     setMsg({ type: 'ok', text: 'Saved.' });
   };

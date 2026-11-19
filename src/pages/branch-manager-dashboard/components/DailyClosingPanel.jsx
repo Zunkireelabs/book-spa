@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import { dayMoneyView } from '../../../lib/dayMoney';
 import DayMoneyRows from '../../../components/ui/DayMoneyRows';
@@ -39,7 +40,7 @@ const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
     setUnfinished(openRows || []);
 
     if (fetchError) {
-      setError(fetchError.message || 'Failed to load daily summary.');
+      setError(friendlyError(fetchError, 'Failed to load daily summary.'));
     } else {
       setSummary(data);
     }
@@ -58,7 +59,7 @@ const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
     const { data, error: closeError } = await closeDay(branchId, selectedDate);
 
     if (closeError) {
-      setError(closeError.message || 'Failed to close the day.');
+      setError(friendlyError(closeError, 'Failed to close the day.'));
     } else {
       setSuccessMsg('Day closed successfully. All bookings are now locked.');
       await loadSummary();

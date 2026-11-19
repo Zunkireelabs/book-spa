@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useCallback, useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import {
@@ -36,7 +37,7 @@ const ReviewQueuePanel = () => {
     setError(null);
     const { data, error: fetchError } = await fetchOutreachReviewQueue();
     if (fetchError) {
-      setError(fetchError.message || 'Failed to load the review queue.');
+      setError(friendlyError(fetchError, 'Failed to load the review queue.'));
       setLoading(false);
       return;
     }
@@ -102,7 +103,7 @@ const ReviewQueuePanel = () => {
     const { error: approveError } = await approveOutreachMessage(id, overrides);
     setActionId(null);
     if (approveError) {
-      setActionError(approveError.message || 'Failed to approve message.');
+      setActionError(friendlyError(approveError, 'Failed to approve message.'));
       return;
     }
     if (editingId === id) setEditingId(null);
@@ -116,7 +117,7 @@ const ReviewQueuePanel = () => {
     const { error: cancelError } = await cancelOutreachMessage(id);
     setActionId(null);
     if (cancelError) {
-      setActionError(cancelError.message || 'Failed to cancel message.');
+      setActionError(friendlyError(cancelError, 'Failed to cancel message.'));
       return;
     }
     if (editingId === id) setEditingId(null);
@@ -140,7 +141,7 @@ const ReviewQueuePanel = () => {
     if (!bulkError && plain.length > 0) ({ error: bulkError } = await bulkApproveOutreach(plain));
     setBulkActing(false);
     if (bulkError) {
-      setActionError(bulkError.message || 'Failed to bulk-approve messages.');
+      setActionError(friendlyError(bulkError, 'Failed to bulk-approve messages.'));
       return;
     }
     await loadData();
