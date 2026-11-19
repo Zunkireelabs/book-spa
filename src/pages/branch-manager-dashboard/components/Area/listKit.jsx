@@ -120,7 +120,7 @@ export const ListPageShell = ({ view, title, lead, actions, counts = {}, childre
             const on = t.view === view;
             return (
               <Link key={t.view} role="tab" aria-selected={on} to={{ search: `?view=${t.view}` }}
-                className={`h-[38px] flex items-center gap-[7px] text-[13px] font-medium relative whitespace-nowrap flex-shrink-0 ${on ? 'text-text-primary' : 'text-[#515152] hover:text-text-primary'}`}>
+                className={`h-[38px] max-md:h-11 flex items-center gap-[7px] text-[13px] font-medium relative whitespace-nowrap flex-shrink-0 ${on ? 'text-text-primary' : 'text-[#515152] hover:text-text-primary'}`}>
                 {t.label}{counts[t.view] != null && <span className="text-[#8A8A90] tabular-nums" data-count={t.view}>{counts[t.view]}</span>}
                 {on && <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-text-primary rounded" />}
               </Link>

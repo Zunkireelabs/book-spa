@@ -119,7 +119,7 @@ const CollectPaymentPanel = ({ onSuccess }) => {
   const [primaryBooking, ...additionalBookings] = payingBookings || [];
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-2xl max-md:pb-28">
       {/* Lookup form */}
       <div className="bg-surface rounded-spa-lg spa-shadow-resting border border-border p-6">
         <div className="flex items-center space-x-3 mb-4">
@@ -150,7 +150,7 @@ const CollectPaymentPanel = ({ onSuccess }) => {
                   onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 15))}
                   placeholder="9800000000"
                   autoFocus
-                  className="flex-1 h-10 px-3 rounded-r-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                  className="flex-1 h-10 max-md:h-11 px-3 rounded-r-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                 />
               </div>
             </div>
@@ -163,11 +163,11 @@ const CollectPaymentPanel = ({ onSuccess }) => {
                 value={customerName}
                 onChange={(e) => setCustomerName(e.target.value)}
                 placeholder="For your reference only"
-                className="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                className="w-full h-10 max-md:h-11 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
               />
             </div>
           </div>
-          <Button variant="primary" type="submit" loading={searching} iconName="Search" iconPosition="left">
+          <Button variant="primary" type="submit" loading={searching} iconName="Search" iconPosition="left" className="max-md:w-full max-md:h-11">
             Find
           </Button>
         </form>

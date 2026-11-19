@@ -1527,7 +1527,7 @@ const PaymentModal = ({
 
   const dialog = receipt ? (
     <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Payment collected"
-      className="checkout-dialog bg-white rounded-[14px] w-[440px] max-w-[calc(100vw-24px)] min-[960px]:max-w-[calc(100vw-32px)] h-[min(640px,calc(100dvh-24px))] min-[960px]:h-[min(640px,calc(100dvh-64px))] flex flex-col outline-none shadow-[0_0_0_1px_rgba(14,13,12,.06),0_2px_4px_rgba(14,13,12,.04),0_24px_64px_-12px_rgba(14,13,12,.28)] animate-fade-in">
+      className="checkout-dialog bg-white rounded-[14px] w-[440px] max-w-[calc(100vw-24px)] min-[960px]:max-w-[calc(100vw-32px)] h-[min(640px,calc(100dvh-24px))] min-[960px]:h-[min(640px,calc(100dvh-64px))] max-md:w-full max-md:max-w-none max-md:h-[100dvh] max-md:rounded-none flex flex-col outline-none shadow-[0_0_0_1px_rgba(14,13,12,.06),0_2px_4px_rgba(14,13,12,.04),0_24px_64px_-12px_rgba(14,13,12,.28)] animate-fade-in">
       <div className="px-7 py-7 text-center overflow-y-auto flex-1 min-h-0"><div className="min-h-full flex flex-col justify-center">
         <div className="w-10 h-10 rounded-full bg-[#EEF3EC] text-primary grid place-items-center mx-auto"><Icon name="Check" size={20} strokeWidth={2.2} /></div>
         <div className="mt-3.5 text-[12.5px] text-[#8A8A90]">{receipt.memberOnly ? 'Member discount saved · nothing left to pay' : 'Payment collected'}</div>
@@ -1585,21 +1585,21 @@ const PaymentModal = ({
         </div>
       </div></div>
       <div className="h-16 px-5 border-t border-[#E7E8E6] flex items-center gap-2 flex-none">
-        <button type="button" onClick={printReceipt} className="h-9 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white text-[13px] font-medium inline-flex items-center gap-2 hover:bg-[#F7F7F5]"><Icon name="Printer" size={15} strokeWidth={1.6} />Print</button>
+        <button type="button" onClick={printReceipt} className="h-9 max-md:h-11 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white text-[13px] font-medium inline-flex items-center gap-2 hover:bg-[#F7F7F5]"><Icon name="Printer" size={15} strokeWidth={1.6} />Print</button>
         {whatsappUrl && (
-          <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="h-9 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white text-[13px] font-medium inline-flex items-center gap-2 hover:bg-[#F7F7F5]"><Icon name="MessageCircle" size={15} strokeWidth={1.6} />WhatsApp</a>
+          <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="h-9 max-md:h-11 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white text-[13px] font-medium inline-flex items-center gap-2 hover:bg-[#F7F7F5]"><Icon name="MessageCircle" size={15} strokeWidth={1.6} />WhatsApp</a>
         )}
-        <button type="button" autoFocus onClick={() => onClose?.({ paid: true })} className="ml-auto h-9 pl-4 pr-3 rounded-[7px] bg-primary text-white text-[13px] font-medium inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(45,90,39,.25)]">Done<kbd className="text-[10.5px] px-1.5 rounded border border-white/25 bg-white/10 font-sans">↵</kbd></button>
+        <button type="button" autoFocus onClick={() => onClose?.({ paid: true })} className="ml-auto h-9 max-md:h-11 max-md:px-6 pl-4 pr-3 rounded-[7px] bg-primary text-white text-[13px] font-medium inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(45,90,39,.25)]">Done<kbd className="max-md:hidden text-[10.5px] px-1.5 rounded border border-white/25 bg-white/10 font-sans">↵</kbd></button>
       </div>
     </div>
   ) : (
     <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Checkout"
-      className={`checkout-dialog relative bg-white rounded-[14px] ${cp.available ? 'w-[960px]' : 'w-[900px]'} max-w-[calc(100vw-24px)] min-[960px]:max-w-[calc(100vw-32px)] h-[min(640px,calc(100dvh-24px))] min-[960px]:h-[min(640px,calc(100dvh-64px))] flex flex-col outline-none shadow-[0_0_0_1px_rgba(14,13,12,.06),0_2px_4px_rgba(14,13,12,.04),0_24px_64px_-12px_rgba(14,13,12,.28)] animate-fade-in text-[13px] text-[#0E0D0C]`}>
+      className={`checkout-dialog relative bg-white rounded-[14px] ${cp.available ? 'w-[960px]' : 'w-[900px]'} max-w-[calc(100vw-24px)] min-[960px]:max-w-[calc(100vw-32px)] h-[min(640px,calc(100dvh-24px))] min-[960px]:h-[min(640px,calc(100dvh-64px))] max-md:w-full max-md:max-w-none max-md:h-[100dvh] max-md:rounded-none flex flex-col outline-none shadow-[0_0_0_1px_rgba(14,13,12,.06),0_2px_4px_rgba(14,13,12,.04),0_24px_64px_-12px_rgba(14,13,12,.28)] animate-fade-in text-[13px] text-[#0E0D0C]`}>
       {/* Header */}
-      <div className="h-[60px] pl-6 pr-5 flex items-center gap-3 border-b border-[#E7E8E6] flex-none">
+      <div className="h-[60px] max-md:h-auto max-md:min-h-[60px] max-md:py-2 pl-6 pr-5 max-md:pl-4 max-md:pr-2 flex items-center gap-3 border-b border-[#E7E8E6] flex-none">
         <h2 className="text-[15px] font-semibold tracking-[-.2px]">Checkout</h2>
-        <span className="flex items-center gap-2 text-[#8A8A90] min-w-0">
-          {guestName && <b className="font-medium text-[#515152] truncate">{guestName}</b>}
+        <span className="flex items-center gap-2 text-[#8A8A90] min-w-0 max-md:flex-wrap max-md:gap-x-2 max-md:gap-y-0">
+          {guestName && <b className="font-medium text-[#515152] truncate max-md:whitespace-normal max-md:break-words">{guestName}</b>}
           <span className="whitespace-nowrap">· {bookingNumber}</span>
           {tierName && (
             <span className="inline-flex items-center gap-1 h-5 px-[7px] rounded-full bg-[#FBF3DF] text-[#9A6B0B] text-[11px] font-semibold">
@@ -1611,13 +1611,19 @@ const PaymentModal = ({
         <button type="button" onClick={requestClose} disabled={busy} aria-label="Close" className="max-[959px]:ml-auto w-[30px] h-[30px] max-[959px]:w-11 max-[959px]:h-11 max-[959px]:-mr-2 rounded-[7px] grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2]"><Icon name="X" size={16} /></button>
       </div>
 
+      {/* Phone: the number stays visible while the body scrolls */}
+      <div className="md:hidden flex-none flex items-center justify-between gap-3 px-4 h-10 border-b border-[#E7E8E6] bg-white text-[13px] tabular-nums" data-testid="due-compact">
+        <span className="text-[#8A8A90]">Amount due <b className="font-semibold text-[#0E0D0C] text-[14px]">NPR {fmt(grandTotal)}</b></span>
+        <span className="text-[#8A8A90]">Left <b className={`font-semibold ${leftover > 0.001 ? 'text-[#B45309]' : 'text-[#0E0D0C]'}`}>{fmt(leftover)}</b></span>
+      </div>
+
       {/* Body */}
       <div className={`grid grid-cols-1 ${cp.available ? 'min-[960px]:grid-cols-[430px_minmax(0,1fr)]' : 'min-[960px]:grid-cols-[380px_minmax(0,1fr)]'} min-[960px]:grid-rows-[minmax(0,1fr)] flex-1 overflow-y-auto min-[960px]:overflow-hidden min-h-0`}
-        onFocusCapture={(e) => { const t = e.target; if (window.innerWidth < 960 && t && t.matches && t.matches('input, textarea, select')) setTimeout(() => t.scrollIntoView?.({ block: 'center', behavior: 'smooth' }), 300); }}
+        onFocusCapture={(e) => { const t = e.target; if (window.innerWidth < 960 && t && t.matches && t.matches('input, textarea, select')) setTimeout(() => t.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }), 300); }}
         onInputCapture={() => setTouched(true)}
         onClickCapture={(e) => { if (e.target.closest && e.target.closest('button, input, label')) setTouched(true); }}>
         {/* Left: paying for */}
-        <div className={`px-6 pt-5 ${Number(tip) > 0 ? 'pb-44' : 'pb-5'} min-[960px]:border-r border-b min-[960px]:border-b-0 border-[#E7E8E6] bg-[#FCFCFB] min-[960px]:overflow-y-auto min-[960px]:min-h-0`}>
+        <div className={`px-6 max-md:px-4 pt-5 ${Number(tip) > 0 ? 'pb-44' : 'pb-5'} min-[960px]:border-r border-b min-[960px]:border-b-0 border-[#E7E8E6] bg-[#FCFCFB] min-[960px]:overflow-y-auto min-[960px]:min-h-0`}>
           <SectionLabel>Paying for</SectionLabel>
           <div className="flex items-center gap-2.5 h-[38px]">
             <Check on disabled />
@@ -1810,7 +1816,7 @@ const PaymentModal = ({
 
         {/* Right: amount due + tenders */}
         <div className="min-w-0 min-[960px]:min-h-0 flex flex-col">
-         <div className="px-6 pt-5 flex-none">
+         <div className="px-6 max-md:px-4 pt-5 flex-none">
           <div className="flex items-center justify-between gap-3 text-[12.5px] text-[#8A8A90]">
             <span>Amount due</span>
             {memberSavings > 0 && <span className="inline-flex items-center gap-1.5 text-[#9A6B0B]" data-member-saves><Icon name="Star" size={11} className="fill-current" strokeWidth={0} />Member saves NPR {fmt(memberSavings)}</span>}
@@ -1867,14 +1873,14 @@ const PaymentModal = ({
          </div>
 
          {error && (
-           <div role="alert" className="mx-6 mt-3 flex-none flex items-start gap-2 px-3 py-2.5 rounded-lg bg-error/5 border border-error/20 text-[12.5px] text-error">
+           <div role="alert" className="mx-6 max-md:mx-4 mt-3 flex-none flex items-start gap-2 px-3 py-2.5 rounded-lg bg-error/5 border border-error/20 text-[12.5px] text-error">
              <Icon name="AlertCircle" size={14} className="mt-0.5 flex-none" /><span>{friendlyCheckoutError(error).message}</span>
            </div>
          )}
 
          {/* Only this area scrolls: the payments list, split link, gap box, note */}
          <div className="relative flex-1 min-h-0">
-          <div ref={listRef} onScroll={measureFade} className="min-[960px]:h-full min-[960px]:overflow-y-auto px-6 pt-3 pb-5" data-testid="checkout-scroll">
+          <div ref={listRef} onScroll={measureFade} className="min-[960px]:h-full min-[960px]:overflow-y-auto px-6 max-md:px-4 pt-3 pb-5" data-testid="checkout-scroll">
           {/* Tender list */}
           {tenders.length > 0 && (
             <div className="border border-[#E7E8E6] rounded-[10px]">
@@ -2062,11 +2068,11 @@ const PaymentModal = ({
                     <AmountInput value={cash.received || ''} aria-label="Cash received"
                       ref={(el) => { if (el && focusReceivedRef.current) { focusReceivedRef.current = false; el.focus(); } }}
                       onChange={(v) => updateTender(cashIdx, { received: v })}
-                      className="h-8 w-[120px] rounded-[7px] border border-[#E7E8E6] bg-white pl-9 pr-2.5 text-right text-[13px] font-medium tabular-nums focus:outline-none focus:border-[#B9C7B6] focus:ring-[3px] focus:ring-primary/10" />
+                      className="h-8 max-[959px]:h-11 w-[120px] rounded-[7px] border border-[#E7E8E6] bg-white pl-9 pr-2.5 text-right text-[13px] font-medium tabular-nums focus:outline-none focus:border-[#B9C7B6] focus:ring-[3px] focus:ring-primary/10" />
                   </div>
                   {quickCashOptions(cashAmount).map((v) => (
                     <button key={v} type="button" onClick={() => updateTender(cashIdx, { received: String(v) })} aria-pressed={received === v}
-                      className={`h-7 px-2.5 rounded-[7px] border text-[12px] font-medium tabular-nums ${received === v ? 'border-[#B9C7B6] bg-[#EEF3EC] text-primary' : 'border-[#E7E8E6] bg-white text-[#515152] hover:bg-[#F7F7F5] hover:text-[#0E0D0C]'}`}>
+                      className={`h-7 max-[959px]:h-11 px-2.5 rounded-[7px] border text-[12px] font-medium tabular-nums ${received === v ? 'border-[#B9C7B6] bg-[#EEF3EC] text-primary' : 'border-[#E7E8E6] bg-white text-[#515152] hover:bg-[#F7F7F5] hover:text-[#0E0D0C]'}`}>
                       {fmt(v)}
                     </button>
                   ))}
@@ -2075,7 +2081,7 @@ const PaymentModal = ({
                   {!(received > 0) ? (
                     <span className="text-[12px] text-[#8A8A90]">Tap a note or type what the guest handed over</span>
                   ) : diff > 0.001 ? (
-                    <span className="text-[#515152]">Give back <b className="text-[15px] font-semibold text-primary tabular-nums">NPR {fmt(diff)}</b></span>
+                    <span className="text-[#515152] max-md:flex max-md:w-full max-md:justify-between max-md:rounded-lg max-md:bg-[#E8F5EC] max-md:px-3 max-md:py-2 max-md:text-[#0B6B3A]">Give back <b className="text-[15px] font-semibold text-primary tabular-nums">NPR {fmt(diff)}</b></span>
                   ) : diff < -0.001 ? (
                     <span className="text-warning tabular-nums">NPR {fmt(-diff)} short of the cash amount</span>
                   ) : (
@@ -2094,20 +2100,20 @@ const PaymentModal = ({
       </div>
 
       {/* Footer */}
-      <div className="min-h-[64px] pl-6 pr-5 py-2 flex items-center gap-3 border-t border-[#E7E8E6] flex-none flex-wrap">
-        <span className="text-[#8A8A90] flex gap-4 tabular-nums">
+      <div className="min-h-[64px] pl-6 pr-5 py-2 flex items-center gap-3 border-t border-[#E7E8E6] flex-none flex-wrap max-md:flex-col max-md:items-stretch max-md:gap-2 max-md:px-4 max-md:pt-3 max-md:pb-[calc(12px+env(safe-area-inset-bottom))] max-md:shadow-[0_-6px_16px_rgba(14,13,12,.04)]">
+        <span className="text-[#8A8A90] flex gap-4 tabular-nums max-md:justify-between max-md:order-1">
           <span>Total <b className="font-medium text-[#0E0D0C]">{fmt(grandTotal)}</b></span>
           <span>Entered <b className="font-medium text-[#0E0D0C]">{fmt(entered)}</b></span>
           <span>Left <b className="font-medium text-[#0E0D0C]">{fmt(leftover)}</b></span>
         </span>
-        {blockReason && <span className="ml-auto text-[12px] text-[#B45309] text-right" data-testid="checkout-reason">{blockReason}</span>}
-        <div className={`${blockReason ? '' : 'ml-auto'} flex items-center gap-2.5`}>
-          {!paidElsewhere && <button type="button" onClick={requestClose} disabled={busy} className="h-9 max-[959px]:h-11 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white font-medium hover:bg-[#F7F7F5]">Cancel</button>}
+        {blockReason && <span className="ml-auto max-md:ml-0 max-md:order-3 max-md:text-center text-[12px] text-[#B45309] text-right" data-testid="checkout-reason">{blockReason}</span>}
+        <div className={`${blockReason ? '' : 'ml-auto'} flex items-center gap-2.5 max-md:order-2 max-md:ml-0`}>
+          {!paidElsewhere && <button type="button" onClick={requestClose} disabled={busy} className="max-md:hidden h-9 max-[959px]:h-11 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white font-medium hover:bg-[#F7F7F5]">Cancel</button>}
           {paidElsewhere ? (
-            <button type="button" autoFocus onClick={requestClose} className="h-9 max-[959px]:h-11 px-4 rounded-[7px] bg-primary border border-primary text-white font-medium">Close</button>
+            <button type="button" autoFocus onClick={requestClose} className="h-9 max-[959px]:h-11 max-md:flex-1 max-md:h-[52px] px-4 rounded-[7px] bg-primary border border-primary text-white font-medium">Close</button>
           ) : (
           <button type="button" onClick={doSubmit} disabled={!canSubmit} title={blockReason || undefined}
-            className="h-9 max-[959px]:h-11 pl-4 pr-3 rounded-[7px] bg-primary border border-primary text-white font-medium inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(45,90,39,.25),inset_0_1px_0_rgba(255,255,255,.15)] disabled:opacity-45 disabled:cursor-not-allowed">
+            className="h-9 max-[959px]:h-11 max-md:flex-1 max-md:h-[52px] max-md:justify-center max-md:text-[16px] max-md:rounded-[12px] pl-4 pr-3 rounded-[7px] bg-primary border border-primary text-white font-medium inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(45,90,39,.25),inset_0_1px_0_rgba(255,255,255,.15)] disabled:opacity-45 disabled:cursor-not-allowed">
             {busy ? 'Recording…' : primaryLabel}
             {!busy && <kbd className="max-[959px]:hidden text-[10.5px] px-1.5 rounded border border-white/25 bg-white/10 font-sans">↵</kbd>}
           </button>
@@ -2132,7 +2138,7 @@ const PaymentModal = ({
 
   // Backdrop: frosted, and a click outside does NOT close (a half-entered payment is too easy to lose).
   return createPortal(
-    <div className="fixed inset-0 z-modal-overlay modal-backdrop-frost flex items-center justify-center p-4"
+    <div className="fixed inset-0 z-modal-overlay modal-backdrop-frost flex items-center justify-center p-4 max-md:p-0 max-md:items-stretch"
       onMouseDown={(e) => { if (e.target === e.currentTarget) e.preventDefault(); /* a click outside neither closes nor steals focus */ }}>
       {dialog}
       {popoverEl}
