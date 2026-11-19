@@ -7249,37 +7249,28 @@ export async function createBooking({
           })
           .eq('id', customerId);
       } else {
-        // Create new customer record (org-wide identity; branch_id kept as origin)
-        const { data: newCustomer, error: insertCustErr } = await supabase
-          .from('customers')
-          .insert({
-            org_id: orgId,
-            branch_id: resolvedBranchId,
-            full_name: customerName,
-            phone: phone || null,
-            email: email || null,
-            gender: customerGender || null,
-          })
-          .select('id')
-          .single();
-        if (newCustomer) {
-          customerId = newCustomer.id;
+        // Create the customer through the SECURITY DEFINER RPC (migration-402): anon can't read back a raw insert (no SELECT
+        // policy), so a direct .insert().select() left customer_id NULL for online bookings. One path for anon and staff;
+        // the RPC also de-dupes by phone/email and never overwrites an existing profile.
+        const { data: newCustomerId, error: createCustErr } = await supabase.rpc('create_customer_for_booking', {
+          p_org_id: orgId,
+          p_branch_id: resolvedBranchId,
+          p_full_name: customerName,
+          p_phone: phone || null,
+          p_email: email || null,
+          p_gender: customerGender || null,
+        });
+        if (newCustomerId) {
+          customerId = newCustomerId;
           isNewCustomer = true;
-        } else if (insertCustErr?.code === '23505' && orgId && phone) {
-          // Lost a race against customers_org_nphone_uniq — re-fetch the winner
-          const { data } = await supabase
-            .from('customers')
-            .select('id')
-            .eq('org_id', orgId)
-            .eq('phone', phone)
-            .limit(1)
-            .maybeSingle();
-          if (data) customerId = data.id;
+        } else if (createCustErr) {
+          // Still non-blocking (the booking must go through), but loud: a booking without a customer link is a real problem.
+          console.error('[API] create_customer_for_booking failed:', createCustErr.message);
         }
       }
     } catch (custErr) {
       // Non-blocking: booking still proceeds without customer link
-      console.warn('[API] Customer lookup/create failed:', custErr.message);
+      console.error('[API] Customer lookup/create failed:', custErr.message);
     }
 
     // 7a. Resolve therapist IDs (support both single and multi)
