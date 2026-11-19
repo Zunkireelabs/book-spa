@@ -9,7 +9,10 @@ import { closeDayBlock, unpaidCloseWarning } from '../../../lib/closeDay';
 import { wordBranch } from '../../../utils/industryTerms';
 
 function formatNPR(amount) {
-  return `NPR ${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // Whole rupees show without decimals; paise show both digits (25,600 vs 1,234.50), never ".00" and never hidden.
+  const n = Number(amount);
+  const paise = Math.abs(n - Math.round(n)) > 0.0049;
+  return `NPR ${n.toLocaleString('en-IN', { minimumFractionDigits: paise ? 2 : 0, maximumFractionDigits: paise ? 2 : 0 })}`;
 }
 
 function formatDate(dateStr) {
@@ -94,14 +97,11 @@ const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
   return (
     <div className="space-y-6">
       {/* Header with Date Selector */}
-      <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 max-sm:p-4 border border-border">
-        <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-3 mb-4">
+      <div>
+        <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-3 mb-1">
           <div className="flex items-center space-x-3 min-w-0">
-            <div className="w-10 h-10 flex-none bg-primary/10 rounded-lg flex items-center justify-center">
-              <Icon name="FileText" size={20} className="text-primary" />
-            </div>
-            <div>
-              <h2 className="font-heading font-heading-semibold text-lg text-text-primary">
+                        <div>
+              <h2 className="font-heading font-heading-semibold text-lg text-text-primary tracking-[-0.3px]">
                 Daily Reconciliation
               </h2>
               <p className="font-caption font-caption-normal text-sm text-text-secondary">
@@ -176,74 +176,74 @@ const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
       {!loading && summary && (
         <>
           {/* Revenue Summary */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-surface rounded-spa-lg spa-shadow-resting p-5 border border-border">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="bg-surface rounded-spa-lg spa-shadow-resting p-3.5 border border-border min-w-0">
               <div className="flex items-center space-x-2 mb-2">
                 <Icon name="TrendingUp" size={16} className="text-text-secondary" />
-                <span className="font-caption font-caption-medium text-xs text-text-secondary uppercase tracking-wider">Money in</span>
+                <span className="font-caption font-caption-medium text-[11px] text-text-secondary uppercase tracking-wide">Money in</span>
               </div>
-              <p className="font-heading font-heading-semibold text-xl text-text-primary">
+              <p className="font-heading font-heading-semibold text-[clamp(1rem,1.35vw,1.25rem)] max-sm:text-xl whitespace-nowrap tabular-nums text-text-primary">
                 {formatNPR(headline.moneyIn)}
               </p>
             </div>
 
-            <div className="bg-surface rounded-spa-lg spa-shadow-resting p-5 border border-border">
+            <div className="bg-surface rounded-spa-lg spa-shadow-resting p-3.5 border border-border min-w-0">
               <div className="flex items-center space-x-2 mb-2">
                 <Icon name="Percent" size={16} className="text-text-secondary" />
-                <span className="font-caption font-caption-medium text-xs text-text-secondary uppercase tracking-wider">Refunds</span>
+                <span className="font-caption font-caption-medium text-[11px] text-text-secondary uppercase tracking-wide">Refunds</span>
               </div>
-              <p className="font-heading font-heading-semibold text-xl text-error">
+              <p className="font-heading font-heading-semibold text-[clamp(1rem,1.35vw,1.25rem)] max-sm:text-xl whitespace-nowrap tabular-nums text-error">
                 − {formatNPR(headline.refunds)}
               </p>
             </div>
 
-            <div className="bg-surface rounded-spa-lg spa-shadow-resting p-5 border border-border border-l-4 border-l-success">
+            <div className="bg-surface rounded-spa-lg spa-shadow-resting p-3.5 border border-border border-l-4 border-l-primary min-w-0 max-sm:col-span-2">
               <div className="flex items-center space-x-2 mb-2">
                 <Icon name="IndianRupee" size={16} className="text-success" />
-                <span className="font-caption font-caption-medium text-xs text-text-secondary uppercase tracking-wider">{view.closed ? 'Taken at close' : 'Taken today'}</span>
+                <span className="font-caption font-caption-medium text-[11px] text-text-secondary uppercase tracking-wide">{view.closed ? 'Taken at close' : 'Taken today'}</span>
               </div>
-              <p className="font-heading font-heading-semibold text-xl text-success">
+              <p className="font-heading font-heading-semibold text-[clamp(1rem,1.35vw,1.25rem)] max-sm:text-xl whitespace-nowrap tabular-nums text-primary">
                 {formatNPR(headline.taken)}
               </p>
             </div>
           </div>
 
           {/* Booking Breakdown + Payment Mode */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4">
             {/* Booking Breakdown */}
             <div className="bg-surface rounded-spa-lg spa-shadow-resting p-5 border border-border">
               <h3 className="font-heading font-heading-medium text-base text-text-primary mb-4 flex items-center space-x-2">
                 <Icon name="Calendar" size={18} className="text-primary" />
                 <span>Booking Breakdown</span>
               </h3>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
+              <div className="divide-y divide-border">
+                <div className="flex items-baseline justify-between gap-3 py-2.5 max-md:min-h-11">
                   <span className="font-body font-body-normal text-sm text-text-secondary">Total Bookings</span>
-                  <span className="font-body font-body-semibold text-sm text-text-primary">{summary.totalBookings}</span>
+                  <span className="font-body font-body-semibold text-sm whitespace-nowrap tabular-nums text-text-primary">{summary.totalBookings}</span>
                 </div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-baseline justify-between gap-3 py-2.5 max-md:min-h-11">
                   <span className="font-body font-body-normal text-sm text-text-secondary">Completed</span>
-                  <span className="font-body font-body-semibold text-sm text-success">{summary.completedBookings}</span>
+                  <span className="font-body font-body-semibold text-sm whitespace-nowrap tabular-nums text-success">{summary.completedBookings}</span>
                 </div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-baseline justify-between gap-3 py-2.5 max-md:min-h-11">
                   <span className="font-body font-body-normal text-sm text-text-secondary">Cancelled</span>
-                  <span className="font-body font-body-semibold text-sm text-error">{summary.cancelledBookings}</span>
+                  <span className="font-body font-body-semibold text-sm whitespace-nowrap tabular-nums text-error">{summary.cancelledBookings}</span>
                 </div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-baseline justify-between gap-3 py-2.5 max-md:min-h-11">
                   <span className="font-body font-body-normal text-sm text-text-secondary">No Show</span>
-                  <span className="font-body font-body-semibold text-sm text-warning">{summary.noShowBookings}</span>
+                  <span className="font-body font-body-semibold text-sm whitespace-nowrap tabular-nums text-warning">{summary.noShowBookings}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="font-body font-body-normal text-sm text-text-secondary">Not finished (Pending / Confirmed / In-Progress)</span>
-                  <span className="font-body font-body-semibold text-sm text-text-primary">{summary.notFinishedBookings}</span>
+                <div className="flex items-baseline justify-between gap-3 py-2.5 max-md:min-h-11">
+                  <span className="font-body font-body-normal text-sm text-text-secondary">Not finished<span className="block text-xs text-text-tertiary">Pending / Confirmed / In-Progress</span></span>
+                  <span className="font-body font-body-semibold text-sm whitespace-nowrap tabular-nums text-text-primary">{summary.notFinishedBookings}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="font-body font-body-normal text-sm text-text-secondary">Discounts given (today's bookings)</span>
-                  <span className="font-body font-body-semibold text-sm text-text-primary">− {formatNPR(summary.totalDiscounts)}</span>
+                <div className="flex items-baseline justify-between gap-3 py-2.5 max-md:min-h-11">
+                  <span className="font-body font-body-normal text-sm text-text-secondary">Discounts given<span className="block text-xs text-text-tertiary">Today's bookings</span></span>
+                  <span className="font-body font-body-semibold text-sm whitespace-nowrap tabular-nums text-text-primary">− {formatNPR(summary.totalDiscounts)}</span>
                 </div>
-                <div className="border-t border-border pt-2 flex items-center justify-between">
+                <div className="flex items-baseline justify-between gap-3 py-2.5 max-md:min-h-11">
                   <span className="font-body font-body-normal text-sm text-text-secondary">Not fully paid</span>
-                  <span className={`font-body font-body-semibold text-sm ${summary.unpaidCount > 0 ? 'text-warning' : 'text-success'}`}>
+                  <span className={`font-body font-body-semibold text-sm whitespace-nowrap tabular-nums ${summary.unpaidCount > 0 ? 'text-warning' : 'text-success'}`}>
                     {summary.unpaidCount}
                   </span>
                 </div>
@@ -256,15 +256,15 @@ const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
                 <Icon name="CreditCard" size={18} className="text-primary" />
                 <span>Payment Breakdown</span>
               </h3>
-              <div className="space-y-3">
+              <div className="divide-y divide-border">
                 <DayMoneyRows data={summary} fmt={formatNPR} lab="font-body font-body-normal text-sm text-text-secondary" val="font-body font-body-semibold text-sm text-text-primary" head="font-heading font-heading-medium text-sm text-text-primary" />
                 {[['product', 'Products', 'Package'], ['voucher', 'Voucher sales', 'Ticket'], ['membership', 'Membership deposits', 'Wallet'], ['package', 'Package sales', 'Gift']].filter(([k]) => Number(summary.sources?.[k]) > 0).map(([k, label, icon]) => (
-                  <div key={k} className="border-t border-border pt-2 flex items-center justify-between" data-source-line={k}>
+                  <div key={k} className="py-2.5 flex items-center justify-between gap-3" data-source-line={k}>
                     <div className="flex items-center gap-2">
                       <Icon name={icon} size={14} className="text-text-secondary" />
                       <span className="font-body font-body-normal text-sm text-text-secondary">of which: {label}</span>
                     </div>
-                    <span className="font-body font-body-semibold text-sm text-text-primary">{formatNPR(summary.sources[k])}</span>
+                    <span className="font-body font-body-semibold text-sm whitespace-nowrap tabular-nums text-text-primary">{formatNPR(summary.sources[k])}</span>
                   </div>
                 ))}
               </div>
@@ -274,7 +274,7 @@ const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
           {/* Close Day Action */}
           {!summary.isClosed && (
             <div className="bg-surface rounded-spa-lg spa-shadow-resting p-5 border border-border">
-              <div className="flex items-center justify-between max-md:flex-col max-md:items-stretch max-md:gap-4">
+              <div className="flex flex-col items-stretch gap-4">
                 <div className="max-md:min-w-0">
                   <h3 className="font-heading font-heading-medium text-base text-text-primary">
                     Close Day
@@ -303,10 +303,15 @@ const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
                   onClick={handleCloseDayClick}
                   loading={closing}
                   disabled={block.blocked}
-                  className="max-md:w-full max-md:h-12"
+                  className="max-md:w-full max-md:h-12 md:self-end md:min-w-[180px] whitespace-nowrap"
                 >
                   Close Day
                 </Button>
+                {block.blocked && (
+                  <p className="text-xs text-warning text-right max-md:text-center -mt-2" data-close-reason>
+                    Finish the {block.rows.length} {block.rows.length === 1 ? 'booking' : 'bookings'} above first
+                  </p>
+                )}
               </div>
             </div>
           )}

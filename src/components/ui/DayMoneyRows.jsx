@@ -7,7 +7,7 @@ const clock = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: 
 const DayMoneyRows = ({ data, fmt, lab, val, head }) => {
   const v = dayMoneyView(data);
   const row = (k, label, amount, extra = '') => (
-    <div key={k} className="flex items-center justify-between" data-method-row={k}>
+    <div key={k} className="flex items-baseline justify-between gap-3 py-2.5 max-md:min-h-11" data-method-row={k}>
       <span className={lab}>{label}</span><span className={`${val} ${extra}`}>{amount}</span>
     </div>
   );
@@ -19,7 +19,7 @@ const DayMoneyRows = ({ data, fmt, lab, val, head }) => {
   if (!v.closed) {
     return (<>
       {methods(v.live)}
-      <div className="border-t border-border pt-2 flex items-center justify-between"><span className={lab}>Cash expected in the drawer</span><span className={val}>{fmt(v.live.cashExpected)}</span></div>
+      <div className="flex items-center justify-between gap-3 rounded-spa bg-primary/5 px-3 max-[380px]:px-2.5 py-2.5 mt-2" data-cash-expected><span className={`${lab} !text-text-primary font-semibold whitespace-nowrap max-[380px]:!text-[13px]`}>Cash expected in the drawer</span><span className={`${val} !text-primary whitespace-nowrap tabular-nums`}>{fmt(v.live.cashExpected)}</span></div>
     </>);
   }
   return (<>
