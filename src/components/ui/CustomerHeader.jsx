@@ -20,6 +20,18 @@ const CustomerHeader = ({ wide, branch, containerClassName, marketplaceName, mar
   const { customer, customerProfile } = customerAuth;
   const loginPath = orgSlug ? `/${orgSlug}/customer-login` : '/login';
   const accountPath = orgSlug ? `/${orgSlug}/account` : '/';
+  const hasRealCustomer = Boolean(customer && customerProfile);
+  // A marketplace identity (no real book-spa customerProfile, but a name/email arrived via
+  // utils/marketplaceIdentity.js) has a real account -- just not a book-spa one. It's the
+  // marketplace's own /account profile page, which is reachable from here specifically
+  // BECAUSE this page is proxied onto the marketplace's origin in exactly the situation
+  // where this identity can appear (see isMarketplaceContext there) -- a plain root-relative
+  // "/account" resolves through that proxy. Never build this from loginPath/accountPath:
+  // this is intentionally NOT a book-spa route, so it's rendered as a plain <a>, not a
+  // react-router <Link> -- a <Link to="/account"> would get BrowserRouter's basename
+  // prepended (e.g. "/book/account"), which is a nonexistent book-spa route, not the
+  // marketplace's page one level up.
+  const hasMarketplaceIdentity = !hasRealCustomer && Boolean(marketplaceName || marketplaceEmail);
 
   // Build tenant-aware paths
   const bookingPath = orgSlug ? `/${orgSlug}` : '/';
@@ -76,26 +88,37 @@ const CustomerHeader = ({ wide, branch, containerClassName, marketplaceName, mar
               </a>
             )}
 
-            {/* Login / Account — a marketplace-sourced name (see utils/marketplaceIdentity.js)
-                is display only, never a book-spa session, so it still links to loginPath,
-                not accountPath: there is no book-spa account behind it to view. A genuine
-                book-spa customerProfile always takes priority when both are present.
+            {/* Login / Account — three states: a genuine book-spa customerProfile always
+                takes priority and links to accountPath, exactly as before. A marketplace
+                identity with no book-spa account links to the marketplace's own /account
+                page (plain <a>, see hasMarketplaceIdentity above) rather than loginPath —
+                this customer already has an account, it's just not here. Otherwise, "Login".
                 Email-OTP marketplace accounts collect no name at all (user_metadata.full_name
                 is simply never set), so `name` can arrive as '' even though the identity is
                 real — falls back to the email's local part, same treatment the marketplace's
                 own accountLabel() uses for the same reason. Not the full address (too long for
                 this slot) and not a name guessed from the email (would misrepresent someone). */}
-            <Link
-              to={customer && customerProfile ? accountPath : loginPath}
-              className="flex items-center space-x-2 px-3 sm:px-4 py-2 rounded-spa border border-border hover:bg-background spa-transition-fast spa-touch-target flex-shrink-0"
-            >
-              <Icon name="User" size={16} className="text-text-primary flex-shrink-0" />
-              <span className="font-body font-body-medium text-sm text-text-primary whitespace-nowrap">
-                {customer && customerProfile
-                  ? customerProfile.full_name.split(' ')[0]
-                  : (marketplaceName?.split(' ')[0] || marketplaceEmail?.split('@')[0] || 'Login')}
-              </span>
-            </Link>
+            {hasMarketplaceIdentity ? (
+              <a
+                href="/account"
+                className="flex items-center space-x-2 px-3 sm:px-4 py-2 rounded-spa border border-border hover:bg-background spa-transition-fast spa-touch-target flex-shrink-0"
+              >
+                <Icon name="User" size={16} className="text-text-primary flex-shrink-0" />
+                <span className="font-body font-body-medium text-sm text-text-primary whitespace-nowrap">
+                  {marketplaceName?.split(' ')[0] || marketplaceEmail?.split('@')[0]}
+                </span>
+              </a>
+            ) : (
+              <Link
+                to={hasRealCustomer ? accountPath : loginPath}
+                className="flex items-center space-x-2 px-3 sm:px-4 py-2 rounded-spa border border-border hover:bg-background spa-transition-fast spa-touch-target flex-shrink-0"
+              >
+                <Icon name="User" size={16} className="text-text-primary flex-shrink-0" />
+                <span className="font-body font-body-medium text-sm text-text-primary whitespace-nowrap">
+                  {hasRealCustomer ? customerProfile.full_name.split(' ')[0] : 'Login'}
+                </span>
+              </Link>
+            )}
           </div>
         </div>
       </div>
