@@ -7,6 +7,7 @@ import CustomerForm from '../../../customer-booking-flow/components/CustomerForm
 import { useResolvedServicePricing } from '../../../../hooks/useCustomerServicePricing';
 import { mapBookingError } from '../../../../services/bookingErrorMessages';
 import { isValidPhoneForCountry } from '../../../../utils/phone';
+import { isCustomerInfoValid } from '../../utils/customerInfoValid';
 
 const GUEST_GENDER_OPTIONS = [
   { value: 'male', label: 'Male' },
@@ -16,15 +17,11 @@ const GUEST_GENDER_OPTIONS = [
 
 export { mapBookingError };
 
-// Mirrors BookingView/index.jsx's isCustomerInfoValid, plus a required-phone check:
-// createBooking() hard-rejects a missing phone (PHONE_REQUIRED) and every guest row
-// inherits this phone — gating here is strictly better than the solo flow's former gap
-// (fixed separately, same rule, see BookingView/index.jsx), not a regression.
-export const isLeadContactValid = (leadContact) => {
-  if (!leadContact.firstName.trim()) return false;
-  if (leadContact.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(leadContact.email)) return false;
-  return isValidPhoneForCountry(leadContact.phone, leadContact.phoneCountryCode);
-};
+// The lead contact has the same shape (and the same Terms checkbox) as solo's customerInfo,
+// so it composes the shared validator directly -- including agreeToTerms. Guests below do
+// NOT compose this: they have no checkbox of their own, and calling this on a guest would
+// silently make Terms a per-guest requirement, which is explicitly not the design.
+export const isLeadContactValid = (leadContact) => isCustomerInfoValid(leadContact);
 
 // A guest row with every field still blank is valid as-is — submitGroupBooking
 // (api.js) fills a fully-blank guest in with the lead's own name/email/phone/gender

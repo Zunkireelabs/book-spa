@@ -210,19 +210,6 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
     setMatchDismissed(true);
   };
 
-  const validateAllFields = () => {
-    setIsValidating(true);
-    const fields = ['firstName', 'lastName', 'gender'];
-    let isValid = true;
-
-    fields.forEach(field => {
-      const fieldValid = validateField(field, customerInfo[field] || '');
-      if (!fieldValid) isValid = false;
-    });
-
-    return isValid;
-  };
-
   const formatDateTime = () => {
     if (!selectedDateTime?.date || !selectedDateTime?.time) return '';
     
@@ -597,10 +584,17 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
             type="checkbox"
             name="agreeToTerms"
             checked={customerInfo.agreeToTerms || false}
-            onChange={(e) => onCustomerInfoChange({
-              ...customerInfo,
-              agreeToTerms: e.target.checked
-            })}
+            onChange={(e) => {
+              // Flip into "show validation" mode on any interaction with this box, same as
+              // handleBlur does for text fields -- a customer who reaches this checkbox by
+              // tabbing past already-prefilled fields would otherwise never trip isValidating,
+              // and unticking it would disable Review with no visible explanation at all.
+              setIsValidating(true);
+              onCustomerInfoChange({
+                ...customerInfo,
+                agreeToTerms: e.target.checked
+              });
+            }}
             className="mt-1 text-primary focus:ring-primary"
           />
           <div className="flex-1">
@@ -614,6 +608,12 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
                 Privacy Policy
               </button>
             </span>
+            {isValidating && !customerInfo.agreeToTerms && (
+              <p className="font-caption font-caption-normal text-xs text-error flex items-center space-x-1 mt-1">
+                <Icon name="AlertCircle" size={12} />
+                <span>Please agree to the Terms and Conditions to continue</span>
+              </p>
+            )}
             <p className="font-caption font-caption-normal text-xs text-text-secondary mt-1">
               By proceeding, you consent to receive booking confirmations and updates via email and SMS.
             </p>

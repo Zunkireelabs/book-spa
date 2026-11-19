@@ -9,7 +9,7 @@ import ConfirmStep from './ConfirmStep';
 import DiscardDialog from './DiscardDialog';
 import { useTenant } from '../../../../contexts/TenantContext';
 import { scrollToTopInstant } from '../../../../utils/scroll';
-import { isValidPhoneForCountry } from '../../../../utils/phone';
+import { isCustomerInfoValid } from '../../utils/customerInfoValid';
 
 // Full-page booking view (Fresha-style), replacing the earlier 460px slide-over: the
 // drawer left two thirds of the screen empty while cramming every step into a narrow
@@ -99,25 +99,10 @@ const BookingView = ({
 
   const goNext = () => setStepIndex((i) => Math.min(steps.length - 1, i + 1));
 
-  const isCustomerInfoValid = () => {
-    if (!customerInfo.firstName.trim()) return false;
-    if (customerInfo.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerInfo.email)) return false;
-    // Phone was previously only format-checked WHEN present, never required -- the actual
-    // bug behind a customer reaching Review-and-confirm with no phone at all, since this is
-    // what disables the Review button, not CustomerForm's own cosmetic error text (which
-    // only populates once the field is blurred). createBooking() hard-requires a phone on
-    // this path with no code on that error (see api.js), so an empty one here always fails
-    // confirmation anyway -- this just stops it before the customer gets that far.
-    // GroupConfirmStep.jsx's isLeadContactValid/isGuestContactValid already required this
-    // correctly; this brings solo in line with it instead of the other way around.
-    if (!isValidPhoneForCountry(customerInfo.phone, customerInfo.phoneCountryCode)) return false;
-    return true;
-  };
-
   const canContinue = {
     professional: !!selectedProfessional,
     time: !!(selectedDateTime.date && selectedDateTime.time),
-    confirm: isCustomerInfoValid(),
+    confirm: isCustomerInfoValid(customerInfo),
   };
 
   const currentStep = steps[stepIndex]?.key;
