@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import { isLoginAllowed, LOGIN_OFF_MESSAGE } from './loginAccess';
+import { isLoginAllowed, LOGIN_OFF_MESSAGE, isLoginOffHookError, LOGIN_OFF_HOOK_MESSAGE } from './loginAccess';
 
 export const PIN_UNAVAILABLE_MESSAGE = "Can't check your PIN right now. Check your connection and try again.";
 
@@ -84,6 +84,8 @@ export async function loginWithPin(email, pin, orgSlug) {
       }
       return { success: true, session: otpData.session, user: otpData.user };
     }
+    // The Auth hook refused the login (login turned off): final, not a blip, so no retry.
+    if (isLoginOffHookError(otpError)) return { success: false, error: LOGIN_OFF_HOOK_MESSAGE, kind: 'login_off' };
     lastError = otpError?.message || 'Session creation failed.';
   }
 

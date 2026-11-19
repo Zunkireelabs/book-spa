@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-19** by Lead · 218 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-19** by Lead · 220 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -13,7 +13,6 @@ Last synced: **2026-11-19** by Lead · 218 open tickets (epics excluded: ZNLY-1,
 ## In progress
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
-| ZNLY-198 | Sadin | urgent | UI integration: merge our UI port onto stage (incl. Anish's PR #462), renumber our migrations to 335+ |
 | ZNLY-66 | Sadin | high | UI/UX Upgrade (feat/ui-port-from-clinicmd) |
 | ZNLY-159 | Sadin | high | Reports redesign: 17 reports in 5 groups, Start here row, headline vs last period, ✦ flags |
 | ZNLY-182 | Anish | high | Online combo-service bookings never split into per-component booking_combo_items |
@@ -34,6 +33,7 @@ Last synced: **2026-11-19** by Lead · 218 open tickets (epics excluded: ZNLY-1,
 | ZNLY-192 | Anish | medium | Wire 11 hardcoded "Therapist" labels to the dynamic staffLabel system |
 | ZNLY-255 | — | medium | Safe dependency upgrades (router 6.x, vite 5.x, supabase-js, posthog, dompurify, postcss) before stage PR |
 | ZNLY-260 | — | medium | Four in-shell high-fidelity mockup redraws (team member panel, service pricing, checkout invoice dialog, calendar + waitlist) |
+| ZNLY-262 | Sadin | medium | Blocked login (login off) shows a raw hook error; show "Your login is turned off, contact your admin" |
 
 ## In review / on stage
 | Ticket | Owner | Priority | State | What |
@@ -43,6 +43,7 @@ Last synced: **2026-11-19** by Lead · 218 open tickets (epics excluded: ZNLY-1,
 | ZNLY-75 | Sadin | urgent | In Review | UI-9 (V19): Cross-tenant RLS sweep (local migrations 287/288) — stage test, then prod after holidays |
 | ZNLY-81 | Sadin | urgent | In Review | UI-15: Renumber UI-branch migrations 282–293 → 301+ (clash with PR #413's 282–298) |
 | ZNLY-153 | Anish | urgent | In Review | Group booking review fixes: therapist PII leak, wrong guest roster, availability math, discard dialog |
+| ZNLY-198 | Sadin | urgent | On Stage | UI integration: merge our UI port onto stage (incl. Anish's PR #462), renumber our migrations to 335+ |
 | ZNLY-204 | Sadin | urgent | QC Accepted | P0: UI-branch migrations 354/361 overwrite stage's public availability RPCs (group booking, PII fix, online capacity, full-capacity blocks, gender reserve) |
 | ZNLY-205 | Sadin | urgent | QC Accepted | P0: two login↔staff links after integration (stage therapists.user_id vs our users.therapist_id): pick one source of truth |
 | ZNLY-221 | Sadin | urgent | QC Accepted | Beauty (no rooms): can a booking be saved when bookings.room_id is NOT NULL? |
@@ -53,6 +54,7 @@ Last synced: **2026-11-19** by Lead · 218 open tickets (epics excluded: ZNLY-1,
 | ZNLY-233 | Sadin | urgent | QC Accepted | Checkout from dashboard / Collect / reports silently drops products: receipt says paid, but no product sale, stock or commission is saved |
 | ZNLY-234 | Sadin | urgent | QC Accepted | Day close traps money and unfinished bookings: balances can't be collected after close, unfinished bookings get frozen, card payments are filed as Fonepay |
 | ZNLY-235 | Sadin | urgent | QC Accepted | Restricted staff access not enforced: names, phones and prices show on most screens and through the API (customers, payments) |
+| ZNLY-261 | Sadin | urgent | On Stage | Stage deploy blocked: 4 RLS policies call helpers unwrapped (attendance_changes, attendance_punches, insight_feedback x2) — migration 400 |
 | ZNLY-14 | — | high | In Review | PR #30: move PIN login service-role usage to Edge Function |
 | ZNLY-34 | Anish | high | In Review | PR #413: Combo-service bookings, calendar full-day view, service/staff admin upgrades |
 | ZNLY-41 | Anish | high | On Stage | Promote stage → main: customer/staff detail rebuild + migrations 275-281 |

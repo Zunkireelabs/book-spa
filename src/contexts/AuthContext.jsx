@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { supabase, retryingFetch } from '../lib/supabase';
 import { identify, reset, setGroup } from '../lib/analytics';
 import { isTransientStatus, ServiceUnavailableError } from '../lib/supabaseRetry';
-import { isLoginAllowed, LOGIN_OFF_MESSAGE } from '../services/loginAccess';
+import { isLoginAllowed, LOGIN_OFF_MESSAGE, isLoginOffHookError, LOGIN_OFF_HOOK_MESSAGE } from '../services/loginAccess';
 import { setRestrictedReads } from '../lib/restrictedReads';
 import { isRestricted } from '../services/dataMasking';
 
@@ -180,7 +180,7 @@ export const AuthProvider = ({ children }) => {
         password,
       });
 
-      if (error) throw error;
+      if (error) throw isLoginOffHookError(error) ? new Error(LOGIN_OFF_HOOK_MESSAGE) : error;
 
       const userProfile = await fetchProfile(
         data.user.id,
