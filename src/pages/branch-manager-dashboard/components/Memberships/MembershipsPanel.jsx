@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ScrollRow from '../../../../components/ui/ScrollRow';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
 import { FilterChip } from '../../../../components/ui/ListToolbarKit';
@@ -287,7 +288,7 @@ const MembershipsPanel = ({ members, tiers, today, error, onRetry, readOnly, isO
       )}
       <div ref={sentinelRef} aria-hidden="true" className="h-px mt-0.5" />
       <div ref={blockRef} className="sticky z-sticky-filter bg-white" style={{ top: stickyTop }}>{toolbar}</div>
-      {!isSm && <div className="flex items-center gap-2 pb-2 flex-wrap">{chips}<div className="ml-auto">{sortMenu}</div></div>}
+      {!isSm && <ScrollRow className="pb-2" wrapperClassName="pb-0">{chips}{sortMenu}</ScrollRow>}
 
       {error ? <ErrorBlock error={error} onRetry={onRetry} /> : (
         <table className="w-full border-collapse table-fixed">

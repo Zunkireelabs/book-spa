@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import ScrollRow from 'components/ui/ScrollRow';
 import { viewerAccess } from 'services/dataMasking';
 import { Link } from 'react-router-dom';
 import { localizeBranch } from '../../../../utils/industryTerms';
@@ -112,7 +113,7 @@ export const ListPageShell = ({ view, title, lead, actions, counts = {}, childre
           <h1 className="text-[20px] font-semibold tracking-[-0.45px] text-text-primary">{title}</h1>
           <p className="text-[13px] text-[#8A8A90] mt-[3px] tabular-nums" data-lead>{lead}</p>
         </div>
-        <div className="flex gap-2 flex-wrap">{actions}</div>
+        <ScrollRow className="flex-wrap md:flex-wrap max-md:flex-nowrap" wrapperClassName="max-md:w-full">{actions}</ScrollRow>
       </div>
       <div ref={tabsRef} className="sticky top-0 z-sticky-filter bg-white pt-[14px]">
         <div role="tablist" aria-label={title} className="flex items-center gap-[22px] border-b border-border overflow-x-auto overflow-y-hidden">

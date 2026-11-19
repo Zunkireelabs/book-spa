@@ -11,7 +11,7 @@ import MiniMonthCalendar from '../../pages/branch-manager-dashboard/components/c
 // dirty-draft confirm. `PanelShell` also renders the same form as a centered modal (`variant="modal"`) for any caller
 // that isn't the calendar.
 
-export const CONTROL = 'w-full h-10 px-3 text-[13px] font-body text-text-primary bg-surface border border-border rounded-spa focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:opacity-60 disabled:cursor-not-allowed placeholder:text-text-tertiary';
+export const CONTROL = 'w-full h-10 max-md:h-11 px-3 text-[13px] font-body text-text-primary bg-surface border border-border rounded-spa focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:opacity-60 disabled:cursor-not-allowed placeholder:text-text-tertiary';
 
 export const format12h = (time24) => {
   if (!time24) return '';
@@ -104,7 +104,7 @@ export const SelectField = ({ value, onChange, options, placeholder, disabled })
 
 // Ink segmented control (same look as the toolbar's Day / 4 Day and quick-create's Individual / Group).
 export const Segmented = ({ options, value, onChange, disabled }) => (
-  <div className={`grid gap-0.5 p-0.5 h-10 bg-background border border-border rounded-spa`} style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }} role="group">
+  <div className={`grid gap-0.5 p-0.5 h-10 max-md:h-11 bg-background border border-border rounded-spa`} style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }} role="group">
     {options.map(([val, label]) => (
       <button
         key={val}
@@ -191,7 +191,7 @@ export const Stepper = ({ value, onChange, min = 1, max, id, ariaLabel = 'Quanti
   const n = Number(value) || 0;
   const clamp = (v) => Math.max(min, max != null ? Math.min(max, v) : v);
   return (
-    <div className={`inline-flex items-stretch h-10 border rounded-spa overflow-hidden ${error ? 'border-error' : 'border-border'}`}>
+    <div className={`inline-flex items-stretch h-10 max-md:h-11 border rounded-spa overflow-hidden ${error ? 'border-error' : 'border-border'}`}>
       <button type="button" aria-label="Decrease" disabled={n <= min} onClick={() => onChange(String(clamp(n - 1)))} className="w-10 flex items-center justify-center text-text-secondary hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent">
         <Icon name="Minus" size={14} />
       </button>
@@ -228,7 +228,7 @@ export const OverflowMenu = ({ items, label = 'More actions' }) => {
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="w-8 h-8 flex items-center justify-center rounded-spa text-text-secondary hover:bg-black/[0.05] spa-transition-fast"
+        className="w-8 h-8 max-md:w-11 max-md:h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-black/[0.05] spa-transition-fast"
       >
         <Icon name="MoreHorizontal" size={16} />
       </button>
@@ -242,7 +242,7 @@ export const OverflowMenu = ({ items, label = 'More actions' }) => {
               disabled={it.disabled}
               title={it.disabled ? it.reason : undefined}
               onClick={() => { setOpen(false); it.run(); }}
-              className={`w-full flex items-center gap-2 px-3 h-9 text-[13px] font-body text-left hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent ${it.danger ? 'text-error' : 'text-text-primary'}`}
+              className={`w-full flex items-center gap-2 px-3 h-9 max-md:h-11 text-[13px] font-body text-left hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent ${it.danger ? 'text-error' : 'text-text-primary'}`}
             >
               {it.icon && <Icon name={it.icon} size={14} className={it.danger ? 'text-error' : 'text-text-tertiary'} />}
               <span className="flex-1">{it.label}</span>
@@ -316,7 +316,7 @@ export const DateField = ({ value, onChange, label, required, disabled, hint, mi
           onClick={() => setOpen((v) => !v)}
           aria-haspopup="dialog"
           aria-expanded={open}
-          className={`w-full h-10 pl-9 pr-3 flex items-center text-[13px] font-body text-text-primary bg-surface border rounded-spa hover:bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 text-left disabled:opacity-60 ${error ? 'border-error' : 'border-border'}`}
+          className={`w-full h-10 max-md:h-11 pl-9 pr-3 flex items-center text-[13px] font-body text-text-primary bg-surface border rounded-spa hover:bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 text-left disabled:opacity-60 ${error ? 'border-error' : 'border-border'}`}
         >
           <Icon name="Calendar" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
           <span className="truncate">{value ? formatShortDate(value) : 'Pick a date'}</span>
@@ -399,8 +399,8 @@ export const TimeField = ({ value, onChange, label, required, disabled, hint, st
   );
 };
 
-const ghostBtn = 'h-9 px-2.5 text-[13px] font-body font-body-medium border border-border rounded-spa hover:bg-background spa-transition-fast whitespace-nowrap disabled:opacity-50';
-const primaryBtn = 'h-9 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap';
+const ghostBtn = 'h-9 max-md:h-11 px-2.5 text-[13px] font-body font-body-medium border border-border rounded-spa hover:bg-background spa-transition-fast whitespace-nowrap disabled:opacity-50';
+const primaryBtn = 'h-9 max-md:h-11 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap';
 
 // Form container: a docked SidePanel (variant="panel") or a centered modal (variant="modal").
 //  * footer = [left: optional destructive action + disabled reason] [Cancel (ghost)] [primary]; or `footerOverride`
@@ -433,7 +433,7 @@ export const PanelShell = ({
       <button
         type="button"
         onClick={() => { const c = confirm; setConfirm(null); if (c.action) c.action(); else onClose?.(); }}
-        className="h-9 px-3 text-[13px] font-body font-body-medium bg-text-primary text-white rounded-spa hover:opacity-90 spa-transition-fast whitespace-nowrap"
+        className="h-9 max-md:h-11 px-3 text-[13px] font-body font-body-medium bg-text-primary text-white rounded-spa hover:opacity-90 spa-transition-fast whitespace-nowrap"
       >
         Discard
       </button>
@@ -471,7 +471,7 @@ export const PanelShell = ({
       >
         <div className="flex items-center justify-between gap-2 px-5 h-14 border-b border-border flex-shrink-0">
           <h3 className="font-heading font-heading-semibold text-[15px] text-text-primary truncate">{title}</h3>
-          <button type="button" onClick={requestClose} aria-label="Close" className="w-8 h-8 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background spa-transition-fast">
+          <button type="button" onClick={requestClose} aria-label="Close" className="w-8 h-8 max-md:w-11 max-md:h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background spa-transition-fast">
             <Icon name="X" size={18} />
           </button>
         </div>

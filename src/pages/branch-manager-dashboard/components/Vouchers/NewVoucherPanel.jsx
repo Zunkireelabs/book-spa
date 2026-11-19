@@ -27,7 +27,7 @@ const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || '';
 const SPLIT = 'grid grid-cols-1 sm:grid-cols-2 gap-3';
 const DEFAULT_CHIP = '90';
 const MAX_SOLD_DISCOUNT = 99; // a sale must collect something (migration-344); 100% off is "Given free"
-const chipCls = (on) => `h-8 px-3 rounded-full border text-[13px] font-medium tabular-nums ${on ? 'border-primary bg-[#EEF3EC] text-primary shadow-[0_0_0_2px_rgba(45,90,39,.10)]' : 'border-border bg-white text-text-primary hover:bg-[#FAFAF9]'}`;
+const chipCls = (on) => `h-8 max-md:h-11 px-3 rounded-full border text-[13px] font-medium tabular-nums ${on ? 'border-primary bg-[#EEF3EC] text-primary shadow-[0_0_0_2px_rgba(45,90,39,.10)]' : 'border-border bg-white text-text-primary hover:bg-[#FAFAF9]'}`;
 const isCouponType = (t) => t?.percent_off != null;
 
 const PhoneInput = ({ id, label, dial, setDial, value, onChange, error }) => (
@@ -35,7 +35,7 @@ const PhoneInput = ({ id, label, dial, setDial, value, onChange, error }) => (
     <CountryCodeSelect value={dial} onChange={setDial} />
     <input {...controlA11y(id, error)} type="tel" inputMode="numeric" aria-label={label} value={value} placeholder="9841234567"
       onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 15))}
-      className={`flex-1 min-w-0 h-10 px-3 text-[13px] border rounded-r-spa rounded-l-none bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary ${error ? 'border-error' : 'border-border'}`} />
+      className={`flex-1 min-w-0 h-10 max-md:h-11 px-3 text-[13px] border rounded-r-spa rounded-l-none bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary ${error ? 'border-error' : 'border-border'}`} />
   </div>
 );
 
@@ -321,8 +321,8 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
       <PanelShell variant="panel" title={title} onClose={() => onIssued(issued)}
         footerOverride={(
           <div className="flex items-center justify-end gap-3">
-            <button type="button" onClick={issueAnother} className="h-9 px-3 text-[13px] font-body font-body-medium text-text-secondary hover:text-text-primary hover:bg-black/[0.04] rounded-spa spa-transition-fast whitespace-nowrap">{wasFree ? 'Give another' : 'Sell another'}</button>
-            <button type="button" onClick={() => onIssued(issued)} className="h-9 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 spa-transition-fast whitespace-nowrap">Done</button>
+            <button type="button" onClick={issueAnother} className="h-9 max-md:h-11 px-3 text-[13px] font-body font-body-medium text-text-secondary hover:text-text-primary hover:bg-black/[0.04] rounded-spa spa-transition-fast whitespace-nowrap">{wasFree ? 'Give another' : 'Sell another'}</button>
+            <button type="button" onClick={() => onIssued(issued)} className="h-9 max-md:h-11 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 spa-transition-fast whitespace-nowrap">Done</button>
           </div>
         )}>
         <div className="px-5 py-10 text-center" role="status" aria-live="polite">
@@ -373,7 +373,7 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
             <div className="grid grid-cols-2 gap-0.5 p-0.5 bg-background border border-border rounded-lg" role="group" aria-label="Sold or given free">
               {[['sold', 'Banknote', 'Sold'], ['free', 'Gift', 'Given free']].map(([k, icon, label]) => (
                 <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKindByUser(k)} data-kind={k}
-                  className={`h-9 rounded-md text-[13px] font-medium inline-flex items-center justify-center gap-2 transition-colors ${kind === k ? 'bg-white text-text-primary shadow-[0_1px_2px_rgba(14,13,12,.08)] border border-border' : 'text-[#515152] hover:text-text-primary'}`}>
+                  className={`h-9 max-md:h-11 rounded-md text-[13px] font-medium inline-flex items-center justify-center gap-2 transition-colors ${kind === k ? 'bg-white text-text-primary shadow-[0_1px_2px_rgba(14,13,12,.08)] border border-border' : 'text-[#515152] hover:text-text-primary'}`}>
                   <Icon name={icon} size={15} />{label}
                 </button>
               ))}
@@ -474,7 +474,7 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
             </div>
           )}
           {!free && discountNum >= 100 && canGiveFree && (
-            <button type="button" onClick={() => { setKindByUser('free'); setDiscount('0'); setDiscountTouched(false); }} className="-mt-2 text-[13px] font-medium text-primary hover:underline">Switch to Given free</button>
+            <button type="button" onClick={() => { setKindByUser('free'); setDiscount('0'); setDiscountTouched(false); }} className="-mt-2 max-md:py-3 text-[13px] font-medium text-primary hover:underline">Switch to Given free</button>
           )}
 
           {canBackdate && (
@@ -504,7 +504,7 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
                       </div>
                       <div className="flex-1 min-w-0"><MoneyInput id={`vch-pay-${i}`} aria-label={`Amount ${i + 1}`} value={t.amount} onChange={(val) => updateTender(i, { amount: val })} /></div>
                       {tenders.length > 1 && (
-                        <button type="button" onClick={() => { autoTender.current = false; removeTenderRow(setTenders, i); }} aria-label="Remove method" className="h-10 w-8 flex items-center justify-center rounded-spa text-text-secondary hover:bg-black/[0.05]"><Icon name="X" size={14} /></button>
+                        <button type="button" onClick={() => { autoTender.current = false; removeTenderRow(setTenders, i); }} aria-label="Remove method" className="h-10 w-8 max-md:h-11 max-md:w-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-black/[0.05]"><Icon name="X" size={14} /></button>
                       )}
                     </div>
                     {isMembership && (
@@ -517,14 +517,14 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
               })}
               {errors.pay && <p id="vch-pay-error" role="alert" className="text-xs text-error">{errors.pay}</p>}
               <div className="flex items-center justify-between gap-3">
-                <button type="button" onClick={() => { autoTender.current = false; addTenderRow(setTenders, { amount: '', paymentMode: 'Cash' }); }} className="text-[13px] font-body-medium text-primary hover:underline">+ Add method</button>
+                <button type="button" onClick={() => { autoTender.current = false; addTenderRow(setTenders, { amount: '', paymentMode: 'Cash' }); }} className="max-md:py-3 text-[13px] font-body-medium text-primary hover:underline">+ Add method</button>
                 {tenderRemaining === 0 ? (
                   <p className="flex items-center gap-1.5 text-[13px] text-success" aria-live="polite"><Icon name="Check" size={13} />Fully collected</p>
                 ) : (
                   <p className="text-[13px] text-warning tabular-nums" aria-live="polite">
                     {tenderRemaining > 0 ? `${formatNPR(tenderRemaining)} left to collect · ` : `${formatNPR(-tenderRemaining)} over · `}
                     <button type="button" onClick={() => { const last = tenders.length - 1; const cur = round2(Number(tenders[last].amount) || 0); updateTender(last, { amount: String(Math.max(0, round2(cur + tenderRemaining))) }); }}
-                      className="font-body-medium text-primary hover:underline">Fill</button>
+                      className="font-body-medium text-primary hover:underline max-md:px-2 max-md:py-3">Fill</button>
                   </p>
                 )}
               </div>

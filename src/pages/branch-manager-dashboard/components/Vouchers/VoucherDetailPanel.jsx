@@ -29,8 +29,8 @@ import { wordBranch, wordBranchCap } from '../../../../utils/industryTerms';
 
 const formatNPR = (amount) => `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
 const SECTION = 'text-[11.5px] text-[#8A8A90] font-medium uppercase tracking-[.05em] mb-2';
-const ghostBtn = 'h-8 px-3 rounded-md border border-border bg-white text-[13px] font-medium inline-flex items-center gap-1.5 text-text-primary hover:bg-[#FAFAF9]';
-const primaryBtn = 'h-8 px-3 rounded-md bg-primary text-white text-[13px] font-medium inline-flex items-center gap-1.5 shadow-[0_1px_2px_rgba(45,90,39,.25),inset_0_1px_0_rgba(255,255,255,.15)] hover:bg-primary/95';
+const ghostBtn = 'max-md:min-h-11 h-8 px-3 rounded-md border border-border bg-white text-[13px] font-medium inline-flex items-center gap-1.5 text-text-primary hover:bg-[#FAFAF9]';
+const primaryBtn = 'max-md:min-h-11 h-8 px-3 rounded-md bg-primary text-white text-[13px] font-medium inline-flex items-center gap-1.5 shadow-[0_1px_2px_rgba(45,90,39,.25),inset_0_1px_0_rgba(255,255,255,.15)] hover:bg-primary/95';
 const SUB_VIEWS = ['claim', 'correct', 'extend', 'contact', 'coupon'];
 const phoneText = (p) => (p ? (formatPhoneGrouped(p) || p) : '');
 const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || '';
@@ -415,7 +415,7 @@ const VoucherDetailPanel = ({ voucherId, readOnly = false, width, initialView = 
             <section>
               <div className={`${SECTION} flex items-baseline justify-between gap-3`}>
                 <span>History</span>
-                <button type="button" onClick={() => navigate(`?view=voucher-activity&voucher=${voucherId}&r=all`)} className="normal-case tracking-normal text-[12px] font-normal text-[#515152] hover:text-text-primary hover:underline" data-see-all>See all</button>
+                <button type="button" onClick={() => navigate(`?view=voucher-activity&voucher=${voucherId}&r=all`)} className="max-md:py-3 normal-case tracking-normal text-[12px] font-normal text-[#515152] hover:text-text-primary hover:underline" data-see-all>See all</button>
               </div>
               <ul className="flex flex-col" data-timeline>
                 {items.map((it) => {
