@@ -34,9 +34,9 @@ import { staffWord, wordBranch } from '../../../../utils/industryTerms';
 // Export these constants for time calculation in parent
 export const SLOT_HEIGHT = 36; // px per 30-min slot (72px per hour) - for visual grid lines
 export const HOUR_HEIGHT = SLOT_HEIGHT * 2; // 72px per hour
-const TIME_COL_WIDTH_DESKTOP = 52; // fits "12pm" and "4:12" with small even padding
+const TIME_COL_WIDTH_DESKTOP = 44; // one gutter width for phone and desktop (see PHONE_TIME_COL)
 // Phone (< md): slimmer time column, Unassigned collapses to a pinned strip, staff columns sized so 3 fit at 390 and 360.
-const PHONE_TIME_COL = 44;
+const PHONE_TIME_COL = 44; // keep equal to TIME_COL_WIDTH_DESKTOP
 const PHONE_UNASSIGNED_W = 40;
 const PINNED_SHADOW = '6px 0 8px -6px rgba(14,13,12,0.16)'; // right shadow on the pinned Unassigned column while the grid is scrolled
 
@@ -1130,24 +1130,32 @@ const CalendarGrid = ({
   // Identity changes whenever card positions can have changed; SharedBookingLines re-measures on it (plus its ResizeObserver).
   const sharedLayoutKey = useMemo(() => ({}), [bookingsByDayAndCol, columns, viewMode, currentDate, eHH]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const renderTimeLabels = () => (
-    <div className="flex-shrink-0 border-r border-border relative bg-surface sticky left-0 z-header" style={{ width: TIME_COL_WIDTH }}>
-      {hours.map((hour) => (
-        <div key={hour} className="absolute w-full" style={{ top: (hour - openHour) * eHH + TOP_PAD }}>
-          <span className="absolute -top-2.5 right-2 font-data text-[11px] text-text-tertiary">
-            {formatHourLabel(hour, use24h)}
-          </span>
-        </div>
-      ))}
-      {days.includes(todayStr) && nowTop >= 0 && nowTop <= totalHeight && (
-        <div className="absolute w-full pointer-events-none" style={{ top: nowTop }}>
-          <span className="absolute -top-2 right-2 px-1 rounded-sm bg-surface font-data text-[11px] font-medium text-error">
-            {nowLabel}
-          </span>
-        </div>
-      )}
-    </div>
-  );
+  const renderTimeLabels = () => {
+    const showNow = days.includes(todayStr) && nowTop >= 0 && nowTop <= totalHeight;
+    return (
+      <div className="flex-shrink-0 border-r border-border relative bg-surface sticky left-0 z-header" style={{ width: TIME_COL_WIDTH }}>
+        {hours.map((hour) => {
+          const top = (hour - openHour) * eHH + TOP_PAD;
+          if (showNow && Math.abs(top - nowTop) < 14) return null; // the now pill replaces the hour label it would collide with
+          return (
+            <div key={hour} className="absolute w-full" style={{ top }}>
+              <span className="absolute -top-2.5 inset-x-0 text-center font-data text-[11px] font-medium text-text-secondary">
+                {formatHourLabel(hour, use24h)}
+              </span>
+            </div>
+          );
+        })}
+        {showNow && (
+          <div className="absolute w-full pointer-events-none" style={{ top: nowTop }}>
+            <span className="absolute right-0 top-0 w-1.5 h-px bg-error" aria-hidden="true" />
+            <span className="absolute left-1/2 -translate-x-1/2 -top-[9px] h-[18px] min-w-[34px] px-1 rounded-full bg-error flex items-center justify-center font-data text-[11px] font-semibold leading-none text-white" aria-label={`Now ${nowLabel}`}>
+              {nowLabel}
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // Light sub-hour lines, purely visual ("Calendar interval" setting) — position math below is hour-based and unaffected.
   const subLineFractions = intervalMinutes >= 60 ? [] : intervalMinutes <= 15 ? [0.25, 0.5, 0.75] : [0.5];
