@@ -554,6 +554,9 @@ const CalendarGrid = ({
         createdByName: b.creator?.full_name || null,
         // Booked through the public online flow (no staff creator), and whether the service needs a therapist at all.
         isOnline: !b.created_by,
+        // Payment rows (only when this account may see money): drives the half-filled payment tag and the package/voucher icon.
+        payments: Array.isArray(b.payments) ? b.payments.map(pm => ({ amount: Number(pm.amount || 0), paymentMode: pm.payment_mode })) : [],
+        amountPaid: Array.isArray(b.payments) ? b.payments.reduce((t, pm) => t + Number(pm.amount || 0), 0) : undefined,
         requiresTherapist: b.service?.requires_therapist !== false,
         isShared,
         sharedCount: isShared ? b.booking_therapists.length : 0,
@@ -1005,7 +1008,7 @@ const CalendarGrid = ({
     };
   }, [days, todayStr, nowTop]);
 
-  const minColWidth = Math.round((isMultiDay ? 80 : phoneDay ? (viewportW - (PHONE_TIME_COL + PHONE_UNASSIGNED_W)) / 3 : 120) * zoomScale);
+  const minColWidth = Math.round((isMultiDay ? 80 : phoneDay ? (viewportW - (PHONE_TIME_COL + PHONE_UNASSIGNED_W)) / 3 : 200) * zoomScale);
   const pinUnassigned = freezeUnassigned || phoneDay; // always pinned on phone (the pin toggle stays desktop-only)
   const unassignedW = phoneDay ? PHONE_UNASSIGNED_W : minColWidth;
 
@@ -1628,7 +1631,7 @@ const CalendarGrid = ({
     <div
       key={col.id}
       className="flex-1 relative border-r border-border last:border-r-0 cursor-pointer"
-      style={{ minWidth: minColWidth, height: totalHeight, ...(phoneDay ? { scrollSnapAlign: 'start' } : null) }}
+      style={{ minWidth: minColWidth, height: totalHeight, ...(!isMultiDay ? { scrollSnapAlign: 'start' } : null) }}
       data-cal-column="true"
       data-day={day} data-col-id={col.id} data-col-type={col.type} data-col-name={col.name}
       onClick={(e) => handleColumnClick(e, day, col)}
@@ -1724,7 +1727,7 @@ const CalendarGrid = ({
       <div
         ref={scrollRef}
         className="flex-1 overflow-x-scroll overflow-y-auto calendar-grid-scroll"
-        style={phoneDay ? { scrollSnapType: 'x proximity', scrollPaddingLeft: TIME_COL_WIDTH + unassignedW } : undefined}
+        style={!isMultiDay ? { scrollSnapType: 'x proximity', scrollPaddingLeft: TIME_COL_WIDTH + (pinUnassigned ? unassignedW : 0) } : undefined}
         onScroll={(e) => {
           if (headerScrollRef.current) {
             headerScrollRef.current.scrollLeft = e.target.scrollLeft;

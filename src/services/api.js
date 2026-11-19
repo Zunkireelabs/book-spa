@@ -6684,7 +6684,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         'creator:users!created_by(full_name)',
         'booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name), room:rooms(id, name))',
         'booking_combo_items(id, service_id, therapist_id, room_id, start_time, end_time, display_order, service:services(name, duration_minutes), therapist:therapists(id, name))',
-        vis.canViewPrices && 'payments(amount)',
+        vis.canViewPrices && 'payments(amount, payment_mode)',
       ].filter(Boolean).join(', ');
 
       let bookingsQuery = supabase

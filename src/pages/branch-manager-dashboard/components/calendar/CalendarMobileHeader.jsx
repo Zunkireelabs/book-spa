@@ -1,3 +1,4 @@
+import { CardIconList, CardIconsSummaryRow } from './CardIconLegend';
 import React, { useRef, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import BottomSheet, { SheetSection, SheetRow } from '../../../../components/ui/BottomSheet';
@@ -77,7 +78,7 @@ const CalendarMobileHeader = ({
   zoomScale, onZoomChange, minZoom, maxZoom, use24h, setUse24h, hideSensitive, setHideSensitive,
 }) => {
   const [sheet, setSheet] = useState(null); // 'views' | 'date' | null
-  const [sub, setSub] = useState(null); // 'filters' | 'away' | 'tips' | null (nested over 'views')
+  const [sub, setSub] = useState(null); // 'filters' | 'away' | 'tips' | 'icons' | null (nested over 'views')
   const ZOOM_STEP = 0.2;
   const filterCount = selectedPositions.length + selectedStaffIds.length + (showServiceOnly ? 0 : 1);
   const [teamQuery, setTeamQuery] = useState('');
@@ -189,6 +190,11 @@ const CalendarMobileHeader = ({
           <SheetRow label="Time format" trailing={<Segmented value={use24h ? '24h' : '12h'} onChange={(v) => setUse24h(v === '24h')} options={[{ key: '12h', label: '12h' }, { key: '24h', label: '24h' }]} />} />
           <SheetRow label="Hide client names and prices" trailing={<Switch checked={hideSensitive} onChange={() => setHideSensitive((v) => !v)} label="Hide client names and prices" />} />
         </SheetSection>
+        {viewMode !== 'month' && (
+          <SheetSection>
+            <CardIconsSummaryRow variant="phone" onClick={() => setSub('icons')} />
+          </SheetSection>
+        )}
         <SheetSection title="Tools">
           <SheetRow icon="Printer" label="Print this calendar view" onClick={tool(onPrint)} />
           {['manager', 'admin'].includes(userRole) && onEditRoster && <SheetRow icon="Users" label={`Edit ${(staffLabel || 'staff').toLowerCase()} roster`} onClick={tool(onEditRoster)} />}
@@ -248,6 +254,10 @@ const CalendarMobileHeader = ({
       </BottomSheet>
 
       {/* Nested: Away today */}
+      <BottomSheet isOpen={sheet === 'views' && sub === 'icons'} title="Card icons" onBack={() => setSub(null)} onClose={() => setSub(null)}>
+        <SheetSection><CardIconList variant="phone" /></SheetSection>
+      </BottomSheet>
+
       <BottomSheet isOpen={sheet === 'views' && sub === 'away'} title="Away today" onBack={() => setSub(null)} onClose={() => setSub(null)}>
         <SheetSection>
           {awayList.map((a) => (

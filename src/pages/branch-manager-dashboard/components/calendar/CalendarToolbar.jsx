@@ -1,3 +1,4 @@
+import { CardIconList, CardIconsSummaryRow } from './CardIconLegend';
 import React, { useState, useRef, useEffect } from 'react';
 import Icon from '../../../../components/AppIcon';
 import MiniMonthCalendar from './MiniMonthCalendar';
@@ -60,9 +61,11 @@ const CalendarToolbar = ({
   const ZOOM_STEP = 0.2;
   const [open, setOpen] = useState(null); // 'date' | 'filter' | 'view' | 'menu' | null
   const [awayExpanded, setAwayExpanded] = useState(false);
+  const [iconsView, setIconsView] = useState(false); // ⋮ menu sub-view: 'Card icons'
   const refs = { date: useRef(null), filter: useRef(null), view: useRef(null), menu: useRef(null) };
   const toggle = (k) => setOpen((p) => (p === k ? null : k));
   const close = () => setOpen(null);
+  useEffect(() => { if (open !== 'menu') setIconsView(false); }, [open]);
 
   const applyJump = (j) => {
     setCurrentDate(j.unit === 'week' ? addDays(currentDate, j.sign * j.amount * 7) : addMonths(currentDate, j.sign * j.amount * (j.unit === 'year' ? 12 : 1)));
@@ -261,6 +264,15 @@ const CalendarToolbar = ({
             </button>
             {open === 'menu' && (
               <div className="absolute right-0 top-full mt-1 w-72 max-h-[calc(100vh-96px)] overflow-y-auto bg-surface border border-border rounded-spa-lg shadow-spa-elevated z-dropdown py-1">
+                {iconsView && (
+                  <div>
+                    <button type="button" onClick={() => setIconsView(false)} className="w-full min-h-[40px] flex items-center gap-1.5 px-3 text-[13px] font-medium text-text-primary hover:bg-background border-b border-border">
+                      <Icon name="ChevronLeft" size={15} className="text-text-secondary" /> Card icons
+                    </button>
+                    <CardIconList variant="desktop" />
+                  </div>
+                )}
+                <div className={iconsView ? 'hidden' : ''}>
                 {enableRooms && (
                   <>
                     <div className={heading}>Group by</div>
@@ -304,6 +316,11 @@ const CalendarToolbar = ({
                     <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white spa-transition-fast transform ${hideSensitive ? 'translate-x-4' : 'translate-x-1'}`} />
                   </button>
                 </div>
+                {viewMode !== 'month' && (
+                  <>
+                    <CardIconsSummaryRow variant="desktop" onClick={() => setIconsView(true)} />
+                  </>
+                )}
                 <div className="my-1 border-t border-border" />
                 {awayList.length > 0 && columnMode === 'therapist' && (
                   <>
@@ -331,6 +348,7 @@ const CalendarToolbar = ({
                   <span>Tips and shortcuts</span>
                   <kbd className="ml-auto px-1.5 py-0.5 rounded-[4px] border border-border bg-background font-data text-[11px] text-text-primary">?</kbd>
                 </button>
+                </div>
               </div>
             )}
             {tipOpen && (

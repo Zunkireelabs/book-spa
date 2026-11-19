@@ -1,14 +1,24 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useId, useLayoutEffect } from 'react';
 import { nameForList } from '../../../../services/dataMasking';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import Icon from '../../../../components/AppIcon';
 
-import { getBookingStatusColors, UNPAID_DOT_COLOR } from '../../../../utils/bookingStatusColors';
+import { getBookingStatusColors } from '../../../../utils/bookingStatusColors';
 import { useBookingHover, HOVER_CARD_ID } from './BookingHoverCard';
 import { formatClockTime } from './timeFormat';
 import { isNoShow } from '../../../../services/bookingTransformers';
 import { OUTSIDE_HOURS_OUTLINE } from '../../../../services/availabilityShading';
+import { cardTier, iconsForBooking, splitForShortCard, statusTag, shouldMoveNameDown, lockReason, fitTinyItems, planFullCard, LINE_PX } from '../../../../services/calendarCardLayout';
+import CardIcon, { LockMark } from './CardIcon';
+import { useCardIconPrefs } from './cardIconPrefs';
+
+// Row of 13px icons; `wrap` lets them flow onto a second row before they clip. `more` = "+N" for icons a short card has no room for.
+const IconRow = ({ icons, more = 0, uid, wrap = false, className = '', rowRef }) => (
+  <span ref={rowRef} className={`flex items-center gap-[5px] text-[rgba(45,90,39,0.75)] ${wrap ? 'flex-wrap gap-y-[3px]' : ''} ${className}`}>
+    {icons.map(i => <CardIcon key={i.key} icon={i} uid={uid} />)}
+    {more > 0 && <span className="font-data text-[10px] text-text-tertiary leading-none" title={`${more} more: open the booking`}>+{more}</span>}
+  </span>
+);
 
 // Compact range: "2:30–3:15pm", or "11:30am–12:15pm" when the period differs; "14:30–15:15" in 24h mode
 function compactRange12h(startStr, endStr, use24h = false) {
@@ -60,12 +70,7 @@ export function canDragBooking(booking) {
 
 const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate, hideSensitive = false, use24h = false, outsideHours = null }) => {
   const colors = getBookingStatusColors(isNoShow(booking) ? 'No Show' : booking.status);
-  const isUnpaid = booking.paymentStatus === 'unpaid';
-  const isPaid = booking.paymentStatus === 'paid';
   const isDraggable = canDragBooking(booking);
-  // status check catches a service started before its scheduled slot, which
-  // isTimeLocked (wall-clock vs. scheduled start) would otherwise miss.
-  const isLocked = booking.isLocked || booking.status === 'In-Progress' || isTimeLocked(booking);
 
   // Hover card: one shared popover (see BookingHoverCard.jsx). Not shown for the booking already open in the side panel.
   const { ref: cardRef, handlers: hoverHandlers, open: hoverOpen, hideNow } = useBookingHover(booking, { draggable: isDraggable, suppress: isPanelSelected || hideSensitive });
@@ -130,18 +135,85 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
     boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,0.2)' : undefined,
   } : {};
 
-  const durationMins = (() => {
-    if (!booking.startTime || !booking.endTime) return null;
-    const [sh, sm] = booking.startTime.split(':').map(Number);
-    const [eh, em] = booking.endTime.split(':').map(Number);
-    return (eh * 60 + em) - (sh * 60 + sm);
-  })();
-
   const rangeLabel = compactRange12h(booking.startTime, booking.endTime, use24h);
   const cardHeight = typeof style?.height === 'number' ? style.height : parseFloat(style?.height) || 0;
-  const isTall = cardHeight >= 56;
-  const isShort = cardHeight > 0 && cardHeight < 40;
-  const sharedLabel = booking.isShared ? `Shared with ${booking.therapistName}` : null;
+  const tier = cardTier(cardHeight);
+  const uid = useId().replace(/:/g, '');
+  const prefs = useCardIconPrefs();
+  const icons = iconsForBooking(booking, prefs);
+  const shortIcons = splitForShortCard(icons);
+  const tag = statusTag(booking);
+  const lockWhy = prefs.lock !== false ? lockReason(booking, getNepalNow()) : null;
+  const tagColor = tag === 'No-show' ? '#374151' : '#991B1B';
+  const displayName = hideSensitive ? '•••••' : nameForList(booking.customerName, booking.customerPhone);
+
+  // Name drops to its own line only when time + name don't fit line 1 AND the card has a row to spare (height never grows).
+  const lineRef = useRef(null);
+  const timeRef = useRef(null);
+  const nameRef = useRef(null);
+  const iconsRef = useRef(null);
+  const [nameDown, setNameDown] = useState(false);
+  const tagRef = useRef(null);
+  const svcMeasureRef = useRef(null);
+  const [svcNeeded, setSvcNeeded] = useState(1); // natural (wrapped) line count of the status words + service
+  useLayoutEffect(() => {
+    if (tier !== 'full') return undefined;
+    const m = svcMeasureRef.current;
+    if (!m) return undefined;
+    const measure = () => setSvcNeeded(Math.max(1, Math.round(m.offsetHeight / LINE_PX.service)));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(measure);
+    ro.observe(m);
+    return () => ro.disconnect();
+  }, [tier, booking.serviceName, tag, outsideHours]);
+  const serviceBits = (
+    <>
+      {tag && <span className="font-medium text-[11px]" style={{ color: tagColor }}>· {tag}{booking.serviceName ? ' · ' : ''}</span>}
+      {outsideHours && <span className="font-medium text-[11px]" style={{ color: OUTSIDE_HOURS_OUTLINE }}>· {outsideHours}{booking.serviceName ? ' · ' : ''}</span>}
+      {booking.serviceName}
+    </>
+  );
+  const roomLine = columnMode === 'room' ? booking.therapistName : columnMode === 'therapist' ? booking.roomName : null;
+  const hasLead = !!(tag || outsideHours || booking.serviceName);
+  const plan = tier === 'full'
+    ? planFullCard({ height: cardHeight, nameDown, hasLead, serviceLines: svcNeeded, hasRoom: !!roomLine, hasIcons: icons.length > 0 || !!lockWhy })
+    : null;
+  const measureRef = useRef(null);
+  const [tinyVisible, setTinyVisible] = useState(null); // null = not measured yet (show all)
+  const tinyItems = tier === 'tiny' ? [
+    ...shortIcons.shown.map(i => ({ key: i.key, node: <CardIcon key={i.key} icon={i} uid={uid} /> })),
+    ...(shortIcons.more > 0 ? [{ key: 'more', node: <span key="more" className="font-data text-[10px] text-text-tertiary leading-none" title={`${shortIcons.more} more: open the booking`}>+{shortIcons.more}</span> }] : []),
+    ...(lockWhy ? [{ key: 'lock', node: <LockMark key="lock" reason={lockWhy} /> }] : []),
+  ] : [];
+  const tinyKeys = tinyItems.map(i => i.key).join(',');
+  useLayoutEffect(() => {
+    if (tier !== 'tiny') return undefined;
+    const fit = () => {
+      const line = lineRef.current, time = timeRef.current, name = nameRef.current, m = measureRef.current;
+      if (!line || !time || !name || !m) return;
+      const items = [...m.children].map(c => ({ key: c.dataset.k, width: c.offsetWidth }));
+      setTinyVisible(fitTinyItems({ lineWidth: line.clientWidth, fixedWidth: time.offsetWidth + 4 + (tagRef.current ? tagRef.current.offsetWidth + 4 : 0), nameWidth: name.scrollWidth, items }));
+    };
+    fit();
+    if (typeof ResizeObserver === 'undefined' || !lineRef.current) return undefined;
+    const ro = new ResizeObserver(fit);
+    ro.observe(lineRef.current);
+    return () => ro.disconnect();
+  }, [tier, tinyKeys, displayName, tag]);
+  useLayoutEffect(() => {
+    if (tier === 'tiny') { setNameDown(false); return undefined; }
+    const measure = () => {
+      const line = lineRef.current, time = timeRef.current, name = nameRef.current;
+      if (!line || !time || !name) return;
+      setNameDown(shouldMoveNameDown({ height: cardHeight, timeWidth: time.scrollWidth, nameWidth: name.scrollWidth, lineWidth: line.clientWidth - (iconsRef.current ? iconsRef.current.offsetWidth + 4 : 0) }));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined' || !lineRef.current) return undefined;
+    const ro = new ResizeObserver(measure);
+    ro.observe(lineRef.current);
+    return () => ro.disconnect();
+  }, [tier, cardHeight, displayName, rangeLabel]);
 
   return (
     <div
@@ -197,64 +269,69 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
     >
       {/* Drag handle area — middle section of card, not edges */}
       <div
-        className={`px-2 ${isShort ? 'py-0.5 justify-center' : 'py-1.5'} h-full flex flex-col overflow-hidden`}
+        className={`${tier === 'tiny' ? 'px-2 py-0 justify-center' : tier === 'short' ? 'px-2 py-[2px]' : 'px-2 py-[3px]'} h-full flex flex-col overflow-hidden`}
         {...(isDraggable && !isResizing ? { ...listeners, ...attributes, tabIndex: -1, role: undefined, 'aria-describedby': undefined } : {})}
       >
-        {isShort ? (
-          <div className="flex items-center gap-1 min-w-0 leading-tight">
-            {isUnpaid && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: UNPAID_DOT_COLOR }} title="Unpaid" />}
-            <span className="font-body font-medium text-xs text-text-primary truncate">{hideSensitive ? '•••••' : nameForList(booking.customerName, booking.customerPhone)}</span>
-            <span className="font-data text-[11px] text-text-secondary shrink-[1000] min-w-0 truncate">· {formatClockTime(booking.startTime, use24h)}</span>
-            {(sharedLabel || booking.specialRequests || booking.customerNotes) && (
-              <span className="flex-shrink-0 ml-auto flex items-center gap-1">
-                {sharedLabel && <span title={sharedLabel} aria-label={sharedLabel} className="text-text-tertiary"><Icon name="Users" size={11} /></span>}
-                {(booking.specialRequests || booking.customerNotes) && (
-                  <span title="Has notes" aria-label="Has notes" style={{ color: booking.customerNotes ? '#D97706' : undefined }}><Icon name="AlertTriangle" size={11} /></span>
-                )}
+        {tier === 'tiny' ? (
+          <div ref={lineRef} className="relative flex items-center gap-1 min-w-0 leading-tight">
+            <span ref={timeRef} className="font-data text-[11px] text-text-secondary whitespace-nowrap flex-shrink-0">{formatClockTime(booking.startTime, use24h)}</span>
+            <span ref={nameRef} className="font-body font-semibold text-[13px] text-text-primary truncate min-w-0">{displayName}</span>
+            {tag && <span ref={tagRef} className="text-[11px] font-medium flex-shrink-0 whitespace-nowrap" style={{ color: tagColor }}>· {tag}</span>}
+            {tinyItems.some(it => !tinyVisible || tinyVisible.has(it.key)) && (
+              <span className="ml-auto flex items-center gap-[5px] flex-shrink-0 text-[rgba(45,90,39,0.75)]">
+                {tinyItems.filter(it => !tinyVisible || tinyVisible.has(it.key)).map(it => it.node)}
               </span>
             )}
+            {/* invisible measurer: natural width of each right-hand item */}
+            <span ref={measureRef} aria-hidden="true" className="absolute left-0 top-0 invisible pointer-events-none flex items-center gap-[5px] whitespace-nowrap">
+              {tinyItems.map(it => <span key={it.key} data-k={it.key} className="inline-flex">{it.node}</span>)}
+            </span>
           </div>
+        ) : tier === 'short' ? (
+          <>
+            <div ref={lineRef} className="flex items-center gap-1 min-w-0 flex-shrink-0 leading-[1.3]">
+              <span ref={timeRef} className="font-data text-[11px] text-text-secondary whitespace-nowrap flex-shrink-0">{rangeLabel}</span>
+              {!nameDown && <span ref={nameRef} className="font-body font-semibold text-[13px] text-text-primary truncate min-w-0">{displayName}</span>}
+              {(shortIcons.shown.length > 0 || shortIcons.more > 0 || lockWhy) && (
+                <span ref={iconsRef} className="ml-auto flex items-center gap-[5px] flex-shrink-0">
+                  <IconRow icons={shortIcons.shown} more={shortIcons.more} uid={uid} />
+                  {lockWhy && <LockMark reason={lockWhy} />}
+                </span>
+              )}
+            </div>
+            {nameDown ? (
+              <div ref={nameRef} className="font-body font-semibold text-[13px] text-text-primary leading-[1.3] truncate flex-shrink-0">{displayName}</div>
+            ) : (
+              <div className="font-body text-[11px] text-text-secondary leading-[1.3] truncate flex-shrink-0">
+                {tag && <span className="font-medium" style={{ color: tagColor }}>· {tag}{booking.serviceName ? ' · ' : ''}</span>}
+                {outsideHours && <span className="font-medium" style={{ color: OUTSIDE_HOURS_OUTLINE }}>· {outsideHours}{booking.serviceName ? ' · ' : ''}</span>}
+                {booking.serviceName}
+              </div>
+            )}
+          </>
         ) : (
           <>
-            <div className="flex items-center gap-1 min-w-0 flex-shrink-0">
-              {isUnpaid && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: UNPAID_DOT_COLOR }} title="Unpaid" />}
-              <span className="font-body font-medium text-xs text-text-primary leading-tight truncate">{hideSensitive ? '•••••' : nameForList(booking.customerName, booking.customerPhone)}</span>
-              <span className="ml-auto flex items-center gap-1 flex-shrink-0 text-text-tertiary">
-                {sharedLabel && (
-                  <span title={sharedLabel} aria-label={sharedLabel} className="flex items-center gap-0.5">
-                    <Icon name="Users" size={12} />
-                    <span className="text-[10px] font-data leading-none">{booking.sharedCount}</span>
-                  </span>
-                )}
-                {booking.isNewCustomer && (
-                  <span className="px-1 rounded-sm bg-primary/10 text-primary text-[10px] font-medium leading-4">New</span>
-                )}
-                {(booking.specialRequests || booking.customerNotes) && (
-                  <span title="Has notes" aria-label="Has notes" style={booking.customerNotes ? { color: '#D97706' } : undefined}><Icon name="AlertTriangle" size={12} /></span>
-                )}
-                {isLocked && <Icon name="Lock" size={12} title="Locked" />}
-                {!isLocked && isPaid && <Icon name="Check" size={12} title="Paid" />}
-              </span>
+            <div ref={lineRef} className="flex items-center gap-1 min-w-0 flex-shrink-0 leading-[1.3]">
+              <span ref={timeRef} className="font-data text-[11px] text-text-secondary whitespace-nowrap flex-shrink-0">{rangeLabel}</span>
+              {!nameDown && <span ref={nameRef} className="font-body font-semibold text-[13px] text-text-primary truncate min-w-0">{displayName}</span>}
             </div>
-            <div className="font-body text-[11px] text-text-secondary leading-tight truncate flex-shrink-0">
-              {rangeLabel}{booking.serviceName ? ` · ${booking.serviceName}` : ''}
-              {outsideHours && <span className="font-medium" style={{ color: OUTSIDE_HOURS_OUTLINE }}> · {outsideHours}</span>}
-            </div>
-            {isTall && columnMode === 'room' && booking.therapistName && (
-              <div className="font-body text-[11px] text-text-tertiary leading-tight truncate flex-shrink-0">
-                {booking.therapistName}
+            {nameDown && <div ref={nameRef} className="font-body font-semibold text-[13px] text-text-primary leading-[1.3] truncate flex-shrink-0">{displayName}</div>}
+            {plan.serviceLines > 0 && (
+              <div className="font-body text-[12px] text-text-secondary leading-[1.3] overflow-hidden break-words flex-shrink-0 mt-px" style={{ maxHeight: `${plan.serviceLines * LINE_PX.service}px`, display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: plan.serviceLines }}>
+                {serviceBits}
               </div>
             )}
-            {isTall && columnMode === 'therapist' && booking.roomName && (
-              <div className="font-body text-[11px] text-text-tertiary leading-tight truncate flex-shrink-0">
-                {booking.roomName}
+            {plan.showRoom && (
+              <div className="font-body text-[11px] text-text-tertiary leading-tight truncate flex-shrink-0">{roomLine}</div>
+            )}
+            {plan.showIcons && (
+              <div className="flex items-end gap-1 flex-shrink-0 mt-auto">
+                <IconRow icons={icons} uid={uid} wrap className="flex-1 min-w-0" />
+                {lockWhy && <LockMark reason={lockWhy} />}
               </div>
             )}
-            {isTall && durationMins && (
-              <div className="font-body text-[11px] text-text-tertiary mt-auto flex-shrink-0">
-                {durationMins} mins
-              </div>
-            )}
+            {/* invisible measurer: natural wrapped height of status words + service */}
+            <div ref={svcMeasureRef} aria-hidden="true" className="absolute left-2 right-2 top-0 invisible pointer-events-none font-body text-[12px] leading-[1.3] break-words">{serviceBits}</div>
           </>
         )}
       </div>
