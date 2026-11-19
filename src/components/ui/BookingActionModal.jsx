@@ -25,6 +25,8 @@ import { useOrg } from '../../contexts/OrgContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
 import BlockOverlapWarning from './BlockOverlapWarning';
 import SidePanel from './SidePanel';
+import BookingCustomerLine from './BookingCustomerLine';
+import { useNavigate } from 'react-router-dom';
 import AvailabilityNoteLine from './AvailabilityNoteLine';
 import { AlertsBlock } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
 import { getBookingStatusColors } from '../../utils/bookingStatusColors';
@@ -284,7 +286,8 @@ const BookingActionModal = ({
   onRescheduleStart,
 }) => {
   const { branchId } = useBranch();
-  const { paymentMethods, orgSettings, staffLabel, staffLabelPlural } = useOrg();
+  const { org: orgForNav, paymentMethods, orgSettings, staffLabel, staffLabelPlural } = useOrg();
+  const navigate = useNavigate();
   const cancelReasonOptions = orgSettings?.cancellation_reasons?.length
     ? orgSettings.cancellation_reasons
     : CANCEL_REASON_OPTIONS;
@@ -1303,6 +1306,11 @@ const BookingActionModal = ({
     if (isDirty) setPanelConfirm({ type: 'close' });
     else onClose?.();
   };
+  // Leaving for another page goes through the same unsaved-changes guard as closing.
+  const requestPanelCloseThen = (go) => {
+    if (isDirty) setPanelConfirm({ type: 'switch', action: go });
+    else go();
+  };
 
   if (!isOpen) return null;
   if (!booking) {
@@ -1539,6 +1547,39 @@ const BookingActionModal = ({
         {booking.status.replace('-', ' ')}
       </span>
     </span>
+  );
+  // Panel header: name + status + pencil + ×, then the customer subline (phone · View profile · birthday). Restricted staff: name + status only.
+  const canEditDetails = !restricted && !isMutationBlocked && !!onEditBooking;
+  const panelHeader = (
+    <div className="border-b border-border">
+      <div className="min-h-14 flex items-center justify-between gap-2 px-5 py-2">
+        <h3 id="booking-panel-title" className="font-heading font-heading-semibold text-[15px] text-text-primary min-w-0 flex items-center gap-2">
+          <span className="truncate">{booking.customerName}</span>
+          <span className="px-2 py-0.5 rounded-full text-[11px] font-medium flex-shrink-0 first-letter:uppercase" style={{ backgroundColor: statusColors.fill, color: statusColors.text }}>
+            {booking.status.replace('-', ' ')}
+          </span>
+        </h3>
+        <div className="flex items-center gap-1">
+          {canEditDetails && (
+            <button type="button" onClick={() => { setActiveTab('details'); startEditing(); }} title="Edit booking details" aria-label="Edit booking details"
+              className="w-8 h-8 max-lg:w-11 max-lg:h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background hover:text-primary spa-transition-fast">
+              <Icon name="Pencil" size={15} />
+            </button>
+          )}
+          <button type="button" onClick={requestPanelClose} aria-label="Close"
+            className="w-8 h-8 max-lg:w-11 max-lg:h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background spa-transition-fast">
+            <Icon name="X" size={18} />
+          </button>
+        </div>
+      </div>
+      <BookingCustomerLine
+        booking={booking}
+        restricted={restricted}
+        canEdit={!isViewer}
+        onViewProfile={() => requestPanelCloseThen(() => navigate(`/${orgForNav?.slug}/customers/${booking.customerId}`))}
+        onSaved={() => onRefreshBooking?.(booking.bookingId)}
+      />
+    </div>
   );
 
   // Primary next action for the booking's status; everything else lives in the "⋯" overflow.
@@ -1921,7 +1962,6 @@ const BookingActionModal = ({
                   const payState = paymentStatusLabel(booking);
                   const pay = { label: payState.label, cls: payState.tone === 'success' ? 'bg-success/10 text-success' : payState.tone === 'neutral' ? 'bg-border-muted text-text-secondary' : 'bg-warning/10 text-warning' };
                   const npr = (n) => `NPR ${Number(n || 0).toLocaleString('en-IN')}`;
-                  const phone = booking.customerPhone ? formatPhoneGrouped(booking.customerPhone) : '';
                   const copy = (v) => { try { navigator.clipboard?.writeText(v); } catch (_) { /* clipboard unavailable */ } };
                   const copyBtn = (value, label) => (
                     <button type="button" onClick={() => copy(value)} aria-label={label} title={label}
@@ -1966,34 +2006,13 @@ const BookingActionModal = ({
                         <RestrictedNotes bookingId={booking.bookingId} value={booking.specialRequests} onSaved={() => onRefreshBooking?.(booking.bookingId)} />
                       )}
 
-                      <div className="border-t border-border pt-5 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <h3 className={sectionHead}>Customer</h3>
-                          {!isMutationBlocked && onEditBooking && (
-                            <button onClick={startEditing} className="p-1.5 -mr-1.5 rounded-spa hover:bg-background spa-transition-fast text-text-secondary hover:text-primary" title="Edit booking details" aria-label="Edit booking details">
-                              <Icon name="Pencil" size={14} />
-                            </button>
-                          )}
+                      {!restricted && booking.customerEmail && (
+                        <div className="group flex items-center gap-2 text-[13px] text-text-primary min-w-0">
+                          <Icon name="Mail" size={14} className="text-text-tertiary flex-shrink-0" />
+                          <span className="break-all">{booking.customerEmail}</span>
+                          {copyBtn(booking.customerEmail, 'Copy email')}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-body text-sm font-medium text-text-primary">{booking.customerName}</p>
-                          {booking.isNewCustomer && <span className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-medium">New</span>}
-                        </div>
-                        {phone && (
-                          <div className="group flex items-center gap-2 text-[13px] text-text-primary">
-                            <Icon name="Phone" size={14} className="text-text-tertiary flex-shrink-0" />
-                            <a href={`tel:${String(booking.customerPhone).replace(/\s/g, '')}`} className="hover:underline tabular-nums">{phone}</a>
-                            {copyBtn(String(booking.customerPhone), 'Copy phone')}
-                          </div>
-                        )}
-                        {booking.customerEmail && (
-                          <div className="group flex items-center gap-2 text-[13px] text-text-primary min-w-0">
-                            <Icon name="Mail" size={14} className="text-text-tertiary flex-shrink-0" />
-                            <span className="break-all">{booking.customerEmail}</span>
-                            {copyBtn(booking.customerEmail, 'Copy email')}
-                          </div>
-                        )}
-                      </div>
+                      )}
 
                       {booking.referredBy && (
                         <div className="border-t border-border pt-5 space-y-2">
@@ -4054,7 +4073,7 @@ const BookingActionModal = ({
   if (isPanel) {
     return (
       <>
-        <SidePanel isOpen={isOpen} width={BOOKING_PANEL_WIDTH} title={panelTitle} onClose={requestPanelClose} footer={panelFooter}>
+        <SidePanel isOpen={isOpen} width={BOOKING_PANEL_WIDTH} header={panelHeader} titleId="booking-panel-title" onClose={requestPanelClose} footer={panelFooter}>
           {panelTabsNode}
           {contentNode}
         </SidePanel>

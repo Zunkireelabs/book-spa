@@ -11865,6 +11865,23 @@ export async function updateCustomerProfileDetails(customerId, {
   }
 }
 
+// Staff-side: one customer's stored date of birth ("YYYY-MM-DD" or null). Plain read under the existing row-level RLS.
+export async function fetchCustomerDateOfBirth(customerId) {
+  try {
+    if (!customerId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID is required.' } };
+    const { data, error } = await supabase
+      .from('customers')
+      .select('date_of_birth')
+      .eq('id', customerId)
+      .maybeSingle();
+    if (error) throw error;
+    return { data: data?.date_of_birth || null, error: null };
+  } catch (error) {
+    console.error('[API] fetchCustomerDateOfBirth error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function getCustomerIntelligence({ branchId }) {
   try {
     if (!branchId) {
