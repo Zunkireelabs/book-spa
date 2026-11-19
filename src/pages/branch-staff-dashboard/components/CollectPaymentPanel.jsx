@@ -146,6 +146,7 @@ const CollectPaymentPanel = ({ onSuccess }) => {
                 <CountryCodeSelect value={customerCountryCode} onChange={setCustomerCountryCode} />
                 <input
                   type="tel"
+                  inputMode="tel"
                   value={customerPhone}
                   onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 15))}
                   placeholder="9800000000"

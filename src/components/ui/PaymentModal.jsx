@@ -1402,7 +1402,8 @@ const PaymentModal = ({
   }, []);
   useEffect(() => {
     const id = requestAnimationFrame(() => {
-      if (firstAmountRef.current) { firstAmountRef.current.focus(); firstAmountRef.current.select?.(); }
+      // Phone: don't auto-focus (it opens the keyboard and scrolls the sheet past Paying for); the dialog itself takes focus.
+      if (firstAmountRef.current && window.innerWidth >= 768) { firstAmountRef.current.focus(); firstAmountRef.current.select?.(); }
       else dialogRef.current?.focus();
     });
     return () => cancelAnimationFrame(id);
