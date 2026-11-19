@@ -13,9 +13,9 @@ const CHIP = "relative inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full 
 const BTN = "relative inline-flex items-center justify-center h-9 px-3 rounded-spa text-[13px] font-medium border before:content-[''] before:absolute before:-inset-1 disabled:opacity-60";
 const FIELD = 'w-full h-9 px-2.5 rounded-spa border bg-surface text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 min-w-0';
 
-// Panel header subline: phone · View profile · birthday chip, plus the inline Birthday editor.
+// Panel header subline (customer facts only): phone · birthday chip, plus the inline Birthday editor.
 // Restricted viewers never reach this component's data: nothing is rendered and no DOB is fetched.
-const BookingCustomerLine = ({ booking, restricted, canEdit, onViewProfile, onSaved }) => {
+const BookingCustomerLine = ({ booking, restricted, canEdit, onSaved }) => {
   const customerId = booking?.customerId || null;
   const [dob, setDob] = useState('');           // stored ISO date or ''
   const [editing, setEditing] = useState(false);
@@ -34,7 +34,6 @@ const BookingCustomerLine = ({ booking, restricted, canEdit, onViewProfile, onSa
   if (restricted) return null;
 
   const phone = booking.customerPhone ? formatPhoneGrouped(booking.customerPhone) : '';
-  const copy = (v) => { try { navigator.clipboard?.writeText(v); } catch (_) { /* clipboard unavailable */ } };
   const soon = birthdaySoonLabel(dob, nepalNow().today);
 
   const open = () => {
@@ -72,21 +71,12 @@ const BookingCustomerLine = ({ booking, restricted, canEdit, onViewProfile, onSa
     <div className="px-5 pb-3 -mt-1">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0 text-[13px] text-text-secondary">
         {phone && (
-          <span className="group inline-flex items-center gap-1 h-7 leading-none">
+          <span className="inline-flex items-center gap-1 h-7 leading-none">
             <Icon name="Phone" size={13} className="text-text-tertiary flex-shrink-0" />
             <a href={`tel:${String(booking.customerPhone).replace(/\s/g, '')}`} className="text-primary font-medium hover:underline tabular-nums whitespace-nowrap">{phone}</a>
-            <button type="button" onClick={() => copy(String(booking.customerPhone))} aria-label="Copy phone" title="Copy phone"
-              className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 rounded-spa text-text-tertiary hover:text-primary hover:bg-background spa-transition-fast">
-              <Icon name="Copy" size={12} />
-            </button>
           </span>
         )}
-        {customerId && (
-          <>
-            {phone && <span className="text-border h-7 inline-flex items-center" aria-hidden="true">·</span>}
-            <button type="button" onClick={onViewProfile} className="relative h-7 inline-flex items-center text-primary font-medium hover:underline leading-none whitespace-nowrap before:content-[''] before:absolute before:-inset-x-1 before:-inset-y-2">View profile</button>
-          </>
-        )}
+        {phone && chip && <span className="text-text-tertiary h-7 inline-flex items-center" aria-hidden="true">·</span>}
         {chip}
       </div>
       {editing && (

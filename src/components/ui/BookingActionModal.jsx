@@ -1553,13 +1553,21 @@ const BookingActionModal = ({
   const panelHeader = (
     <div className="border-b border-border">
       <div className="min-h-14 flex items-center justify-between gap-2 px-5 py-2">
+        <div className="min-w-0 flex items-center gap-2">
         <h3 id="booking-panel-title" className="font-heading font-heading-semibold text-[15px] text-text-primary min-w-0 flex items-center gap-2">
           <span className="truncate">{booking.customerName}</span>
           <span className="px-2 py-0.5 rounded-full text-[11px] font-medium flex-shrink-0 first-letter:uppercase" style={{ backgroundColor: statusColors.fill, color: statusColors.text }}>
             {booking.status.replace('-', ' ')}
           </span>
         </h3>
-        <div className="flex items-center gap-1">
+        {!restricted && booking.customerId && (
+          <button type="button" onClick={() => requestPanelCloseThen(() => navigate(`/${orgForNav?.slug}/customers/${booking.customerId}`))}
+            className="relative flex-shrink-0 whitespace-nowrap text-[13px] font-medium text-primary hover:underline before:content-[''] before:absolute before:-inset-x-1 before:-inset-y-3">
+            View profile
+          </button>
+        )}
+        </div>
+        <div className="flex items-center gap-1 flex-shrink-0">
           {canEditDetails && (
             <button type="button" onClick={() => { setActiveTab('details'); startEditing(); }} title="Edit booking details" aria-label="Edit booking details"
               className="w-8 h-8 max-lg:w-11 max-lg:h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background hover:text-primary spa-transition-fast">
@@ -1576,7 +1584,6 @@ const BookingActionModal = ({
         booking={booking}
         restricted={restricted}
         canEdit={!isViewer}
-        onViewProfile={() => requestPanelCloseThen(() => navigate(`/${orgForNav?.slug}/customers/${booking.customerId}`))}
         onSaved={() => onRefreshBooking?.(booking.bookingId)}
       />
     </div>
