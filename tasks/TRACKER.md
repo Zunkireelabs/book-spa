@@ -2,12 +2,12 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-19** by Lead · 220 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-19** by Project Manager · 225 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
 ## Flags from the last sync
-- **Open PRs without `ZNLY-` in the title:** #425, #415, #30 (3 open PRs).
+- **Open PRs without `ZNLY-` in the title:** #425, #415, #30 (4 open PRs).
 - **Urgent/high with no owner:** ZNLY-258, ZNLY-256, ZNLY-220, ZNLY-218, ZNLY-216, ZNLY-213, ZNLY-210, ZNLY-209, ZNLY-208, ZNLY-207, ZNLY-206, ZNLY-199, ZNLY-197, ZNLY-196, ZNLY-183, ZNLY-179, ZNLY-26, ZNLY-18, ZNLY-15, ZNLY-14, ZNLY-13, ZNLY-12.
 
 ## In progress
@@ -21,6 +21,8 @@ Last synced: **2026-11-19** by Lead · 220 open tickets (epics excluded: ZNLY-1,
 | ZNLY-190 | Anish | high | Customer-facing branch picker shows stale hours, ignores per-day Weekly Opening Hours |
 | ZNLY-191 | Anish | high | Customer "Log" tab errors on production — audit_logs missing FKs to users/branches |
 | ZNLY-195 | Sadin | high | Fresha audit + Zennly gap map (feature list, UX, flows, logic, outreach/automation) |
+| ZNLY-265 | Sadin | high | Mobile QC: every screen responsive and polished at phone width (start: checkout dialog overlaps when keyboard opens) |
+| ZNLY-267 | Sadin | high | Calendar Settings: "Show whole hours of a day" fails with "update_org_profile_settings: unknown setting key calendar_show_full_day" |
 | ZNLY-136 | Anish | medium | Group booking (Fresha-style): book multiple people, one shared slot, one checkout |
 | ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
 | ZNLY-175 | Sadin | medium | Therapist inner page: outcomes bar total counts upcoming bookings that sit in no bucket |
@@ -33,7 +35,6 @@ Last synced: **2026-11-19** by Lead · 220 open tickets (epics excluded: ZNLY-1,
 | ZNLY-192 | Anish | medium | Wire 11 hardcoded "Therapist" labels to the dynamic staffLabel system |
 | ZNLY-255 | — | medium | Safe dependency upgrades (router 6.x, vite 5.x, supabase-js, posthog, dompurify, postcss) before stage PR |
 | ZNLY-260 | — | medium | Four in-shell high-fidelity mockup redraws (team member panel, service pricing, checkout invoice dialog, calendar + waitlist) |
-| ZNLY-262 | Sadin | medium | Blocked login (login off) shows a raw hook error; show "Your login is turned off, contact your admin" |
 
 ## In review / on stage
 | Ticket | Owner | Priority | State | What |
@@ -97,6 +98,7 @@ Last synced: **2026-11-19** by Lead · 220 open tickets (epics excluded: ZNLY-1,
 | ZNLY-244 | Sadin | high | QC Accepted | Transfer form: timed transfer preview calls computeRevertPreview, which is never imported (ReferenceError) |
 | ZNLY-248 | Sadin | high | QC Accepted | Payment mode spelling: Business Health report (mig 371) and other readers match 'Cash' exactly, so 'cash' payments count as "other" |
 | ZNLY-250 | Sadin | high | QC Accepted | Customer detail page numbers use old rules: Amount owing counts upcoming/cancelled bookings; Last Visit can be a future booking (disagrees with Customers list + panel) |
+| ZNLY-263 | Sadin | high | In Review | Login pages redesign (/login org finder and /:org/login): split layout, our current stack |
 | ZNLY-67 | Sadin | medium | In Review | UI-1: Calendar exact-match port + app shell from ClinicMD (pre-V5) |
 | ZNLY-68 | Sadin | medium | In Review | UI-2 (V5–V9): Panel unification — forms, details, settings, campaigns → right-hand panels |
 | ZNLY-69 | Sadin | medium | In Review | UI-3 (V11–V13): Customers redesign — list, lifecycle strip, panel, collect, Spotlight, one-scroll header |
@@ -118,6 +120,7 @@ Last synced: **2026-11-19** by Lead · 220 open tickets (epics excluded: ZNLY-1,
 | ZNLY-237 | — | medium | QC Accepted | My day shows a No-show booking as "Late" (Bookings list says "No show") |
 | ZNLY-249 | Sadin | medium | QC Accepted | Calendar transfer shading label shows the wrong end time ("At QC Second Studio 10:00am–12:00pm" for a 2-day transfer) |
 | ZNLY-251 | Sadin | medium | QC Accepted | Prod spa industry plural label is "All Staffs": sidebar, list headers and search show "All Staffs" / "Search all staffs..." |
+| ZNLY-262 | Sadin | medium | On Stage | Blocked login (login off) shows a raw hook error; show "Your login is turned off, contact your admin" |
 | ZNLY-40 | Sadin | low | On Stage | Retire stale docs now superseded by Plane |
 | ZNLY-119 | Sadin | low | In Review | Profile: Transfer is hidden behind Profile → Edit; add it to the header ⋯ menu and show Branch in the read view |
 | ZNLY-120 | Sadin | low | In Review | Therapists list shows nothing for a transfer scheduled later today (e.g. "To Sanepa at 4:20 pm") |
@@ -167,6 +170,7 @@ Last synced: **2026-11-19** by Lead · 220 open tickets (epics excluded: ZNLY-1,
 | ZNLY-196 | — | high | Port the Zone POS QC harness into the Zennly repo (critical-path screens, one shared test tenant), owned by the lead/QC session |
 | ZNLY-256 | — | high | Waitlist insert blocked by RLS for org-level admins (branch_id NULL, no user_branches row) |
 | ZNLY-258 | — | high | Cash expected in drawer subtracts card refunds (payment_refunds has no refund method) |
+| ZNLY-266 | Sadin | high | Confirm booking fails silently when the room is at capacity (HTTP 500 ROOM_AT_CAPACITY, no message shown) |
 | ZNLY-16 | — | medium | RLS access harness (6 principals x 64 tables) — confirm merged |
 | ZNLY-20 | — | medium | Legacy-domain redirect (zenly.zunkireelabs.com → app.zennly.io) + retire old domains |
 | ZNLY-21 | — | medium | Auth email via Resend SMTP (no-reply@mail.zennly.io) + DKIM/SPF/DMARC + templates |
@@ -249,3 +253,4 @@ Last synced: **2026-11-19** by Lead · 220 open tickets (epics excluded: ZNLY-1,
 | ZNLY-247 | — | low | Staff row menu offers "Transfer to branch…" when the business has only one location (the picker then says "No results found") |
 | ZNLY-253 | Sadin | low | Insight: flag a paid amount that doesn't match the price after discount (voucher NTL327 paid 8,400 for a 20%-off 6,720 voucher) |
 | ZNLY-254 | Sadin | low | Insight: flag a paid amount that doesn't match the price after discount (voucher NTL327 paid 8,400 for a 20%-off 6,720 voucher) |
+| ZNLY-264 | Sadin | low | Evaluate Astryx design system (Meta, beta): React 18 to 19 upgrade + StyleX vs our Tailwind stack. After go-live |
