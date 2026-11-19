@@ -105,7 +105,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const isItemActive = (item) => (item.path ? location.pathname.endsWith(`/${item.path}`) : currentView !== null && isNavItemActive(item, currentView));
 
   // New Booking is no longer a nav item (it is a tab under Bookings); the mobile FAB remains.
-  const showNewBookingFab = !isOverall && currentView !== 'calendar'; // the calendar header has its own primary "+"
+  const showNewBookingFab = !isOverall && currentView !== 'calendar' && currentView !== 'dashboard'; // calendar and dashboard have their own New booking; the FAB covered content there // the calendar header has its own primary "+"
 
   // Mobile: a few primary pills, everything else in the "More" sheet (grouped by section, Settings last).
   const flatItems = [

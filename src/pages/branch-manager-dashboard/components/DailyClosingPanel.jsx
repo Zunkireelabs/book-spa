@@ -71,8 +71,8 @@ const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
   const view = dayMoneyView(summary);
   const headline = view.headline;
   const openLink = (id) => (onOpenBooking
-    ? <button type="button" onClick={() => onOpenBooking(id)} className="text-primary underline text-sm">Open</button>
-    : <a href={`${window.location.pathname.split('/').slice(0, 2).join('/')}/bookings/${id}`} target="_blank" rel="noreferrer" className="text-primary underline text-sm">Open</a>);
+    ? <button type="button" onClick={() => onOpenBooking(id)} className="text-primary underline text-sm max-md:min-h-11 max-md:min-w-11 max-md:inline-flex max-md:items-center max-md:justify-center">Open</button>
+    : <a href={`${window.location.pathname.split('/').slice(0, 2).join('/')}/bookings/${id}`} target="_blank" rel="noreferrer" className="text-primary underline text-sm max-md:min-h-11 max-md:min-w-11 max-md:inline-flex max-md:items-center max-md:justify-center">Open</a>);
 
   const handleCloseDayClick = () => {
     if (block.blocked) return;
@@ -274,8 +274,8 @@ const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
           {/* Close Day Action */}
           {!summary.isClosed && (
             <div className="bg-surface rounded-spa-lg spa-shadow-resting p-5 border border-border">
-              <div className="flex items-center justify-between">
-                <div>
+              <div className="flex items-center justify-between max-md:flex-col max-md:items-stretch max-md:gap-4">
+                <div className="max-md:min-w-0">
                   <h3 className="font-heading font-heading-medium text-base text-text-primary">
                     Close Day
                   </h3>
@@ -288,8 +288,8 @@ const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
                       <p className="text-sm text-text-secondary mt-1">{block.message}</p>
                       <ul className="mt-2 space-y-1">
                         {block.rows.map((r) => (
-                          <li key={r.bookingId} className="flex items-center gap-2 text-sm text-text-primary">
-                            <span className="font-medium">{r.bookingNumber}</span><span className="text-text-secondary">{r.customerName} · {r.status}</span>{openLink(r.bookingId)}
+                          <li key={r.bookingId} className="flex items-center gap-2 text-sm text-text-primary max-md:min-h-11">
+                            <span className="font-medium max-md:whitespace-nowrap max-md:text-[13px]">{r.bookingNumber}</span><span className="text-text-secondary max-md:min-w-0 max-md:flex-1 max-md:break-words max-md:leading-tight">{r.customerName} · {r.status}</span>{openLink(r.bookingId)}
                           </li>
                         ))}
                       </ul>
@@ -303,6 +303,7 @@ const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
                   onClick={handleCloseDayClick}
                   loading={closing}
                   disabled={block.blocked}
+                  className="max-md:w-full max-md:h-12"
                 >
                   Close Day
                 </Button>

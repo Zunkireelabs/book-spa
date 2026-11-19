@@ -176,7 +176,7 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
                 {phase === p.key && <i className="w-1.5 h-1.5 rounded-full bg-success" />}
               </button>
             ))}
-            <span className="inline-flex items-center text-[11.5px] text-gray-400">{manualPhase ? 'chosen by you' : 'auto'}</span>
+            <span className="inline-flex items-center text-[11.5px] max-md:text-xs text-gray-400">{manualPhase ? 'chosen by you' : 'auto'}</span>
           </ScrollRow>
         )}
       </header>

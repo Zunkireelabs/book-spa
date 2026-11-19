@@ -47,7 +47,7 @@ export const Row = ({ tone = 'text-gray-500', icon, title, sub, actions, chip })
       <div className="text-sm font-medium text-gray-900 truncate">{title}{chip && <span className="ml-1.5 align-middle text-[10.5px] font-semibold text-gray-600 bg-gray-100 rounded px-1.5 py-px">{chip}</span>}</div>
       {sub && <div className="text-xs text-gray-500 truncate">{sub}</div>}
     </div>
-    {actions && <div className="flex gap-1.5 flex-shrink-0">{actions}</div>}
+    {actions && <div className="flex gap-1.5 flex-shrink-0 max-md:[&>button]:min-h-11 max-md:[&>a]:min-h-11">{actions}</div>}
   </div>
 );
 
@@ -107,7 +107,7 @@ export const SuggestionsCard = ({ title = 'Suggestions', view = 'branch', branch
       <header className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
         <span className="text-accent text-[15px] leading-none" aria-hidden="true">✦</span>
         <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
-        <span className="text-[10.5px] font-semibold bg-accent/10 text-[#8a6a10] rounded-full px-2 py-px">Rule-based</span>
+        <span className="text-[10.5px] max-md:text-xs font-semibold bg-accent/10 text-[#8a6a10] rounded-full px-2 py-px">Rule-based</span>
         {total > shown.length && <span className="ml-auto text-xs text-gray-500">{shown.length} of {total}</span>}
       </header>
       <div className="p-4">
