@@ -60,6 +60,14 @@ describe('loginWithPin', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
+  it('ZNLY-262: the Auth hook refusing a login-off user gives the plain message, no retry', async () => {
+    global.fetch.mockResolvedValue({ json: async () => ({ success: true, email_otp: '123456' }) });
+    verifyOtpMock.mockResolvedValue({ data: null, error: { message: 'Error running hook URI: pg-functions://postgres/public/auth_hook_block_login_off' } });
+    const result = await loginWithPin('staff@zenly.app', '1234', 'nuad-thai-spa');
+    expect(result).toEqual({ success: false, error: 'Your login is turned off. Contact your admin.', kind: 'login_off' });
+    expect(verifyOtpMock).toHaveBeenCalledTimes(1);
+  });
+
   it('accepts the legacy otp response shape', async () => {
     global.fetch.mockResolvedValue({
       json: async () => ({ success: true, otp: '654321' }),
