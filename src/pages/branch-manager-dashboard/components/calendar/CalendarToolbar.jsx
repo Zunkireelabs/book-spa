@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import Icon from '../../../../components/AppIcon';
 import MiniMonthCalendar from './MiniMonthCalendar';
 import { addDays, addMonths } from './calendarDates';
+import CalendarMobileHeader from './CalendarMobileHeader';
 
 function formatDateTitle(dateStr, viewMode) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -56,6 +57,7 @@ const CalendarToolbar = ({
   onNewBooking, onOpenWaitlist, waitlistCount = 0, branchId,
   userRole, onPrint, onEditRoster, onBlockWholeCalendar, onCalendarSettings, onClosedDates,
   zoomScale, onZoomChange, minZoom, maxZoom, use24h, setUse24h, hideSensitive, setHideSensitive,
+  onGroupByChange,
 }) => {
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
   const settingsMenuRef = useRef(null);
@@ -139,7 +141,21 @@ const CalendarToolbar = ({
   // toolbar's centre whenever there's room. When there isn't, the wider side keeps its content width and the centre
   // slides over; if even that doesn't fit, the right group wraps to a second row as before (never overlapping/overflowing).
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-1.5 border-b border-border bg-surface flex-shrink-0 overflow-x-clip">
+    <>
+    <CalendarMobileHeader
+      staffLabel={staffLabel} locationLabel={locationLabel} enableRooms={enableRooms}
+      columnMode={columnMode} onGroupByChange={onGroupByChange || setColumnMode} awayList={awayList}
+      currentDate={currentDate} setCurrentDate={setCurrentDate} viewMode={viewMode} setViewMode={setViewMode}
+      goToday={goToday} goPrev={goPrev} goNext={goNext} setTipOpen={setTipOpen}
+      showServiceOnly={showServiceOnly} setShowServiceOnly={setShowServiceOnly}
+      selectedPositions={selectedPositions} setSelectedPositions={setSelectedPositions} calendarPositionOptions={calendarPositionOptions}
+      onNewBooking={onNewBooking} onOpenWaitlist={onOpenWaitlist} waitlistCount={waitlistCount} branchId={branchId}
+      userRole={userRole} onPrint={onPrint} onEditRoster={onEditRoster} onBlockWholeCalendar={onBlockWholeCalendar}
+      onCalendarSettings={onCalendarSettings} onClosedDates={onClosedDates}
+      zoomScale={zoomScale} onZoomChange={onZoomChange} minZoom={minZoom} maxZoom={maxZoom}
+      use24h={use24h} setUse24h={setUse24h} hideSensitive={hideSensitive} setHideSensitive={setHideSensitive}
+    />
+    <div className="max-md:hidden flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-1.5 border-b border-border bg-surface flex-shrink-0 overflow-x-clip">
       {/* Left: Therapist/Room toggle + away summary */}
       <div className="flex items-center gap-3 justify-self-start min-w-0 lg:flex-1 lg:basis-0 lg:min-w-max">
         {enableRooms ? (
@@ -483,6 +499,7 @@ const CalendarToolbar = ({
         )}
       </div>
     </div>
+    </>
   );
 };
 

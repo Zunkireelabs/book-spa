@@ -11,6 +11,7 @@ import { formatClockTime, formatHourLabel } from './timeFormat';
 import SharedBookingLines from './SharedBookingLines';
 import { STATUS_DOT_COLOR, isClosedByBlocks } from '../../../../utils/todayStatusLine';
 import OverflowBadge from './OverflowBadge';
+import { useViewportWidth, PHONE_MAX } from '../../../../hooks/useViewportWidth';
 import { transferShadeSegments, dedupeAgainst } from '../../../../utils/transferShade';
 import TransferHeaderLine, { describeColumnTransfer, describeTransferOnDay } from './TransferHeaderLine';
 import { useIndustry } from '../../../../hooks/useIndustry';
@@ -33,7 +34,10 @@ import { staffWord, wordBranch } from '../../../../utils/industryTerms';
 // Export these constants for time calculation in parent
 export const SLOT_HEIGHT = 36; // px per 30-min slot (72px per hour) - for visual grid lines
 export const HOUR_HEIGHT = SLOT_HEIGHT * 2; // 72px per hour
-const TIME_COL_WIDTH = 64;
+const TIME_COL_WIDTH_DESKTOP = 64;
+// Phone (< md): slimmer time column, Unassigned collapses to a pinned strip, staff columns sized so 3 fit at 390 and 360.
+const PHONE_TIME_COL = 44;
+const PHONE_UNASSIGNED_W = 40;
 const PINNED_SHADOW = '6px 0 8px -6px rgba(14,13,12,0.16)'; // right shadow on the pinned Unassigned column while the grid is scrolled
 
 // Pinch-to-zoom bounds (mobile/touch only) — effective hour height 40px–320px
@@ -378,6 +382,10 @@ const CalendarGrid = ({
   }, [currentDate, viewMode]);
 
   const isMultiDay = days.length > 1;
+  const viewportW = useViewportWidth();
+  const isPhone = viewportW <= PHONE_MAX;
+  const TIME_COL_WIDTH = isPhone ? PHONE_TIME_COL : TIME_COL_WIDTH_DESKTOP;
+  const phoneDay = isPhone && !isMultiDay; // single-day phone grid: pinned Unassigned strip + 3-up staff columns
 
   // Visible hour range: branch hours padded by 1h each side, extended to include
   // any booking on a displayed day that falls outside it. Falls back to 9–21.
@@ -721,7 +729,7 @@ const CalendarGrid = ({
       if (!ghost) return;
       const g = ghost.getBoundingClientRect();
       const sr = scroller.getBoundingClientRect();
-      const stickyLeft = TIME_COL_WIDTH + (!isMultiDay && freezeUnassigned ? minColWidth : 0);
+      const stickyLeft = TIME_COL_WIDTH + (!isMultiDay && pinUnassigned ? unassignedW : 0);
       const visLeft = sr.left + stickyLeft + 24;
       const visRight = Math.min(sr.right, window.innerWidth - panelW) - 24;
       let dx = 0;
@@ -997,7 +1005,9 @@ const CalendarGrid = ({
     };
   }, [days, todayStr, nowTop]);
 
-  const minColWidth = Math.round((isMultiDay ? 80 : 120) * zoomScale);
+  const minColWidth = Math.round((isMultiDay ? 80 : phoneDay ? (viewportW - (PHONE_TIME_COL + PHONE_UNASSIGNED_W)) / 3 : 120) * zoomScale);
+  const pinUnassigned = freezeUnassigned || phoneDay; // always pinned on phone (the pin toggle stays desktop-only)
+  const unassignedW = phoneDay ? PHONE_UNASSIGNED_W : minColWidth;
 
   // ── Column header tooltip (fixed-position to escape overflow-hidden) ──
   const [headerTooltip, setHeaderTooltip] = useState(null);
@@ -1034,11 +1044,29 @@ const CalendarGrid = ({
       <div
         key={col.id}
         data-col-header
-        className="relative flex-1 border-r border-border last:border-r-0 px-2 h-10 flex items-center justify-center"
-        style={{ minWidth: minColWidth }}
+        className={`relative flex-1 border-r border-border last:border-r-0 h-10 flex items-center justify-center ${phoneDay && isUnassigned ? 'px-0' : 'px-2'}`}
+        style={{ minWidth: phoneDay && isUnassigned ? unassignedW : minColWidth }}
         onMouseEnter={(e) => showHeaderTooltip(e, onlineUnassignedTooltip || [col.name, hdrShift?.full, trDesc?.sentence].filter(Boolean).join(' · '))}
         onMouseLeave={hideHeaderTooltip}
       >
+        {phoneDay && isUnassigned ? (
+          <span className="relative w-6 h-6 flex items-center justify-center text-text-secondary" role="img" aria-label={onlineUnassignedTooltip || col.name}>
+            <Icon name="AlertCircle" size={16} />
+            {col.onlineUnassignedCount > 0 && (
+              <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 bg-warning text-white rounded-full text-[10px] font-medium flex items-center justify-center">{col.onlineUnassignedCount}</span>
+            )}
+          </span>
+        ) : phoneDay ? (
+          <div className="flex flex-col items-center justify-center gap-0.5 min-w-0 w-full" title={col.name}>
+            <span className="relative flex items-center">
+              <span className="w-5 h-5 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center text-[9px] font-medium">
+                {col.type === 'therapist' ? initials : <Icon name={col.icon} size={11} />}
+              </span>
+              {col.type === 'therapist' && <span className={`absolute -right-1 -top-0.5 w-1.5 h-1.5 rounded-full ${col.attendance ? 'bg-gray-300' : 'bg-success'}`} />}
+            </span>
+            <span className="font-body text-[11px] font-medium leading-none text-text-primary truncate max-w-full">{col.name.split(/\s+/)[0]}</span>
+          </div>
+        ) : (
         <div className="flex items-center gap-2 overflow-hidden min-w-0">
           <span className="w-6 h-6 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center flex-shrink-0 text-[10px] font-medium">
             {col.type === 'therapist' ? initials : <Icon name={isUnassigned ? 'AlertCircle' : col.icon} size={12} />}
@@ -1093,6 +1121,7 @@ const CalendarGrid = ({
             </button>
           )}
         </div>
+        )}
       </div>
     );
   };
@@ -1591,7 +1620,7 @@ const CalendarGrid = ({
     <div
       key={col.id}
       className="flex-1 relative border-r border-border last:border-r-0 cursor-pointer"
-      style={{ minWidth: minColWidth, height: totalHeight }}
+      style={{ minWidth: minColWidth, height: totalHeight, ...(phoneDay ? { scrollSnapAlign: 'start' } : null) }}
       data-cal-column="true"
       data-day={day} data-col-id={col.id} data-col-type={col.type} data-col-name={col.name}
       onClick={(e) => handleColumnClick(e, day, col)}
@@ -1611,7 +1640,7 @@ const CalendarGrid = ({
   }, [bookingsByDayAndCol, currentDate]);
 
   // ── Single-day view ───────────────────────────────────────
-  const columnsMinWidth = columns.length * minColWidth;
+  const columnsMinWidth = columns.length * minColWidth - (columns.some(c => c.type === 'unassigned') ? minColWidth - unassignedW : 0);
   const unassignedCol = useMemo(() => {
     const base = columns.find(c => c.type === 'unassigned');
     return base ? { ...base, onlineUnassignedCount: unassignedOnlineStats.count, allSelfService: unassignedOnlineStats.allSelfService } : base;
@@ -1654,10 +1683,10 @@ const CalendarGrid = ({
           {unassignedCol && (
             <div
               className={`flex-shrink-0 border-r border-border bg-surface ${
-                freezeUnassigned ? 'sticky z-header' : ''
+                pinUnassigned ? 'sticky z-header' : ''
               }`}
-              style={freezeUnassigned
-                ? { left: TIME_COL_WIDTH, width: minColWidth, boxShadow: gridScrolled ? PINNED_SHADOW : undefined }
+              style={pinUnassigned
+                ? { left: TIME_COL_WIDTH, width: unassignedW, boxShadow: gridScrolled ? PINNED_SHADOW : undefined }
                 : { minWidth: minColWidth }
               }
             >
@@ -1687,6 +1716,7 @@ const CalendarGrid = ({
       <div
         ref={scrollRef}
         className="flex-1 overflow-x-scroll overflow-y-auto calendar-grid-scroll"
+        style={phoneDay ? { scrollSnapType: 'x proximity', scrollPaddingLeft: TIME_COL_WIDTH + unassignedW } : undefined}
         onScroll={(e) => {
           if (headerScrollRef.current) {
             headerScrollRef.current.scrollLeft = e.target.scrollLeft;
@@ -1712,10 +1742,10 @@ const CalendarGrid = ({
           {unassignedCol && (
             <div
               className={`flex-shrink-0 relative border-r border-border bg-surface overflow-hidden cursor-pointer ${
-                freezeUnassigned ? 'sticky z-header' : ''
+                pinUnassigned ? 'sticky z-header' : ''
               }`}
-              style={freezeUnassigned
-                ? { left: TIME_COL_WIDTH, width: minColWidth, height: totalHeight, boxShadow: gridScrolled ? PINNED_SHADOW : undefined }
+              style={pinUnassigned
+                ? { left: TIME_COL_WIDTH, width: unassignedW, height: totalHeight, boxShadow: gridScrolled ? PINNED_SHADOW : undefined }
                 : { minWidth: minColWidth, height: totalHeight }
               }
               data-cal-column="true"

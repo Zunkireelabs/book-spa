@@ -95,7 +95,9 @@ const OperationalCalendar = ({ branchId }) => {
     return next;
   });
   // Default to staff view if rooms are disabled
-  const [columnMode, setColumnMode] = useState('therapist'); // therapist | room
+  // Phone only: the Group by choice is remembered per device (group_by pref); desktop always starts on therapist as before.
+  const [columnMode, setColumnMode] = useState(() => (enableRooms && typeof window !== 'undefined' && window.innerWidth < 768 && readPref('group_by', null) === 'room' ? 'room' : 'therapist')); // therapist | room
+  const setGroupBy = (mode) => { setColumnMode(mode); writePref('group_by', mode); };
   const [freezeUnassigned, setFreezeUnassigned] = useState(true);
   const [showServiceOnly, setShowServiceOnly] = useState(true);
   const [selectedPositions, setSelectedPositions] = useState([]); // empty = all
@@ -262,6 +264,7 @@ const OperationalCalendar = ({ branchId }) => {
             enableRooms={enableRooms}
             columnMode={columnMode}
             setColumnMode={setColumnMode}
+            onGroupByChange={setGroupBy}
             awayList={awayList}
             currentDate={currentDate}
             setCurrentDate={setCurrentDate}
