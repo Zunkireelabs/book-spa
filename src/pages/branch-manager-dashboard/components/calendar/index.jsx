@@ -95,8 +95,8 @@ const OperationalCalendar = ({ branchId }) => {
     return next;
   });
   // Default to staff view if rooms are disabled
-  // Phone only: the Group by choice is remembered per device (group_by pref); desktop always starts on therapist as before.
-  const [columnMode, setColumnMode] = useState(() => (enableRooms && typeof window !== 'undefined' && window.innerWidth < 768 && readPref('group_by', null) === 'room' ? 'room' : 'therapist')); // therapist | room
+  // The Group by choice is remembered per device (group_by pref), phone and desktop alike.
+  const [columnMode, setColumnMode] = useState(() => (enableRooms && readPref('group_by', null) === 'room' ? 'room' : 'therapist')); // therapist | room
   const setGroupBy = (mode) => { setColumnMode(mode); writePref('group_by', mode); };
   const [freezeUnassigned, setFreezeUnassigned] = useState(true);
   const [showServiceOnly, setShowServiceOnly] = useState(true);
