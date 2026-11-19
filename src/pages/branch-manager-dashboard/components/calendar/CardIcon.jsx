@@ -1,4 +1,5 @@
 import React from 'react';
+import Tooltip from '../../../../components/ui/Tooltip';
 
 // ZNLY-271: 13px calendar-card icons (inline SVG, same paths as the approved mockup).
 const P = {
@@ -48,19 +49,23 @@ export default function CardIcon({ icon, uid, terms }) {
   const title = iconTitle(icon, terms);
   const color = icon.key === 'alert' || (icon.key === 'pay' && icon.state === 'unpaid') ? '#D97706' : undefined;
   return (
-    <span title={title} aria-label={title} className="inline-flex items-center gap-px" style={{ color }}>
-      {icon.key === 'pay' ? <PayTag state={icon.state} uid={uid} /> : <svg {...svgProps}>{P[icon.key]}</svg>}
-      {icon.key === 'group' && <small className="font-data text-[10px] leading-none">{icon.count}</small>}
-    </span>
+    <Tooltip label={title}>
+      <span aria-label={title} className="inline-flex items-center gap-px" style={{ color }}>
+        {icon.key === 'pay' ? <PayTag state={icon.state} uid={uid} /> : <svg {...svgProps}>{P[icon.key]}</svg>}
+        {icon.key === 'group' && <small className="font-data text-[10px] leading-none">{icon.count}</small>}
+      </span>
+    </Tooltip>
   );
 }
 
 // Muted 12px lock for the card's bottom-right corner; `reason` is the tooltip ("Locked: paid" ...).
 export function LockMark({ reason }) {
   return (
-    <span title={reason} aria-label={reason} className="inline-flex flex-shrink-0 text-text-tertiary">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }} aria-hidden="true">{P.lock}</svg>
-    </span>
+    <Tooltip label={reason} className="inline-flex flex-shrink-0">
+      <span aria-label={reason} className="inline-flex text-text-tertiary">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }} aria-hidden="true">{P.lock}</svg>
+      </span>
+    </Tooltip>
   );
 }
 

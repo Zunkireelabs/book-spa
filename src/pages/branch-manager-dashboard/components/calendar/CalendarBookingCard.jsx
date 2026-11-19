@@ -9,6 +9,7 @@ import { formatClockTime } from './timeFormat';
 import { isNoShow } from '../../../../services/bookingTransformers';
 import { OUTSIDE_HOURS_OUTLINE } from '../../../../services/availabilityShading';
 import { cardTier, iconsForBooking, splitForShortCard, statusTag, shouldMoveNameDown, lockReason, fitTinyItems, planFullCard, LINE_PX } from '../../../../services/calendarCardLayout';
+import Tooltip from '../../../../components/ui/Tooltip';
 import CardIcon, { LockMark } from './CardIcon';
 import { useCardIconPrefs } from './cardIconPrefs';
 
@@ -16,7 +17,7 @@ import { useCardIconPrefs } from './cardIconPrefs';
 const IconRow = ({ icons, more = 0, uid, wrap = false, className = '', rowRef }) => (
   <span ref={rowRef} className={`flex items-center gap-[5px] text-[rgba(45,90,39,0.75)] ${wrap ? 'flex-wrap gap-y-[3px]' : ''} ${className}`}>
     {icons.map(i => <CardIcon key={i.key} icon={i} uid={uid} />)}
-    {more > 0 && <span className="font-data text-[10px] text-text-tertiary leading-none" title={`${more} more: open the booking`}>+{more}</span>}
+    {more > 0 && <Tooltip label={`${more} more: open the booking`}><span className="font-data text-[10px] text-text-tertiary leading-none">+{more}</span></Tooltip>}
   </span>
 );
 
@@ -183,7 +184,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
   const [tinyVisible, setTinyVisible] = useState(null); // null = not measured yet (show all)
   const tinyItems = tier === 'tiny' ? [
     ...shortIcons.shown.map(i => ({ key: i.key, node: <CardIcon key={i.key} icon={i} uid={uid} /> })),
-    ...(shortIcons.more > 0 ? [{ key: 'more', node: <span key="more" className="font-data text-[10px] text-text-tertiary leading-none" title={`${shortIcons.more} more: open the booking`}>+{shortIcons.more}</span> }] : []),
+    ...(shortIcons.more > 0 ? [{ key: 'more', node: <Tooltip key="more" label={`${shortIcons.more} more: open the booking`}><span className="font-data text-[10px] text-text-tertiary leading-none">+{shortIcons.more}</span></Tooltip> }] : []),
     ...(lockWhy ? [{ key: 'lock', node: <LockMark key="lock" reason={lockWhy} /> }] : []),
   ] : [];
   const tinyKeys = tinyItems.map(i => i.key).join(',');

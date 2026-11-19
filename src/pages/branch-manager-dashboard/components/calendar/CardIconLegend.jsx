@@ -1,4 +1,5 @@
 import React from 'react';
+import Tooltip from '../../../../components/ui/Tooltip';
 import Icon from '../../../../components/AppIcon';
 import { CARD_ICONS } from '../../../../services/calendarCardLayout';
 import CardIcon from './CardIcon';
@@ -34,7 +35,8 @@ export function CardIconList({ variant = 'desktop' }) {
       {CARD_ICONS.map(({ key, label, desc }) => {
         const on = prefs[key] !== false;
         return (
-          <div key={key} title={desc} className={`flex items-center gap-2.5 ${phone ? 'min-h-[44px]' : 'min-h-[40px] px-3'}`}>
+          <Tooltip key={key} label={desc} className="flex w-full">
+          <div className={`w-full flex items-center gap-2.5 ${phone ? 'min-h-[44px]' : 'min-h-[40px] px-3'}`}>
             <span className={`w-6 flex items-center justify-center text-text-secondary flex-shrink-0 ${on ? '' : 'opacity-50'}`}>
               <CardIcon icon={SAMPLE[key]} uid={`lg-${variant}-${key}`} />
             </span>
@@ -53,6 +55,7 @@ export function CardIconList({ variant = 'desktop' }) {
               <span className={`inline-block rounded-full bg-white spa-transition-fast transform ${phone ? `h-5 w-5 ${on ? 'translate-x-6' : 'translate-x-1'}` : `h-3.5 w-3.5 ${on ? 'translate-x-4' : 'translate-x-1'}`}`} />
             </button>
           </div>
+          </Tooltip>
         );
       })}
     </div>
