@@ -34,7 +34,7 @@ import { staffWord, wordBranch } from '../../../../utils/industryTerms';
 // Export these constants for time calculation in parent
 export const SLOT_HEIGHT = 36; // px per 30-min slot (72px per hour) - for visual grid lines
 export const HOUR_HEIGHT = SLOT_HEIGHT * 2; // 72px per hour
-const TIME_COL_WIDTH_DESKTOP = 64;
+const TIME_COL_WIDTH_DESKTOP = 52; // fits "12pm" and "4:12" with small even padding
 // Phone (< md): slimmer time column, Unassigned collapses to a pinned strip, staff columns sized so 3 fit at 390 and 360.
 const PHONE_TIME_COL = 44;
 const PHONE_UNASSIGNED_W = 40;
