@@ -5,6 +5,8 @@ import Input from '../../../../components/ui/Input';
 import CountryCodeSelect from '../../../../components/ui/CountryCodeSelect';
 import CustomerForm from '../../../customer-booking-flow/components/CustomerForm';
 import { useResolvedServicePricing } from '../../../../hooks/useCustomerServicePricing';
+import { mapBookingError } from '../../../../services/bookingErrorMessages';
+import { isValidPhoneForCountry } from '../../../../utils/phone';
 
 const GUEST_GENDER_OPTIONS = [
   { value: 'male', label: 'Male' },
@@ -12,36 +14,16 @@ const GUEST_GENDER_OPTIONS = [
   { value: 'other', label: 'Other' },
 ];
 
-// Same list createBooking()/createBookingGroup() error codes map to customer-safe
-// copy for in BookingConfirmation.jsx (customer-booking-flow) — kept in sync there;
-// submitGroupBooking (api.js) reuses the exact same codes, so the same list applies here.
-const KNOWN_BOOKING_ERROR_CODES = [
-  'COUPLE_SERVICE_NOT_ALLOWED_IN_GROUP', 'ROOMS_FULL', 'ROOM_FULL', 'INVALID_ROOM',
-  'ROOM_INACTIVE', 'INVALID_THERAPIST', 'THERAPIST_INACTIVE', 'THERAPIST_ABSENT',
-  'THERAPIST_CHECKED_OUT', 'THERAPIST_NOT_ELIGIBLE', 'BOOKING_GROUP_PARTIAL',
-  'NO_SERVICES', 'THERAPIST_CONFLICT', 'BRANCH_ONLINE_CAPACITY', 'BOOKING_CROSSES_MIDNIGHT',
-  'BOOKING_CONFIRMATION_UNAVAILABLE',
-];
-
-export const mapBookingError = (error) => {
-  if (!error) return null;
-  return KNOWN_BOOKING_ERROR_CODES.includes(error.code) && error.message
-    ? error.message
-    : 'Something went wrong while confirming your booking. Please try again.';
-};
+export { mapBookingError };
 
 // Mirrors BookingView/index.jsx's isCustomerInfoValid, plus a required-phone check:
-// createBooking() hard-rejects a missing phone ("Phone number is required", with no
-// `code`, so mapBookingError can't recognise it) and every guest row inherits this
-// phone — gating here is strictly better than the solo flow's gap, not a regression.
+// createBooking() hard-rejects a missing phone (PHONE_REQUIRED) and every guest row
+// inherits this phone — gating here is strictly better than the solo flow's former gap
+// (fixed separately, same rule, see BookingView/index.jsx), not a regression.
 export const isLeadContactValid = (leadContact) => {
   if (!leadContact.firstName.trim()) return false;
   if (leadContact.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(leadContact.email)) return false;
-  if (!leadContact.phone.trim()) return false;
-  const isNepal = (leadContact.phoneCountryCode || '+977') === '+977';
-  const digits = leadContact.phone.replace(/\D/g, '');
-  const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
-  return phoneValid;
+  return isValidPhoneForCountry(leadContact.phone, leadContact.phoneCountryCode);
 };
 
 // A guest row with every field still blank is valid as-is — submitGroupBooking
@@ -59,11 +41,7 @@ export const isGuestContactValid = (person) => {
   if (!isGuestFilled(person)) return true;
   if (!person.firstName?.trim()) return false;
   if (person.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(person.email)) return false;
-  if (!person.phone?.trim()) return false;
-  const isNepal = (person.phoneCountryCode || '+977') === '+977';
-  const digits = person.phone.replace(/\D/g, '');
-  const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
-  return phoneValid;
+  return isValidPhoneForCountry(person.phone, person.phoneCountryCode);
 };
 
 const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBranch, selectedDateTime, orgSlug, genderPreference, customerAccountId, onGuestFieldChange, onSubmit, submitting, submitError }) => {

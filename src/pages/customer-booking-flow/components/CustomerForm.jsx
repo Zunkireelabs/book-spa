@@ -5,6 +5,7 @@ import CountryCodeSelect from '../../../components/ui/CountryCodeSelect';
 import Icon from '../../../components/AppIcon';
 import { checkExistingCustomerByPhone, findCustomerMatch } from '../../../services/api';
 import { formatNPR } from '../../../services/bookingTransformers';
+import { isValidPhoneForCountry } from '../../../utils/phone';
 
 // showSummary defaults to true so the v2 wizard (which has no summary elsewhere) is
 // unaffected; the provider-profile flow already shows a live, multi-service summary
@@ -63,15 +64,14 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
       }
 
       case 'phone': {
-        // Nepal keeps the strict 10-digit mobile format (the overwhelming common
-        // case); any other selected country code just gets a loose sanity-length
-        // check, since we don't carry per-country phone rules anywhere in this app.
-        const isNepal = (customerInfo.phoneCountryCode || '+977') === '+977';
-        const digits = value.replace(/\D/g, '');
-        const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
+        // isValidPhoneForCountry (utils/phone.js) is the single shared rule -- also used by
+        // BookingView's isCustomerInfoValid (the gate that actually enables Review/Confirm)
+        // and GroupConfirmStep's per-guest checks, so this error text and that gate can
+        // never silently disagree about what counts as a valid phone.
         if (!value.trim()) {
           newErrors.phone = 'Phone number is required';
-        } else if (!phoneValid) {
+        } else if (!isValidPhoneForCountry(value, customerInfo.phoneCountryCode)) {
+          const isNepal = (customerInfo.phoneCountryCode || '+977') === '+977';
           newErrors.phone = isNepal ? 'Please enter a valid Nepali phone number' : 'Please enter a valid phone number';
         } else {
           delete newErrors.phone;
@@ -415,7 +415,6 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
                   value={customerInfo.phone || ''}
                   onChange={handleInputChange}
                   onBlur={handleBlur}
-                  placeholder="9841234567"
                   className={`w-full rounded-l-none ${errors.phone ? 'border-error' : ''}`}
                 />
               </div>

@@ -5780,7 +5780,11 @@ export async function createBooking({
 }) {
   try {
     if ((!customerPhone || !customerPhone.trim()) && !knownCustomerId) {
-      return { data: null, error: { message: 'Phone number is required' } };
+      // This had no `code` for years -- every other guard right below it does. A caller
+      // matching on error.code (BookingConfirmation.jsx, GroupConfirmStep.jsx) silently
+      // fell through to a generic "something went wrong" for the one failure a customer
+      // can actually see and fix themselves. See KNOWN_BOOKING_ERROR_CODES in both.
+      return { data: null, error: { code: 'PHONE_REQUIRED', message: 'Phone number is required' } };
     }
 
     // knownCustomerId: overwrite whatever was passed as customerName/Phone/Email

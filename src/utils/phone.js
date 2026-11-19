@@ -63,6 +63,32 @@ export function phoneDigits(value) {
 }
 
 /**
+ * Whether a national-number input (the raw text typed into a phone field, paired with a
+ * separately-selected dial code — NOT yet joined into E.164) is a plausible phone number,
+ * required and non-empty. Used to gate booking submission, so it deliberately errs toward
+ * accepting: a false rejection loses a real customer, while a slightly loose rule at worst
+ * lets through a number that was probably typed correctly anyway. Nepal (this app's home
+ * country, and the one case with an unambiguous rule) gets an exact 10-digit check; every
+ * other selected country gets only a sanity-range length check, since this app carries no
+ * per-country phone format rules — rejecting a real international customer's number because
+ * it doesn't match Nepal's shape would be worse than accepting a slightly malformed one.
+ *
+ * Separators (spaces, dashes, parens) are stripped before checking, not rejected — someone
+ * typing "984-123-4567" has entered a valid number, not an invalid one.
+ *
+ * This is validation (is-this-plausible), not normalization — it does not call toE164()
+ * itself, matching how every call site already holds the national number and dial code as
+ * two separate form fields rather than a joined E.164 string.
+ */
+export function isValidPhoneForCountry(rawValue, dialCode = DEFAULT_DIAL) {
+  if (!rawValue || !String(rawValue).trim()) return false;
+  const digits = String(rawValue).replace(/\D/g, '');
+  if (!digits) return false;
+  const isNepal = (dialCode || DEFAULT_DIAL) === DEFAULT_DIAL;
+  return isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
+}
+
+/**
  * True when two phone values refer to the same number, tolerant of formatting
  * and of one side being a legacy bare-national string.
  */

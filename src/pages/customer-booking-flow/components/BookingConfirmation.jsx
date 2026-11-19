@@ -3,6 +3,7 @@ import Button from '../../../components/ui/Button';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
 import { createBooking, createBookingGroup, lookupReferrerByPhone, fetchServiceComboComponents, createComboBookingItems } from '../../../services/api';
+import { mapBookingError } from '../../../services/bookingErrorMessages';
 import { toE164 } from '../../../utils/phone';
 import { useResolvedServicePricing } from '../../../hooks/useCustomerServicePricing';
 
@@ -121,31 +122,7 @@ const BookingConfirmation = ({
 
       if (error) {
         console.error('[BookingConfirmation] createBooking failed:', error.code, error.message);
-        // Keep this list in sync with the error codes createBooking() (services/api.js) can return —
-        // each already carries a customer-safe message; only truly unrecognized/raw errors fall through.
-        const KNOWN_BOOKING_ERROR_CODES = [
-          'COUPLE_SERVICE_NOT_ALLOWED_IN_GROUP',
-          'ROOMS_FULL',
-          'ROOM_FULL',
-          'INVALID_ROOM',
-          'ROOM_INACTIVE',
-          'INVALID_THERAPIST',
-          'THERAPIST_INACTIVE',
-          'THERAPIST_ABSENT',
-          'THERAPIST_CHECKED_OUT',
-          'THERAPIST_NOT_ELIGIBLE',
-          'BOOKING_GROUP_PARTIAL',
-          'NO_SERVICES',
-          'THERAPIST_CONFLICT',
-          'BRANCH_ONLINE_CAPACITY',
-          'BOOKING_CROSSES_MIDNIGHT',
-          'BOOKING_CONFIRMATION_UNAVAILABLE',
-        ];
-        setBookingError(
-          KNOWN_BOOKING_ERROR_CODES.includes(error.code) && error.message
-            ? error.message
-            : 'Something went wrong while confirming your booking. Please try again.'
-        );
+        setBookingError(mapBookingError(error));
         return;
       }
       // ZNLY-182: a combo service (e.g. "Bold transformation") previously landed as
