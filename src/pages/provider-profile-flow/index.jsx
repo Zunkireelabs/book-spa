@@ -9,6 +9,7 @@ import { fetchBranchesByOrgId, fetchBookableServicesByOrgSlug, fetchBookableTher
 import { useResolvedServicePricing } from '../../hooks/useCustomerServicePricing';
 import { splitE164 } from '../../utils/phone';
 import { scrollToTopInstant } from '../../utils/scroll';
+import { fetchMarketplaceIdentity } from '../../utils/marketplaceIdentity';
 import BookingSuccess from '../customer-booking-flow/components/BookingSuccess';
 import ProfileHero from './components/ProfileHero';
 import ServicesSection from './components/ServicesSection';
@@ -40,7 +41,7 @@ const ProviderProfileFlow = () => {
     enableStaffRatings,
     enableGroupBooking,
   } = useTenant();
-  const { customerProfile } = useCustomerAuth();
+  const { customerProfile, loading: customerAuthLoading } = useCustomerAuth();
 
   // Single source of truth for whether group booking is offered: the build-time kill
   // switch AND the per-org admin toggle must both be on. Combined once here rather than
@@ -85,6 +86,9 @@ const ProviderProfileFlow = () => {
   const prefilledFromProfile = useRef(false);
   // Guards the ?service= preselect so it fires once per visit, not on every branch switch.
   const preselectApplied = useRef(false);
+  // Display/prefill only -- a marketplace session, never a book-spa one. See
+  // utils/marketplaceIdentity.js for why this must never gain any authority over booking.
+  const [marketplaceIdentity, setMarketplaceIdentity] = useState(null);
 
   useEffect(() => {
     if (!customerProfile || prefilledFromProfile.current) return;
@@ -100,6 +104,27 @@ const ProviderProfileFlow = () => {
       phoneCountryCode: prev.phone ? prev.phoneCountryCode : (savedPhone.national ? savedPhone.dial : prev.phoneCountryCode),
     }));
   }, [customerProfile]);
+
+  // Only fills the gap when there's no genuine book-spa account -- a customer with their
+  // own book-spa login keeps using that path untouched, per the effect above. Waits for
+  // customerAuthLoading to settle first: firing while it's still resolving would let a
+  // fast marketplace response win the prefill race against a slower, but higher-priority,
+  // real book-spa profile.
+  useEffect(() => {
+    if (customerAuthLoading || customerProfile || prefilledFromProfile.current) return;
+    fetchMarketplaceIdentity().then((identity) => {
+      if (!identity || prefilledFromProfile.current) return;
+      prefilledFromProfile.current = true;
+      setMarketplaceIdentity(identity);
+      const [firstName, ...rest] = (identity.name || '').split(' ');
+      setCustomerInfo((prev) => ({
+        ...prev,
+        firstName: prev.firstName || firstName || '',
+        lastName: prev.lastName || rest.join(' '),
+        email: prev.email || identity.email || '',
+      }));
+    });
+  }, [customerAuthLoading, customerProfile]);
 
   useEffect(() => {
     if (!orgId) return;
@@ -531,7 +556,7 @@ const ProviderProfileFlow = () => {
       style={{ paddingTop: 'var(--customer-header-h, 64px)' }}
     >
       {entryChoiceModal}
-      <CustomerHeader branch={selectedBranch} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
+      <CustomerHeader branch={selectedBranch} marketplaceName={marketplaceIdentity?.name} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
       <ProfileHero orgName={orgName} heroImageUrl={heroImageUrl} logoUrl={logoUrl} />
 
       {/* Persistent "Book" entry, unconditional unlike SummaryCard/MobileBookingBar's

@@ -5,7 +5,7 @@ import BrandMark from './BrandMark';
 import CustomerAuthContext from 'contexts/CustomerAuthContext';
 import useMeasuredHeightVar from 'hooks/useMeasuredHeightVar';
 
-const CustomerHeader = ({ wide, branch, containerClassName }) => {
+const CustomerHeader = ({ wide, branch, containerClassName, marketplaceName }) => {
   const location = useLocation();
   const { orgSlug } = useParams();
   const headerRef = useRef(null);
@@ -76,14 +76,19 @@ const CustomerHeader = ({ wide, branch, containerClassName }) => {
               </a>
             )}
 
-            {/* Login / Account */}
+            {/* Login / Account — a marketplace-sourced name (see utils/marketplaceIdentity.js)
+                is display only, never a book-spa session, so it still links to loginPath,
+                not accountPath: there is no book-spa account behind it to view. A genuine
+                book-spa customerProfile always takes priority when both are present. */}
             <Link
               to={customer && customerProfile ? accountPath : loginPath}
               className="flex items-center space-x-2 px-3 sm:px-4 py-2 rounded-spa border border-border hover:bg-background spa-transition-fast spa-touch-target flex-shrink-0"
             >
               <Icon name="User" size={16} className="text-text-primary flex-shrink-0" />
               <span className="font-body font-body-medium text-sm text-text-primary whitespace-nowrap">
-                {customer && customerProfile ? customerProfile.full_name.split(' ')[0] : 'Login'}
+                {customer && customerProfile
+                  ? customerProfile.full_name.split(' ')[0]
+                  : (marketplaceName?.split(' ')[0] || 'Login')}
               </span>
             </Link>
           </div>
