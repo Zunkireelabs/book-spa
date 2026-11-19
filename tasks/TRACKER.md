@@ -2,13 +2,13 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-18** by Project Manager · 208 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-19** by Lead · 218 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
 ## Flags from the last sync
 - **Open PRs without `ZNLY-` in the title:** #425, #415, #30 (3 open PRs).
-- **Urgent/high with no owner:** ZNLY-220, ZNLY-218, ZNLY-216, ZNLY-213, ZNLY-210, ZNLY-209, ZNLY-208, ZNLY-207, ZNLY-206, ZNLY-199, ZNLY-197, ZNLY-196, ZNLY-183, ZNLY-179, ZNLY-26, ZNLY-18, ZNLY-15, ZNLY-14, ZNLY-13, ZNLY-12.
+- **Urgent/high with no owner:** ZNLY-258, ZNLY-256, ZNLY-220, ZNLY-218, ZNLY-216, ZNLY-213, ZNLY-210, ZNLY-209, ZNLY-208, ZNLY-207, ZNLY-206, ZNLY-199, ZNLY-197, ZNLY-196, ZNLY-183, ZNLY-179, ZNLY-26, ZNLY-18, ZNLY-15, ZNLY-14, ZNLY-13, ZNLY-12.
 
 ## In progress
 | Ticket | Owner | Priority | What |
@@ -32,6 +32,8 @@ Last synced: **2026-11-18** by Project Manager · 208 open tickets (epics exclud
 | ZNLY-188 | Anish | medium | Group booking: collect per-guest First/Last Name, Email, Phone, Gender (fixes shared-customer-record overwrite) |
 | ZNLY-189 | Anish | medium | Group booking: retry rollback + alert staff when a group booking gets stuck |
 | ZNLY-192 | Anish | medium | Wire 11 hardcoded "Therapist" labels to the dynamic staffLabel system |
+| ZNLY-255 | — | medium | Safe dependency upgrades (router 6.x, vite 5.x, supabase-js, posthog, dompurify, postcss) before stage PR |
+| ZNLY-260 | — | medium | Four in-shell high-fidelity mockup redraws (team member panel, service pricing, checkout invoice dialog, calendar + waitlist) |
 
 ## In review / on stage
 | Ticket | Owner | Priority | State | What |
@@ -82,6 +84,7 @@ Last synced: **2026-11-18** by Project Manager · 208 open tickets (epics exclud
 | ZNLY-210 | — | high | QC Accepted | PIN lock screen (stage 863820d): review and acceptance checks; must never lock staff out |
 | ZNLY-216 | — | high | QC Accepted | Security check: is users.pin stored hashed, and why can anon and authenticated select that column? |
 | ZNLY-218 | — | high | QC Accepted | Billing "Add VAT on top" mode: does checkout charge the VAT? If not, invoices can never be issued in that mode |
+| ZNLY-220 | — | high | QC Accepted | Schema drift: login_with_pin() exists in production but has no migration in the repo (created by hand); capture it, then hash PINs |
 | ZNLY-222 | Sadin | high | QC Accepted | Online booking offers only 10:00–18:00, ignoring each branch's opening hours |
 | ZNLY-225 | Sadin | high | QC Accepted | Booking links still open the old centred Booking Management modal instead of the right-side panel |
 | ZNLY-226 | Sadin | high | QC Accepted | Setup checklist asks no-rooms industries (beauty, cleaning) to "Add your rooms" and never hides |
@@ -90,6 +93,7 @@ Last synced: **2026-11-18** by Project Manager · 208 open tickets (epics exclud
 | ZNLY-239 | Sadin | high | QC Accepted | CP7 wording and label sweep: beauty org still sees spa/therapist words, raw labels and wrong hints |
 | ZNLY-241 | Sadin | high | QC Accepted | Create service saves the row, then fails "set_service_therapists: branch <NULL>" (new org before reload; likely also "All locations"); a retry duplicates |
 | ZNLY-244 | Sadin | high | QC Accepted | Transfer form: timed transfer preview calls computeRevertPreview, which is never imported (ReferenceError) |
+| ZNLY-248 | Sadin | high | QC Accepted | Payment mode spelling: Business Health report (mig 371) and other readers match 'Cash' exactly, so 'cash' payments count as "other" |
 | ZNLY-250 | Sadin | high | QC Accepted | Customer detail page numbers use old rules: Amount owing counts upcoming/cancelled bookings; Last Visit can be a future booking (disagrees with Customers list + panel) |
 | ZNLY-67 | Sadin | medium | In Review | UI-1: Calendar exact-match port + app shell from ClinicMD (pre-V5) |
 | ZNLY-68 | Sadin | medium | In Review | UI-2 (V5–V9): Panel unification — forms, details, settings, campaigns → right-hand panels |
@@ -111,6 +115,7 @@ Last synced: **2026-11-18** by Project Manager · 208 open tickets (epics exclud
 | ZNLY-230 | Sadin | medium | QC Accepted | Customer detail page: redesign to the new Zennly design (tabs, payment labels, layout) |
 | ZNLY-237 | — | medium | QC Accepted | My day shows a No-show booking as "Late" (Bookings list says "No show") |
 | ZNLY-249 | Sadin | medium | QC Accepted | Calendar transfer shading label shows the wrong end time ("At QC Second Studio 10:00am–12:00pm" for a 2-day transfer) |
+| ZNLY-251 | Sadin | medium | QC Accepted | Prod spa industry plural label is "All Staffs": sidebar, list headers and search show "All Staffs" / "Search all staffs..." |
 | ZNLY-40 | Sadin | low | On Stage | Retire stale docs now superseded by Plane |
 | ZNLY-119 | Sadin | low | In Review | Profile: Transfer is hidden behind Profile → Edit; add it to the header ⋯ menu and show Branch in the read view |
 | ZNLY-120 | Sadin | low | In Review | Therapists list shows nothing for a transfer scheduled later today (e.g. "To Sanepa at 4:20 pm") |
@@ -126,7 +131,6 @@ Last synced: **2026-11-18** by Project Manager · 208 open tickets (epics exclud
 | ZNLY-183 | — | high | Attendance numbers ignore the branch "Expect check-in" switch: unmarked rostered days are "counted present" on the Attendance page but "not marked" in reports |
 | ZNLY-197 | — | high | Remove zenly.zunkireelabs.com from prod Traefik router rule in docker-compose.yml |
 | ZNLY-245 | Sadin | high | Sami's onboarding: import the Fresha export (staff, customers, services, products) into production, rehearsed and reconciled |
-| ZNLY-248 | Sadin | high | Payment mode spelling: Business Health report (mig 371) and other readers match 'Cash' exactly, so 'cash' payments count as "other" |
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-180 | — | medium | Attendance worked time rounded to 0.1 h before display (1 h 32 min shows as 1 h 30 min) |
@@ -136,11 +140,13 @@ Last synced: **2026-11-18** by Project Manager · 208 open tickets (epics exclud
 |---|---|---|---|
 | ZNLY-213 | — | high | DECIDE: enable the Supabase Auth "Custom Access Token" hook (auth_hook_block_login_off) on staging and production so "login off" is enforced on the server |
 | ZNLY-214 | Sadin | high | DECIDE: confirm with the accountant how VAT treats tips and product sales on a Nepal tax invoice (before 19 Nov) |
+| ZNLY-252 | Sadin | high | DECIDE: 747 old completed Nuad bookings with no payment (NPR 2,855,386.81, May-Nov) will appear as money to collect after release. Settle, cut off, or leave? |
 | ZNLY-30 | — | medium | Decide on required_linear_history for main/stage |
 | ZNLY-84 | Sadin | medium | DECIDE A-2: admin_viewer sees write actions on customer-detail (Anish's page) — hand to Anish or fix here? |
 | ZNLY-85 | Sadin | medium | DECIDE V-4: staff voucher limits (100% discount, price edit, back-dating) — match booking limits? |
 | ZNLY-89 | Sadin | medium | DECIDE V-9: Outreach win_back emails guests who are already booked — align with Customers At-risk rule? |
 | ZNLY-125 | Sadin | medium | DECIDE: who pays bookings done before a PERMANENT transfer in the same month? |
+| ZNLY-257 | — | medium | DECIDE: should Nuad refuse double-booking a staff member (enforce_staff_availability is false)? |
 | ZNLY-25 | — | low | Decide on generic Package (bundle) booking system — may be superseded |
 | ZNLY-86 | Sadin | low | DECIDE V-6: staff issuing vouchers get no member tier discount / wallet tender (RLS hides memberships) |
 | ZNLY-87 | Sadin | low | DECIDE V-7: let admins edit existing membership tiers? (API supports it, UI doesn't) |
@@ -157,7 +163,8 @@ Last synced: **2026-11-18** by Project Manager · 208 open tickets (epics exclud
 | ZNLY-82 | Sadin | high | UI-16: Release prep — regression pass, stage re-merge, PR to stage |
 | ZNLY-121 | Sadin | high | Customer booking flow shows every date "Full" at Sanepa (local, after migrations 324–327) |
 | ZNLY-196 | — | high | Port the Zone POS QC harness into the Zennly repo (critical-path screens, one shared test tenant), owned by the lead/QC session |
-| ZNLY-220 | — | high | Schema drift: login_with_pin() exists in production but has no migration in the repo (created by hand); capture it, then hash PINs |
+| ZNLY-256 | — | high | Waitlist insert blocked by RLS for org-level admins (branch_id NULL, no user_branches row) |
+| ZNLY-258 | — | high | Cash expected in drawer subtracts card refunds (payment_refunds has no refund method) |
 | ZNLY-16 | — | medium | RLS access harness (6 principals x 64 tables) — confirm merged |
 | ZNLY-20 | — | medium | Legacy-domain redirect (zenly.zunkireelabs.com → app.zennly.io) + retire old domains |
 | ZNLY-21 | — | medium | Auth email via Resend SMTP (no-reply@mail.zennly.io) + DKIM/SPF/DMARC + templates |
@@ -194,6 +201,7 @@ Last synced: **2026-11-18** by Project Manager · 208 open tickets (epics exclud
 | ZNLY-240 | — | medium | Platform admin: create a new org from the UI, then manage its access and billing (onboard-tenant.sql has no 'beauty') |
 | ZNLY-242 | — | medium | New org first run: dashboard with 0 locations misbehaves, and location open/close defaults (09–21) disagree with per-day hours |
 | ZNLY-246 | — | medium | Insight: flag tiered services missing tier prices, and team members with no price tier |
+| ZNLY-259 | — | medium | Harden PIN login: PINs are compared as plain text and have no server-side attempt limit |
 | ZNLY-19 | — | low | Remaining "Zenly" strings (PlatformNav, docs, favicon, skill footer) |
 | ZNLY-22 | — | low | Booking confirmation + day-before reminder emails; wire 2 stub "Send Email" buttons |
 | ZNLY-29 | — | low | Supabase dashboard cleanup: Postgres ERROR logging off, name the original 25P02 trigger |
@@ -237,3 +245,5 @@ Last synced: **2026-11-18** by Project Manager · 208 open tickets (epics exclud
 | ZNLY-202 | — | low | Evaluate Meta Astryx design system (React 19 upgrade, one-screen pilot, go/no-go) |
 | ZNLY-229 | — | low | Booking link panel opens over a blank page: keep the page you came from visible behind it |
 | ZNLY-247 | — | low | Staff row menu offers "Transfer to branch…" when the business has only one location (the picker then says "No results found") |
+| ZNLY-253 | Sadin | low | Insight: flag a paid amount that doesn't match the price after discount (voucher NTL327 paid 8,400 for a 20%-off 6,720 voucher) |
+| ZNLY-254 | Sadin | low | Insight: flag a paid amount that doesn't match the price after discount (voucher NTL327 paid 8,400 for a 20%-off 6,720 voucher) |
