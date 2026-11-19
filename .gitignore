@@ -6,7 +6,10 @@ node_modules
 .env
 .env.*
 !.env.example
-!.env.local
+# The local-stack template is tracked, but NOT under the name .env.local: Vite auto-loads that
+# filename in every mode, above .env, so a template with that name activates itself. Copy it to
+# .env instead (supabase/LOCAL_DEV.md).
+!.env.local.example
 !.env.staging
 !.env.production
 .mcp.json

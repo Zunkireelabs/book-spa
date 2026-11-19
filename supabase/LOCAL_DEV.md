@@ -20,7 +20,7 @@ if it isn't already the default).
 ```bash
 supabase start                      # bring up local Postgres/Auth/Studio (OrbStack containers)
 ./scripts/local-db-bootstrap.sh     # apply schema.sql + rls.sql + migrations + seed.sql
-cp .env.local .env                  # point the app at the local stack
+cp .env.local.example .env          # point the app at the local stack
 npm start                           # http://localhost:4028
 ```
 
