@@ -39,7 +39,9 @@ const ImportPanel = ({ branches, branchId, onClose, onDone, width }) => {
     if (!f) return;
     setError(null); setPreview(null); setSheet(null); setFile(f);
     try {
-      const XLSX = await import('xlsx');
+      let XLSX;
+      try { XLSX = await import('xlsx'); }
+      catch (e) { setError('The spreadsheet reader could not be loaded. Check your connection and try again.'); return; }
       const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const table = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });

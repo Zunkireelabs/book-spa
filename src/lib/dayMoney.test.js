@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { foldDayMoney, addTender, isTendered, methodLabel, canonicalMode, dayMoneyView } from './dayMoney';
+import { foldDayMoney, addTender, isTendered, methodLabel, canonicalMode, dayMoneyView, applyRefundsToBuckets } from './dayMoney';
 
 // Same fixture as supabase/tests/znly-232.sql (the SQL rule, get_dashboard): the Nuad Smoke case, cash was shown as 100 while the drawer held 900.
 //   booking: Cash 100 (+ Cash 70 on a booking dated ANOTHER day, paid today: counts today), Khalti 300, Membership 200 (wallet) | products: Cash 800, Esewa 100, Membership 50 (wallet) | refunds 40 + 150
@@ -134,5 +134,18 @@ describe('closed day: at close / after close / now never mix (ZNLY-234, Nuad 17 
     expect(open.closed).toBe(false);
     expect(open.headline.taken).toBe(90);
     expect(dayMoneyView({ isClosed: true, atClose: null, byMode: { Cash: 5 }, refunds: 0 }).closed).toBe(false);
+  });
+});
+
+describe('applyRefundsToBuckets (ZNLY-258, shared by the daily summary and the operational report)', () => {
+  it('only the cash part leaves cash; the rest comes off card', () => {
+    expect(applyRefundsToBuckets({ cash: 500, card: 300, fonepay: 0 }, 100, 40)).toEqual({ cash: 460, card: 240, fonepay: 0 });
+  });
+  it('cashRefunds missing = every refund is cash (no NaN)', () => {
+    expect(applyRefundsToBuckets({ cash: 500, card: 300, fonepay: 0 }, 100, undefined)).toEqual({ cash: 400, card: 300, fonepay: 0 });
+  });
+  it('cashRefunds 0 = all of it card; never more than the refunds', () => {
+    expect(applyRefundsToBuckets({ cash: 500, card: 300, fonepay: 0 }, 100, 0)).toEqual({ cash: 500, card: 200, fonepay: 0 });
+    expect(applyRefundsToBuckets({ cash: 500, card: 300, fonepay: 0 }, 100, 999)).toEqual({ cash: 400, card: 300, fonepay: 0 });
   });
 });

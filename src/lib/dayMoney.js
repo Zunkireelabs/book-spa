@@ -68,3 +68,13 @@ export function dayMoneyView(d) {
   }
   return { closed: false, headline: live, live };
 }
+
+// Takes the day's refunds out of the { cash, card, fonepay } buckets IN PLACE (ZNLY-258): only the cash part leaves cash, the rest went back
+// to card / online. cashRefunds missing (an RPC that predates it) = every refund counted as cash, like foldDayMoney. Never more than the refunds.
+export function applyRefundsToBuckets(buckets, refunds, cashRefunds) {
+  const total = Number(refunds) || 0;
+  const cash = cashRefunds == null ? total : Math.min(Number(cashRefunds) || 0, total);
+  buckets.cash -= cash;
+  buckets.card -= total - cash;
+  return buckets;
+}

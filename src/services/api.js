@@ -1,5 +1,5 @@
 import { buildQueue, needsOf } from '../lib/dashboardNeeds';
-import { WALLET_MODES, addTender, isTendered, canonicalMode, dayMoneyView } from '../lib/dayMoney';
+import { WALLET_MODES, addTender, isTendered, canonicalMode, dayMoneyView, applyRefundsToBuckets } from '../lib/dayMoney';
 import { closeDayBlock } from '../lib/closeDay';
 import { cardModeNames, bucketForMode, getOrgPaymentMethods } from './paymentMethods';
 import { toTransferInput } from '../utils/transferText';
@@ -1179,11 +1179,11 @@ export async function getDayMoneyForDate(branchId, date) {
   const { data, error } = await supabase.rpc('get_day_money', { p_branch_id: isOverallBranch(branchId) ? null : resolveBranchId(branchId), p_date: date });
   if (error) throw error;
   const d = data || {};
-  return { byMode: d.by_method || {}, refunds: Number(d.refunds || 0), cashRefunds: Number(d.cash_refunds || 0), taken: Number(d.taken || 0), cashExpected: Number(d.cash_expected || 0), serviceIn: Number(d.service_in || 0), sources: d.sources || {},
+  return { byMode: d.by_method || {}, refunds: Number(d.refunds || 0), cashRefunds: d.cash_refunds == null ? undefined : Number(d.cash_refunds), taken: Number(d.taken || 0), cashExpected: Number(d.cash_expected || 0), serviceIn: Number(d.service_in || 0), sources: d.sources || {},
     // money taken AFTER this day was closed (not in the closed daily_reports row), and its cash part (ZNLY-234)
     afterClose: { amount: Number(d.after_close?.amount || 0), cash: Number(d.after_close?.cash || 0) },
     // what the closed day held at close, from rows taken at or before closed_at (null when the day is open or a multi-branch view)
-    atClose: d.at_close ? { byMode: d.at_close.by_method || {}, refunds: Number(d.at_close.refunds || 0), cashRefunds: Number(d.at_close.cash_refunds || 0), taken: Number(d.at_close.taken || 0), cashExpected: Number(d.at_close.cash_expected || 0), closedAt: d.at_close.closed_at || null } : null };
+    atClose: d.at_close ? { byMode: d.at_close.by_method || {}, refunds: Number(d.at_close.refunds || 0), cashRefunds: d.at_close.cash_refunds == null ? undefined : Number(d.at_close.cash_refunds), taken: Number(d.at_close.taken || 0), cashExpected: Number(d.at_close.cash_expected || 0), closedAt: d.at_close.closed_at || null } : null };
 }
 
 // Membership top-ups and package purchases on [date] — new cash in from selling
@@ -4884,8 +4884,7 @@ export async function getDailySummary(branchId, date) {
     const cardNames = await getOrgCardNames();
     for (const [m, v] of Object.entries(byMode)) paymentBreakdown[bucketForMode(m, cardNames)] += Number(v);
     // Only refunds paid out in cash leave the cash bucket; the rest went back to card / online (ZNLY-258). The buckets still add up to taken.
-    paymentBreakdown.cash -= dayMoney.cashRefunds;
-    paymentBreakdown.card -= refunds - dayMoney.cashRefunds;
+    applyRefundsToBuckets(paymentBreakdown, refunds, dayMoney.cashRefunds);
     netRevenue = dayMoney.taken;
 
     // 4d. Tips collected today — NOT revenue (migration-240). Reported separately,
@@ -5585,8 +5584,7 @@ export async function getDailyOperationalReport(branchId, date) {
       const cardNames = await getOrgCardNames();
       for (const [m, v] of Object.entries(byMode)) paymentBreakdown[bucketForMode(m, cardNames)] += Number(v);
       // Only refunds paid out in cash leave the cash bucket; the rest went back to card / online (ZNLY-258). The buckets still add up to taken.
-    paymentBreakdown.cash -= dayMoney.cashRefunds;
-    paymentBreakdown.card -= refunds - dayMoney.cashRefunds;
+    applyRefundsToBuckets(paymentBreakdown, refunds, dayMoney.cashRefunds);
     }
 
     // Step 5 — Staff discount summary

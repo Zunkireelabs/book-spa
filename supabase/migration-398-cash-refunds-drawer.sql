@@ -18,11 +18,22 @@ ALTER TABLE public.payment_refunds ADD COLUMN IF NOT EXISTS cash_amount numeric(
 ALTER TABLE public.payment_refunds DROP CONSTRAINT IF EXISTS chk_payment_refunds_cash_amount;
 ALTER TABLE public.payment_refunds ADD CONSTRAINT chk_payment_refunds_cash_amount CHECK (cash_amount >= 0 AND cash_amount <= amount);
 
--- Backfill: the cash part of each refund = cash paid on that booking, never more than the refund. Idempotent (only rows still at 0).
+-- Backfill: the cash part of each refund = the cash paid on that booking, allocated SEQUENTIALLY across the booking's refunds (oldest first), so the
+-- cash handed back never adds up to more than the cash that came in (a booking refunded twice would otherwise count its cash twice). Never more than the
+-- refund itself. Idempotent (only rows still at 0; the allocation is a pure function of the rows, so a re-run gives the same numbers).
+WITH alloc AS (
+  SELECT rf.id,
+         GREATEST(0, LEAST(rf.amount,
+           COALESCE((SELECT sum(p.amount) FROM public.payments p
+                      WHERE p.booking_id = rf.booking_id AND public._dashboard_canon_mode(p.payment_mode) = 'Cash'), 0)
+           - COALESCE(sum(rf.amount) OVER (PARTITION BY rf.booking_id ORDER BY rf.created_at, rf.id
+                                            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0))) AS cash
+    FROM public.payment_refunds rf
+)
 UPDATE public.payment_refunds rf
-   SET cash_amount = LEAST(rf.amount, COALESCE((SELECT sum(p.amount) FROM public.payments p
-                                                  WHERE p.booking_id = rf.booking_id AND public._dashboard_canon_mode(p.payment_mode) = 'Cash'), 0))
- WHERE rf.cash_amount = 0;
+   SET cash_amount = alloc.cash
+  FROM alloc
+ WHERE alloc.id = rf.id AND rf.cash_amount = 0 AND alloc.cash > 0;
 
 -- A cancellation refunds every payment; stamp the cash part. (Body = migration 335's, plus cash_amount.)
 CREATE OR REPLACE FUNCTION public.handle_booking_cancellation_refund()
