@@ -556,7 +556,7 @@ const ProviderProfileFlow = () => {
       style={{ paddingTop: 'var(--customer-header-h, 64px)' }}
     >
       {entryChoiceModal}
-      <CustomerHeader branch={selectedBranch} marketplaceName={marketplaceIdentity?.name} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
+      <CustomerHeader branch={selectedBranch} marketplaceName={marketplaceIdentity?.name} marketplaceEmail={marketplaceIdentity?.email} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
       <ProfileHero orgName={orgName} heroImageUrl={heroImageUrl} logoUrl={logoUrl} />
 
       {/* Persistent "Book" entry, unconditional unlike SummaryCard/MobileBookingBar's

@@ -5,7 +5,7 @@ import BrandMark from './BrandMark';
 import CustomerAuthContext from 'contexts/CustomerAuthContext';
 import useMeasuredHeightVar from 'hooks/useMeasuredHeightVar';
 
-const CustomerHeader = ({ wide, branch, containerClassName, marketplaceName }) => {
+const CustomerHeader = ({ wide, branch, containerClassName, marketplaceName, marketplaceEmail }) => {
   const location = useLocation();
   const { orgSlug } = useParams();
   const headerRef = useRef(null);
@@ -79,7 +79,12 @@ const CustomerHeader = ({ wide, branch, containerClassName, marketplaceName }) =
             {/* Login / Account — a marketplace-sourced name (see utils/marketplaceIdentity.js)
                 is display only, never a book-spa session, so it still links to loginPath,
                 not accountPath: there is no book-spa account behind it to view. A genuine
-                book-spa customerProfile always takes priority when both are present. */}
+                book-spa customerProfile always takes priority when both are present.
+                Email-OTP marketplace accounts collect no name at all (user_metadata.full_name
+                is simply never set), so `name` can arrive as '' even though the identity is
+                real — falls back to the email's local part, same treatment the marketplace's
+                own accountLabel() uses for the same reason. Not the full address (too long for
+                this slot) and not a name guessed from the email (would misrepresent someone). */}
             <Link
               to={customer && customerProfile ? accountPath : loginPath}
               className="flex items-center space-x-2 px-3 sm:px-4 py-2 rounded-spa border border-border hover:bg-background spa-transition-fast spa-touch-target flex-shrink-0"
@@ -88,7 +93,7 @@ const CustomerHeader = ({ wide, branch, containerClassName, marketplaceName }) =
               <span className="font-body font-body-medium text-sm text-text-primary whitespace-nowrap">
                 {customer && customerProfile
                   ? customerProfile.full_name.split(' ')[0]
-                  : (marketplaceName?.split(' ')[0] || 'Login')}
+                  : (marketplaceName?.split(' ')[0] || marketplaceEmail?.split('@')[0] || 'Login')}
               </span>
             </Link>
           </div>
