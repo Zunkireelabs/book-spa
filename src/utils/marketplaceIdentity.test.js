@@ -35,7 +35,10 @@ describe('fetchMarketplaceIdentity', () => {
 
     const result = await fetchMarketplaceIdentity();
 
-    expect(result).toEqual({ name: 'Ana Smith', email: 'a@b.com' });
+    expect(result).toEqual({
+      name: 'Ana Smith', email: 'a@b.com',
+      firstName: '', lastName: '', phone: '', gender: '', country: '',
+    });
   });
 
   it('fetches when ?source=zennly is present even with no base path', async () => {
@@ -48,7 +51,10 @@ describe('fetchMarketplaceIdentity', () => {
 
     const result = await fetchMarketplaceIdentity();
 
-    expect(result).toEqual({ name: 'Ana Smith', email: 'a@b.com' });
+    expect(result).toEqual({
+      name: 'Ana Smith', email: 'a@b.com',
+      firstName: '', lastName: '', phone: '', gender: '', country: '',
+    });
   });
 
   it('does not fetch when some other source param is present', async () => {
@@ -102,6 +108,42 @@ describe('fetchMarketplaceIdentity', () => {
       json: async () => ({ ok: true, data: { id: 'u1', email: null, name: 'Ana Smith' } }),
     }));
 
-    expect(await fetchMarketplaceIdentity()).toEqual({ name: 'Ana Smith', email: '' });
+    expect(await fetchMarketplaceIdentity()).toEqual({
+      name: 'Ana Smith', email: '',
+      firstName: '', lastName: '', phone: '', gender: '', country: '',
+    });
+  });
+
+  it('passes through firstName/lastName/phone/gender/country when the marketplace sends them', async () => {
+    vi.stubEnv('VITE_BASE_PATH', '/book/');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        data: {
+          id: 'u1', email: 'a@b.com', name: 'Ana Smith',
+          firstName: 'Ana', lastName: 'Smith', phone: '9841234567', gender: 'female', country: 'NP',
+        },
+      }),
+    }));
+
+    expect(await fetchMarketplaceIdentity()).toEqual({
+      name: 'Ana Smith', email: 'a@b.com',
+      firstName: 'Ana', lastName: 'Smith', phone: '9841234567', gender: 'female', country: 'NP',
+    });
+  });
+
+  it('stays backward-compatible when the marketplace has not shipped the new fields yet', async () => {
+    vi.stubEnv('VITE_BASE_PATH', '/book/');
+    // Old-shape response: no firstName/lastName/phone/gender/country keys at all.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, data: { id: 'u1', email: 'a@b.com', name: 'Ana Smith' } }),
+    }));
+
+    expect(await fetchMarketplaceIdentity()).toEqual({
+      name: 'Ana Smith', email: 'a@b.com',
+      firstName: '', lastName: '', phone: '', gender: '', country: '',
+    });
   });
 });

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import CustomerHeader from '../../../../components/ui/CustomerHeader';
@@ -11,7 +11,7 @@ import GroupConfirmStep, { mapBookingError } from './GroupConfirmStep';
 import DiscardDialog from '../BookingView/DiscardDialog';
 import { addGuest, removeGuest, updateGuestField, MAX_GROUP_SIZE } from '../../utils/groupBooking';
 import { submitGroupBooking } from '../../../../services/api';
-import { toE164 } from '../../../../utils/phone';
+import { toE164, splitE164 } from '../../../../utils/phone';
 import { scrollToTopInstant } from '../../../../utils/scroll';
 
 const STEP_HEADINGS = {
@@ -51,6 +51,7 @@ const GroupBookingView = ({
   onGroupBookingComplete,
   marketplaceName,
   marketplaceEmail,
+  marketplaceIdentity,
 }) => {
   const [stepIndex, setStepIndex] = useState(0);
   const [activeGuestId, setActiveGuestId] = useState('lead');
@@ -64,6 +65,28 @@ const GroupBookingView = ({
     referralSource: '', referralClientName: '', referralPhone: '', referralCountryCode: '+977',
     referralSocialPlatform: '', referralStaffName: '', specialRequests: '', agreeToTerms: false,
   });
+  // The lead contact previously started blank with no prefill at all, unlike solo's
+  // customerInfo -- fixed by mirroring that same effect here. No customerProfile/loading
+  // flag is available at this level (only customerAccountId, already resolved by the
+  // parent), so this just avoids overriding a lead that already has an account linked.
+  const leadPrefilled = useRef(false);
+  useEffect(() => {
+    if (customerAccountId || leadPrefilled.current || !marketplaceIdentity) return;
+    leadPrefilled.current = true;
+    const [splitFirstName, ...splitRest] = (marketplaceIdentity.name || '').split(' ');
+    const firstName = marketplaceIdentity.firstName || splitFirstName || '';
+    const lastName = marketplaceIdentity.lastName || splitRest.join(' ');
+    const savedPhone = splitE164(marketplaceIdentity.phone || '');
+    setLeadContact((prev) => ({
+      ...prev,
+      firstName: prev.firstName || firstName,
+      lastName: prev.lastName || lastName,
+      email: prev.email || marketplaceIdentity.email || '',
+      phone: prev.phone || savedPhone.national,
+      phoneCountryCode: prev.phone ? prev.phoneCountryCode : (savedPhone.national ? savedPhone.dial : prev.phoneCountryCode),
+      gender: prev.gender || marketplaceIdentity.gender || '',
+    }));
+  }, [customerAccountId, marketplaceIdentity]);
 
   // Mirrors BookingView's own steps list exactly: showStaffSelection=false drops the
   // professional step entirely for solo, so group booking's toggle-respecting fix

@@ -116,12 +116,26 @@ const ProviderProfileFlow = () => {
       if (!identity || prefilledFromProfile.current) return;
       prefilledFromProfile.current = true;
       setMarketplaceIdentity(identity);
-      const [firstName, ...rest] = (identity.name || '').split(' ');
+      // Prefer the marketplace's own firstName/lastName when it sends them -- splitting
+      // `name` on a space is lossy for names like "Bahadur Singh Thapa" (not first+last,
+      // just two words that happen to contain a space). Only fall back to the split when
+      // the marketplace hasn't shipped the structured fields yet (identity.firstName/
+      // lastName come back '' from fetchMarketplaceIdentity's own defaults in that case).
+      const [splitFirstName, ...splitRest] = (identity.name || '').split(' ');
+      const firstName = identity.firstName || splitFirstName || '';
+      const lastName = identity.lastName || splitRest.join(' ');
+      const savedPhone = splitE164(identity.phone || '');
       setCustomerInfo((prev) => ({
         ...prev,
-        firstName: prev.firstName || firstName || '',
-        lastName: prev.lastName || rest.join(' '),
+        firstName: prev.firstName || firstName,
+        lastName: prev.lastName || lastName,
         email: prev.email || identity.email || '',
+        // Unverified on the marketplace's side (see marketplaceIdentity.js) -- prefill
+        // only, still passes through isValidPhoneForCountry and the customer's own
+        // review before anything submits, exactly like any other typed value.
+        phone: prev.phone || savedPhone.national,
+        phoneCountryCode: prev.phone ? prev.phoneCountryCode : (savedPhone.national ? savedPhone.dial : prev.phoneCountryCode),
+        gender: prev.gender || identity.gender || '',
       }));
     });
   }, [customerAuthLoading, customerProfile]);
@@ -482,6 +496,7 @@ const ProviderProfileFlow = () => {
         onGroupBookingComplete={handleGroupBookingComplete}
         marketplaceName={marketplaceIdentity?.name}
         marketplaceEmail={marketplaceIdentity?.email}
+        marketplaceIdentity={marketplaceIdentity}
       />
     );
   }
