@@ -22,9 +22,9 @@ describe('maskCustomerName', () => {
 
 describe('maskPhone', () => {
   it('first 2 + 5 dots + last 3, same width every time, no country code', () => {
-    expect(maskPhone('+9779818088655')).toBe('98•••••655');
-    expect(maskPhone('9818088655')).toBe('98•••••655');
-    expect(maskPhone('+977 98-1808-8655')).toBe('98•••••655');
+    expect(maskPhone('+9779800000012')).toBe('98•••••012');
+    expect(maskPhone('9800000012')).toBe('98•••••012');
+    expect(maskPhone('+977 98-0000-0012')).toBe('98•••••012');
   });
   it('a too-short number is all dots, never exposed', () => {
     expect(maskPhone('12')).toBe('••••••••••');

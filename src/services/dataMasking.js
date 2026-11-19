@@ -11,7 +11,7 @@ export function maskCustomerName(name) {
   return `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.`;
 }
 
-// "+9779818088655" -> "98•••••655": first 2 + 5 dots + last 3 of the national number, always the same width. Twin of SQL mask_phone_digits.
+// "+9779800000012" -> "98•••••012": first 2 + 5 dots + last 3 of the national number, always the same width. Twin of SQL mask_phone_digits.
 export function maskPhone(phone) {
   if (!phone) return phone;
   const digits = String(phone).replace(/\D/g, '');

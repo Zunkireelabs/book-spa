@@ -37,8 +37,8 @@ DO $$ BEGIN
   ASSERT mask_person_name('Anisha Thakuri') = 'Anisha T.', 'P1 name mask ' || mask_person_name('Anisha Thakuri');
   ASSERT mask_person_name('Kokwah') = 'Kokwah', 'P2 single word stays';
   ASSERT mask_person_name('Ashmi Thing Tamang') = 'Ashmi T.', 'P2b last initial, first name';
-  ASSERT mask_phone_digits('+9779818088655') = '98•••••655', 'P3 phone mask ' || mask_phone_digits('+9779818088655');
-  ASSERT mask_phone_digits('9818088655') = '98•••••655', 'P3b same without the country code';
+  ASSERT mask_phone_digits('+9779800000012') = '98•••••012', 'P3 phone mask ' || mask_phone_digits('+9779800000012');
+  ASSERT mask_phone_digits('9800000012') = '98•••••012', 'P3b same without the country code';
   ASSERT mask_phone_digits('123') = '••••••••••', 'P4 short phone is fixed width';
 END $$;
 -- Each block: switch to the login, count through the BASE table and the SAFE view, assert no leak.

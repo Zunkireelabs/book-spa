@@ -29,9 +29,9 @@ describe('viewerAccess', () => {
 });
 
 describe('maskBookingForViewer', () => {
-  const b = { customer_name: 'Anisha Thakuri', customer_phone: '+9779818088655', customer_email: 'a@b.c', final_amount: 1000 };
+  const b = { customer_name: 'Anisha Thakuri', customer_phone: '+9779800000012', customer_email: 'a@b.c', final_amount: 1000 };
   it('masks and strips per flag', () => {
-    expect(maskBookingForViewer(b, { canViewCustomerDetails: false, canViewPrices: false })).toEqual({ customer_name: 'Anisha T.', customer_phone: '98•••••655', customer_email: null, final_amount: null });
+    expect(maskBookingForViewer(b, { canViewCustomerDetails: false, canViewPrices: false })).toEqual({ customer_name: 'Anisha T.', customer_phone: '98•••••012', customer_email: null, final_amount: null });
   });
   it('leaves a full-access viewer untouched', () => expect(maskBookingForViewer(b, { canViewCustomerDetails: true, canViewPrices: true })).toEqual(b));
   it('moneyOrDash', () => {
