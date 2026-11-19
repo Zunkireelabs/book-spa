@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import BookingSearch from '../../booking-management-portal/components/BookingSearch';
@@ -61,7 +62,7 @@ const CheckBookingPanel = ({ branchId }) => {
     const result = await updateBookingStatus({ bookingId: booking.bookingId, newStatus: dbStatus, reason });
 
     if (result.error) {
-      showNotification(result.error.message || 'Failed to cancel booking.', 'error');
+      showNotification(friendlyError(result.error, 'Failed to cancel booking.'), 'error');
     } else {
       showNotification('Booking cancelled successfully.', 'success');
       setCurrentBooking(prev => prev ? { ...prev, status: 'cancelled' } : null);

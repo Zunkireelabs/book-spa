@@ -52,7 +52,7 @@ const RoomManagementPanel = ({ branchId }) => {
     const result = await fetchRoomsForManagement(branchId);
     
     if (result.error) {
-      setError(result.error.message || 'Failed to load rooms.');
+      setError(friendlyError(result.error, 'Failed to load rooms.'));
     } else {
       setRooms(result.data || []);
     }

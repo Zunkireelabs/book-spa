@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import FilterBar from '../../../../components/ui/FilterBar';
@@ -53,7 +54,7 @@ const ReferralWalletPanel = ({ branchId }) => {
     setError(null);
     const { data, error: err } = await getReferralWalletReport({ branchId, from: range.from, to: range.to });
     if (err) {
-      setError(err.message || 'Failed to load referral wallets.');
+      setError(friendlyError(err, 'Failed to load referral wallets.'));
     } else {
       setRows(data || []);
     }

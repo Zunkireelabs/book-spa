@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
@@ -51,8 +52,8 @@ const MembershipDetailPanel = ({ membershipId, isAdmin = false, readOnly = false
     if (!membershipId) return;
     setError(null);
     const [mRes, tRes] = await Promise.all([fetchMembership(membershipId), fetchMembershipTransactions(membershipId)]);
-    if (mRes.error) { setError(mRes.error.message || 'Failed to load membership.'); return; }
-    if (tRes.error) { setError(tRes.error.message || 'Failed to load transactions.'); return; }
+    if (mRes.error) { setError(friendlyError(mRes.error, 'Failed to load membership.')); return; }
+    if (tRes.error) { setError(friendlyError(tRes.error, 'Failed to load transactions.')); return; }
     setMembership(mRes.data);
     setTxns(tRes.data || []);
   }, [membershipId]);

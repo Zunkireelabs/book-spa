@@ -200,7 +200,7 @@ const VoucherDetailPanel = ({ voucherId, readOnly = false, width, initialView = 
       orgId ? fetchBranchesByOrgId(orgId) : Promise.resolve({ data: [] }),
       orgId ? fetchServicesByOrgId(orgId) : Promise.resolve({ data: [] }),
     ]);
-    if (voucherRes.error) { setLoadError(voucherRes.error.message || 'Failed to load voucher.'); return; }
+    if (voucherRes.error) { setLoadError(friendlyError(voucherRes.error, 'Failed to load voucher.')); return; }
     setVoucher(voucherRes.data);
     setClaims(claimsRes.data || []);
     setHistory(historyRes.data || null);

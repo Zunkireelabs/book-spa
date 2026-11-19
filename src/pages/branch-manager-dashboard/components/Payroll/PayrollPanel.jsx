@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
@@ -63,7 +64,7 @@ const CompensationPanel = ({ branchId, readOnly = false }) => {
   const load = useCallback(async () => {
     setLoadError(null);
     const { data, error: err } = await fetchStaffCompensation(branchId);
-    if (err) { setLoadError(err.message || 'Failed to load staff compensation.'); setStaff([]); return; }
+    if (err) { setLoadError(friendlyError(err, 'Failed to load staff compensation.')); setStaff([]); return; }
     setStaff(data || []);
   }, [branchId]);
   useEffect(() => { setStaff(null); load(); }, [load]);
@@ -87,7 +88,7 @@ const CompensationPanel = ({ branchId, readOnly = false }) => {
     setError(null);
     const { error: err } = await setStaffCompensation({ therapistId, monthlySalary: salary, commissionRate: rate, productCommissionRate: productRate });
     setSaving(false);
-    if (err) { setError(err.message || 'Failed to save.'); return; }
+    if (err) { setError(friendlyError(err, 'Failed to save.')); return; }
     setEditing(null);
     await load();
   };
@@ -165,7 +166,7 @@ const ProductSalesDrill = ({ item, branchId, periodMonth, onClose }) => {
     let live = true;
     fetchTherapistProductSales({ branchId, therapistId: item.therapistId, periodMonth }).then(({ data: d, error: err }) => {
       if (!live) return;
-      if (err) setError(err.message || 'Could not load the sales.'); else setData(d);
+      if (err) setError(friendlyError(err, 'Could not load the sales.')); else setData(d);
     });
     return () => { live = false; };
   }, [item.therapistId, branchId, periodMonth]);
@@ -227,7 +228,7 @@ const RunPayrollPanel = ({ branchId, readOnly = false }) => {
     setLoading(true);
     setError(null);
     const { data, error: err } = await getPayrollRun({ branchId, periodMonth: month });
-    if (err) setError(err.message || 'Failed to load payroll run.'); else setRunData(data);
+    if (err) setError(friendlyError(err, 'Failed to load payroll run.')); else setRunData(data);
     const sp = await fetchPayrollBranchSplit({ branchId, periodMonth: month });
     setSplit(sp.data || null);
     setLoading(false);
@@ -239,7 +240,7 @@ const RunPayrollPanel = ({ branchId, readOnly = false }) => {
     setError(null);
     const { data, error: err } = await generatePayroll({ branchId, periodMonth: selectedMonth });
     setGenerating(false);
-    if (err) setError(err.message || 'Failed to generate payroll.'); else setRunData(data);
+    if (err) setError(friendlyError(err, 'Failed to generate payroll.')); else setRunData(data);
   };
   const handleFinalize = async () => {
     setShowFinalizeConfirm(false);
@@ -247,7 +248,7 @@ const RunPayrollPanel = ({ branchId, readOnly = false }) => {
     setError(null);
     const { error: err } = await finalizePayroll({ runId: runData.run.id });
     setFinalizing(false);
-    if (err) setError(err.message || 'Failed to finalize payroll.'); else await loadRun(selectedMonth);
+    if (err) setError(friendlyError(err, 'Failed to finalize payroll.')); else await loadRun(selectedMonth);
   };
 
   const handleExportCSV = () => {

@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { useOrg } from '../../../../contexts/OrgContext';
@@ -113,21 +114,21 @@ const BookingSettingsPanel = () => {
     if (!next) {
       setSaving('enforce_staff_availability');
       const r = await setEnforceStaffAvailability({ enabled: false });
-      if (r.error) setError(r.error.message || 'Failed to update setting.'); else await refreshOrg();
+      if (r.error) setError(friendlyError(r.error, 'Failed to update setting.')); else await refreshOrg();
       setSaving(null);
       return;
     }
     setSaving('enforce_staff_availability');
     const { data, error: checkErr } = await fetchAvailabilityRolloutCheck(orgId);
     setSaving(null);
-    if (checkErr || !data) { setError(checkErr?.message || 'Could not check what turning this on would change.'); return; }
+    if (checkErr || !data) { setError(friendlyError(checkErr, 'Could not check what turning this on would change.')); return; }
     setRollout(data);
   };
 
   const confirmEnforce = async () => {
     setSaving('enforce_staff_availability');
     const r = await setEnforceStaffAvailability({ enabled: true });
-    if (r.error) setError(r.error.message || 'Failed to update setting.'); else { await refreshOrg(); setRollout(null); }
+    if (r.error) setError(friendlyError(r.error, 'Failed to update setting.')); else { await refreshOrg(); setRollout(null); }
     setSaving(null);
   };
 
@@ -136,7 +137,7 @@ const BookingSettingsPanel = () => {
     setError(null);
     const result = await updateOrgBookingSetting(toggle.key, nextValue);
     if (result.error) {
-      setError(result.error.message || 'Failed to update setting.');
+      setError(friendlyError(result.error, 'Failed to update setting.'));
     } else {
       await refreshOrg();
     }

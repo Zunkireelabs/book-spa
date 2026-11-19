@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { viewerAccess } from '../../../services/dataMasking';
@@ -141,7 +142,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
     });
 
     if (result.error) {
-      setError(result.error.message || 'Failed to create booking.');
+      setError(friendlyError(result.error, 'Failed to create booking.'));
       setSubmitting(false);
       return;
     }

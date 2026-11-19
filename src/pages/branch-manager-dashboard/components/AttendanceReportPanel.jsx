@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
@@ -249,7 +250,7 @@ const AttendanceReportPanel = ({ branchId }) => {
     setError(null);
     const result = await fetchAttendanceReport({ branchId, ...range });
     if (result.error) {
-      setError(result.error.message || 'Failed to load attendance report.');
+      setError(friendlyError(result.error, 'Failed to load attendance report.'));
     } else {
       setData(result.data);
     }

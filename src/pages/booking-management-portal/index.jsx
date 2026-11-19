@@ -1,3 +1,4 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState } from 'react';
 import { Helmet } from 'react-helmet';
 import CustomerHeader from '../../components/ui/CustomerHeader';
@@ -63,7 +64,7 @@ const BookingManagementPortal = () => {
     const result = await updateBookingStatus({ bookingId: booking.bookingId, newStatus: dbStatus });
 
     if (result.error) {
-      showNotification(result.error.message || 'Failed to cancel booking.', 'error');
+      showNotification(friendlyError(result.error, 'Failed to cancel booking.'), 'error');
     } else {
       showNotification('Booking cancelled successfully.', 'success');
       // Refresh by re-searching

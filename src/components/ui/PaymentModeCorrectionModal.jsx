@@ -1,3 +1,4 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect } from 'react';
 import Icon from '../AppIcon';
 import PaymentMethodSelector from './PaymentMethodSelector';
@@ -53,7 +54,7 @@ const PaymentModeCorrectionModal = ({ payment, paymentMethods, onClose, onSucces
       });
       if (rpcError) {
         setSubmitting(false);
-        setError(rpcError.message || 'Failed to correct payment method.');
+        setError(friendlyError(rpcError, 'Failed to correct payment method.'));
         return;
       }
     }
@@ -70,7 +71,7 @@ const PaymentModeCorrectionModal = ({ payment, paymentMethods, onClose, onSucces
         setError(
           (modeChanged ? 'Payment method corrected, but the ' : 'The ')
           + 'amount correction failed: '
-          + (rpcError.message || 'please try again.')
+          + (friendlyError(rpcError, 'please try again.'))
         );
         return;
       }

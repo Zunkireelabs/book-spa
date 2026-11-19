@@ -1,3 +1,4 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState } from 'react';
 import Icon from '../AppIcon';
 import { updateCustomerContact } from '../../services/api';
@@ -49,7 +50,7 @@ const CustomerContactQuickEdit = ({ customerId, email, phone, onSaved }) => {
     setSaving(false);
 
     if (saveError) {
-      setError(saveError.message || 'Failed to save contact info.');
+      setError(friendlyError(saveError, 'Failed to save contact info.'));
       return;
     }
 

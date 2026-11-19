@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useCustomerAuth } from 'contexts/CustomerAuthContext';
@@ -65,7 +66,7 @@ const CustomerSignupForm = () => {
       setStep('code');
     } catch (error) {
       setErrors({
-        submit: error.message || 'An unexpected error occurred. Please try again.'
+        submit: friendlyError(error, 'An unexpected error occurred. Please try again.')
       });
     } finally {
       setIsLoading(false);

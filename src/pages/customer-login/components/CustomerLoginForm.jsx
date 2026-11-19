@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useCustomerAuth } from 'contexts/CustomerAuthContext';
@@ -43,7 +44,7 @@ const CustomerLoginForm = () => {
       setError(
         err.message?.toLowerCase().includes('signup')
           ? 'No account found for this email. Please sign up.'
-          : err.message || 'An unexpected error occurred. Please try again.'
+          : friendlyError(err, 'An unexpected error occurred. Please try again.')
       );
     } finally {
       setIsLoading(false);

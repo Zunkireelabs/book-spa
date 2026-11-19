@@ -1,3 +1,4 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useBranch } from 'contexts/BranchContext';
@@ -232,7 +233,7 @@ const AttendanceCalendarPage = ({ embedded = false }) => {
     setError(null);
     const result = await fetchAttendanceReport({ branchId, ...range });
     if (result.error) {
-      setError(result.error.message || 'Failed to load attendance.');
+      setError(friendlyError(result.error, 'Failed to load attendance.'));
     } else {
       setData(result.data);
     }

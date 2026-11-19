@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useCallback, useEffect } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
@@ -139,7 +140,7 @@ const AuditPanel = ({ branchId, initialRecordId = '' }) => {
           offset: 0,
         });
         if (result.error) {
-          setError(result.error.message || 'Failed to load audit logs.');
+          setError(friendlyError(result.error, 'Failed to load audit logs.'));
           setLogs([]);
           setTotalCount(0);
         } else {
@@ -168,7 +169,7 @@ const AuditPanel = ({ branchId, initialRecordId = '' }) => {
     });
 
     if (result.error) {
-      setError(result.error.message || 'Failed to load audit logs.');
+      setError(friendlyError(result.error, 'Failed to load audit logs.'));
       setLogs([]);
       setTotalCount(0);
     } else {

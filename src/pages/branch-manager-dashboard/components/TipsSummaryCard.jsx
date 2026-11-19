@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import { getTipsSummary, markTipsDistributed, isOverallBranch } from '../../../services/api';
@@ -30,7 +31,7 @@ const TipsSummaryCard = ({ branchId, userRole = 'staff' }) => {
     setError(null);
     const result = await getTipsSummary(branchId);
     if (result.error) {
-      setError(result.error.message || 'Failed to load tips.');
+      setError(friendlyError(result.error, 'Failed to load tips.'));
       setLoading(false);
       return;
     }

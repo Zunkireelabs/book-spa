@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { useIndustry } from 'hooks/useIndustry';
@@ -43,7 +44,7 @@ const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, per
     setOv((s) => ({ ...s, loading: true, error: null }));
     const res = await getTherapistOverview({ branchId, therapistId, fromDate: range.from, toDate: range.to });
     if (req !== ovReq.current) return;
-    setOv({ data: res.data, loading: false, error: res.error ? (res.error.message || 'Failed to load overview.') : null });
+    setOv({ data: res.data, loading: false, error: res.error ? (friendlyError(res.error, 'Failed to load overview.')) : null });
   }, [branchId, therapistId, range.from, range.to]);
   useEffect(() => { load(); }, [load]);
 
@@ -56,7 +57,7 @@ const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, per
     if (!scopeIds.length || !therapistId) return;
     setCust((s) => ({ ...s, loading: true, error: null }));
     const res = await fetchTherapistCustomers({ therapistId, branchIds: scopeIds, from: range.from, to: range.to });
-    setCust({ rows: res.error ? null : res.data, loading: false, error: res.error ? (res.error.message || 'Failed to load customers.') : null });
+    setCust({ rows: res.error ? null : res.data, loading: false, error: res.error ? (friendlyError(res.error, 'Failed to load customers.')) : null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [therapistId, scopeKey, range.from, range.to]);
   useEffect(() => { loadCust(); }, [loadCust]);

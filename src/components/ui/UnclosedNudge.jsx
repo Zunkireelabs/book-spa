@@ -1,3 +1,4 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState } from 'react';
 import { closePastBooking } from '../../services/api';
 import { shortDate } from '../../utils/customerDirectory';
@@ -20,7 +21,7 @@ const UnclosedNudge = ({ unclosed = [], stale = [], readOnly, onChanged }) => {
     const { error: err } = await closePastBooking({ bookingId: first.id, outcome, reason: why });
     setBusy(false);
     if (err) {
-      setError(err.message || 'Could not update this booking.');
+      setError(friendlyError(err, 'Could not update this booking.'));
       if (err.code === 'PARTIAL') onChanged?.(); // the booking is mid-way: refresh so the panel shows its real state
       return;
     }

@@ -47,7 +47,7 @@ const CategoryManagementPanel = () => {
     setError(null);
     const result = await fetchCategoriesForManagement();
     if (result.error) {
-      setError(result.error.message || 'Failed to load categories.');
+      setError(friendlyError(result.error, 'Failed to load categories.'));
     } else {
       setCategories(result.data || []);
     }
@@ -87,7 +87,7 @@ const CategoryManagementPanel = () => {
 
     if (result.error) {
       if (result.error.code === 'HAS_SERVICES') {
-        setError(result.error.message);
+        setError(friendlyError(result.error));
       } else {
         setError(friendlyError(result.error, 'Delete failed.'));
       }

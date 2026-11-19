@@ -221,7 +221,7 @@ const EnrollMemberPanel = ({ onClose, onEnrolled, onRenewExisting, initialTierId
     setSubmitting(false);
 
     if (rpcError) {
-      setServerError(/uniq_active_membership_per_customer/.test(rpcError?.message || '')
+      setServerError(/uniq_active_membership_per_customer/.test(rpcError.message || '')
         ? 'This customer already has an active membership. Open it from Memberships to top up or renew.'
         : friendlyError(rpcError, 'Failed to enroll member.'));
       return;

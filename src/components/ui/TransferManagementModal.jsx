@@ -328,7 +328,7 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
     if (editingScheduled && scheduledTransfer) {
       const cancelled = await cancelScheduledTransfer(scheduledTransfer.id);
       if (cancelled.error) {
-        setTransferError(cancelled.error.message || 'Could not replace the scheduled transfer.');
+        setTransferError(friendlyError(cancelled.error, 'Could not replace the scheduled transfer.'));
         setTransferring(false);
         return;
       }

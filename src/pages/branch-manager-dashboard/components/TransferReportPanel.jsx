@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import FilterBar from '../../../components/ui/FilterBar';
@@ -99,7 +100,7 @@ const TransferReportPanel = () => {
     setError(null);
     const { data, error: err } = await fetchStaffTransfers();
     if (err) {
-      setError(err.message || 'Failed to load transfer history.');
+      setError(friendlyError(err, 'Failed to load transfer history.'));
     } else {
       setTransfers(data || []);
     }

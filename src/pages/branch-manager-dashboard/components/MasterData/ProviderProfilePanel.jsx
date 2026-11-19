@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
@@ -173,7 +174,7 @@ const ProviderProfilePanel = () => {
     setError(null);
     const result = await updateOrgProfileSetting(key, value);
     if (result.error) {
-      setError(result.error.message || 'Failed to save.');
+      setError(friendlyError(result.error, 'Failed to save.'));
     } else {
       await refreshOrg();
     }
@@ -203,20 +204,20 @@ const ProviderProfilePanel = () => {
     let finalLogoUrl = logoPreview;
     if (logoFile) {
       const { url, error: uploadErr } = await uploadOrgBrandingImage('logo', logoFile);
-      if (uploadErr) { setError(uploadErr.message || 'Failed to upload logo.'); setSaving(null); return; }
+      if (uploadErr) { setError(friendlyError(uploadErr, 'Failed to upload logo.')); setSaving(null); return; }
       finalLogoUrl = url;
     }
 
     let finalHeroUrl = heroPreview;
     if (heroFile) {
       const { url, error: uploadErr } = await uploadOrgBrandingImage('hero', heroFile);
-      if (uploadErr) { setError(uploadErr.message || 'Failed to upload hero image.'); setSaving(null); return; }
+      if (uploadErr) { setError(friendlyError(uploadErr, 'Failed to upload hero image.')); setSaving(null); return; }
       finalHeroUrl = url;
     }
 
     const result = await updateOrgBranding({ logoUrl: finalLogoUrl, heroImageUrl: finalHeroUrl });
     if (result.error) {
-      setError(result.error.message || 'Failed to save branding.');
+      setError(friendlyError(result.error, 'Failed to save branding.'));
     } else {
       setLogoFile(null);
       setHeroFile(null);

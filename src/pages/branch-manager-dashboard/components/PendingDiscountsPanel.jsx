@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
@@ -23,7 +24,7 @@ const PendingDiscountsPanel = ({ branchId, highlightBookingId }) => {
 
     const result = await fetchPendingDiscounts(branchId);
     if (result.error) {
-      setError(result.error.message || 'Failed to load pending discounts.');
+      setError(friendlyError(result.error, 'Failed to load pending discounts.'));
     } else {
       setDiscounts(result.data || []);
     }

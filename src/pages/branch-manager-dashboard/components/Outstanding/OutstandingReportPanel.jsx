@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import FilterBar from '../../../../components/ui/FilterBar';
@@ -82,7 +83,7 @@ const OutstandingReportPanel = ({ branchId }) => {
     setError(null);
     const { data, error: err } = await getOutstandingByStaff({ branchId, from: range.from, to: range.to });
     if (err) {
-      setError(err.message || 'Failed to load outstanding balances.');
+      setError(friendlyError(err, 'Failed to load outstanding balances.'));
     } else {
       setGroups(data || []);
     }
@@ -192,7 +193,7 @@ const OutstandingReportPanel = ({ branchId }) => {
     const { error: err } = await setDueHolder({ bookingId, dueHolderName: name });
     setAssignSaving(false);
     if (err) {
-      setError(err.message || 'Failed to assign name.');
+      setError(friendlyError(err, 'Failed to assign name.'));
       return;
     }
     setAssigning(null);
