@@ -49,6 +49,8 @@ const GroupBookingView = ({
   showStaffSelection,
   customerAccountId,
   onGroupBookingComplete,
+  marketplaceName,
+  marketplaceEmail,
 }) => {
   const [stepIndex, setStepIndex] = useState(0);
   const [activeGuestId, setActiveGuestId] = useState('lead');
@@ -211,7 +213,7 @@ const GroupBookingView = ({
   // step name is its own back-navigation) or the browser's Back button.
   return (
     <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
-      <CustomerHeader branch={selectedBranch} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
+      <CustomerHeader branch={selectedBranch} marketplaceName={marketplaceName} marketplaceEmail={marketplaceEmail} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
 
       {confirmingClose && (
         <DiscardDialog onCancel={() => setConfirmingClose(false)} onConfirm={onClose} />

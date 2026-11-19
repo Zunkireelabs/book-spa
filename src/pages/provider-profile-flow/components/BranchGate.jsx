@@ -81,12 +81,12 @@ function useBranchStatus(branches) {
   return statusByBranchId;
 }
 
-const BranchGate = ({ orgName, heroImageUrl, logoUrl, branches, onSelect }) => {
+const BranchGate = ({ orgName, heroImageUrl, logoUrl, branches, onSelect, marketplaceName, marketplaceEmail }) => {
   const statusByBranchId = useBranchStatus(branches);
 
   return (
   <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
-    <CustomerHeader containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
+    <CustomerHeader marketplaceName={marketplaceName} marketplaceEmail={marketplaceEmail} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
     <ProfileHero orgName={orgName} heroImageUrl={heroImageUrl} logoUrl={logoUrl} />
 
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">

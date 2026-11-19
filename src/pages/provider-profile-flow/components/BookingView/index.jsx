@@ -46,6 +46,8 @@ const BookingView = ({
   therapistsError,
   onRetryTherapists,
   initialStepKey,
+  marketplaceName,
+  marketplaceEmail,
 }) => {
   const { showStaffSelection, enableStaffRatings, orgName, logoUrl, heroImageUrl } = useTenant();
 
@@ -137,7 +139,7 @@ const BookingView = ({
   // -> BookingConfirmation) is independent of this and still works unchanged.
   return (
     <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
-      <CustomerHeader branch={selectedBranch} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
+      <CustomerHeader branch={selectedBranch} marketplaceName={marketplaceName} marketplaceEmail={marketplaceEmail} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
 
       {confirmingClose && (
         <DiscardDialog onCancel={() => setConfirmingClose(false)} onConfirm={onClose} />

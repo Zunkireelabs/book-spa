@@ -480,6 +480,8 @@ const ProviderProfileFlow = () => {
         showStaffSelection={showStaffSelection}
         customerAccountId={customerProfile?.id}
         onGroupBookingComplete={handleGroupBookingComplete}
+        marketplaceName={marketplaceIdentity?.name}
+        marketplaceEmail={marketplaceIdentity?.email}
       />
     );
   }
@@ -508,6 +510,8 @@ const ProviderProfileFlow = () => {
         therapistsError={therapistsError}
         onRetryTherapists={() => setFetchNonce((n) => n + 1)}
         initialStepKey={selectedProfessional ? 'time' : 'professional'}
+        marketplaceName={marketplaceIdentity?.name}
+        marketplaceEmail={marketplaceIdentity?.email}
       />
     );
   }
@@ -543,6 +547,8 @@ const ProviderProfileFlow = () => {
             logoUrl={logoUrl}
             branches={branches}
             onSelect={handleBranchGateSelect}
+            marketplaceName={marketplaceIdentity?.name}
+            marketplaceEmail={marketplaceIdentity?.email}
           />
         </div>
         {entryChoiceModal}
