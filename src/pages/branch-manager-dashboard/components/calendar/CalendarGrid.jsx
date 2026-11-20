@@ -27,7 +27,7 @@ import {
   earliestStartTime,
   getOverlapLayout,
 } from './calendarLayout';
-import { PANEL_WIDTH } from '../../../../components/ui/SidePanel';
+import { bookingPanelPx } from '../../../../components/ui/SidePanel';
 import { scrollIntoTopBand } from '../../../../utils/gestures';
 import { findBlockOverlap, formatBlockRange } from '../../../../utils/blockOverlap';
 import { SHADE_STYLES, buildShadeSegments, shiftHeaderInfo, slotVerdict, outsideReasonText, outsideNote } from '../../../../services/availabilityShading';
@@ -820,12 +820,12 @@ const CalendarGrid = ({
       : `${draftGhost.kind || 'bk'}|${draftGhost.date}|${draftGhost.therapistId || ''}|${draftGhost.roomId || ''}|${draftGhost.startTime}|${draftGhost.durationMinutes}`)
     : (selectedBookingId ? `booking|${selectedBookingId}` : null);
   const focusSelector = draftGhost ? '[data-draft-ghost]' : `[data-booking-key="${selectedBookingId}"]`;
-  // The panel's real width (it differs per content: quick-create 420, booking details up to 560); falls back to defaults.
+  // The panel's real width (it differs per content: every booking panel shares PANEL_WIDTH_BOOKING); falls back to defaults.
   const panelWidthNow = () => {
     if (window.innerWidth < 768) return 0; // phones: the booking bottom sheet (no side panel)
     const el = document.querySelector('[data-side-panel]');
     if (el && el.getBoundingClientRect().width > 0) return Math.round(el.getBoundingClientRect().width);
-    return window.innerWidth >= 1024 ? PANEL_WIDTH : 400;
+    return window.innerWidth >= 1024 ? bookingPanelPx(window.innerWidth) : 400;
   };
   const [spacerW, setSpacerW] = useState(0);
   const gridScrolledRef = useRef(false);

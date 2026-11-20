@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import BottomSheet, { useMediaQuery } from '../../../../components/ui/BottomSheet';
-import SidePanel from '../../../../components/ui/SidePanel';
+import SidePanel, { PANEL_WIDTH_BOOKING } from '../../../../components/ui/SidePanel';
 import StaffPicker from '../../../../components/ui/StaffPicker';
 import Icon from '../../../../components/AppIcon';
 import { fetchUnassignedBookings, getCalendarBookings, fetchAttendance, fetchShiftsForRange, assignTherapist, LEAVE_LIKE_ATTENDANCE_STATUSES } from '../../../../services/api';
@@ -225,7 +225,7 @@ const AssignFlow = ({
 
   const headerExtra = sub ? <p className="px-4 pb-1 text-xs text-text-secondary">{sub}</p> : null;
   const common = { isOpen, title, onClose, children: body, footer, headerExtra };
-  return isPhone ? <BottomSheet {...common} /> : <SidePanel {...common} width="560px" />;
+  return isPhone ? <BottomSheet {...common} /> : <SidePanel {...common} width={PANEL_WIDTH_BOOKING} />;
 };
 
 export default AssignFlow;

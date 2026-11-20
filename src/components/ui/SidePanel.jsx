@@ -1,7 +1,11 @@
 import React, { useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Icon from '../AppIcon';
-export const PANEL_WIDTH = 420; // px; docked-panel width at lg+
+export const PANEL_WIDTH = 420; // px; default docked-panel width at lg+ (form/peek panels)
+// ONE width for every panel that does booking work over the calendar (view booking, New booking, Assign list): 560 on wide screens,
+// shrinking (never below 420) so the calendar isn't starved. Docked (lg+) only; below lg the panel is a sheet as before.
+export const PANEL_WIDTH_BOOKING = 'min(560px, max(420px, 100vw - 720px))';
+export const bookingPanelPx = (viewportW) => Math.min(560, Math.max(420, viewportW - 720)); // same rule in px, for JS that needs a number
 
 function useMediaQuery(query) {
   const get = () => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(query).matches : false);
@@ -22,7 +26,7 @@ function useMediaQuery(query) {
 //  * below lg: a right-hand sheet (full-screen under 640px) with a light scrim covering the whole viewport.
 // `onClose` is called for ×, Esc and the scrim — callers put any dirty-draft guard behind it. Both variants are portalled to <body>.
 // `header`: replaces the default title row entirely (the caller then renders its own × and the element with `titleId`).
-// `width`: any CSS width for the docked panel (default 420px), e.g. 'min(560px, max(420px, 100vw - 720px))'.
+// `width`: any CSS width for the docked panel (default 420px), booking-work panels pass PANEL_WIDTH_BOOKING.
 const SidePanel = ({ isOpen, title, onClose, onBack, children, footer, headerExtra, header, titleId: titleIdProp, width = `${PANEL_WIDTH}px` }) => {
   const docked = useMediaQuery('(min-width: 1024px)');
   const autoId = useId();

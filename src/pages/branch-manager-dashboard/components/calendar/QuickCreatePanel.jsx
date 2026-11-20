@@ -3,7 +3,7 @@ import { useAuth } from '../../../../contexts/AuthContext';
 import { viewerAccess } from '../../../../services/dataMasking';
 import Icon from '../../../../components/AppIcon';
 import MiniMonthCalendar from './MiniMonthCalendar';
-import SidePanel from '../../../../components/ui/SidePanel';
+import SidePanel, { PANEL_WIDTH_BOOKING } from '../../../../components/ui/SidePanel';
 import BlockOverlapWarning from '../../../../components/ui/BlockOverlapWarning';
 import AvailabilityNotice from '../../../../components/ui/AvailabilityNotice';
 import { useAvailabilityPrecheck } from '../../../../hooks/useAvailabilityPrecheck';
@@ -879,7 +879,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   );
 
   return (
-    <SidePanel isOpen={isOpen} title="New booking" onClose={requestClose} footer={footerNode}>
+    <SidePanel isOpen={isOpen} width={PANEL_WIDTH_BOOKING} title="New booking" onClose={requestClose} footer={footerNode}>
       <form id="quick-create-form" onSubmit={handleSubmit} className="px-5 py-5 space-y-4">
         {summaryRow}
 

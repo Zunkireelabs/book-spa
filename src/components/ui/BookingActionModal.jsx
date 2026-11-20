@@ -25,7 +25,7 @@ import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
 import BlockOverlapWarning from './BlockOverlapWarning';
-import SidePanel from './SidePanel';
+import SidePanel, { PANEL_WIDTH_BOOKING } from './SidePanel';
 import { DetentSheet, SheetExpandButton, useMediaQuery, releaseSheetEntry } from './BottomSheet';
 import ClientDayLine from '../../pages/branch-manager-dashboard/components/calendar/ClientDayLine';
 import { compactRange } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
@@ -80,8 +80,6 @@ function formatCreatedAt(iso) {
 }
 
 // Status badge styles
-// Booking details panel width: 560 on wide screens, shrinking (never below 420) so the calendar isn't starved.
-const BOOKING_PANEL_WIDTH = 'min(560px, max(420px, 100vw - 720px))';
 
 // Discount tab, member part (V22 addendum A): the tier's discount for this booking. Undecided (applies itself at checkout,
 // "Apply now" / "Don't apply for this visit"), applied ("Remove"), declined ("Apply N%"), or a better rate than the booking's
@@ -1379,7 +1377,7 @@ const BookingActionModal = ({
       <>
       <SidePanel
         isOpen
-        width={BOOKING_PANEL_WIDTH}
+        width={PANEL_WIDTH_BOOKING}
         onClose={onClose}
         title={(
           <span className="flex items-center gap-2 min-w-0">
@@ -4125,7 +4123,7 @@ const BookingActionModal = ({
     }
     return (
       <>
-        <SidePanel isOpen={isOpen} width={BOOKING_PANEL_WIDTH} header={panelHeader} titleId="booking-panel-title" onClose={requestPanelClose} footer={panelFooterWithNote}>
+        <SidePanel isOpen={isOpen} width={PANEL_WIDTH_BOOKING} header={panelHeader} titleId="booking-panel-title" onClose={requestPanelClose} footer={panelFooterWithNote}>
           {panelTabsNode}
           {contentNode}
         </SidePanel>
