@@ -3,7 +3,6 @@ import { useBodyScrollLock } from './BottomSheet';
 import { useGuardedNavigate } from '../../contexts/DirtyGuardContext';
 import Icon from '../AppIcon';
 import { useAuth } from 'contexts/AuthContext';
-import { useBranch } from 'contexts/BranchContext';
 import { useLock } from 'contexts/LockContext';
 import { useMenuNav } from './useMenuNav';
 import { pinHint } from './pinHint';
@@ -54,9 +53,9 @@ const ProfileMenu = () => {
 
   // "Settings" opens the first Setup page the role can see (Setup is manager/admin/admin_viewer only).
   // Branch-scoped Setup pages are hidden in the Overall view, where only the Audit Log is available.
-  const { isOverall } = useBranch();
   const canSettings = role === 'manager' || role === 'admin' || role === 'admin_viewer';
-  const settingsView = isOverall ? 'audit' : role === 'admin' ? 'booking-settings' : 'services';
+  // One entry point: ?view=settings is the home on a phone and the first menu page on desktop (SettingsLayout decides).
+  const settingsView = 'settings';
 
   const run = (fn) => () => {
     setOpen(false);
