@@ -1,4 +1,5 @@
 import { createBooking, createComboBookingItems } from '../../../../services/api';
+import { friendlyError } from '../../../../utils/friendlyError';
 import { wordBranch } from '../../../../utils/industryTerms';
 
 // Create the booking(s) from the QuickCreatePanel form. Shared by the Calendar and the Dashboard so both host the panel identically.
@@ -37,7 +38,7 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
       if (result.error) {
         const who = person.customerName || `person ${i + 1}`;
         const tail = created > 0 ? ` (${created} booking${created > 1 ? 's' : ''} already created)` : '';
-        return { error: `Failed for ${who}: ${result.error.message || 'could not create booking.'}${tail}` };
+        return { error: `Failed for ${who}: ${friendlyError(result.error, 'could not create booking.')}${tail}`, code: result.error.code };
       }
       created++;
     }
@@ -66,7 +67,7 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
     knownCustomerId: formData.knownCustomerId || undefined,
     overrideReason,
   }));
-  if (result.error) return { error: result.error.message || 'Failed to create booking.' };
+  if (result.error) return { error: friendlyError(result.error, 'Failed to create booking.'), code: result.error.code };
 
   if (formData.comboAssignments?.length > 0 && result.data?.id) {
     const comboResult = await createComboBookingItems({
@@ -79,7 +80,7 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
       overrideReason: result.overrideReason,
     });
     if (comboResult.error) {
-      return { toast: { msg: `Booking created, but combo components failed: ${comboResult.error.message || 'unknown error'}`, type: 'error' }, bookingId: result.data?.id };
+      return { toast: { msg: `Booking created, but combo components failed: ${friendlyError(comboResult.error, 'please check the booking')}`, type: 'error' }, bookingId: result.data?.id };
     }
   }
 

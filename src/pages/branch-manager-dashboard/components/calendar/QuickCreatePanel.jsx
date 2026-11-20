@@ -19,6 +19,8 @@ import { CUSTOMER_REFERRALS_ENABLED } from '../../../../lib/featureFlags';
 import { todayStr } from './calendarDates';
 import StaffPicker from '../../../../components/ui/StaffPicker';
 import { staffPickIncomplete } from '../../../../utils/staffFit';
+import { friendlyError } from '../../../../utils/friendlyError';
+import { fieldForErrorCode } from '../../../../utils/quickCreateErrorField';
 
 
 // ── Quick Create Panel ────────────────────────────────────────
@@ -69,6 +71,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [submitting, setSubmitting] = useState(false);
   const submitInFlightRef = useRef(false);
   const [error, setError] = useState(null);
+  const [errorCode, setErrorCode] = useState(null);
+  const [errorKey, setErrorKey] = useState(null); // snapshot of the form when the rejection came back: the reason stands until something relevant changes
   const [timeDropdownOpen, setTimeDropdownOpen] = useState(false);
   const nameRef = useRef(null);
   const initialDraftRef = useRef({ date: '', time: '', therapist: '', room: '' });
@@ -250,6 +254,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     }
     return '';
   }, [dayBlocks, bookingDate, bookingTime, bookingMode, people, groupType, groupRoomId, serviceMode, groupServiceId, selectedTherapistIds, roomId, selectedService, services, dragMinutes]);
+
+  // Everything a rejection could depend on. A saved rejection stays (and Create stays off) only while this is unchanged.
+  const formKey = JSON.stringify([bookingMode, bookingDate, bookingTime, serviceId, selectedTherapistIds, roomId, customerName, customerPhone, knownCustomerId,
+    people, groupServiceId, groupRoomId, serviceMode, groupType, therapistRoomOverrides, comboTherapistOverrides, comboRoomOverrides]);
 
   // Parse room capacity from amenities (e.g., "3 Room" → 3, "1 Bed" → 1)
   const getRoomCapacity = (room) => {
@@ -480,6 +488,14 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     }));
   };
 
+  // Which field a rejection is about (null = the whole booking, e.g. a network failure).
+  const errorField = (text) => {
+    if (/phone|customer|name/i.test(text) && !/slot|time/i.test(text)) return 'customer';
+    if (/room|bed|capacity/i.test(text)) return 'room';
+    if (/therapist|staff|person|provider|absent|leave|already has a booking|unavailable/i.test(text)) return 'staff';
+    if (/slot|time|booked|closed|date|day|hours|window|advance|past/i.test(text)) return 'time';
+    return null;
+  };
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || (!customerPhone.replace(/\D/g, '') && !knownCustomerId))) return;
@@ -536,9 +552,15 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         };
     const err = await onSubmit(payload);
     if (err) {
-      setError(err);
+      const text = friendlyError(err, 'Couldn\'t create the booking. Please try again.');
+      setError(text);
+      setErrorCode(err?.code || null);
+      setErrorKey(formKey);
       setSubmitting(false);
       submitInFlightRef.current = false;
+      // Bring the field the reason is about into view (the footer already shows the reason itself).
+      const field = fieldForErrorCode(err?.code) || errorField(text);
+      if (field) requestAnimationFrame(() => document.querySelector(`[data-qc-field="${field}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
     }
   };
 
@@ -628,12 +650,15 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // ── Footer: why Create is disabled, or the inline confirm ──────────────────────────────
   // Couple rule (same helper as the booking panel): 0 picks saves unassigned, 2 is fine, 1 is not.
   const couplePickIncomplete = bookingMode === 'individual' && !comboAllDifferentStaff && staffPickIncomplete({ isCouple: !!selectedService?.is_couple, optional: !serviceRequiresTherapist, count: selectedTherapistIds.length, zeroOk: true });
-  const disabledReason = submitting ? '' : precheck.blocked ? `${staffLabel} unavailable at this time` : blockOverlapMsg
+  const activeError = error && errorKey === formKey ? error : null; // cleared the moment the user changes anything relevant
+  const errField = activeError ? (fieldForErrorCode(errorCode) || errorField(activeError)) : null;
+  const fieldRing = (name) => (errField === name ? 'rounded-spa ring-2 ring-error' : '');
+  const disabledReason = submitting ? '' : activeError ? activeError : precheck.blocked ? `${staffLabel} unavailable at this time` : blockOverlapMsg
     ? (/^Overlaps '(Transferred|Visiting)/.test(blockOverlapMsg) ? `${staffLabel} unavailable` : 'Overlaps a block')
     : bookingMode === 'group'
       ? (groupValid ? '' : 'Complete the group details')
       : !serviceId ? 'Pick a service' : couplePickIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : !customerName.trim() ? 'Enter the customer name' : (!customerPhone.replace(/\D/g, '') && !knownCustomerId) ? 'Enter the customer phone' : '';
-  const createDisabled = submitting || !!blockOverlapMsg || precheck.blocked || couplePickIncomplete || (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || (!customerPhone.replace(/\D/g, '') && !knownCustomerId)));
+  const createDisabled = submitting || !!activeError || !!blockOverlapMsg || precheck.blocked || couplePickIncomplete || (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || (!customerPhone.replace(/\D/g, '') && !knownCustomerId)));
   const confirmSlotLabel = confirm?.type === 'move'
     ? [therapists.find((d) => d.id === confirm.slot.colId)?.name || rooms.find((c) => c.id === confirm.slot.colId)?.name || confirm.slot.colName,
        confirm.slot.day,
@@ -669,7 +694,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   ) : (
     <div key="actions" className="flex flex-wrap sm:flex-nowrap items-center justify-end gap-x-3 gap-y-2">
       {/* Phone: the reason gets its own full-width line (max 2 lines) above the buttons; from sm it sits beside them as before. */}
-      <p className={`min-w-0 text-xs text-text-secondary basis-full line-clamp-2 sm:basis-auto sm:flex-1 sm:line-clamp-none ${createDisabled && disabledReason ? '' : 'hidden sm:block'}`} aria-live="polite">{createDisabled ? disabledReason : ''}</p>
+      <p className={`min-w-0 text-xs ${activeError || precheck.blocked || blockOverlapMsg ? 'text-error font-medium' : 'text-text-secondary'} basis-full line-clamp-2 sm:basis-auto sm:flex-1 sm:line-clamp-3 ${createDisabled && disabledReason ? '' : 'hidden sm:block'}`} role={activeError ? 'alert' : undefined} aria-live="polite">{createDisabled ? disabledReason : ''}</p>
       <button
         type="button"
         onClick={requestClose}
@@ -725,7 +750,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
           </div>
         )}
       </div>
-      <div className="relative" ref={timeDropdownRef}>
+      <div className={`relative ${fieldRing('time')}`} data-qc-field="time" ref={timeDropdownRef}>
         <Icon name="Clock" size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
         <input
           type="text"
@@ -833,7 +858,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
             {/* Room */}
             {rooms && rooms.length > 0 && (
-              <div>
+              <div data-qc-field="room" className={fieldRing('room')}>
                 <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                   Room
                 </label>
@@ -889,6 +914,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
             {/* Therapist(s): hidden for a combo whose every component needs its own staff, and for self-service amenities */}
             {!comboAllDifferentStaff && serviceRequiresTherapist && (
+            <div data-qc-field="staff" className={fieldRing('staff')}>
             <StaffPicker
               people={pickerPeople}
               selectedIds={selectedTherapistIds}
@@ -902,6 +928,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               bookings={bookings}
               offById={bookingDate === offDate ? offStaff : {}}
             />
+            </div>
             )}
 
             {/* Couple — separate rooms & companion; only for a couple service with 2+ therapists */}
@@ -1026,7 +1053,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             )}
 
             {/* Customer name */}
-            <div>
+            <div data-qc-field="customer" className={fieldRing('customer')}>
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                 Customer Name <span className="text-error">*</span>
               </label>
@@ -1445,13 +1472,6 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               />
             </div>
 
-            {/* Error display */}
-            {error && (
-              <div className="flex items-start gap-2 p-3 bg-error/10 border border-error/20 rounded-spa">
-                <Icon name="AlertCircle" size={16} className="text-error mt-0.5 flex-shrink-0" />
-                <span className="font-body text-sm text-error">{error}</span>
-              </div>
-            )}
       </form>
     </SidePanel>
   );
