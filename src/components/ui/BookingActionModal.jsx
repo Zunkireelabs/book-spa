@@ -43,6 +43,7 @@ import { MEMBERSHIP_ENABLED, PRODUCTS_ENABLED } from '../../lib/featureFlags';
 import { humanizePaymentMethod } from '../../services/paymentMethods';
 import { wordBranchCap } from '../../utils/industryTerms';
 import { canonicalMode } from 'lib/dayMoney';
+import { arrangeAssignees, STICKY_SEARCH_MIN } from '../../utils/assignList';
 
 function getNepalNow() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
@@ -2563,154 +2564,130 @@ const BookingActionModal = ({
                   </div>
                 )}
 
-                {/* Section 1: Therapist */}
-                <div className="space-y-3">
-                  <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
-                    Therapist
-                  </h3>
-                  {isTherapistOptional && (
-                    <p className="font-caption font-caption-normal text-xs text-text-secondary">
-                      Optional for {selectedRoomObj?.name} — self-service room, no therapist required.
-                    </p>
-                  )}
-                  {therapists.length === 0 ? (
-                    <p className="font-body font-body-normal text-sm text-text-secondary">No {(staffLabelPlural || 'team members').toLowerCase()} available.</p>
-                  ) : (
-                    <div>
-                      <div className="relative mb-2">
-                        <Icon name="Search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
+                {(() => {
+                  // ZNLY-286: staff + room lists. One scroll area (the panel body); words come from the org's staff label.
+                  const TAG = 'ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-success/10 text-success';
+                  const isPlural = !!currentServiceObj?.is_couple || selectedTherapists.length > 1;
+                  const staffHeading = isPlural ? (staffLabelPlural || 'Team') : (staffLabel || 'Team member');
+                  const staffLower = (staffLabel || 'team member').toLowerCase();
+                  const staffPluralLower = (staffLabelPlural || 'team members').toLowerCase();
+                  const assignedIds = (booking?.therapists?.length ? booking.therapists.map(t => t.id) : (booking?.therapist?.id ? [booking.therapist.id] : []));
+                  const arr = arrangeAssignees(therapists, { assignedIds, selectedIds: selectedTherapists, query: therapistSearch });
+                  const stickySearch = therapists.length >= STICKY_SEARCH_MIN;
+                  const rowBase = `flex items-center gap-3 min-h-[44px] px-3 py-1.5 border-t border-border first:border-t-0 spa-transition-fast ${isAssignmentBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`;
+                  const staffRow = (t) => {
+                    const isSelected = selectedTherapists.includes(t.id);
+                    const sub = [t.gender && String(t.gender).replace(/^./, c => c.toUpperCase()), t.specialties?.length ? t.specialties.join(', ') : null].filter(Boolean).join(' · ');
+                    return (
+                      <label key={t.id} className={`${rowBase} ${isSelected ? 'bg-primary/5' : 'hover:bg-background'}`}>
                         <input
-                          type="text"
-                          value={therapistSearch}
-                          onChange={(e) => setTherapistSearch(e.target.value)}
-                          placeholder={`Search ${(staffLabelPlural || 'team members').toLowerCase()}...`}
-                          className="w-full pl-8 pr-3 py-2 bg-background border border-border rounded-spa text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
-                        />
-                      </div>
-                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                      {therapists
-                        .filter(t => !therapistSearch.trim() || t.name.toLowerCase().includes(therapistSearch.toLowerCase()))
-                        .map((therapist) => {
-                        const isSelected = selectedTherapists.includes(therapist.id);
-                        const isCurrentlyAssigned = booking?.therapists?.some(t => t.id === therapist.id)
-                          || booking?.therapist?.id === therapist.id;
-                        return (
-                          <label
-                            key={therapist.id}
-                            className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 spa-transition-fast min-h-[52px] ${
-                              isAssignmentBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                            } ${
-                              isSelected
-                                ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              value={therapist.id}
-                              checked={isSelected}
-                              disabled={isAssignmentBlocked}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedTherapists(prev => [...prev, therapist.id]);
-                                } else {
-                                  setSelectedTherapists(prev => prev.filter(id => id !== therapist.id));
-                                }
-                              }}
-                              className="text-primary focus:ring-primary w-4 h-4 rounded disabled:cursor-not-allowed"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="font-body font-body-medium text-sm text-text-primary truncate">
-                                  {therapist.name}
-                                  {isCurrentlyAssigned && (
-                                    <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-success/10 text-success">Assigned</span>
-                                  )}
-                                </span>
-                                <span className="text-xs font-caption font-caption-normal text-text-secondary capitalize flex-shrink-0">
-                                  {therapist.gender}
-                                </span>
-                              </div>
-                              {therapist.specialties && therapist.specialties.length > 0 && (
-                                <div className="flex flex-wrap gap-1 mt-1">
-                                  {therapist.specialties.map((specialty) => (
-                                    <span
-                                      key={specialty}
-                                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-accent/10 text-accent"
-                                    >
-                                      {specialty}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Section 2: Room */}
-                {rooms.length > 0 && (
-                  <div className="space-y-3">
-                    <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
-                      Room
-                    </h3>
-                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                      {/* Unassign room option */}
-                      <label
-                        className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 spa-transition-fast min-h-[44px] ${
-                          isAssignmentBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                        } ${
-                          selectedRoom === ''
-                            ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="room"
-                          value=""
-                          checked={selectedRoom === ''}
+                          type="checkbox"
+                          value={t.id}
+                          checked={isSelected}
                           disabled={isAssignmentBlocked}
-                          onChange={() => setSelectedRoom('')}
-                          className="text-primary focus:ring-primary w-4 h-4 disabled:cursor-not-allowed"
+                          onChange={(e) => {
+                            if (e.target.checked) setSelectedTherapists(prev => [...prev, t.id]);
+                            else setSelectedTherapists(prev => prev.filter(id => id !== t.id));
+                          }}
+                          className="w-5 h-5 flex-shrink-0 rounded text-primary focus:ring-primary disabled:cursor-not-allowed"
                         />
-                        <span className="font-body font-body-normal text-sm text-text-secondary italic">No room assigned</span>
+                        <span className="flex-1 min-w-0">
+                          <span className="block truncate font-body font-body-medium text-sm text-text-primary">
+                            {t.name}
+                            {assignedIds.includes(t.id) && <span className={TAG}>Assigned</span>}
+                          </span>
+                          {sub && <span className="block truncate text-xs font-caption text-text-secondary">{sub}</span>}
+                        </span>
                       </label>
-                      {rooms.map((room) => (
-                        <label
-                          key={room.id}
-                          className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 spa-transition-fast min-h-[44px] ${
-                            isAssignmentBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                          } ${
-                            selectedRoom === room.id
-                              ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="room"
-                            value={room.id}
-                            checked={selectedRoom === room.id}
-                            disabled={isAssignmentBlocked}
-                            onChange={(e) => setSelectedRoom(e.target.value)}
-                            className="text-primary focus:ring-primary w-4 h-4 disabled:cursor-not-allowed"
-                          />
-                          <div className="flex items-center gap-2">
-                            <Icon name="DoorOpen" size={14} className="text-text-secondary" />
-                            <span className="font-body font-body-medium text-sm text-text-primary">
-                              {room.name}
-                              {booking?.roomId === room.id && (
-                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-primary/10 text-primary">Allocated</span>
+                    );
+                  };
+                  const roomRow = (id, name, allocated) => (
+                    <label key={id || 'none'} className={`${rowBase} ${selectedRoom === id ? 'bg-primary/5' : 'hover:bg-background'}`}>
+                      <input
+                        type="radio"
+                        name="room"
+                        value={id}
+                        checked={selectedRoom === id}
+                        disabled={isAssignmentBlocked}
+                        onChange={() => setSelectedRoom(id)}
+                        className="w-5 h-5 flex-shrink-0 text-primary focus:ring-primary disabled:cursor-not-allowed"
+                      />
+                      {id ? <Icon name="DoorOpen" size={14} className="text-text-secondary flex-shrink-0" /> : null}
+                      <span className={`flex-1 min-w-0 truncate font-body text-sm ${id ? 'font-body-medium text-text-primary' : 'font-body-normal text-text-secondary'}`}>
+                        {name}
+                        {allocated && <span className={TAG}>Allocated</span>}
+                      </span>
+                    </label>
+                  );
+                  return (
+                    <>
+                      {/* Section 1: staff */}
+                      <div>
+                        <div className={stickySearch ? 'sticky top-11 z-sticky-filter bg-surface pt-1 pb-2' : ''}>
+                          <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">{staffHeading}</h3>
+                          {isTherapistOptional && (
+                            <p className="mt-1 font-caption font-caption-normal text-xs text-text-secondary">
+                              Optional for {selectedRoomObj?.name} — self-service room, no {staffLower} required.
+                            </p>
+                          )}
+                          {therapists.length > 0 && (
+                            <>
+                              <div className="relative mt-2">
+                                <Icon name="Search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
+                                <input
+                                  type="text"
+                                  value={therapistSearch}
+                                  onChange={(e) => setTherapistSearch(e.target.value)}
+                                  placeholder={`Search ${staffPluralLower}...`}
+                                  className="w-full h-11 pl-9 pr-3 bg-background border border-border rounded-spa text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                                />
+                              </div>
+                              <div className="mt-1.5 flex justify-between text-xs text-text-secondary">
+                                <span>{arr.selectedVisible} selected</span>
+                                <span>{arr.filtering ? `${arr.matchCount} of ${arr.total} match` : `${arr.total} ${arr.total === 1 ? staffLower : staffPluralLower}`}</span>
+                              </div>
+                              {arr.hiddenSelected > 0 && (
+                                <p className="mt-0.5 text-xs text-text-tertiary">+{arr.hiddenSelected} assigned outside your view</p>
                               )}
-                            </span>
+                            </>
+                          )}
+                        </div>
+                        {therapists.length === 0 ? (
+                          <p className="font-body font-body-normal text-sm text-text-secondary">No {staffPluralLower} available.</p>
+                        ) : (
+                          <>
+                            {arr.pinned.length > 0 && (
+                              <>
+                                <p className="mt-2 mb-1 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">Selected</p>
+                                <div className="border border-border rounded-spa overflow-hidden">{arr.pinned.map(staffRow)}</div>
+                                <p className="mt-3 mb-1 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">Matches</p>
+                              </>
+                            )}
+                            <div className="mt-2 border border-border rounded-spa overflow-hidden">
+                              {arr.rows.length === 0 ? (
+                                <div className="py-5 px-3 text-center text-sm text-text-secondary">
+                                  No {staffPluralLower} match &ldquo;{therapistSearch.trim()}&rdquo;.
+                                  <button type="button" onClick={() => setTherapistSearch('')} className="block mx-auto mt-1 min-h-[44px] px-3 text-sm font-medium text-primary hover:underline">Clear search</button>
+                                </div>
+                              ) : arr.rows.map(staffRow)}
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      {/* Section 2: Room */}
+                      {rooms.length > 0 && (
+                        <div>
+                          <h3 className="mb-2 font-heading font-heading-medium text-sm sm:text-base text-text-primary">Room</h3>
+                          <div className="border border-border rounded-spa overflow-hidden">
+                            {roomRow('', 'No room assigned', false)}
+                            {rooms.map((room) => roomRow(room.id, room.name, booking?.roomId === room.id))}
                           </div>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
 
                 {/* Section 2b: Couple in separate rooms — surfaced only for a couple-flagged
                     service with 2+ therapists selected, not any multi-therapist assignment. */}
