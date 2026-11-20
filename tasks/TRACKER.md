@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-20** by Project Manager · 250 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-20** by Project Manager · 251 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -36,6 +36,11 @@ Last synced: **2026-11-20** by Project Manager · 250 open tickets (epics exclud
 | ZNLY-280 | Sadin | high | Payment Breakdown: no repeated numbers on a closed day, highlight the cash figure that matters, "of which" lines under the methods, whole-rupee money everywhere |
 | ZNLY-285 | Sadin | high | Phone: booking opens as a half-height sheet over the calendar (not full screen), so the calendar, incl. ZNLY-281 same-client outlines, stays visible |
 | ZNLY-286 | Sadin | high | Booking panel Staff tab: the org's own staff word everywhere (beauty shows "Therapist") and no cramped inner scroll boxes for the staff/room lists |
+| ZNLY-288 | Sadin | high | QC: Dashboard Live floor (phone) — pinned names column lets bookings and the now-line show through, rows uneven |
+| ZNLY-289 | Sadin | high | QC: Phone shell bottom — grey band behind the nav on some screens, last content cropped or hidden under the nav |
+| ZNLY-290 | Sadin | high | QC: Notification panel (phone) — scrolling inside it scrolls the page behind |
+| ZNLY-291 | Sadin | high | QC: Notification settings (phone) — Sound row squeezes its description into a one-word column |
+| ZNLY-292 | Sadin | high | QC: Bookings sort/filters (phone) — Sort opens a plain list behind the nav; should use the Calendar-views bottom sheet pattern |
 | ZNLY-136 | Anish | medium | Group booking (Fresha-style): book multiple people, one shared slot, one checkout |
 | ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
 | ZNLY-175 | Sadin | medium | Therapist inner page: outcomes bar total counts upcoming bookings that sit in no bucket |
@@ -52,6 +57,7 @@ Last synced: **2026-11-20** by Project Manager · 250 open tickets (epics exclud
 | ZNLY-273 | Sadin | medium | Bookings "Needs you now" says "Everything's on track" while finished bookings are still unpaid |
 | ZNLY-276 | Sadin | medium | Dashboard strip "50 of 54 done (1 no-show)" reads as 4 left when 3 are open |
 | ZNLY-281 | Sadin | medium | Calendar: hover/open a booking lights up every booking of the same client on screen (Fresha-style), no link lines |
+| ZNLY-293 | Sadin | medium | QC: Bookings list (phone) — row chevron is cut off when the action button is "Confirm" (wider than "Start") |
 
 ## In review / on stage
 | Ticket | Owner | Priority | State | What |
@@ -154,11 +160,6 @@ Last synced: **2026-11-20** by Project Manager · 250 open tickets (epics exclud
 | ZNLY-197 | — | high | Remove zenly.zunkireelabs.com from prod Traefik router rule in docker-compose.yml |
 | ZNLY-245 | Sadin | high | Sami's onboarding: import the Fresha export (staff, customers, services, products) into production, rehearsed and reconciled |
 | ZNLY-284 | Sadin | high | Interim: Staff › Access stops offering "(view only)" calendar options until ZNLY-283 enforces them; existing view-only logins get an honest note |
-| ZNLY-288 | Sadin | high | QC: Dashboard Live floor (phone) — pinned names column lets bookings and the now-line show through, rows uneven |
-| ZNLY-289 | Sadin | high | QC: Phone shell bottom — grey band behind the nav on some screens, last content cropped or hidden under the nav |
-| ZNLY-290 | Sadin | high | QC: Notification panel (phone) — scrolling inside it scrolls the page behind |
-| ZNLY-291 | Sadin | high | QC: Notification settings (phone) — Sound row squeezes its description into a one-word column |
-| ZNLY-292 | Sadin | high | QC: Bookings sort/filters (phone) — Sort opens a plain list behind the nav; should use the Calendar-views bottom sheet pattern |
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-180 | — | medium | Attendance worked time rounded to 0.1 h before display (1 h 32 min shows as 1 h 30 min) |
