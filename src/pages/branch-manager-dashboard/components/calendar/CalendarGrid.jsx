@@ -32,14 +32,17 @@ import { findBlockOverlap, formatBlockRange } from '../../../../utils/blockOverl
 import { SHADE_STYLES, buildShadeSegments, shiftHeaderInfo, slotVerdict, outsideReasonText, outsideNote } from '../../../../services/availabilityShading';
 import { hhmmToMinutes } from '../../../../services/availability';
 import { staffWord, wordBranch } from '../../../../utils/industryTerms';
+import BottomSheet from '../../../../components/ui/BottomSheet';
+import {
+  PHONE_HOUR_BASE, PHONE_MAX_LANES, phoneColumnCount, phoneColumnWidth, clampPhoneZoom, assignPhoneLanes, coupleName, shortName, avatarColor,
+} from './phoneCalendarLayout';
 
 // Export these constants for time calculation in parent
 export const SLOT_HEIGHT = 36; // px per 30-min slot (72px per hour) - for visual grid lines
 export const HOUR_HEIGHT = SLOT_HEIGHT * 2; // 72px per hour
 const TIME_COL_WIDTH_DESKTOP = 44; // one gutter width for phone and desktop (see PHONE_TIME_COL)
-// Phone (< md): slimmer time column, Unassigned collapses to a pinned strip, staff columns sized so 3 fit at 390 and 360.
+// Phone (< md): 100px-minimum staff columns (3 at 360-430), taller hours, Unassigned becomes a bar above the grid (ZNLY-299, phoneCalendarLayout.js).
 const PHONE_TIME_COL = 44; // keep equal to TIME_COL_WIDTH_DESKTOP
-const PHONE_UNASSIGNED_W = 40;
 const PINNED_SHADOW = '6px 0 8px -6px rgba(14,13,12,0.16)'; // right shadow on the pinned Unassigned column while the grid is scrolled
 
 // Pinch-to-zoom bounds (mobile/touch only) — effective hour height 40px–320px
@@ -220,6 +223,7 @@ const CalendarGrid = ({
   use24h = false,
   zoomScale: zoomScaleProp,
   onZoomScaleChange,
+  onOpenUnassigned, // phone Unassigned bar: opens the earliest unassigned booking on its team tab
 }) => {
   const { locationLabel } = useIndustry();
   const scrollRef = useRef(null);
@@ -252,17 +256,36 @@ const CalendarGrid = ({
   // Hide the connector of the booking being dragged (its copies are mid-move); it redraws from fresh data on drop.
   const draggingSharedId = activeDragId ? String(activeDragId).split('__')[0] : null;
 
+  const days = useMemo(() => {
+    if (viewMode === '4day') return [0, 1, 2, 3].map(i => addDays(currentDate, i));
+    if (viewMode === 'week') {
+      // Sunday-first, must match calendar/index.jsx's own startOfWeek so the fetched range and rendered columns agree.
+      const start = addDays(currentDate, -new Date(currentDate + 'T00:00:00').getDay());
+      return Array.from({ length: 7 }, (_, i) => addDays(start, i));
+    }
+    return [currentDate];
+  }, [currentDate, viewMode]);
+
+  const isMultiDay = days.length > 1;
+  const viewportW = useViewportWidth();
+  const isPhone = viewportW <= PHONE_MAX;
+  const TIME_COL_WIDTH = isPhone ? PHONE_TIME_COL : TIME_COL_WIDTH_DESKTOP;
+  const phoneDay = isPhone && !isMultiDay; // single-day phone grid: 100px-min staff columns, 96px hours, Unassigned as a bar
+
   // ── Pinch-to-zoom (mobile/touch only) ──────────────────────
   // Relayouts the grid at a scaled HOUR_HEIGHT/column width rather than a CSS
   // transform, so drag/tap hit-testing (which reads real DOM pixel positions)
   // stays correct at any zoom level.
   // Controlled by the parent toolbar's zoom buttons when onZoomScaleChange is passed; local state otherwise.
   const [zoomScaleState, setZoomScaleState] = useState(1);
-  const zoomScale = zoomScaleProp != null ? zoomScaleProp : zoomScaleState;
+  const zoomScaleRaw = zoomScaleProp != null ? zoomScaleProp : zoomScaleState;
+  const zoomScale = isPhone ? clampPhoneZoom(zoomScaleRaw) : zoomScaleRaw; // phones: zoom only goes up (a saved 55% reads as 100%)
+  const isPhoneRef = useRef(isPhone);
+  isPhoneRef.current = isPhone;
   const zoomScaleRef = useRef(zoomScale);
   useEffect(() => { zoomScaleRef.current = zoomScale; }, [zoomScale]);
   const setZoomScale = useCallback((v) => {
-    const clamped = clampZoom(v);
+    const clamped = isPhoneRef.current ? clampPhoneZoom(clampZoom(v)) : clampZoom(v);
     zoomScaleRef.current = clamped;
     if (onZoomScaleChange) onZoomScaleChange(clamped);
     else setZoomScaleState(clamped);
@@ -340,8 +363,9 @@ const CalendarGrid = ({
     pinchAnchorRef.current = null;
   }, [zoomScale]);
 
-  const eHH = HOUR_HEIGHT * zoomScale;   // effective hour height at current zoom
-  const eSlot = SLOT_HEIGHT * zoomScale; // effective 30-min slot height at current zoom
+  // Effective hour height. Phone day view: 96px at 100% (desktop and phone multi-day stay 72px); zoom scales both the same way.
+  const eHH = (phoneDay ? PHONE_HOUR_BASE : HOUR_HEIGHT) * zoomScale;
+  const eSlot = eHH / 2; // effective 30-min slot height
 
   // Multi-select for shared booking cards (Cmd/Ctrl + click)
   const [selectedCardIds, setSelectedCardIds] = useState(new Set());
@@ -381,22 +405,6 @@ const CalendarGrid = ({
       gridRef.current = gridBodyRef.current;
     }
   }, [gridRef]);
-
-  const days = useMemo(() => {
-    if (viewMode === '4day') return [0, 1, 2, 3].map(i => addDays(currentDate, i));
-    if (viewMode === 'week') {
-      // Sunday-first, must match calendar/index.jsx's own startOfWeek so the fetched range and rendered columns agree.
-      const start = addDays(currentDate, -new Date(currentDate + 'T00:00:00').getDay());
-      return Array.from({ length: 7 }, (_, i) => addDays(start, i));
-    }
-    return [currentDate];
-  }, [currentDate, viewMode]);
-
-  const isMultiDay = days.length > 1;
-  const viewportW = useViewportWidth();
-  const isPhone = viewportW <= PHONE_MAX;
-  const TIME_COL_WIDTH = isPhone ? PHONE_TIME_COL : TIME_COL_WIDTH_DESKTOP;
-  const phoneDay = isPhone && !isMultiDay; // single-day phone grid: pinned Unassigned strip + 3-up staff columns
 
   // Visible hour range: branch hours padded by 1h each side, extended to include
   // any booking on a displayed day that falls outside it. Falls back to 9–21.
@@ -468,7 +476,7 @@ const CalendarGrid = ({
         subtitle: null,
         attendance: null,
       }));
-      cols.push({ id: 'unassigned', name: 'No Room', type: 'unassigned', icon: 'AlertCircle', subtitle: null, attendance: null });
+      if (!phoneDay) cols.push({ id: 'unassigned', name: 'No Room', type: 'unassigned', icon: 'AlertCircle', subtitle: null, attendance: null });
       return cols;
     }
     // therapist mode
@@ -492,9 +500,9 @@ const CalendarGrid = ({
       transferFromBranch: t.transferFromBranch,
       transferToBranch: t.transferToBranch,
     }));
-    if (!hideUnassigned) cols.push({ id: 'unassigned', name: 'Unassigned', type: 'unassigned', icon: 'AlertCircle', subtitle: null, attendance: null });
+    if (!hideUnassigned && !phoneDay) cols.push({ id: 'unassigned', name: 'Unassigned', type: 'unassigned', icon: 'AlertCircle', subtitle: null, attendance: null });
     return cols;
-  }, [therapists, rooms, attendanceMap, columnMode, hideUnassigned]);
+  }, [therapists, rooms, attendanceMap, columnMode, hideUnassigned, phoneDay]);
 
   // ── Group bookings by day and column ─────────────────────
   const bookingsByDayAndCol = useMemo(() => {
@@ -538,6 +546,7 @@ const CalendarGrid = ({
         bookingNumber: b.booking_number,
         customerName: b.customer_name,
         customerPhone: b.customer_phone || null,
+        companionName: b.companion_name || null, // couple: the second guest's name
         customerId: b.customer_id || null, // ZNLY-281: same-client highlight matches on this id only
         serviceName: b.service?.name || 'Service',
         serviceDuration: b.service?.duration_minutes || null,
@@ -1053,9 +1062,20 @@ const CalendarGrid = ({
     };
   }, [days, todayStr, nowTop]);
 
-  const minColWidth = Math.round((isMultiDay ? 80 : phoneDay ? (viewportW - (PHONE_TIME_COL + (hideUnassigned ? 0 : PHONE_UNASSIGNED_W))) / 3 : 200) * zoomScale);
-  const pinUnassigned = !hideUnassigned && (freezeUnassigned || phoneDay); // always pinned on phone (the pin toggle stays desktop-only)
-  const unassignedW = phoneDay ? PHONE_UNASSIGNED_W : minColWidth;
+  // Phone day: columns fill the screen in whole units (3 at 360-430) and zoom never changes their width.
+  const minColWidth = phoneDay ? phoneColumnWidth(viewportW) : Math.round((isMultiDay ? 80 : 200) * zoomScale);
+  const pinUnassigned = !hideUnassigned && !phoneDay && freezeUnassigned;
+  const unassignedW = minColWidth;
+
+  // Phone "+N" tile: the bookings it hides, listed in a bottom sheet (each row opens the booking).
+  const [overflowSheet, setOverflowSheet] = useState(null);
+
+  // Phone: soft shadow on the right edge while more columns lie off-screen.
+  const [moreRight, setMoreRight] = useState(false);
+  const updateMoreRight = useCallback(() => {
+    const el = scrollRef.current;
+    setMoreRight(!!el && el.scrollWidth - el.clientWidth - el.scrollLeft > 2);
+  }, []);
 
   // ── Column header tooltip (fixed-position to escape overflow-hidden) ──
   const [headerTooltip, setHeaderTooltip] = useState(null);
@@ -1092,27 +1112,20 @@ const CalendarGrid = ({
       <div
         key={col.id}
         data-col-header
-        className={`relative flex-1 border-r border-border last:border-r-0 h-10 flex items-center justify-center ${phoneDay && isUnassigned ? 'px-0' : 'px-2'}`}
-        style={{ minWidth: phoneDay && isUnassigned ? unassignedW : minColWidth }}
+        className={`relative flex-1 border-r border-border last:border-r-0 ${phoneDay ? 'h-[62px]' : 'h-10'} flex items-center justify-center px-2`}
+        style={{ minWidth: minColWidth }}
         onMouseEnter={(e) => showHeaderTooltip(e, onlineUnassignedTooltip || [col.name, hdrShift?.full, trDesc?.sentence].filter(Boolean).join(' · '))}
         onMouseLeave={hideHeaderTooltip}
       >
-        {phoneDay && isUnassigned ? (
-          <span className="relative w-6 h-6 flex items-center justify-center text-text-secondary" role="img" aria-label={onlineUnassignedTooltip || col.name}>
-            <Icon name="AlertCircle" size={16} />
-            {col.onlineUnassignedCount > 0 && (
-              <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 bg-warning text-white rounded-full text-[10px] font-medium flex items-center justify-center">{col.onlineUnassignedCount}</span>
-            )}
-          </span>
-        ) : phoneDay ? (
-          <div className="flex flex-col items-center justify-center gap-0.5 min-w-0 w-full" title={col.name}>
+        {phoneDay ? (
+          <div className="flex flex-col items-center justify-center gap-[3px] min-w-0 w-full" title={col.name}>
             <span className="relative flex items-center">
-              <span className="w-5 h-5 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center text-[9px] font-medium">
-                {col.type === 'therapist' ? initials : <Icon name={col.icon} size={11} />}
+              <span className="w-[30px] h-[30px] rounded-full text-white flex items-center justify-center text-[11px] font-semibold" style={{ background: avatarColor(col.id) }}>
+                {col.type === 'therapist' ? initials : <Icon name={col.icon} size={14} />}
               </span>
-              {col.type === 'therapist' && <span className={`absolute -right-1 -top-0.5 w-1.5 h-1.5 rounded-full ${col.attendance ? 'bg-gray-300' : 'bg-success'}`} />}
+              {col.type === 'therapist' && <span className={`absolute -right-px -top-px w-[9px] h-[9px] rounded-full border-2 border-white ${col.attendance ? 'bg-gray-300' : 'bg-success'}`} />}
             </span>
-            <span className="font-body text-[11px] font-medium leading-none text-text-primary truncate max-w-full">{col.name.split(/\s+/)[0]}</span>
+            <span className="font-body text-[12px] font-medium leading-tight text-text-primary truncate max-w-[94%]">{col.type === 'therapist' ? shortName(col.name) : col.name}</span>
           </div>
         ) : (
         <div className="flex items-center gap-2 overflow-hidden min-w-0">
@@ -1542,21 +1555,28 @@ const CalendarGrid = ({
   const renderClusteredCards = (col, day, colBookings, v) => {
     const clusters = clusterOverlapping(colBookings, (24 / eHH) * 60); // 24px = the shortest a card is drawn (timeToHeight)
     return clusters.map(cluster => {
-      const layout = getOverlapLayout(cluster.length);
+      // Phone: at most 2 lanes; a 3rd+ overlapping booking collapses into a "+N" tile that opens the list (ZNLY-299).
+      const phoneLanes = phoneDay ? assignPhoneLanes(cluster, (24 / eHH) * 60) : null;
+      const layout = phoneLanes ? { cards: [], badge: null } : getOverlapLayout(cluster.length);
       const clusterTop = timeToTop(cluster[0].startTime);
       const clusterHeight = Math.max(
         timeToHeight(cluster[0].startTime, clusterEndTime(cluster)),
-        layout.badge ? BADGE_MIN_HEIGHT : 0
+        layout.badge ? BADGE_MIN_HEIGHT : 0,
+        phoneLanes && phoneLanes.hidden.length ? 28 : 0
       );
+      const cardsToDraw = phoneLanes ? phoneLanes.placed : cluster.slice(0, MAX_VISIBLE_OVERLAP).map((booking, idx) => ({ booking, idx }));
+      const laneW = `calc((100% - ${OVERLAP_PADDING * 2 + 2}px) / ${PHONE_MAX_LANES})`;
       return (
         <div
           key={`cluster-${cluster[0].id}${cluster[0]._comboIndex != null ? `-c${cluster[0]._comboIndex}` : ''}`}
           className="group absolute inset-x-0"
           style={{ top: clusterTop, height: clusterHeight }}
         >
-          {cluster.slice(0, MAX_VISIBLE_OVERLAP).map((booking, idx) => {
+          {cardsToDraw.map(({ booking, idx, lane }) => {
             const cardKey = (booking._colTherapistId || booking._colRoomId) ? `${booking.id}__${booking._colTherapistId || booking._colRoomId}${booking._comboIndex != null ? `__c${booking._comboIndex}` : ''}` : booking.id;
-            const pos = layout.cards[idx];
+            const pos = phoneLanes
+              ? (phoneLanes.lanes > 1 ? { left: `calc(${OVERLAP_PADDING}px + ${lane} * (${laneW} + 2px))`, width: laneW } : null)
+              : layout.cards[idx];
             return (
               <CalendarBookingCard
                 isPanelSelected={!!selectedBookingId && (booking.bookingId || booking.id) === selectedBookingId}
@@ -1573,6 +1593,9 @@ const CalendarGrid = ({
                   return o || info ? { ...booking, ...(o ? { availabilityNote: o.note } : {}), ...(info ? { _clientDay: info } : {}) } : booking;
                 })()}
                 columnMode={columnMode}
+                phone={phoneDay}
+                narrow={!!phoneLanes && phoneLanes.lanes > 1}
+                chipWidth={phoneLanes && phoneLanes.lanes > 1 ? (minColWidth - OVERLAP_PADDING * 2 - 2) / PHONE_MAX_LANES : minColWidth - OVERLAP_PADDING * 2}
                 hideSensitive={hideSensitive}
                 use24h={use24h}
                 outsideHours={outsideOf(col, day, booking)?.text || null}
@@ -1590,6 +1613,21 @@ const CalendarGrid = ({
               />
             );
           })}
+          {phoneLanes && phoneLanes.hidden.length > 0 && (() => {
+            const hiddenTop = Math.max(0, Math.min(timeToTop(earliestStartTime(phoneLanes.hidden)) - clusterTop, clusterHeight - 28));
+            return (
+              <button
+                type="button"
+                data-overflow-tile="true"
+                aria-label={`${phoneLanes.hidden.length} more booking${phoneLanes.hidden.length === 1 ? '' : 's'}, open the list`}
+                className="absolute z-[4] h-7 min-w-[30px] px-1.5 rounded-spa bg-surface border border-border text-[12px] font-semibold text-text-secondary flex items-center justify-center shadow-spa-resting"
+                style={{ top: hiddenTop, right: 6 }}
+                onClick={(e) => { e.stopPropagation(); if (!activeDragId) setOverflowSheet(phoneLanes.hidden); }}
+              >
+                +{phoneLanes.hidden.length}
+              </button>
+            );
+          })()}
           {layout.badge && (() => {
             const hidden = cluster.slice(MAX_VISIBLE_OVERLAP);
             const hiddenTopRaw = hidden.length ? timeToTop(earliestStartTime(hidden)) - clusterTop : 0;
@@ -1635,7 +1673,7 @@ const CalendarGrid = ({
             />
             );
           })()}
-          {!layout.badge && !!onEmptySlotClick && (
+          {!layout.badge && !phoneDay && !!onEmptySlotClick && (
             <button
               type="button"
               title="Add booking at this time"
@@ -1702,6 +1740,30 @@ const CalendarGrid = ({
     return { count: online.length, allSelfService: online.length > 0 && online.every(b => b.requiresTherapist === false) };
   }, [bookingsByDayAndCol, currentDate]);
 
+  // ── Phone extras: Unassigned bar + empty / closed day card (ZNLY-299) ──
+  // The bar counts the open bookings of the shown day that have no one (or, in the rooms view, no room) assigned.
+  const phoneUnassigned = useMemo(() => {
+    if (!phoneDay || hideUnassigned) return [];
+    const seen = new Set();
+    return ((bookingsByDayAndCol[currentDate] || {}).unassigned || [])
+      .filter((b) => !['Completed', 'Cancelled', 'No Show'].includes(b.status) && !seen.has(b.bookingId) && seen.add(b.bookingId))
+      .sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
+  }, [phoneDay, hideUnassigned, bookingsByDayAndCol, currentDate]);
+  const dayHasBookings = useMemo(
+    () => Object.values(bookingsByDayAndCol[currentDate] || {}).some((arr) => arr.length > 0),
+    [bookingsByDayAndCol, currentDate],
+  );
+  const closedBlock = useMemo(
+    () => (blockOccurrences || []).find((o) => o.date === currentDate && !o.therapistId && !o.roomId
+      && String(o.startTime).slice(0, 5) === '00:00' && ['00:00', '24:00'].includes(String(o.endTime).slice(0, 5))) || null,
+    [blockOccurrences, currentDate],
+  );
+  const dayLabel = new Date(`${currentDate}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  const phoneDayNote = !phoneDay ? null : closedBlock
+    ? { title: `Closed${closedBlock.description ? ` · ${closedBlock.description}` : ''}`, sub: 'Staff can still book after a warning.' }
+    : !dayHasBookings ? { title: `No bookings on ${dayLabel}`, sub: 'Tap any free slot, or use + to add a booking.' } : null;
+  useEffect(() => { if (phoneDay) updateMoreRight(); }, [phoneDay, updateMoreRight, columns.length, viewportW]);
+
   // ── Single-day view ───────────────────────────────────────
   const columnsMinWidth = columns.length * minColWidth - (columns.some(c => c.type === 'unassigned') ? minColWidth - unassignedW : 0);
   const unassignedCol = useMemo(() => {
@@ -1733,6 +1795,18 @@ const CalendarGrid = ({
 
   const renderDayView = () => (
     <div className="flex flex-col h-full overflow-hidden isolate">
+      {phoneUnassigned.length > 0 && (
+        <button
+          type="button"
+          data-unassigned-bar="true"
+          onClick={() => onOpenUnassigned?.(phoneUnassigned[0])}
+          className="flex-shrink-0 flex items-center gap-2 px-3 py-1.5 min-h-[36px] border-b border-border bg-warning/10 text-left font-body text-[12px] text-warning"
+        >
+          <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-warning text-white text-[11px] font-semibold flex items-center justify-center">{phoneUnassigned.length}</span>
+          <span className="truncate">Unassigned booking{phoneUnassigned.length === 1 ? '' : 's'} {currentDate === todayStr ? 'today' : `on ${dayLabel}`}{columnMode === 'room' ? ` · no ${locationLabel.toLowerCase()}` : ''}</span>
+          <span className="ml-auto font-semibold flex-shrink-0">Assign ›</span>
+        </button>
+      )}
       {/* Fixed header — outside scroll container */}
       <div
         ref={headerScrollRef}
@@ -1786,6 +1860,7 @@ const CalendarGrid = ({
           }
           const scrolled = e.target.scrollLeft > 0;
           if (scrolled !== gridScrolledRef.current) { gridScrolledRef.current = scrolled; setGridScrolled(scrolled); }
+          if (phoneDay) updateMoreRight();
         }}
       >
         <div
@@ -1824,8 +1899,32 @@ const CalendarGrid = ({
             {renderNowIndicator(currentDate, !unassignedCol)}
             {regularColumns.map(col => renderColumn(col, currentDate))}
           </div>
+          {phoneDay && moreRight && (
+            <div aria-hidden="true" data-more-right="true" className="sticky right-0 flex-shrink-0 pointer-events-none z-[5]"
+              style={{ width: 14, marginLeft: -14, height: totalHeight, background: 'linear-gradient(90deg, rgba(255,255,255,0), rgba(0,0,0,0.07))' }} />
+          )}
         </div>
+        {phoneDayNote && (
+          <div className="sticky left-0 pointer-events-none flex justify-center px-3 z-[5]" style={{ width: viewportW, top: 96, marginTop: -totalHeight + 96, height: 0 }}>
+            <div data-day-note="true" className="pointer-events-none max-w-[300px] text-center rounded-spa-lg border border-border bg-surface shadow-spa-resting px-4 py-3 font-body" style={{ marginLeft: TIME_COL_WIDTH }}>
+              <div className="text-[13px] font-semibold text-text-primary">{phoneDayNote.title}</div>
+              <div className="text-[12px] text-text-secondary mt-0.5">{phoneDayNote.sub}</div>
+            </div>
+          </div>
+        )}
       </div>
+      <BottomSheet isOpen={!!overflowSheet} title={`${overflowSheet ? overflowSheet.length : 0} more booking${overflowSheet && overflowSheet.length === 1 ? '' : 's'}`} onClose={() => setOverflowSheet(null)}>
+        <div className="divide-y divide-border">
+          {(overflowSheet || []).map((b) => (
+            <button key={`${b.id}-${b._comboIndex ?? ''}`} type="button" className="w-full text-left py-3 px-1 min-h-[56px]"
+              onClick={() => { setOverflowSheet(null); onBookingClick?.(b); }}>
+              <div className="font-data text-[12px] text-text-secondary">{formatClockTime(b.startTime, use24h)} – {formatClockTime(b.endTime, use24h)}</div>
+              <div className="font-body text-[14px] font-semibold text-text-primary truncate">{hideSensitive ? '•••••' : coupleName(b.customerName || 'Guest', b.companionName)}</div>
+              <div className="font-body text-[12px] text-text-secondary truncate">{b.serviceName}</div>
+            </button>
+          ))}
+        </div>
+      </BottomSheet>
     </div>
   );
 

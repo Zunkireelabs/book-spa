@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { buildClientIndex, clientDayInfo } from './sameClient';
 import { viewerAccess } from 'services/dataMasking';
 import UnlinkedLoginNotice from 'components/ui/UnlinkedLoginNotice';
@@ -32,6 +32,8 @@ import { useOrg } from '../../../../contexts/OrgContext';
 import WaitlistPanel, { useWaitlistEntries } from './WaitlistPanel';
 import { todayStr, addDays, addMonths, getStepDays } from './calendarDates';
 import { staffWord } from '../../../../utils/industryTerms';
+import { useViewportWidth, PHONE_MAX } from '../../../../hooks/useViewportWidth';
+import { clampPhoneZoom } from './phoneCalendarLayout';
 
 // ── Component ────────────────────────────────────────────────
 
@@ -88,12 +90,17 @@ const OperationalCalendar = ({ branchId }) => {
     writePref('use24h', next ? '1' : '0');
     return next;
   });
-  const [zoomScale, setZoomScaleState] = useState(() => {
+  const isPhoneView = useViewportWidth() <= PHONE_MAX;
+  const [zoomSaved, setZoomScaleState] = useState(() => {
     const raw = parseFloat(readPref('zoom', null));
     return Number.isFinite(raw) ? clampZoom(raw) : 1;
   });
+  // ZNLY-299: on a phone zoom only goes up (100% is the floor); a saved lower value reads as 100% there and is left alone for desktop.
+  const zoomScale = isPhoneView ? clampPhoneZoom(zoomSaved) : zoomSaved;
+  const minZoomNow = isPhoneView ? 1 : MIN_ZOOM;
   const setZoomScale = (updater) => setZoomScaleState((prev) => {
-    const next = clampZoom(typeof updater === 'function' ? updater(prev) : updater);
+    const cur = isPhoneView ? clampPhoneZoom(prev) : prev;
+    const next = Math.max(minZoomNow, clampZoom(typeof updater === 'function' ? updater(cur) : updater));
     writePref('zoom', String(next));
     return next;
   });
@@ -102,6 +109,7 @@ const OperationalCalendar = ({ branchId }) => {
   const [columnMode, setColumnMode] = useState(() => (enableRooms && !viewerAccess(profile).ownOnly && readPref('group_by', null) === 'room' ? 'room' : 'therapist')); // therapist | room
   const setGroupBy = (mode) => { setColumnMode(mode); writePref('group_by', mode); };
   const [freezeUnassigned, setFreezeUnassigned] = useState(true);
+  const [openTab, setOpenTab] = useState(null); // booking panel tab to open on (phone Unassigned bar -> team tab); cleared when the panel closes
   const [showServiceOnly, setShowServiceOnly] = useState(true);
   const [selectedPositions, setSelectedPositions] = useState([]); // empty = all
   const [hiddenStaffIds, setHiddenStaffIds] = useState([]); // people UNTICKED in the team filter; empty = everyone; ANDed with positions + service-staff
@@ -210,6 +218,7 @@ const OperationalCalendar = ({ branchId }) => {
   const autoRefreshPaused = modalOpen || blockPanelOpen || !!activeDragId || isRescheduling || !!quickCreateSlot
     || !!pendingReassign || !!rebookSource || !!choiceMenuSlot || !!addBlockSlot || !!editingBlock || !!blockDeleteRequest
     || !!transferModalTarget || !!editingTransferTherapist;
+  useEffect(() => { if (!modalOpen) setOpenTab(null); }, [modalOpen]);
   useAutoRefresh(refreshCalendar, { intervalMs: 60000, enabled: !!branchId && !autoRefreshPaused });
 
   // ── Navigation ─────────────────────────────────────────────
@@ -325,7 +334,7 @@ const OperationalCalendar = ({ branchId }) => {
             onClosedDates={() => navigate(`/${orgSlug}/dashboard?view=closed-dates`)}
             zoomScale={zoomScale}
             onZoomChange={setZoomScale}
-            minZoom={MIN_ZOOM}
+            minZoom={minZoomNow}
             maxZoom={MAX_ZOOM}
             use24h={use24h}
             setUse24h={setUse24h}
@@ -405,6 +414,7 @@ const OperationalCalendar = ({ branchId }) => {
                   use24h={use24h}
                   zoomScale={zoomScale}
                   onZoomScaleChange={setZoomScale}
+                  onOpenUnassigned={(b) => { setOpenTab('assign'); handleBookingClick(b); }}
                 />
                 )
               ) : (
@@ -506,6 +516,7 @@ const OperationalCalendar = ({ branchId }) => {
       <BookingActionModal
         variant="panel"
         liveBackdrop
+        initialTab={openTab}
         isOpen={modalOpen}
         previewBooking={previewBooking}
         onRefreshBooking={refreshOpenBooking}

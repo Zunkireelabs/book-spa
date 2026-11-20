@@ -271,6 +271,7 @@ const BookingActionModal = ({
   branchHours,
   defaultNewBookingMode,
   userRole = 'staff',
+  initialTab = null, // tab to open on for a newly opened booking (e.g. 'assign'); default Details
   // variant: 'modal' (default, centered dialog — every other caller) | 'panel' (docked SidePanel, used by the calendar).
   // Printing an invoice hands the customer their own name/phone on paper: an account with customer details hidden must not
   // get that affordance (same gate as issue_invoice(), migration-334).
@@ -1311,7 +1312,7 @@ const BookingActionModal = ({
     };
     return () => { guardRef.current = null; };
   });
-  useEffect(() => { setPanelConfirm(null); setMoreOpen(false); if (booking) setActiveTab('details'); }, [booking?.bookingId]);
+  useEffect(() => { setPanelConfirm(null); setMoreOpen(false); if (booking) setActiveTab(initialTab || 'details'); }, [booking?.bookingId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!moreOpen) return undefined;
     const onDown = (e) => { if (moreRef.current && !moreRef.current.contains(e.target)) setMoreOpen(false); };

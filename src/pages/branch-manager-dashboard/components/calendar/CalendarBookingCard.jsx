@@ -12,6 +12,7 @@ import { cardTier, iconsForBooking, splitForShortCard, statusTag, shouldMoveName
 import Tooltip from '../../../../components/ui/Tooltip';
 import CardIcon, { LockMark } from './CardIcon';
 import { useCardIconPrefs } from './cardIconPrefs';
+import { phoneCardPlan, startNoMeridiem, coupleName, shortName, oneLineShowsIcon } from './phoneCalendarLayout';
 
 // Row of 13px icons; `wrap` lets them flow onto a second row before they clip. `more` = "+N" for icons a short card has no room for.
 const IconRow = ({ icons, more = 0, uid, wrap = false, className = '', rowRef }) => (
@@ -69,7 +70,7 @@ export function canDragBooking(booking) {
   return true;
 }
 
-const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate, onClientActivate, onClientDeactivate, sameClient = false, hideSensitive = false, use24h = false, outsideHours = null }) => {
+const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate, onClientActivate, onClientDeactivate, sameClient = false, hideSensitive = false, use24h = false, outsideHours = null, phone = false, narrow = false, chipWidth = 0 }) => {
   const colors = getBookingStatusColors(isNoShow(booking) ? 'No Show' : booking.status);
   const isDraggable = canDragBooking(booking);
 
@@ -147,6 +148,11 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
   const lockWhy = prefs.lock !== false ? lockReason(booking, getNepalNow()) : null;
   const tagColor = tag === 'No-show' ? '#374151' : '#991B1B';
   const displayName = hideSensitive ? '•••••' : nameForList(booking.customerName, booking.customerPhone);
+  // Phone day view (ZNLY-299): its own simple card, rules in phoneCalendarLayout.js. Desktop never takes this branch.
+  const phonePlan = phone ? phoneCardPlan(cardHeight) : null;
+  const phoneName = hideSensitive ? displayName : coupleName(displayName, booking.companionName);
+  const WORDS = { wordBreak: 'keep-all', overflowWrap: 'normal' }; // whole words only; overflow ends in an ellipsis
+  const CLAMP2 = { display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden', ...WORDS };
 
   // Name drops to its own line only when time + name don't fit line 1 AND the card has a row to spare (height never grows).
   const lineRef = useRef(null);
@@ -276,7 +282,36 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         className={`${tier === 'tiny' ? 'px-2 py-0 justify-center' : tier === 'short' ? 'px-2 py-[2px]' : 'px-2 py-[3px]'} h-full flex flex-col overflow-hidden`}
         {...(isDraggable && !isResizing ? { ...listeners, ...attributes, tabIndex: -1, role: undefined, 'aria-describedby': undefined } : {})}
       >
-        {tier === 'tiny' ? (
+        {phonePlan ? (
+          phonePlan.mode === 'one' ? (
+            <div className="flex items-center gap-1 min-w-0 h-full leading-tight">
+              <span className="font-data text-[11px] text-text-secondary whitespace-nowrap flex-shrink-0">{narrow ? formatClockTime(booking.startTime, use24h) : startNoMeridiem(formatClockTime(booking.startTime, use24h))}</span>
+              <span className="font-body font-semibold text-[12.5px] text-text-primary truncate min-w-0 flex-1" style={WORDS}>{hideSensitive ? phoneName : shortName(booking.companionName ? phoneName : displayName)}</span>
+              {!narrow && oneLineShowsIcon(chipWidth) && icons.length > 0 && <IconRow icons={icons.slice(0, 1)} uid={uid} className="flex-shrink-0" />}
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-1 min-w-0 flex-shrink-0 leading-[1.3]">
+                <span className="font-data text-[11px] text-text-secondary whitespace-nowrap truncate min-w-0">{narrow ? formatClockTime(booking.startTime, use24h) : rangeLabel}</span>
+                {!narrow && (icons.length > 0 || lockWhy) && (
+                  <span className="ml-auto flex items-center gap-[5px] flex-shrink-0">
+                    <IconRow icons={shortIcons.shown} more={shortIcons.more} uid={uid} />
+                    {lockWhy && <LockMark reason={lockWhy} />}
+                  </span>
+                )}
+              </div>
+              <div className="font-body font-semibold text-[12.5px] text-text-primary leading-[1.25]" style={narrow ? { ...WORDS, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } : CLAMP2}>
+                {narrow ? (hideSensitive ? phoneName : shortName(displayName)) : phoneName}
+              </div>
+              {phonePlan.showService && !narrow && (
+                <div className="font-body text-[12px] text-text-secondary leading-[1.25] mt-px" style={CLAMP2}>
+                  {tag && <span className="font-medium" style={{ color: tagColor }}>· {tag} · </span>}
+                  {booking.serviceName}
+                </div>
+              )}
+            </>
+          )
+        ) : tier === 'tiny' ? (
           <div ref={lineRef} className="relative flex items-center gap-1 min-w-0 leading-tight">
             <span ref={timeRef} className="font-data text-[11px] text-text-secondary whitespace-nowrap flex-shrink-0">{formatClockTime(booking.startTime, use24h)}</span>
             <span ref={nameRef} className="font-body font-semibold text-[13px] text-text-primary truncate min-w-0">{displayName}</span>
