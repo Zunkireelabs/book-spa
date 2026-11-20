@@ -85,7 +85,7 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
   }
 
   if (result.data?._therapistAssignmentWarning) {
-    return { toast: { msg: `Booking created, but: ${result.data._therapistAssignmentWarning}`, type: 'error' }, bookingId: result.data?.id };
+    return { toast: { msg: `Booking created, but: ${result.data._therapistAssignmentWarning}`, type: 'error' }, bookingId: result.data?.id, bookingNumber: result.data?.booking_number };
   }
-  return { toast: { msg: 'Booking created successfully' }, bookingId: result.data?.id };
+  return { toast: { msg: 'Booking created successfully' }, bookingId: result.data?.id, bookingNumber: result.data?.booking_number };
 }

@@ -4,12 +4,11 @@ import { useSearchParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
 import BranchPending from '../branch-manager-dashboard/components/Area/BranchPending';
 import AreaTabs from '../branch-manager-dashboard/components/Area/AreaTabs';
-import { getAreaForView } from '../branch-manager-dashboard/components/Area/areaTabsRegistry';
+import { getAreaForView, resolveAreaView } from '../branch-manager-dashboard/components/Area/areaTabsRegistry';
 import AppShell from '../../components/ui/AppShell';
 import QuickFilters from './components/QuickFilters';
 import BookingsList from './components/BookingsList';
 import BookingsViewPanel from '../branch-manager-dashboard/components/BookingsViewPanel';
-import StaffBookingForm from './components/StaffBookingForm';
 import DashboardHome from '../dashboard-home';
 import { hasOwnBookingsToday } from '../../lib/dashboardViews';
 import CheckBookingPanel from './components/CheckBookingPanel';
@@ -468,7 +467,7 @@ const BranchStaffDashboard = () => {
   // Staff also get the Products area (Products + Categories tabs) when the flag is on.
   const bookingsArea = getAreaForView('bookings');
   const productsArea = PRODUCTS_ENABLED ? getAreaForView('products') : null;
-  const areaForView = bookingsArea.tabs.some((t) => t.view === viewMode) ? bookingsArea : (productsArea && productsArea.tabs.some((t) => t.view === viewMode) ? productsArea : null);
+  const areaForView = bookingsArea.tabs.some((t) => t.view === resolveAreaView(viewMode)) ? bookingsArea : (productsArea && productsArea.tabs.some((t) => t.view === viewMode) ? productsArea : null);
   // Bookings, "New membership" and "New voucher" share one tree: the bookings list keeps its key and the panel is the second
   // child, so switching between these tabs doesn't remount the list (which would refetch and flash).
   const withBookingsList = (overlay = null) => (
@@ -482,7 +481,7 @@ const BranchStaffDashboard = () => {
     switch (view) {
       case 'bookings': return withBookingsList();
       case 'collect-payment': return <CollectPaymentPanel onSuccess={showSuccess} />;
-      case 'new-booking': return <StaffBookingForm onBookingCreated={loadData} />;
+      case 'new-booking': return withBookingsList(); // the New booking panel opens over the list (BookingsViewPanel reads ?view=new-booking)
       case 'check-booking': return <CheckBookingPanel branchId={branchId} />;
       case 'new-membership':
         return withBookingsList(MEMBERSHIP_ENABLED ? (
@@ -575,7 +574,7 @@ const BranchStaffDashboard = () => {
       ) : areaForView ? (
         <AreaTabs area={areaForView} view={viewMode}>{renderAreaView(viewMode)}</AreaTabs>
       ) : (
-        <StaffBookingForm onBookingCreated={loadData} />
+        <OperationalCalendar branchId={branchId} />
       )}
     </AppShell>
   );

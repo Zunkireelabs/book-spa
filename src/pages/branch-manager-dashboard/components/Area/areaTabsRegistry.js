@@ -17,7 +17,6 @@ export const AREAS = [
     description: ({ branchName, isOverall, ownOnly }) => ownOnly ? OWN_BOOKINGS_HEADER : `Every booking at ${isOverall ? `all ${wordBranches()}` : (branchName || `this ${wordBranch()}`)}.`,
     tabs: [
       { view: 'bookings', label: 'All bookings', roles: ALL },
-      { view: 'new-booking', label: 'New booking', roles: ['staff', 'manager', 'admin'], overallHidden: true },
       { view: 'check-booking', label: 'Check booking', roles: ALL, overallHidden: true },
       { view: 'collect-payment', money: true, label: 'Collect payment', roles: FRONT_DESK, overallHidden: true },
       ...(MEMBERSHIP_ENABLED ? [{ view: 'new-membership', money: true, label: 'New membership', roles: FRONT_DESK, overallHidden: true }] : []),
@@ -112,7 +111,11 @@ export const AREAS = [
   }] : []),
 ];
 
-export const getAreaForView = (view) => AREAS.find((a) => a.tabs.some((t) => t.view === view)) || null;
+// Views that are not a tab but belong to an area: `?view=new-booking` is the Bookings list with the New booking panel open on top (ZNLY-301).
+export const AREA_VIEW_ALIASES = { 'new-booking': 'bookings' };
+export const resolveAreaView = (view) => AREA_VIEW_ALIASES[view] || view;
+
+export const getAreaForView = (view) => { const v = resolveAreaView(view); return AREAS.find((a) => a.tabs.some((t) => t.view === v)) || null; };
 
 // Tabs this role / branch can see, in order (labels resolved).
 export const getVisibleTabs = (area, { role, isOverall, hidePrices, ...labels }) =>

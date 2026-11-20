@@ -81,7 +81,6 @@ import TemplateEditorPanel from './components/Outreach/TemplateEditorPanel';
 import ReviewQueuePanel from './components/Outreach/ReviewQueuePanel';
 import MessageLogPanel from './components/Outreach/MessageLogPanel';
 import ProviderSettingsPanel from './components/Outreach/ProviderSettingsPanel';
-import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
 import CheckBookingPanel from '../branch-staff-dashboard/components/CheckBookingPanel';
 import CollectPaymentPanel from '../branch-staff-dashboard/components/CollectPaymentPanel';
 import EnrollMemberPanel from './components/Memberships/EnrollMemberPanel';
@@ -415,7 +414,7 @@ const BranchManagerDashboard = () => {
     const outreachAdmin = OUTREACH_ENABLED && profile?.role === 'admin';
     switch (view) {
       case 'bookings': return withBookingsList(null);
-      case 'new-booking': return !isOverall ? <StaffBookingForm onBookingCreated={loadData} /> : null;
+      case 'new-booking': return !isOverall ? withBookingsList(null) : null; // the New booking panel opens over the list (BookingsViewPanel reads ?view=new-booking)
       case 'check-booking': return !isOverall ? <CheckBookingPanel branchId={branchId} /> : null;
       // Front-desk tools (ZNLY-149): manager and admin sell and collect too; admin_viewer stays read-only.
       case 'collect-payment': return frontDesk && !isOverall ? <CollectPaymentPanel onSuccess={showSuccess} /> : null;

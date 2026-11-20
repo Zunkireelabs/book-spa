@@ -160,8 +160,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setCustomerPhone(slotInfo?.defaultCustomerPhone || '');
     setCustomerCountryCode(slotInfo?.defaultCustomerCountryCode || '+977');
     setKnownCustomerId(slotInfo?.defaultCustomerId || null);
-    setCustomerEmail('');
-    setCustomerGender('');
+    setCustomerEmail(slotInfo?.defaultCustomerEmail || '');
+    setCustomerGender(slotInfo?.defaultCustomerGender ? String(slotInfo.defaultCustomerGender).toLowerCase() : '');
     setSpecialRequests('');
     setIsExistingCustomer(false);
     setReferringCustomerId('');
@@ -196,6 +196,11 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setSubmitting(false);
     submitInFlightRef.current = false;
     setPreviousDue(null);
+    // Opened for a known customer (Customers / Memberships / Packages 'Book'): treat as an existing customer and show any earlier balance.
+    if (slotInfo?.defaultCustomerExisting && slotInfo.defaultCustomerPhone) {
+      setIsExistingCustomer(true);
+      checkPreviousDue(`${slotInfo.defaultCustomerCountryCode || '+977'}${slotInfo.defaultCustomerPhone}`);
+    }
     setConfirm(null);
     initialDraftRef.current = {
       date: slotInfo?.day || '',

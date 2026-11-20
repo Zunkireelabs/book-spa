@@ -5,12 +5,13 @@ import { viewerAccess } from 'services/dataMasking';
 import { useBranch } from 'contexts/BranchContext';
 import { useIndustry } from 'hooks/useIndustry';
 import { AreaPage } from './AreaLayout';
-import { getVisibleTabs } from './areaTabsRegistry';
+import { getVisibleTabs, resolveAreaView } from './areaTabsRegistry';
 import ScrollRow from 'components/ui/ScrollRow';
 
 // A small area as tabs: header (title + description), an underline tab row (same style as the Outstanding / Settled tabs), then the
 // panel in `.content-scroll`. Each tab is a `?view=` link. The tab row is hidden when only one tab is visible.
-const AreaTabs = ({ area, view, children }) => {
+const AreaTabs = ({ area, view: rawView, children }) => {
+  const view = resolveAreaView(rawView);
   const { profile } = useAuth();
   const { branchName, isOverall } = useBranch();
   const { staffLabelPlural, productLabel } = useIndustry();

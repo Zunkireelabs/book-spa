@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react';
+import { CreateBookingHost } from '../../dashboard-home/DashboardPanels';
+import { newBookingSlot } from './calendar/newBookingSlot';
 import UnlinkedLoginNotice from '../../../components/ui/UnlinkedLoginNotice';
 import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate, useLocation, useNavigationType } from 'react-router-dom';
@@ -259,7 +261,7 @@ const BookingsViewPanel = ({ branchId }) => {
   };
   const bookTherapist = (therapistId) => navigate(`?view=calendar&newBooking=1&bt=${therapistId}&btime=${fromMin(nextSlot10(nowMin))}`);
 
-  const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
+  const showToast = (msg, type = 'success', action = null) => { setToast({ msg, type, action }); setTimeout(() => setToast(null), action ? 7000 : 3000); };
 
   // ── Derived ─────────────────────────────────────────────────────────────────────────────────────────────────────────
   const therapistOptions = useMemo(() => {
@@ -418,6 +420,36 @@ const BookingsViewPanel = ({ branchId }) => {
     URL.revokeObjectURL(a.href);
   };
 
+  // ── New booking (ZNLY-301): the one New booking panel opens on top of this list ─────────────────────────────────────
+  // `?view=new-booking` (⌘K, Customers / Memberships / Packages / customer-detail "Book") opens it too, prefilled from location.state.
+  const viewParam = sp.get('view');
+  const navLoc = useLocation();
+  const navState = navLoc.state;
+  const canCreate = !isOverall && !readOnly && ['staff', 'manager', 'admin'].includes(role);
+  const [createSlot, setCreateSlot] = useState(null);
+  const [hoursWaited, setHoursWaited] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setHoursWaited(true), 1200); return () => clearTimeout(t); }, []);
+  const openCreate = (prefill) => setCreateSlot(newBookingSlot({ today, nowHM, branchHours, prefill }));
+  const handledNewRef = useRef(null);
+  useEffect(() => {
+    if (viewParam !== 'new-booking' || !canCreate || !branchId || (branchHours === undefined && !hoursWaited)) return;
+    const key = navLoc.key || 'x';
+    if (handledNewRef.current === key) return;
+    handledNewRef.current = key;
+    openCreate(navState?.prefill);
+  }, [viewParam, canCreate, branchId, branchHours, hoursWaited]); // eslint-disable-line react-hooks/exhaustive-deps
+  // "View" on the created-booking toast: open it by id whatever day the list shows (the panel fetches it, so it need not be in
+  // the loaded rows) and move the list to the booking's day so it appears in context. One patch, straight to the URL (no dirty guard:
+  // nothing is open at this point).
+  const viewCreated = (info) => {
+    const d = info.bookingDate;
+    patch({ open: info.bookingId, ...(d && (d < range.from || d > range.to) ? { r: '', d: d === today ? '' : d, from: '', to: '' } : {}) });
+  };
+  const closeCreate = () => {
+    setCreateSlot(null);
+    if (viewParam === 'new-booking') navigate('?view=bookings', { replace: true }); // no Back trap
+  };
+
   // ── Header actions (portaled into the area header) ──────────────────────────────────────────────────────────────────
   const [actionsEl, setActionsEl] = useState(null);
   useEffect(() => { setActionsEl(document.getElementById('area-header-actions')); }, []);
@@ -428,6 +460,7 @@ const BookingsViewPanel = ({ branchId }) => {
   const headerActions = actionsEl && createPortal(
     <>
       {liveBadge}
+      {canCreate && <button type="button" onClick={() => openCreate()} className="h-8 px-3 rounded-md bg-primary text-white text-[13px] font-medium inline-flex items-center gap-1.5 hover:bg-primary/90 whitespace-nowrap"><Icon name="Plus" size={14} /><span className="sm:hidden">New</span><span className="hidden sm:inline">New booking</span></button>}
       {canExport && <button type="button" onClick={exportCsv} disabled={!visible.length} className="h-8 px-3 border border-border rounded-md bg-white text-[13px] font-medium inline-flex items-center gap-1.5 hover:bg-[#FAFAF9] disabled:opacity-50 disabled:cursor-not-allowed"><Icon name="Download" size={14} />Export</button>}
     </>, actionsEl);
 
@@ -715,6 +748,7 @@ const BookingsViewPanel = ({ branchId }) => {
       {toast && (
         <div className={`fixed toast-top left-1/2 -translate-x-1/2 z-toast px-5 py-3 rounded-lg shadow-lg flex items-center gap-2 ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
           <span className="text-sm font-medium">{toast.msg}</span>
+          {toast.action && <button type="button" onClick={() => { toast.action.run(); setToast(null); }} className="ml-2 min-h-[32px] px-2 text-sm font-semibold underline">{toast.action.label}</button>}
         </div>
       )}
       {needsLine}
@@ -790,6 +824,19 @@ const BookingsViewPanel = ({ branchId }) => {
         userRole={role}
         onViewBooking={handleViewBooking}
       />
+      {createSlot && (
+        <CreateBookingHost
+          slot={createSlot}
+          branchId={branchId}
+          onClose={closeCreate}
+          onCreated={(t, info) => {
+            closeCreate();
+            load();
+            const msg = info?.bookingNumber && t?.type !== 'error' ? `Booking ${info.bookingNumber} created` : (t?.msg || 'Booking created');
+            showToast(msg, t?.type || 'success', info?.bookingId ? { label: 'View', run: () => viewCreated(info) } : null);
+          }}
+        />
+      )}
     </div>
   );
 };

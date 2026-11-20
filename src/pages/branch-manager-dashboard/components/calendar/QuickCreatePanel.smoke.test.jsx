@@ -17,6 +17,7 @@ vi.mock('../../../../services/api', async (importOriginal) => ({
 }));
 
 import QuickCreatePanel from './QuickCreatePanel';
+import { newBookingSlot } from './newBookingSlot';
 
 const props = {
   services: [{ id: 's1', name: 'Massage', duration_minutes: 60, requires_therapist: true }],
@@ -44,5 +45,18 @@ describe('QuickCreatePanel smoke', () => {
     render(<QuickCreatePanel {...props} slotInfo={{ day: '2026-11-20', hour: 17, minute: 20, colType: 'therapist', colId: 't1', dragMinutes: 0 }} />);
     expect(screen.getByText('Pick a service')).toBeTruthy();
     expect(screen.getByRole('button', { name: /create booking/i }).disabled).toBe(true);
+  });
+  it('opens slot-less from a prefill (?view=new-booking): name, phone, email and gender are filled, service preselected', () => {
+    const slot = newBookingSlot({
+      today: '2026-11-20', nowHM: '17:20', branchHours: { openTime: '09:00:00', closeTime: '21:00:00' },
+      prefill: { fullName: 'Hema Devi', phone: '+9779841000000', email: 'hema@example.com', gender: 'Female', serviceId: 's1' },
+    });
+    render(<QuickCreatePanel {...props} slotInfo={slot} />);
+    expect(document.querySelector('input[value="Hema Devi"]')).toBeTruthy();
+    expect(document.querySelector('input[value="9841000000"]')).toBeTruthy();
+    expect(document.querySelector('input[value="hema@example.com"]')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Female' }).className).toMatch(/primary|bg-/);
+    expect(screen.getByText(/Massage/)).toBeTruthy();
+    expect(screen.getByDisplayValue('5:30pm')).toBeTruthy();
   });
 });
