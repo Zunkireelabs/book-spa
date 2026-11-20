@@ -44,7 +44,7 @@ Last synced: **2026-11-20** by Project Manager · 243 open tickets (epics exclud
 | ZNLY-188 | Anish | medium | Group booking: collect per-guest First/Last Name, Email, Phone, Gender (fixes shared-customer-record overwrite) |
 | ZNLY-189 | Anish | medium | Group booking: retry rollback + alert staff when a group booking gets stuck |
 | ZNLY-192 | Anish | medium | Wire 11 hardcoded "Therapist" labels to the dynamic staffLabel system |
-| ZNLY-255 | — | medium | Safe dependency upgrades (router 6.x, vite 5.x, supabase-js, posthog, dompurify, postcss) before stage PR |
+| ZNLY-255 | Sadin | medium | Safe dependency upgrades (router 6.x, vite 5.x, supabase-js, posthog, dompurify, postcss) before stage PR |
 | ZNLY-260 | — | medium | Four in-shell high-fidelity mockup redraws (team member panel, service pricing, checkout invoice dialog, calendar + waitlist) |
 | ZNLY-271 | Sadin | medium | Calendar card icons: one calm icon set (payment tag, note vs customer alert, first visit, online, package session, group) + Icons legend with on/off |
 | ZNLY-273 | Sadin | medium | Bookings "Needs you now" says "Everything's on track" while finished bookings are still unpaid |
