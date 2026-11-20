@@ -104,7 +104,7 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
         {late != null && <div className="text-[11.5px] font-medium text-[#B45309] mt-0.5">Late · {formatLate(late)}</div>}
       </td>}
       {bp.sm && columns.amount && <td className={`${cell} pr-4 text-right whitespace-nowrap ${dim ? 'opacity-[.55]' : ''}`}><AmountCell a={amount} /></td>}
-      <td className={`${cell} w-[88px] pl-1 pr-1`}>
+      <td className={`${cell} w-[112px] pl-1 pr-1`}>
         <div className="flex gap-1.5 justify-end items-center text-[#8A8A90]">
           {action && (
             <button type="button" disabled={busy || !!action.blocked} title={action.blocked || undefined} onClick={(e) => { e.stopPropagation(); onAction(action); }}

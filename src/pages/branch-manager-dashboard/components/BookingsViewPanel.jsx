@@ -640,6 +640,8 @@ const BookingsViewPanel = ({ branchId }) => {
   // colSpan must equal the number of columns actually showing (hidden ones are display:none), or the fixed layout grows a phantom column.
   const colCount = 3 + (isSm ? (columns.amount ? 2 : 1) : 0) + (isMd && columns.service ? 1 : 0) + (isLg && columns.therapist ? 1 : 0);
 
+  // The right column (action button + chevron) is one fixed width sized for the longest label ("Complete"), so no row ever pushes its chevron off the edge.
+  const ACTION_COL_W = 112;
   // One <colgroup> shared by the heading table and every day table so their columns line up exactly.
   const colgroup = (
     <colgroup>
@@ -649,7 +651,7 @@ const BookingsViewPanel = ({ branchId }) => {
       {isLg && columns.therapist && <col style={{ width: '16%' }} />}
       {isSm && <col style={{ width: 132 }} />}
       {isSm && columns.amount && <col style={{ width: 112 }} />}
-      <col style={{ width: isSm ? 88 : 84 }} />
+      <col style={{ width: ACTION_COL_W }} />
     </colgroup>
   );
   const rowProps = (b) => ({
