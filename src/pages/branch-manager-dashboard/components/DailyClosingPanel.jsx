@@ -257,17 +257,8 @@ const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
                 <Icon name="CreditCard" size={18} className="text-primary" />
                 <span>Payment Breakdown</span>
               </h3>
-              <div className="divide-y divide-border">
-                <DayMoneyRows data={summary} fmt={formatNPR} lab="font-body font-body-normal text-sm text-text-secondary" val="font-body font-body-semibold text-sm text-text-primary" head="font-heading font-heading-medium text-sm text-text-primary" />
-                {[['product', 'Products', 'Package'], ['voucher', 'Voucher sales', 'Ticket'], ['membership', 'Membership deposits', 'Wallet'], ['package', 'Package sales', 'Gift']].filter(([k]) => Number(summary.sources?.[k]) > 0).map(([k, label, icon]) => (
-                  <div key={k} className="py-2.5 flex items-center justify-between gap-3" data-source-line={k}>
-                    <div className="flex items-center gap-2">
-                      <Icon name={icon} size={14} className="text-text-secondary" />
-                      <span className="font-body font-body-normal text-sm text-text-secondary">of which: {label}</span>
-                    </div>
-                    <span className="font-body font-body-semibold text-sm whitespace-nowrap tabular-nums text-text-primary">{formatNPR(summary.sources[k])}</span>
-                  </div>
-                ))}
+              <div>
+                <DayMoneyRows data={summary} fmt={formatNPR} lab="font-body font-body-normal text-sm text-text-secondary" val="font-body font-body-semibold text-sm text-text-primary" />
               </div>
             </div>
           </div>

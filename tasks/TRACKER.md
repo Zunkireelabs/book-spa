@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-19** by Project Manager · 232 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-20** by Project Manager · 237 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -27,6 +27,10 @@ Last synced: **2026-11-19** by Project Manager · 232 open tickets (epics exclud
 | ZNLY-269 | Sadin | high | Booking panel: customer in the header with View profile + add date of birth inline (Fresha-style) |
 | ZNLY-272 | Sadin | high | Dashboard shows a false "0 of 0 done · Nothing left open ✓ · Tomorrow 0 bookings" for ~3s while loading |
 | ZNLY-274 | Sadin | high | Online bookings by NEW customers never create or link a customer record (no profile, no history, no DOB, missed by campaigns) |
+| ZNLY-275 | Sadin | high | A booking for a later day can be Started, Completed or marked No-show today (its money lands in today's takings and Day close) |
+| ZNLY-277 | Sadin | high | Closed-day Payment Breakdown: uneven row spacing (tall method rows, cramped totals and section headings) |
+| ZNLY-278 | Sadin | high | "Own bookings only" login: calendar shows every colleague's column empty, so busy colleagues look free |
+| ZNLY-279 | Sadin | high | Calendar team filter: all staff are showing but every checkbox is unticked ("All positions", "Clear all" with nothing to clear) |
 | ZNLY-136 | Anish | medium | Group booking (Fresha-style): book multiple people, one shared slot, one checkout |
 | ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
 | ZNLY-175 | Sadin | medium | Therapist inner page: outcomes bar total counts upcoming bookings that sit in no bucket |
@@ -41,6 +45,7 @@ Last synced: **2026-11-19** by Project Manager · 232 open tickets (epics exclud
 | ZNLY-260 | — | medium | Four in-shell high-fidelity mockup redraws (team member panel, service pricing, checkout invoice dialog, calendar + waitlist) |
 | ZNLY-271 | Sadin | medium | Calendar card icons: one calm icon set (payment tag, note vs customer alert, first visit, online, package session, group) + Icons legend with on/off |
 | ZNLY-273 | Sadin | medium | Bookings "Needs you now" says "Everything's on track" while finished bookings are still unpaid |
+| ZNLY-276 | Sadin | medium | Dashboard strip "50 of 54 done (1 no-show)" reads as 4 left when 3 are open |
 
 ## In review / on stage
 | Ticket | Owner | Priority | State | What |

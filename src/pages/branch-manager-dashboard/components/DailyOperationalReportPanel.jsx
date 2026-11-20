@@ -338,17 +338,8 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                 <Icon name="CreditCard" size={18} className="text-primary" />
                 <span>Payment Breakdown</span>
               </h3>
-              <div className="space-y-3">
-                <DayMoneyRows data={report} fmt={formatNPR} lab="text-sm text-text-secondary" val="text-sm font-semibold text-text-primary" head="text-sm font-semibold text-text-primary" />
-                {[['product', 'Products', 'Package'], ['voucher', 'Voucher sales', 'Ticket'], ['membership', 'Membership deposits', 'Wallet'], ['package', 'Package sales', 'Gift']].filter(([k]) => Number(report.sources?.[k]) > 0).map(([k, label, icon]) => (
-                  <div key={k} className="border-t border-border pt-2 flex items-center justify-between" data-source-line={k}>
-                    <div className="flex items-center gap-2">
-                      <Icon name={icon} size={14} className="text-text-secondary" />
-                      <span className="text-sm text-text-secondary">of which: {label}</span>
-                    </div>
-                    <span className="text-sm font-semibold text-text-primary">{formatNPR(report.sources[k])}</span>
-                  </div>
-                ))}
+              <div>
+                <DayMoneyRows data={report} fmt={formatNPR} lab="text-sm text-text-secondary" val="text-sm font-semibold text-text-primary" />
               </div>
             </div>
           </div>
