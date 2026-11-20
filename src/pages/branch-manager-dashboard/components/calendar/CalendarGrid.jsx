@@ -1,3 +1,4 @@
+import { buildClientIndex, customerIdOf, isSameClient, clientDayInfo } from './sameClient';
 import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
@@ -237,8 +238,16 @@ const CalendarGrid = ({
     sharedClearTimer.current = setTimeout(() => setHoverSharedId(null), 100);
   }, []);
   useEffect(() => () => clearTimeout(sharedClearTimer.current), []);
+  // ZNLY-281: same-client highlight. Any card under the pointer/focus (or open in a popover / the panel) lights up that client's other cards on screen.
+  const [hoverClientId, setHoverClientId] = useState(null);
+  const clientClearTimer = useRef(null);
+  const activateClient = useCallback((id) => { clearTimeout(clientClearTimer.current); setHoverClientId(id); }, []);
+  const deactivateClient = useCallback(() => { clearTimeout(clientClearTimer.current); clientClearTimer.current = setTimeout(() => setHoverClientId(null), 100); }, []);
+  useEffect(() => () => clearTimeout(clientClearTimer.current), []);
   const popoverBookingId = useHoverCardBookingId();
   const activeSharedId = hoverSharedId || popoverBookingId || selectedBookingId || null;
+  const clientIndex = useMemo(() => buildClientIndex(bookings), [bookings]); // one map customerId -> bookings for the whole render, no per-card scans
+  const activeCustomerId = useMemo(() => customerIdOf(bookings, hoverClientId || popoverBookingId || selectedBookingId || null), [bookings, hoverClientId, popoverBookingId, selectedBookingId]);
   // Hide the connector of the booking being dragged (its copies are mid-move); it redraws from fresh data on drop.
   const draggingSharedId = activeDragId ? String(activeDragId).split('__')[0] : null;
 
@@ -528,6 +537,7 @@ const CalendarGrid = ({
         bookingNumber: b.booking_number,
         customerName: b.customer_name,
         customerPhone: b.customer_phone || null,
+        customerId: b.customer_id || null, // ZNLY-281: same-client highlight matches on this id only
         serviceName: b.service?.name || 'Service',
         serviceDuration: b.service?.duration_minutes || null,
         status: b.status,
@@ -1519,8 +1529,15 @@ const CalendarGrid = ({
                 isLinkedActive={!!(booking.isShared || booking.isRoomShared || booking.isCombo) && !!activeSharedId && booking.bookingId === activeSharedId}
                 onSharedActivate={activateShared}
                 onSharedDeactivate={deactivateShared}
+                onClientActivate={activateClient}
+                onClientDeactivate={deactivateClient}
+                sameClient={isSameClient(clientIndex, activeCustomerId, booking)}
                 key={cardKey}
-                booking={outsideOf(col, day, booking) ? { ...booking, availabilityNote: outsideOf(col, day, booking).note } : booking}
+                booking={(() => {
+                  const info = clientDayInfo(clientIndex, booking);
+                  const o = outsideOf(col, day, booking);
+                  return o || info ? { ...booking, ...(o ? { availabilityNote: o.note } : {}), ...(info ? { _clientDay: info } : {}) } : booking;
+                })()}
                 columnMode={columnMode}
                 hideSensitive={hideSensitive}
                 use24h={use24h}

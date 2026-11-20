@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
+import { buildClientIndex, clientDayInfo } from './sameClient';
 import { viewerAccess } from 'services/dataMasking';
 import UnlinkedLoginNotice from 'components/ui/UnlinkedLoginNotice';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -228,6 +229,12 @@ const OperationalCalendar = ({ branchId }) => {
 
   // ── Derived data ───────────────────────────────────────────
 
+  // ZNLY-281: "N bookings today for this client" in the open panel / sheet (same index the grid uses).
+  const clientIndexAll = useMemo(() => buildClientIndex(calendarData?.bookings), [calendarData?.bookings]);
+  const selectedClientDay = useMemo(
+    () => (selectedBooking ? clientDayInfo(clientIndexAll, { customerId: selectedBooking.customerId, date: selectedBooking.date }) : null),
+    [clientIndexAll, selectedBooking]
+  );
   const therapistsForModal = useMemo(() =>
     calendarData
       ? calendarData.therapists
@@ -500,6 +507,7 @@ const OperationalCalendar = ({ branchId }) => {
         guardRef={bookingGuardRef}
         onClose={handleModalClose}
         booking={selectedBooking}
+        clientDay={selectedClientDay}
         therapists={therapistsForModal}
         rooms={calendarData?.rooms || []}
         services={servicesCache || []}

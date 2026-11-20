@@ -26,6 +26,8 @@ import { useOrg } from '../../contexts/OrgContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
 import BlockOverlapWarning from './BlockOverlapWarning';
 import SidePanel from './SidePanel';
+import ClientDayLine from '../../pages/branch-manager-dashboard/components/calendar/ClientDayLine';
+import { compactRange } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
 import BookingCustomerLine from './BookingCustomerLine';
 import { useNavigate } from 'react-router-dom';
 import AvailabilityNoteLine from './AvailabilityNoteLine';
@@ -242,6 +244,7 @@ const RestrictedNotes = ({ bookingId, value, onSaved }) => {
 };
 
 const BookingActionModal = ({
+  clientDay = null, // ZNLY-281: { count, first, last } of this client's bookings that day (calendar only)
   isOpen = false,
   onClose,
   booking = null,
@@ -1854,6 +1857,7 @@ const BookingActionModal = ({
             {/* Details Tab */}
             {activeTab === 'details' && (
               <div className={isPanel ? 'space-y-5' : 'space-y-4 sm:space-y-6'}>
+                <ClientDayLine info={clientDay} range={clientDay ? compactRange(clientDay.first, clientDay.last) : ''} />
                 {/* Lock / Immutability Banner — payment-aware on Completed so it complements the Record Payment button */}
                 {isMutationBlocked && (() => {
                   const banner = isLocked

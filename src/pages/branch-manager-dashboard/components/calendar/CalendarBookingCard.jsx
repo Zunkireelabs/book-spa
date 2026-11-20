@@ -69,7 +69,7 @@ export function canDragBooking(booking) {
   return true;
 }
 
-const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate, hideSensitive = false, use24h = false, outsideHours = null }) => {
+const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate, onClientActivate, onClientDeactivate, sameClient = false, hideSensitive = false, use24h = false, outsideHours = null }) => {
   const colors = getBookingStatusColors(isNoShow(booking) ? 'No Show' : booking.status);
   const isDraggable = canDragBooking(booking);
 
@@ -244,6 +244,8 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         ...(outsideHours && !isDragging ? { boxShadow: `inset 0 0 0 1.5px ${OUTSIDE_HOURS_OUTLINE}` } : {}),
         // Linked highlight (all copies of the hovered/focused/open shared booking); the panel ring wins on the open card.
         ...(isLinkedActive && !isPanelSelected && !isDragging ? { outline: `1.5px solid ${colors.bar}`, outlineOffset: 1 } : {}),
+        // Same client as the hovered / focused / open booking (ZNLY-281): brand outline; a linked (spa) copy keeps its own status-colour outline.
+        ...(sameClient && !isLinkedActive && !isPanelSelected && !isDragging ? { outline: '2px solid #2D5A27', outlineOffset: 1 } : {}),
       }}
       onClick={(e) => {
         if (!isDragging && !isResizing) {
@@ -263,10 +265,10 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         hoverHandlers.onKeyDown(e);
         if (!e.defaultPrevented && e.key === 'Enter' && e.target === e.currentTarget && !isResizing) { e.preventDefault(); hideNow(); onClick(booking); }
       }}
-      onPointerEnter={(e) => { hoverHandlers.onPointerEnter?.(e); if (booking.isShared || booking.isRoomShared || booking.isCombo) onSharedActivate?.(booking.bookingId); }}
-      onPointerLeave={(e) => { hoverHandlers.onPointerLeave?.(e); if (booking.isShared || booking.isRoomShared || booking.isCombo) onSharedDeactivate?.(); }}
-      onFocus={(e) => { hoverHandlers.onFocus?.(e); if (booking.isShared || booking.isRoomShared || booking.isCombo) onSharedActivate?.(booking.bookingId); }}
-      onBlur={(e) => { hoverHandlers.onBlur?.(e); if (booking.isShared || booking.isRoomShared || booking.isCombo) onSharedDeactivate?.(); }}
+      onPointerEnter={(e) => { hoverHandlers.onPointerEnter?.(e); onClientActivate?.(booking.bookingId || booking.id); if (booking.isShared || booking.isRoomShared || booking.isCombo) onSharedActivate?.(booking.bookingId); }}
+      onPointerLeave={(e) => { hoverHandlers.onPointerLeave?.(e); onClientDeactivate?.(); if (booking.isShared || booking.isRoomShared || booking.isCombo) onSharedDeactivate?.(); }}
+      onFocus={(e) => { hoverHandlers.onFocus?.(e); onClientActivate?.(booking.bookingId || booking.id); if (booking.isShared || booking.isRoomShared || booking.isCombo) onSharedActivate?.(booking.bookingId); }}
+      onBlur={(e) => { hoverHandlers.onBlur?.(e); onClientDeactivate?.(); if (booking.isShared || booking.isRoomShared || booking.isCombo) onSharedDeactivate?.(); }}
     >
       {/* Drag handle area — middle section of card, not edges */}
       <div
