@@ -6582,6 +6582,36 @@ export function getBookingDayCounts(branchId, startDate, endDate) {
 }
 
 
+// ZNLY-299: open bookings in [fromDate, toDate] that have no staff yet (no therapist_id, no booking_therapists rows) and whose
+// service needs staff. Feeds the calendar's Assign list (today + the next 7 days). Plain select under RLS; raw rows, same
+// shape the calendar uses, so the list helpers take both.
+export async function fetchUnassignedBookings({ branchId, fromDate, toDate }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const vis = await resolveVisibility(profile);
+    let query = supabase
+      .from('bookings')
+      .select('id, customer_name, customer_phone, status, date, start_time, end_time, created_by, therapist_id, room_id, service_id, service:services(name, duration_minutes, requires_therapist, is_couple), booking_therapists(therapist_id)')
+      .gte('date', fromDate)
+      .lte('date', toDate)
+      .is('therapist_id', null)
+      .not('status', 'in', '("Cancelled","No Show","Completed")')
+      .order('date')
+      .order('start_time')
+      .limit(300);
+    query = withBranch(query, branchId);
+    const { data, error } = await query;
+    if (error) throw error;
+    let rows = (data || []).filter((b) => !(b.booking_therapists || []).length && b.service?.requires_therapist !== false);
+    if (!vis.canViewCustomerDetails) rows = rows.map((b) => ({ ...b, customer_name: maskCustomerName(b.customer_name), customer_phone: maskPhone(b.customer_phone) }));
+    return { data: rows, error: null };
+  } catch (error) {
+    console.error('[API] fetchUnassignedBookings error:', error.message);
+    return { data: null, error: { code: error.code || 'FETCH_FAILED', message: friendlyError(error, 'Could not load the unassigned bookings.') } };
+  }
+}
+
 export async function getCalendarBookings(branchId, startDate, endDate) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);

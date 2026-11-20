@@ -25,7 +25,10 @@ import { useCalendarPanels } from './hooks/useCalendarPanels';
 import { useCalendarShortcuts } from './hooks/useCalendarShortcuts';
 import { useGoTodaySignal } from './calendarSignals';
 import { useBookingActions } from './hooks/useBookingActions';
-import { isOverallBranch } from '../../../../services/api';
+import { isOverallBranch, assignTherapist } from '../../../../services/api';
+import { useAvailabilityGuard } from '../../../../contexts/AvailabilityOverrideContext';
+import AssignFlow from './AssignFlow';
+import { dayAssignCount } from '../../../../utils/unassignedList';
 import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
@@ -116,6 +119,10 @@ const OperationalCalendar = ({ branchId }) => {
   const [hiddenStaffIds, setHiddenStaffIds] = useState([]); // people UNTICKED in the team filter; empty = everyone; ANDed with positions + service-staff
   const [tipOpen, setTipOpen] = useState(false);
   const [actionToast, setActionToast] = useState(null);
+  const [assignOpen, setAssignOpen] = useState(false); // ZNLY-299: the Assign list / staff step (phone sheet, desktop side panel)
+  const [assignedToast, setAssignedToast] = useState(null); // { msg, undo } — "Assigned to <name> · Undo", 6s
+  const assignedToastTimer = useRef(null);
+  const { guard: assignGuard } = useAvailabilityGuard();
 
   // Ref to the grid body for calculating time from cursor position
   const gridRef = useRef(null);
@@ -126,6 +133,26 @@ const OperationalCalendar = ({ branchId }) => {
   const showToast = (msg, type = 'success') => {
     setActionToast({ msg, type });
     setTimeout(() => setActionToast(null), 3000);
+  };
+
+  const showAssignedToast = (toast) => {
+    clearTimeout(assignedToastTimer.current);
+    setAssignedToast(toast);
+    assignedToastTimer.current = setTimeout(() => setAssignedToast(null), 6000);
+  };
+  useEffect(() => () => clearTimeout(assignedToastTimer.current), []);
+  // Scroll the calendar to a card and flash it (the grid re-renders after the refresh, so retry briefly).
+  const flashBooking = (bookingId) => {
+    let tries = 0;
+    const tick = () => {
+      const el = document.querySelector(`[data-booking-key="${bookingId}"]`);
+      if (el) {
+        el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+        el.classList.add('ring-2', 'ring-primary');
+        setTimeout(() => el.classList.remove('ring-2', 'ring-primary'), 2200);
+      } else if (++tries < 12) setTimeout(tick, 250);
+    };
+    setTimeout(tick, 250);
   };
 
 
@@ -236,6 +263,25 @@ const OperationalCalendar = ({ branchId }) => {
   // Gates both onTherapistReorder and onRoomReorder below. Branch-scoped:
   // staff can rearrange columns for their own branch only.
   const canReorderTherapists = ['staff', 'manager', 'admin'].includes(profile?.role);
+  // Own-only and view-only logins (and the all-branches view) cannot assign, so they get no bar and no link.
+  const canAssign = !ownOnly && profile?.role !== 'admin_viewer' && !isOverallBranch(branchId);
+
+  const assignCount = useMemo(() => dayAssignCount(calendarData?.bookings || [], currentDate), [calendarData?.bookings, currentDate]);
+
+  const handleAssigned = ({ bookingId, date, names, prevRoomId, roomChanged }) => {
+    refreshCalendar();
+    if (date && date !== currentDate) setCurrentDate(date);
+    flashBooking(bookingId);
+    const who = names.join(' & ') || staffLabel.toLowerCase();
+    const undo = async () => {
+      setAssignedToast(null);
+      const r = await assignGuard((overrideReason) => assignTherapist({ bookingId, therapistIds: [], roomId: roomChanged ? prevRoomId : undefined, overrideReason }));
+      if (r?.error) { showToast(r.error.message || 'Could not undo. Open the booking to change it.', 'error'); return; }
+      showToast('Back to unassigned');
+      refreshCalendar();
+    };
+    showAssignedToast({ msg: `Assigned to ${who}`, undo });
+  };
 
   // ── Derived data ───────────────────────────────────────────
 
@@ -421,7 +467,9 @@ const OperationalCalendar = ({ branchId }) => {
                   use24h={use24h}
                   zoomScale={zoomScale}
                   onZoomScaleChange={setZoomScale}
-                  onOpenUnassigned={(b) => { setOpenTab('assign'); handleBookingClick(b); }}
+                  onOpenUnassigned={canAssign ? (b) => { if (columnMode === 'room') { setOpenTab('assign'); handleBookingClick(b); } else setAssignOpen(true); } : undefined}
+                  assignCount={columnMode === 'room' ? null : assignCount}
+                  onOpenAssignList={canAssign ? () => setAssignOpen(true) : undefined}
                 />
                 )
               ) : (
@@ -562,6 +610,28 @@ const OperationalCalendar = ({ branchId }) => {
           onClose={() => setPrintReportOpen(false)}
           use24h={use24h}
         />
+      )}
+
+      <AssignFlow
+        isOpen={assignOpen}
+        onClose={() => setAssignOpen(false)}
+        branchId={branchId}
+        currentDate={currentDate}
+        calendarData={calendarData}
+        attendanceMap={attendanceMap}
+        shiftsByTherapist={shiftsByTherapist}
+        staffLabel={staffLabel}
+        staffLabelPlural={staffLabelPlural}
+        locationLabel={locationLabel}
+        onAssigned={handleAssigned}
+      />
+
+      {assignedToast && (
+        <div role="status" className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] lg:bottom-6 left-1/2 -translate-x-1/2 z-toast px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center gap-4 bg-success text-white">
+          <Icon name="CheckCircle" size={16} />
+          <span className="font-body font-body-medium text-sm">{assignedToast.msg}</span>
+          <button type="button" onClick={assignedToast.undo} className="min-h-[44px] -my-2 px-2 text-sm font-semibold underline">Undo</button>
+        </div>
       )}
 
       {/* Toast */}

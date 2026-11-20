@@ -3,6 +3,8 @@ import Icon from '../AppIcon';
 import { arrangeAssignees, STICKY_SEARCH_MIN } from '../../utils/assignList';
 import { arrangeByTime, staffDayRanges, rangeLabel, pillRange } from '../../utils/staffFit';
 import { fetchServiceEligibility } from '../../services/api';
+import { nepalNow } from '../../utils/customerDirectory';
+import { dayTag } from '../../utils/unassignedList';
 
 // ONE staff picker for the booking panel's Staff tab and the New booking panel (ZNLY-286 look, ZNLY-300 time awareness).
 // One list, 44px rows, no inner scroll box (the parent scrolls). "Assigned" only ever means "on this booking" (assignedIds).
@@ -64,7 +66,7 @@ const StaffPicker = ({
     const locked = disabled || extra.off || (!isSelected && finite && max > 1 && selectedIds.length >= max);
     const order = selectedIds.indexOf(p.id) + 1;
     const sub = [p.gender && String(p.gender).replace(/^./, (c) => c.toUpperCase()),
-      extra.bookings != null && fit ? (extra.bookings ? `${extra.bookings} today` : null) : (p.specialties?.length ? p.specialties.join(', ') : null)].filter(Boolean).join(' · ');
+      extra.bookings != null && fit ? (extra.bookings ? `${extra.bookings} ${slot?.date && slot.date !== nepalNow().today ? `on ${dayTag(slot.date)}` : 'today'}` : null) : (p.specialties?.length ? p.specialties.join(', ') : null)].filter(Boolean).join(' · ');
     return (
       <label key={p.id} className={`${rowBase} ${locked && !isSelected ? 'cursor-not-allowed' : 'cursor-pointer'} ${extra.off || extra.busy ? 'opacity-70' : ''} ${isSelected ? 'bg-primary/5' : locked ? '' : 'hover:bg-background'}`}>
         {finite && max > 1 ? (

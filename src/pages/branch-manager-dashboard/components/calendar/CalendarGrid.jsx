@@ -223,7 +223,9 @@ const CalendarGrid = ({
   use24h = false,
   zoomScale: zoomScaleProp,
   onZoomScaleChange,
-  onOpenUnassigned, // phone Unassigned bar: opens the earliest unassigned booking on its team tab
+  onOpenUnassigned, // phone Unassigned bar: opens the Assign list (undefined = this login cannot assign: no bar)
+  assignCount = null, // therapist view: the Assign list's first-group count for the day shown (needsStaff), so bar, link and list agree
+  onOpenAssignList, // desktop: "Assign ›" link under the count in the Unassigned column header
 }) => {
   const { locationLabel } = useIndustry();
   const scrollRef = useRef(null);
@@ -1165,6 +1167,16 @@ const CalendarGrid = ({
               {col.name}
             </span>
             {statusLine(false)}
+            {isUnassigned && columnMode !== 'room' && onOpenAssignList && assignCount > 0 && (
+              <button
+                type="button"
+                data-no-drag-create
+                onClick={(e) => { e.stopPropagation(); onOpenAssignList(); }}
+                className="self-start font-body text-[11px] font-semibold leading-tight text-warning hover:underline"
+              >
+                Assign ›
+              </button>
+            )}
           </span>
           {isUnassigned && col.onlineUnassignedCount > 0 && (
             <span
@@ -1760,6 +1772,7 @@ const CalendarGrid = ({
       .filter((b) => !['Completed', 'Cancelled', 'No Show'].includes(b.status) && !seen.has(b.bookingId) && seen.add(b.bookingId))
       .sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
   }, [phoneDay, hideUnassigned, bookingsByDayAndCol, currentDate]);
+  const barCount = columnMode === 'room' || assignCount == null ? phoneUnassigned.length : assignCount;
   const dayHasBookings = useMemo(
     () => Object.values(bookingsByDayAndCol[currentDate] || {}).some((arr) => arr.length > 0),
     [bookingsByDayAndCol, currentDate],
@@ -1806,15 +1819,15 @@ const CalendarGrid = ({
 
   const renderDayView = () => (
     <div className="flex flex-col h-full overflow-hidden isolate">
-      {phoneUnassigned.length > 0 && (
+      {phoneDay && barCount > 0 && onOpenUnassigned && (
         <button
           type="button"
           data-unassigned-bar="true"
-          onClick={() => onOpenUnassigned?.(phoneUnassigned[0])}
+          onClick={() => onOpenUnassigned(columnMode === 'room' ? phoneUnassigned[0] : undefined)}
           className="flex-shrink-0 flex items-center gap-2 px-3 py-1.5 min-h-[36px] border-b border-border bg-warning/10 text-left font-body text-[12px] text-warning"
         >
-          <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-warning text-white text-[11px] font-semibold flex items-center justify-center">{phoneUnassigned.length}</span>
-          <span className="truncate">Unassigned booking{phoneUnassigned.length === 1 ? '' : 's'} {currentDate === todayStr ? 'today' : `on ${dayLabel}`}{columnMode === 'room' ? ` · no ${locationLabel.toLowerCase()}` : ''}</span>
+          <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-warning text-white text-[11px] font-semibold flex items-center justify-center">{barCount}</span>
+          <span className="truncate">Unassigned booking{barCount === 1 ? '' : 's'} {currentDate === todayStr ? 'today' : `on ${dayLabel}`}{columnMode === 'room' ? ` · no ${locationLabel.toLowerCase()}` : ''}</span>
           <span className="ml-auto font-semibold flex-shrink-0">Assign ›</span>
         </button>
       )}
