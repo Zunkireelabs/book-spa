@@ -44,6 +44,7 @@ import { humanizePaymentMethod } from '../../services/paymentMethods';
 import { wordBranchCap } from '../../utils/industryTerms';
 import { canonicalMode } from 'lib/dayMoney';
 import StaffPicker from './StaffPicker';
+import { useDayAvailability } from '../../hooks/useDayAvailability';
 import { staffPickIncomplete } from '../../utils/staffFit';
 
 function getNepalNow() {
@@ -310,6 +311,17 @@ const BookingActionModal = ({
   const [activeTab, setActiveTab] = useState('details');
   const [isFirstBooking, setIsFirstBooking] = useState(false);
   const [selectedTherapists, setSelectedTherapists] = useState([]);
+  // ZNLY-312: callers that pass no day data (everything but the calendar's day view) get Free / Busy / Off from the panel's own
+  // fetch of the booking's day. Own-only logins keep the plain list: RLS hides colleagues' bookings, so everyone would look Free.
+  const ownOnlyViewer = viewerAccess(viewerProfile).ownOnly;
+  const ownDay = useDayAvailability({
+    branchId: booking?.branchId || branchId,
+    date: booking?.date,
+    enabled: !!(isOpen && activeTab === 'assign' && booking?.bookingId && dayBookings == null && !ownOnlyViewer),
+    refreshKey: `${booking?.therapist?.id || ''}|${(booking?.therapists || []).map((t) => t.id).join(',')}`,
+  });
+  const effDayBookings = dayBookings ?? (ownDay.ready ? ownDay.bookings : null);
+  const effOffStaff = dayBookings != null ? offStaff : (ownDay.ready ? ownDay.offById : offStaff);
   const [selectedRoom, setSelectedRoom] = useState('');
   // Per-companion (non-primary therapist) room override for couple bookings where each
   // person is in a separate room — { [therapistId]: roomId }. Primary therapist (index 0
@@ -2611,9 +2623,9 @@ const BookingActionModal = ({
                         staffLabelPlural={staffLabelPlural || 'Team'}
                         slot={booking?.date && booking?.startTime ? { date: booking.date, start: booking.startTime, end: booking.endTime } : null}
                         serviceId={booking?.serviceId || null}
-                        bookings={dayBookings}
+                        bookings={effDayBookings}
                         excludeBookingId={booking?.bookingId || null}
-                        offById={offStaff}
+                        offById={effOffStaff}
                         assignedIds={assignedIds}
                         disabled={isAssignmentBlocked}
                         stickyClass="sticky top-11 z-sticky-filter bg-surface pt-1 pb-2"
