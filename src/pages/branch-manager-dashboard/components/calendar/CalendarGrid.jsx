@@ -27,6 +27,7 @@ import {
   getOverlapLayout,
 } from './calendarLayout';
 import { PANEL_WIDTH } from '../../../../components/ui/SidePanel';
+import { scrollIntoTopBand } from '../../../../utils/gestures';
 import { findBlockOverlap, formatBlockRange } from '../../../../utils/blockOverlap';
 import { SHADE_STYLES, buildShadeSegments, shiftHeaderInfo, slotVerdict, outsideReasonText, outsideNote } from '../../../../services/availabilityShading';
 import { hhmmToMinutes } from '../../../../services/availability';
@@ -713,7 +714,7 @@ const CalendarGrid = ({
   const focusSelector = draftGhost ? '[data-draft-ghost]' : `[data-booking-key="${selectedBookingId}"]`;
   // The panel's real width (it differs per content: quick-create 420, booking details up to 560); falls back to defaults.
   const panelWidthNow = () => {
-    if (window.innerWidth < 640) return 0;
+    if (window.innerWidth < 768) return 0; // phones: the booking bottom sheet (no side panel)
     const el = document.querySelector('[data-side-panel]');
     if (el && el.getBoundingClientRect().width > 0) return Math.round(el.getBoundingClientRect().width);
     return window.innerWidth >= 1024 ? PANEL_WIDTH : 400;
@@ -730,13 +731,46 @@ const CalendarGrid = ({
     if (!draftKey) {
       const saved = draftScrollRestoreRef.current;
       draftScrollRestoreRef.current = null;
-      if (saved) scroller.scrollTo({ left: saved.left, behavior });
+      scroller.style.paddingBottom = '';
+      if (saved) scroller.scrollTo({ left: saved.left, top: saved.top ?? scroller.scrollTop, behavior });
       const t = setTimeout(() => setSpacerActive(false), saved && smooth ? 450 : 0);
       return () => clearTimeout(t);
     }
     if (!draftScrollRestoreRef.current) draftScrollRestoreRef.current = { left: scroller.scrollLeft };
     setSpacerActive(true);
-    if (!panelWidthNow() && window.innerWidth < 640) return undefined; // phones: full-screen sheet, nothing to keep visible
+    if (window.innerWidth < 768) {
+      // ZNLY-285 phone: the open booking sits in a bottom sheet. A bottom spacer (= sheet height) lets any card scroll clear of it,
+      // and the card is scrolled into the visible top 38%. Quick-create / block drafts have their own full-screen sheet: untouched.
+      if (draftGhost || !selectedBookingId) return undefined;
+      if (draftScrollRestoreRef.current && draftScrollRestoreRef.current.top == null) draftScrollRestoreRef.current.top = scroller.scrollTop;
+      const sheetEl = () => document.querySelector('[data-detent-sheet]');
+      const applyPad = () => {
+        const el = sheetEl();
+        const h = el && el.getAttribute('data-detent-sheet') === 'half' ? Math.round(el.getBoundingClientRect().height) : 0;
+        scroller.style.paddingBottom = h ? `${h}px` : '';
+        return h;
+      };
+      const ensureVisibleY = () => {
+        const h = applyPad();
+        const card = gridBodyRef.current?.querySelector(focusSelector);
+        if (!card || !h) return;
+        const g = card.getBoundingClientRect();
+        const sr = scroller.getBoundingClientRect();
+        const visTop = sr.top + 48; // sticky column header
+        const visBottom = Math.min(sr.bottom, window.innerHeight - h);
+        const dy = scrollIntoTopBand(g.top, visTop, visBottom);
+        let dx = 0;
+        const stickyLeft = TIME_COL_WIDTH + (!isMultiDay && pinUnassigned ? unassignedW : 0);
+        if (g.left < sr.left + stickyLeft + 12) dx = g.left - (sr.left + stickyLeft + 12);
+        else if (g.right > sr.right - 12) dx = g.right - (sr.right - 12);
+        if (dx || dy) scroller.scrollBy({ left: dx, top: dy, behavior });
+      };
+      const t1 = setTimeout(ensureVisibleY, 260); // after the sheet has slid in and settled at its fixed 62% height
+      const el0 = sheetEl();
+      const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(applyPad) : null;
+      if (el0 && ro) ro.observe(el0);
+      return () => { clearTimeout(t1); ro?.disconnect(); };
+    }
     const ensureVisible = () => {
       const panelW = panelWidthNow();
       const ghost = gridBodyRef.current?.querySelector(focusSelector);

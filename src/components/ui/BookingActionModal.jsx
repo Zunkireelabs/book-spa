@@ -26,6 +26,7 @@ import { useOrg } from '../../contexts/OrgContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
 import BlockOverlapWarning from './BlockOverlapWarning';
 import SidePanel from './SidePanel';
+import { DetentSheet, SheetExpandButton, useMediaQuery, releaseSheetEntry } from './BottomSheet';
 import ClientDayLine from '../../pages/branch-manager-dashboard/components/calendar/ClientDayLine';
 import { compactRange } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
 import BookingCustomerLine from './BookingCustomerLine';
@@ -276,6 +277,7 @@ const BookingActionModal = ({
   variant = 'modal',
   previewBooking = null,   // panel only: the calendar card's already-known data, shown while the full booking loads
   onRefreshBooking,        // panel only: re-fetch the open booking after an in-place action (status change)
+  liveBackdrop = false,    // panel on phones: the page behind stays live (calendar): no scrim, no focus trap at half
   guardRef,                // panel only: parent calls guardRef.current(action) to run `action` through the dirty guard
   // Optional: when provided, a small "view" affordance appears on each Related-
   // services/Other-unpaid-bookings row, letting staff jump straight to THAT
@@ -1266,6 +1268,15 @@ const BookingActionModal = ({
   const [panelConfirm, setPanelConfirm] = useState(null); // { type: 'close' | 'switch', action? }
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef(null);
+  // ZNLY-285: below md the panel is a two-detent bottom sheet (half / full) instead of the right-hand SidePanel.
+  const phoneViewport = useMediaQuery('(max-width: 767px)');
+  const useSheet = isPanel && phoneViewport;
+  const [detent, setDetent] = useState('half');
+  useEffect(() => { if (!isOpen) setDetent('half'); }, [isOpen]);
+  // Anything that needs room (edit, payment, + Service, Extend) opens the sheet fully.
+  useEffect(() => {
+    if (useSheet && isOpen && (isEditing || showExtendPanel || showPaymentModal || newBookingMode)) setDetent('full');
+  }, [useSheet, isOpen, isEditing, showExtendPanel, showPaymentModal, newBookingMode]);
   // Two-column Customer | Service layout only when the panel body is >= 520px wide (container-based, not viewport-based).
   const bodyRef = useRef(null);
   const [wideBody, setWideBody] = useState(false);
@@ -1316,6 +1327,14 @@ const BookingActionModal = ({
     else go();
   };
 
+  // Collapsing full -> half closes any edit / extend / add form; unsaved edits go through the same discard guard as closing.
+  const changeDetent = (next) => {
+    if (next !== 'half') { setDetent(next); return; }
+    const collapse = () => { if (isEditing) cancelEditing(); setShowExtendPanel(false); setNewBookingMode(null); setDetent('half'); };
+    if (isEditing && isDirty) setPanelConfirm({ type: 'switch', action: collapse });
+    else collapse();
+  };
+
   if (!isOpen) return null;
   if (!booking) {
     // Panel opens instantly from the card's known data; skeleton rows stand in for the rest while it loads.
@@ -1324,6 +1343,35 @@ const BookingActionModal = ({
     const pvStatusLabel = String(pv.status || '').toLowerCase();
     const pvColors = getBookingStatusColors(pvStatusLabel === 'in-progress' ? 'In-Progress' : pvStatusLabel === 'no show' ? 'No Show' : pvStatusLabel.charAt(0).toUpperCase() + pvStatusLabel.slice(1));
     // Same tree shape as the loaded panel (fragment > SidePanel) so switching bookings doesn't remount/re-animate it.
+    if (useSheet) {
+      return (
+        <DetentSheet
+          isOpen detent={detent} onDetentChange={changeDetent} onClose={onClose} scrim={!liveBackdrop} titleId="booking-panel-title"
+          header={(
+            <div className="border-b border-border">
+              <div className="flex items-center justify-between gap-1 pl-5 pr-2">
+                <h3 id="booking-panel-title" className="min-w-0 truncate font-heading font-heading-semibold text-[16px] text-text-primary">{pv.customerName || 'Booking'}</h3>
+                <div className="flex items-center flex-shrink-0">
+                  <SheetExpandButton full={detent === 'full'} onToggle={() => changeDetent(detent === 'full' ? 'half' : 'full')} />
+                  <button type="button" onClick={onClose} aria-label="Close" className="w-11 h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background spa-transition-fast"><Icon name="X" size={18} /></button>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 px-5 pb-2 -mt-1 min-h-[28px]">
+                {pv.status && <span className="px-2 py-0.5 rounded-full text-[11px] font-medium capitalize flex-shrink-0" style={{ backgroundColor: pvColors.fill, color: pvColors.text }}>{pvStatusLabel.replace('-', ' ')}</span>}
+              </div>
+            </div>
+          )}
+        >
+          <div className="p-5 space-y-5" aria-busy="true">
+            <div>
+              <p className="text-[13px] text-text-primary">{pv.serviceName || pv.service || ''}</p>
+              <p className="text-[13px] text-text-secondary mt-0.5">{[pv.date, pv.startTime && pv.endTime ? `${pv.startTime.slice(0, 5)}–${pv.endTime.slice(0, 5)}` : ''].filter(Boolean).join(' · ')}</p>
+            </div>
+            {[0, 1].map((i) => (<div key={i} className="space-y-2 animate-pulse"><div className="h-3 w-24 bg-gray-100 rounded" /><div className="h-4 w-full bg-gray-100 rounded" /></div>))}
+          </div>
+        </DetentSheet>
+      );
+    }
     return (
       <>
       <SidePanel
@@ -1554,7 +1602,7 @@ const BookingActionModal = ({
   );
   // Panel header: name + status + pencil + ×, then the customer subline (phone · View profile · birthday). Restricted staff: name + status only.
   const canEditDetails = !restricted && !isMutationBlocked && !!onEditBooking;
-  const panelHeader = (
+  const desktopPanelHeader = (
     <div className="border-b border-border">
       <div className="min-h-14 flex items-center justify-between gap-2 px-5 py-2">
         <div className="min-w-0 flex items-center gap-2">
@@ -1565,7 +1613,7 @@ const BookingActionModal = ({
           </span>
         </h3>
         {!restricted && booking.customerId && (
-          <button type="button" onClick={() => requestPanelCloseThen(() => navigate(`/${orgForNav?.slug}/customers/${booking.customerId}`))}
+          <button type="button" onClick={() => requestPanelCloseThen(() => { releaseSheetEntry(); navigate(`/${orgForNav?.slug}/customers/${booking.customerId}`); })}
             className="relative flex-shrink-0 whitespace-nowrap text-[13px] font-medium text-primary hover:underline before:content-[''] before:absolute before:-inset-x-1 before:-inset-y-3">
             View profile
           </button>
@@ -1578,6 +1626,7 @@ const BookingActionModal = ({
               <Icon name="Pencil" size={15} />
             </button>
           )}
+          {useSheet && <SheetExpandButton full={detent === 'full'} onToggle={() => changeDetent(detent === 'full' ? 'half' : 'full')} />}
           <button type="button" onClick={requestPanelClose} aria-label="Close"
             className="w-8 h-8 max-lg:w-11 max-lg:h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background spa-transition-fast">
             <Icon name="X" size={18} />
@@ -1592,6 +1641,46 @@ const BookingActionModal = ({
       />
     </div>
   );
+
+  // Phone sheet header (ZNLY-285): row 1 name + controls, row 2 status chip · View profile, row 3 the customer line.
+  const sheetHeader = (
+    <div className="border-b border-border">
+      <div className="flex items-center justify-between gap-1 pl-5 pr-2">
+        <h3 id="booking-panel-title" className="min-w-0 truncate font-heading font-heading-semibold text-[16px] text-text-primary">{booking.customerName}</h3>
+        <div className="flex items-center flex-shrink-0">
+          {canEditDetails && (
+            <button type="button" onClick={() => { setActiveTab('details'); startEditing(); }} aria-label="Edit booking details"
+              className="w-11 h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background hover:text-primary spa-transition-fast">
+              <Icon name="Pencil" size={15} />
+            </button>
+          )}
+          <SheetExpandButton full={detent === 'full'} onToggle={() => changeDetent(detent === 'full' ? 'half' : 'full')} />
+          <button type="button" onClick={requestPanelClose} aria-label="Close"
+            className="w-11 h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background spa-transition-fast">
+            <Icon name="X" size={18} />
+          </button>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 px-5 pb-2 -mt-1">
+        <span className="px-2 py-0.5 rounded-full text-[11px] font-medium flex-shrink-0 first-letter:uppercase" style={{ backgroundColor: statusColors.fill, color: statusColors.text }}>
+          {booking.status.replace('-', ' ')}
+        </span>
+        {!restricted && booking.customerId && (
+          <button type="button" onClick={() => requestPanelCloseThen(() => { releaseSheetEntry(); navigate(`/${orgForNav?.slug}/customers/${booking.customerId}`); })}
+            className="relative flex-shrink-0 whitespace-nowrap text-[13px] font-medium text-primary hover:underline before:content-[''] before:absolute before:-inset-x-2 before:-inset-y-3">
+            View profile
+          </button>
+        )}
+      </div>
+      <BookingCustomerLine
+        booking={booking}
+        restricted={restricted}
+        canEdit={!isViewer}
+        onSaved={() => onRefreshBooking?.(booking.bookingId)}
+      />
+    </div>
+  );
+  const panelHeader = useSheet ? sheetHeader : desktopPanelHeader;
 
   // Primary next action for the booking's status; everything else lives in the "⋯" overflow.
   const primaryStatusTarget = booking.status === 'pending' ? 'confirmed' : booking.status === 'confirmed' ? 'in-progress' : booking.status === 'in-progress' ? 'completed' : null;
@@ -4091,6 +4180,26 @@ const BookingActionModal = ({
   );
 
   if (isPanel) {
+    if (useSheet) {
+      return (
+        <>
+          <DetentSheet
+            isOpen={isOpen}
+            detent={detent}
+            onDetentChange={changeDetent}
+            onClose={requestPanelClose}
+            scrim={!liveBackdrop}
+            titleId="booking-panel-title"
+            header={panelHeader}
+            footer={panelFooterWithNote}
+          >
+            {panelTabsNode}
+            {contentNode}
+          </DetentSheet>
+          {createPortal(overlays, document.body)}
+        </>
+      );
+    }
     return (
       <>
         <SidePanel isOpen={isOpen} width={BOOKING_PANEL_WIDTH} header={panelHeader} titleId="booking-panel-title" onClose={requestPanelClose} footer={panelFooterWithNote}>

@@ -224,7 +224,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       }}
       className={`absolute left-1 right-1 rounded-spa overflow-visible outline-none focus-visible:ring-2 focus-visible:ring-primary/60 transition-colors duration-150 ease-out hover:z-dropdown hover:brightness-[0.97] ${
         isDraggable && !isResizing ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
-      } ${isSelected ? 'ring-2 ring-primary ring-offset-1' : ''} ${isPanelSelected ? 'ring-2 ring-primary z-[3]' : ''}`}
+      } ${isSelected ? 'ring-2 ring-primary ring-offset-1' : ''} ${isPanelSelected ? 'ring-2 ring-primary z-[3] shadow-spa-elevated' : ''}`}
       data-booking-card="true"
       data-booking-key={booking.bookingId || booking.id}
       data-outside-hours={outsideHours ? 'true' : undefined}
@@ -237,7 +237,8 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         ...(isResizing && resizeDir === 'bottom' ? { height: Math.max((style?.height || 60) + resizeDelta, 20), zIndex: 9999 } : {}),
         ...(isResizing && resizeDir === 'top' ? { top: (style?.top || 0) + resizeDelta, height: Math.max((style?.height || 60) - resizeDelta, 20), zIndex: 9999 } : {}),
         // Secondary copies of a shared booking stay readable: a lighter fill and a softer bar, not ghosted.
-        backgroundColor: booking._isFaded ? `color-mix(in srgb, ${colors.fill} 55%, white)` : colors.fill,
+        // The open booking: one step deeper than its own status fill (ZNLY-285), so it stands out from same-client outlines.
+        backgroundColor: isPanelSelected ? `color-mix(in srgb, ${colors.fill} 80%, ${colors.bar})` : booking._isFaded ? `color-mix(in srgb, ${colors.fill} 55%, white)` : colors.fill,
         borderLeft: `3px solid ${booking._isFaded ? `color-mix(in srgb, ${colors.bar} 50%, transparent)` : colors.bar}`,
         opacity: isDragging ? 0.3 : 1,
         // Booked before the therapist's hours / break / leave changed: left where it is, flagged (ZNLY-100).

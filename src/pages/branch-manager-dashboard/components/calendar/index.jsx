@@ -373,7 +373,11 @@ const OperationalCalendar = ({ branchId }) => {
                   onBookingClick={handleBookingClick}
                   onBookingResize={handleBookingResize}
                   onMultiDrag={(getter) => { getSelectedBookingsRef.current = getter; }}
-                  onEmptySlotClick={handleEmptySlotClick}
+                  // Phones (ZNLY-285): with the booking sheet open, a tap on the empty grid only closes the sheet (through its dirty guard).
+                  onEmptySlotClick={(slot) => {
+                    if (modalOpen && window.innerWidth < 768) { runThroughPanelGuard(handleModalClose); return; }
+                    handleEmptySlotClick(slot);
+                  }}
                   currentDate={currentDate}
                   viewMode={viewMode}
                   columnMode={columnMode}
@@ -501,6 +505,7 @@ const OperationalCalendar = ({ branchId }) => {
       {/* Booking Action Modal */}
       <BookingActionModal
         variant="panel"
+        liveBackdrop
         isOpen={modalOpen}
         previewBooking={previewBooking}
         onRefreshBooking={refreshOpenBooking}

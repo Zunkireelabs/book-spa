@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useMediaQuery } from '../../../components/ui/BottomSheet';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import BookingActionModal from '../../../components/ui/BookingActionModal';
@@ -30,6 +31,7 @@ const STATUS_STYLES = {
 };
 
 const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignTherapist, onRecordPayment, onGroupPaymentRecorded, onApplyDiscount, userRole = 'staff', canViewCustomerDetails = true, onRefresh, dateRange = 'today' }) => {
+  const isPhone = useMediaQuery('(max-width: 767px)');
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [showActionModal, setShowActionModal] = useState(false);
 
@@ -407,6 +409,7 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
 
       {/* Booking Action Modal */}
       <BookingActionModal
+        variant={isPhone ? 'panel' : 'modal'} // phones share the calendar's bottom sheet; desktop keeps the centred modal
         isOpen={showActionModal}
         // Refresh on close, matching the two calendar call sites. Without this
         // an admin correction (or any other in-modal mutation) leaves this list
