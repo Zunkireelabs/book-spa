@@ -316,7 +316,7 @@ export const DateField = ({ value, onChange, label, required, disabled, hint, mi
           onClick={() => setOpen((v) => !v)}
           aria-haspopup="dialog"
           aria-expanded={open}
-          className={`w-full h-10 max-md:h-11 pl-9 pr-3 flex items-center text-[13px] font-body text-text-primary bg-surface border rounded-spa hover:bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 text-left disabled:opacity-60 ${error ? 'border-error' : 'border-border'}`}
+          className={`field-text w-full h-10 max-md:h-11 pl-9 pr-3 flex items-center text-[13px] font-body text-text-primary bg-surface border rounded-spa hover:bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 text-left disabled:opacity-60 ${error ? 'border-error' : 'border-border'}`}
         >
           <Icon name="Calendar" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
           <span className="truncate">{value ? formatShortDate(value) : 'Pick a date'}</span>

@@ -94,12 +94,31 @@
   html {
     @apply bg-background;
     overscroll-behavior-y: none;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    touch-action: manipulation; /* no double-tap zoom; pinch still works */
   }
 
   body {
     @apply bg-background text-text-primary font-body;
     font-feature-settings: "rlig" 1, "calt" 1;
     overscroll-behavior-y: none;
+    overscroll-behavior-x: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* iOS Safari/Chrome zoom the page into any focused text field whose font-size
+     is under 16px. Touch devices only (desktop unchanged). !important is needed
+     to beat Tailwind text-* utilities (text-sm, text-[13px]) on every field. */
+  @media (hover: none) and (pointer: coarse) {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+    textarea,
+    select,
+    [contenteditable]:not([contenteditable="false"]),
+    .field-text,
+    .field-text span {
+      font-size: 16px !important;
+    }
   }
 
   /* Smooth scrolling, opt-in: the customer booking flow adds `smooth-scroll` to <html>

@@ -691,7 +691,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
           onClick={() => setDateOpen((v) => !v)}
           aria-haspopup="dialog"
           aria-expanded={dateOpen}
-          className="w-full h-9 pl-8 pr-2 flex items-center text-[13px] font-body text-text-primary bg-surface border border-border rounded-spa hover:bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 text-left"
+          className="field-text w-full h-9 pl-8 pr-2 flex items-center text-[13px] font-body text-text-primary bg-surface border border-border rounded-spa hover:bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 text-left"
         >
           <Icon name="Calendar" size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
           <span className="truncate">{dateLabel}</span>

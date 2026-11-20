@@ -169,7 +169,7 @@ const CustomSelect = ({
         onKeyDown={handleKeyDown}
         disabled={disabled}
         className={`
-          flex items-center justify-between gap-2 w-full
+          field-text flex items-center justify-between gap-2 w-full
           border ${error ? 'border-error' : 'border-border'} rounded-spa bg-surface
           font-body font-body-normal
           focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary
