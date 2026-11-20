@@ -48,9 +48,11 @@ Last synced: **2026-11-20** by Project Manager · 266 open tickets (epics exclud
 | ZNLY-298 | Sadin | high | QC: Phone nav — current page not highlighted; More never lights up for pages inside it |
 | ZNLY-299 | Sadin | high | QC: Calendar day view (phone) — ~4.5 squeezed staff columns and tiny chips ("1:15", "Dee…"), hard to read; should be 3 readable columns like Fresha |
 | ZNLY-300 | Sadin | high | QC: Staff picker — New booking and the booking panel use two different lists, and "Assigned" means opposite things; one shared Staff picker everywhere |
+| ZNLY-301 | Sadin | high | QC: Two different New booking forms — Bookings tab opens a 4-step wizard with no staff choice; Calendar/Dashboard open the panel; one New booking everywhere |
 | ZNLY-304 | Sadin | high | QC: New booking — a blocked save shows its reason far down the form while Create booking stays green, so tapping it seems to do nothing |
 | ZNLY-305 | Sadin | high | QC: Toasts (phone) — bottom messages sit behind the floating bottom nav |
 | ZNLY-306 | Sadin | high | QC: Services settings (phone) — the services table squeezes each service name onto about 5 lines |
+| ZNLY-308 | Sadin | high | Edit service: category shows "Select…" when the service's category isn't in the business's category list (saving may wipe it) |
 | ZNLY-136 | Anish | medium | Group booking (Fresha-style): book multiple people, one shared slot, one checkout |
 | ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
 | ZNLY-175 | Sadin | medium | Therapist inner page: outcomes bar total counts upcoming bookings that sit in no bucket |
@@ -172,8 +174,6 @@ Last synced: **2026-11-20** by Project Manager · 266 open tickets (epics exclud
 | ZNLY-197 | — | high | Remove zenly.zunkireelabs.com from prod Traefik router rule in docker-compose.yml |
 | ZNLY-245 | Sadin | high | Sami's onboarding: import the Fresha export (staff, customers, services, products) into production, rehearsed and reconciled |
 | ZNLY-284 | Sadin | high | Interim: Staff › Access stops offering "(view only)" calendar options until ZNLY-283 enforces them; existing view-only logins get an honest note |
-| ZNLY-301 | Sadin | high | QC: Two different New booking forms — Bookings tab opens a 4-step wizard with no staff choice; Calendar/Dashboard open the panel; one New booking everywhere |
-| ZNLY-308 | Sadin | high | Edit service: category shows "Select…" when the service's category isn't in the business's category list (saving may wipe it) |
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-180 | — | medium | Attendance worked time rounded to 0.1 h before display (1 h 32 min shows as 1 h 30 min) |
