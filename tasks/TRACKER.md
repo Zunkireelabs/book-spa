@@ -33,6 +33,7 @@ Last synced: **2026-11-20** by Project Manager · 243 open tickets (epics exclud
 | ZNLY-278 | Sadin | high | "Own bookings only" login: calendar shows every colleague's column empty, so busy colleagues look free |
 | ZNLY-279 | Sadin | high | Calendar team filter: all staff are showing but every checkbox is unticked ("All positions", "Clear all" with nothing to clear) |
 | ZNLY-280 | Sadin | high | Payment Breakdown: no repeated numbers on a closed day, highlight the cash figure that matters, "of which" lines under the methods, whole-rupee money everywhere |
+| ZNLY-285 | Sadin | high | Phone: booking opens as a half-height sheet over the calendar (not full screen), so the calendar, incl. ZNLY-281 same-client outlines, stays visible |
 | ZNLY-136 | Anish | medium | Group booking (Fresha-style): book multiple people, one shared slot, one checkout |
 | ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
 | ZNLY-175 | Sadin | medium | Therapist inner page: outcomes bar total counts upcoming bookings that sit in no bucket |
@@ -151,7 +152,6 @@ Last synced: **2026-11-20** by Project Manager · 243 open tickets (epics exclud
 | ZNLY-197 | — | high | Remove zenly.zunkireelabs.com from prod Traefik router rule in docker-compose.yml |
 | ZNLY-245 | Sadin | high | Sami's onboarding: import the Fresha export (staff, customers, services, products) into production, rehearsed and reconciled |
 | ZNLY-284 | Sadin | high | Interim: Staff › Access stops offering "(view only)" calendar options until ZNLY-283 enforces them; existing view-only logins get an honest note |
-| ZNLY-285 | Sadin | high | Phone: booking opens as a half-height sheet over the calendar (not full screen), so the calendar, incl. ZNLY-281 same-client outlines, stays visible |
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-180 | — | medium | Attendance worked time rounded to 0.1 h before display (1 h 32 min shows as 1 h 30 min) |
