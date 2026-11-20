@@ -66,6 +66,7 @@ describe('QuickCreatePanel smoke', () => {
       ...props,
       therapists: [{ id: 't1', name: 'Tara Gurung' }, { id: 't2', name: 'Mina Rai' }, { id: 't3', name: 'Sita Lama' }],
       rooms: [],
+      offDate: '2026-11-20', // day data is only trusted for offDate; other dates are fetched (ZNLY-310)
     };
     const openSeparate = (extra = {}) => {
       const r = render(<QuickCreatePanel {...gprops} {...extra} slotInfo={slot} />);

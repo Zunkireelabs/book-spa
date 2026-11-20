@@ -79,6 +79,37 @@ export function staffPickIncomplete({ isCouple = false, optional = false, count 
   return zeroOk ? false : count === 0;
 }
 
+/** ZNLY-310: the Off group heading / row line follow the slot's date: "Off today" stays only for today (Nepal), else "Off Mon 23 Nov". Leave text is untouched. */
+export function offDayLabel(date, today) {
+  if (!date || date === today) return 'Off today';
+  return `Off ${new Date(`${date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '')}`;
+}
+export const offReasonFor = (reason, date, today) => (reason === 'Off today' ? offDayLabel(date, today) : reason);
+
+/**
+ * ZNLY-310: the ONE rule for a picked-staff row (Rebook / Add service, Waitlist, combo steps).
+ * { name, statusLine, pill, problem }. slot = { start, end } minutes; without a valid slot the row is plain (no status).
+ * off -> problem "X is off today" / "X is off Mon 23 Nov" (same wording as the list); busy -> pill + line, and `problem` too unless busyOk
+ * (the Waitlist: busy is pickable); free -> "Free 2:00–3:00pm".
+ */
+export function pickedRowStatus(person, { slot = null, rangesById = {}, offById = {}, date = null, today = null, busyOk = false } = {}) {
+  if (!person) return { name: '', statusLine: '', pill: null, problem: '' };
+  const name = person.name || '';
+  const s = slot && Number.isFinite(slot.start) ? slot.start : null;
+  const e = slot && Number.isFinite(slot.end) ? slot.end : null;
+  if (s == null || e == null) return { name, statusLine: '', pill: null, problem: '' };
+  if (offById[person.id]) {
+    const label = offReasonFor(offById[person.id], date, today);
+    return { name, statusLine: label, pill: null, problem: `${name} is ${label.charAt(0).toLowerCase()}${label.slice(1)}` };
+  }
+  const hit = (rangesById[person.id] || []).filter((r) => overlaps(r, s, e));
+  if (hit.length) {
+    const range = pillRange(Math.min(...hit.map((r) => r.start)), Math.max(...hit.map((r) => r.end)));
+    return { name, statusLine: `Busy ${range}`, pill: 'busy', problem: busyOk ? '' : `${name} is busy ${range}` };
+  }
+  return { name, statusLine: `Free ${rangeLabel(s, e)}`, pill: 'free', problem: '' };
+}
+
 /** { [id]: 'Off today' | 'On leave' } from the calendar's attendance map (id -> 'Absent' | 'Leave' | ...) and shift rows for `date`. */
 export function offStaffReasons(people, { attendanceMap = {}, shiftsByTherapist = {}, date } = {}) {
   const out = {};

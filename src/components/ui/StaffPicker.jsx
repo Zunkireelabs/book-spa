@@ -1,7 +1,7 @@
 import React, { useEffect, useId, useMemo, useState } from 'react';
 import Icon from '../AppIcon';
 import { arrangeAssignees, STICKY_SEARCH_MIN } from '../../utils/assignList';
-import { arrangeByTime, staffDayRanges, rangeClock, clockAmPm, clockShort, pillRange } from '../../utils/staffFit';
+import { arrangeByTime, offDayLabel, offReasonFor, staffDayRanges, rangeClock, clockAmPm, clockShort, pillRange } from '../../utils/staffFit';
 import { avatarColor } from '../../pages/branch-manager-dashboard/components/calendar/phoneCalendarLayout';
 import { fetchServiceEligibility } from '../../services/api';
 import { nepalNow } from '../../utils/customerDirectory';
@@ -79,7 +79,7 @@ const StaffPicker = ({
     const gender = p.gender && String(p.gender).replace(/^./, (c) => c.toUpperCase());
     const today = extra.bookings != null && fit ? (extra.bookings ? `${extra.bookings} ${slot?.date && slot.date !== nepalNow().today ? `on ${dayTag(slot.date)}` : 'today'}` : null) : null;
     const sub = holdObj ? holdObj.line
-      : extra.off ? extra.off
+      : extra.off ? offReasonFor(extra.off, slot?.date, nepalNow().today)
         : extra.busy ? `Busy ${pillRange(extra.busy.start, extra.busy.end)} · free after ${clockShort(extra.busy.end)}`
           : [gender, fit ? today : (p.specialties?.length ? p.specialties.join(', ') : null)].filter(Boolean).join(' · ');
     const pill = holdObj ? { text: holdObj.pill, cls: 'bg-indigo-50 text-indigo-600' }
@@ -141,7 +141,7 @@ const StaffPicker = ({
         {arr.rows.length === 0 && <NoMatch query={query} staffPluralLower={staffPluralLower} onClear={() => setQuery('')} />}
         {section(`Free ${rangeClock(fit.s, fit.e)}`, free.map((x) => row(x.person, { bookings: x.bookings })))}
         {section(`Busy at ${clockAmPm(fit.s)}`, busy.map((x) => row(x.person, { busy: x.busyRange, bookings: x.bookings })))}
-        {section('Off today', off.map((x) => row(x.person, { off: x.reason })))}
+        {section(offDayLabel(slot?.date, nepalNow().today), off.map((x) => row(x.person, { off: x.reason })))}
       </>
     );
   }

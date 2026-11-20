@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { staffPickIncomplete, arrangeByTime, staffDayRanges, rangeLabel, pillRange, offStaffReasons } from './staffFit';
+import { staffPickIncomplete, arrangeByTime, staffDayRanges, rangeLabel, pillRange, offStaffReasons, offDayLabel, offReasonFor, staffHeldByOthers, pickedRowStatus } from './staffFit';
 
 const P = (id, name) => ({ id, name });
 const people = [P('a', 'Asha'), P('b', 'Bishnu'), P('c', 'Chhori'), P('d', 'Dil')];
@@ -157,5 +157,59 @@ describe('arrangeByTime excludeIds (Best fit only from pickable staff)', () => {
     expect(arrangeByTime(ppl, { slotStart: 840, slotEnd: 900, excludeIds: new Set(['a', 'b']) }).bestIds).toEqual([]);
     const r = arrangeByTime(ppl, { slotStart: 840, slotEnd: 900, rangesById: { a: [{ start: 850, end: 880 }] }, offById: { b: 'Off today' } });
     expect(r.bestIds).toEqual([]);
+  });
+});
+
+describe('ZNLY-310 Off label follows the slot date', () => {
+  it('keeps "Off today" for today, names the day otherwise', () => {
+    expect(offDayLabel('2026-11-22', '2026-11-22')).toBe('Off today');
+    expect(offDayLabel(undefined, '2026-11-22')).toBe('Off today');
+    expect(offDayLabel('2026-11-23', '2026-11-22')).toBe('Off Mon 23 Nov');
+  });
+  it('rewrites only the "Off today" reason, never leave', () => {
+    expect(offReasonFor('Off today', '2026-11-23', '2026-11-22')).toBe('Off Mon 23 Nov');
+    expect(offReasonFor('On leave', '2026-11-23', '2026-11-22')).toBe('On leave');
+    expect(offReasonFor('Off today', '2026-11-22', '2026-11-22')).toBe('Off today');
+  });
+});
+
+describe('ZNLY-310 combo step holds', () => {
+  const steps = [
+    { idx: 0, staffId: 'a', start: 840, end: 900 },  // 2:00-3:00
+    { idx: 1, staffId: '', start: 840, end: 870 },   // concurrent 2:00-2:30
+    { idx: 2, staffId: 'b', start: 900, end: 920 },  // sequential 3:00-3:20
+  ];
+  it('holds the person of an overlapping step', () => {
+    expect(staffHeldByOthers(steps)[1]).toEqual({ a: 0 });
+  });
+  it('lets sequential steps share a person', () => {
+    expect(staffHeldByOthers(steps)[2]).toEqual({});
+    expect(staffHeldByOthers([{ ...steps[0] }, { idx: 2, staffId: 'a', start: 900, end: 920 }])[2]).toEqual({});
+  });
+});
+
+describe('ZNLY-310 pickedRowStatus', () => {
+  const k = { id: 'k', name: 'Kebisha S.' };
+  const slot = { start: 840, end: 900 }; // 2:00-3:00pm
+  const T = '2026-11-22';
+  it('free', () => {
+    expect(pickedRowStatus(k, { slot, date: T, today: T })).toEqual({ name: 'Kebisha S.', statusLine: 'Free 2–3pm', pill: 'free', problem: '' });
+  });
+  it('busy: problem unless busyOk', () => {
+    const rangesById = { k: [{ start: 810, end: 855 }] };
+    const r = pickedRowStatus(k, { slot, rangesById, date: T, today: T });
+    expect(r.pill).toBe('busy'); expect(r.statusLine).toMatch(/^Busy /); expect(r.problem).toMatch(/^Kebisha S\. is busy /);
+    expect(pickedRowStatus(k, { slot, rangesById, date: T, today: T, busyOk: true }).problem).toBe('');
+  });
+  it('off today and off on another date use the list wording', () => {
+    expect(pickedRowStatus(k, { slot, offById: { k: 'Off today' }, date: T, today: T }).problem).toBe('Kebisha S. is off today');
+    const r = pickedRowStatus(k, { slot, offById: { k: 'Off today' }, date: '2026-11-23', today: T });
+    expect(r.problem).toBe('Kebisha S. is off Mon 23 Nov'); expect(r.pill).toBe(null); expect(r.statusLine).toBe('Off Mon 23 Nov');
+    expect(pickedRowStatus(k, { slot, offById: { k: 'On leave' }, date: T, today: T }).problem).toBe('Kebisha S. is on leave');
+  });
+  it('no time / NaN / no person = plain row', () => {
+    expect(pickedRowStatus(k, { slot: null, offById: { k: 'Off today' } })).toEqual({ name: 'Kebisha S.', statusLine: '', pill: null, problem: '' });
+    expect(pickedRowStatus(k, { slot: { start: NaN, end: 900 } }).statusLine).toBe('');
+    expect(pickedRowStatus(null).name).toBe('');
   });
 });

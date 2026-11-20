@@ -20,8 +20,10 @@ import { todayStr } from './calendarDates';
 import StaffPicker, { useServiceEligibility } from '../../../../components/ui/StaffPicker';
 import { Segmented } from '../../../../components/ui/PanelFormKit';
 import { ExistingCustomerTag, EarlierBalanceNotice } from '../../../../components/ui/ExistingCustomerNotes';
+import { nepalNow } from '../../../../utils/customerDirectory';
+import { useDayAvailability } from '../../../../hooks/useDayAvailability';
 import StaffPickRow from '../../../../components/ui/StaffPickRow';
-import { staffPickIncomplete, staffDayRanges, arrangeByTime, staffHeldByOthers, pickProblems, fillFreeStaff, undoFill, rangeLabel, rangeClock, pillRange, clockShort } from '../../../../utils/staffFit';
+import { staffPickIncomplete, staffDayRanges, arrangeByTime, staffHeldByOthers, pickProblems, fillFreeStaff, undoFill, rangeLabel, rangeClock, pillRange, clockShort, pickedRowStatus } from '../../../../utils/staffFit';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { fieldForErrorCode } from '../../../../utils/quickCreateErrorField';
 
@@ -381,8 +383,17 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       return { idx, staffId: p.therapistId || '', start, end: start + dur, serviceId: sid || null };
     });
   }, [bookingMode, bookingTime, people, serviceMode, groupServiceId, services]); // eslint-disable-line react-hooks/exhaustive-deps
-  const groupRanges = useMemo(() => (bookingMode === 'group' && bookingDate ? staffDayRanges(bookings, { date: bookingDate }) : {}), [bookingMode, bookingDate, bookings]);
-  const groupOff = bookingDate === offDate ? offStaff : {};
+  // ZNLY-310: Free / Busy / Off for the picked DATE. The calendar's day data (bookings + offStaff) is only right for offDate; for any other date
+  // (Bookings, Dashboard, another day) the panel fetches that day itself. Not ready / own-only login => null = plain staff list.
+  const reuseCalDay = bookingDate === offDate;
+  const ownDayData = useDayAvailability({ branchId, date: bookingDate, enabled: !!bookingDate && !reuseCalDay && !viewerAccess(viewerProfile).ownOnly });
+  // dayChecking: the fetch is in flight (show "Checking who's free…"); dayKnown false and not checking = failed / own-only: plain list, no Fill.
+  const dayKnown = reuseCalDay || ownDayData.ready;
+  const dayChecking = !!bookingDate && !dayKnown && !ownDayData.failed && !viewerAccess(viewerProfile).ownOnly;
+  const dayBookings = reuseCalDay ? bookings : (ownDayData.ready ? ownDayData.bookings : null);
+  const dayOff = reuseCalDay ? offStaff : (ownDayData.ready ? ownDayData.offById : {});
+  const groupRanges = useMemo(() => (bookingMode === 'group' && bookingDate && dayBookings ? staffDayRanges(dayBookings, { date: bookingDate }) : {}), [bookingMode, bookingDate, dayBookings]);
+  const groupOff = dayOff;
   const groupHeld = useMemo(() => staffHeldByOthers(guestSlots), [guestSlots]);
   const groupProblems = useMemo(() => pickProblems(guestSlots, { rangesById: groupRanges, offById: groupOff }), [guestSlots, groupRanges, groupOff]); // eslint-disable-line react-hooks/exhaustive-deps
   const guestSub = (idx) => {
@@ -392,6 +403,42 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   };
   const contactFirst = (people[0]?.name || '').trim().split(/\s+/)[0] || 'the contact';
   const staffNameOf = (id) => pickerPeople.find((t) => t.id === id)?.name || '';
+  // ZNLY-310: combo steps. Each step has its own window (same offset rule as createComboBookingItems), its own staff pick, and the
+  // shared staff list/row. A person picked on an overlapping step is held ("With step N") by the same rule as group guests.
+  const comboSchedule = useMemo(() => {
+    let cursor = 0; let previousStart = 0;
+    const [bh, bm] = (bookingTime || '00:00').split(':').map(Number);
+    const base = (Number.isFinite(bh) ? bh : 0) * 60 + (Number.isFinite(bm) ? bm : 0);
+    return comboComponents.map((c) => {
+      const duration = c.service?.durationMinutes || 0;
+      const start = c.defaultTiming === 'concurrent' ? previousStart : cursor;
+      const end = start + duration;
+      cursor = Math.max(cursor, end);
+      previousStart = start;
+      return { ...c, duration, start, end, base };
+    });
+  }, [comboComponents, bookingTime]);
+  const comboSlots = useMemo(() => comboSchedule.map((c, i) => ({
+    idx: i, serviceId: c.serviceId, start: c.base + c.start, end: c.base + c.end,
+    staffId: c.defaultSameStaff ? (selectedTherapistIds[0] || '') : (comboTherapistOverrides[c.serviceId] || ''),
+  })), [comboSchedule, selectedTherapistIds, comboTherapistOverrides]);
+  const comboHeld = useMemo(() => staffHeldByOthers(comboSlots), [comboSlots]);
+  const comboRanges = useMemo(() => (comboComponents.length && bookingDate && dayBookings ? staffDayRanges(dayBookings, { date: bookingDate }) : {}), [comboComponents, bookingDate, dayBookings]);
+  const comboOff = dayOff;
+  const comboProblems = useMemo(() => pickProblems(comboSlots, { rangesById: comboRanges, offById: comboOff }), [comboSlots, comboRanges, comboOff]);
+  const minToHHMM = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const comboPick = (i) => {
+    const g = comboSlots[i];
+    if (!g?.staffId) return { name: '', statusLine: '', pill: null, problem: '' };
+    return pickedRowStatus(pickerPeople.find((t) => t.id === g.staffId) || { id: g.staffId, name: staffNameOf(g.staffId) }, {
+      slot: dayBookings ? { start: g.start, end: g.end } : null, rangesById: comboRanges, offById: comboOff, date: bookingDate, today: nepalNow().today,
+    });
+  };
+  const comboProblemText = (i) => {
+    const own = comboPick(i).problem; if (own) return own;
+    const pr = comboProblems[i];
+    return pr?.kind === 'clash' ? `${staffNameOf(pr.staffId)} is already on step ${pr.withIdx + 1} at this time` : '';
+  };
   const guestLabel = (idx) => (people[idx]?.name?.trim() || (idx === 0 ? 'the booking contact' : `Person ${idx + 1}`));
   const problemText = (idx) => {
     const pr = groupProblems[idx]; if (!pr) return '';
@@ -1003,8 +1050,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               staffLabelPlural={staffLabelPlural}
               slot={bookingDate && bookingTime ? { date: bookingDate, start: bookingTime, end: pickerSlotEnd } : null}
               serviceId={selectedService?.id || null}
-              bookings={bookings}
-              offById={bookingDate === offDate ? offStaff : {}}
+              bookings={dayBookings}
+              offById={dayOff}
             />
             </div>
             )}
@@ -1043,8 +1090,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
             {/* Combo schedule & staff: when each component runs (same offset algorithm as createComboBookingItems) and who does it */}
             {isComboService && (
-              <div className="rounded-spa-lg border border-border bg-surface shadow-spa-resting overflow-hidden">
-                <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 bg-primary/5 border-b border-border">
+              <div className="rounded-spa-lg border border-border bg-surface shadow-spa-resting">
+                <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 bg-primary/5 border-b border-border rounded-t-spa-lg">
                   <div className="flex items-center gap-2">
                     <Icon name="Layers" size={14} className="text-primary" />
                     <span className="font-body font-body-medium text-[13px] text-text-primary">Combo schedule &amp; staff</span>
@@ -1058,56 +1105,61 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     <p className="text-xs text-text-secondary py-1">Loading combo services...</p>
                   ) : comboComponents.length === 0 ? (
                     <p className="text-xs text-text-secondary py-1">No components configured for this combo.</p>
-                  ) : (() => {
-                    // "concurrent" starts alongside the previous component; "sequential" once the running total has finished.
-                    let cursor = 0;
-                    let previousStart = 0;
-                    const [bh, bm] = (bookingTime || '00:00').split(':').map(Number);
-                    const baseMinutes = (Number.isFinite(bh) ? bh : 0) * 60 + (Number.isFinite(bm) ? bm : 0);
-                    const toClock = (offsetMin) => {
-                      const total = ((baseMinutes + offsetMin) % 1440 + 1440) % 1440;
-                      return format12h(`${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`);
-                    };
-                    const schedule = comboComponents.map((c) => {
-                      const duration = c.service?.durationMinutes || 0;
-                      const start = c.defaultTiming === 'concurrent' ? previousStart : cursor;
-                      const end = start + duration;
-                      cursor = Math.max(cursor, end);
-                      previousStart = start;
-                      return { ...c, duration, start, end };
-                    });
-                    return (
-                      <div className="relative space-y-3.5">
-                        {schedule.map((c, index) => (
+                  ) : (
+                    <div className="relative space-y-3.5">
+                      {comboSchedule.map((c, index) => {
+                        const toClock = (min) => format12h(minToHHMM(c.base + min));
+                        const heldFor = comboHeld[index] || {};
+                        return (
                           <div key={c.componentId} className="flex items-start gap-3">
                             <div className="flex flex-col items-center flex-shrink-0">
                               <div className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center font-data text-[11px]">{index + 1}</div>
-                              {index < schedule.length - 1 && <div className="w-px flex-1 min-h-[22px] bg-border mt-1" />}
+                              {index < comboSchedule.length - 1 && <div className="w-px flex-1 min-h-[22px] bg-border mt-1" />}
                             </div>
-                            <div className="flex-1 min-w-0 flex items-start justify-between gap-3 pb-0.5">
-                              <div className="min-w-0">
-                                <p className="font-body font-body-medium text-[13px] text-text-primary leading-tight">{c.service?.name || 'Service'}</p>
-                                <p className="font-data text-xs text-text-secondary mt-0.5">{toClock(c.start)} – {toClock(c.end)} <span className="text-text-tertiary">· {c.duration}min</span></p>
-                              </div>
-                              <div className="flex-shrink-0 flex flex-col items-end gap-1.5">
-                                {c.defaultSameStaff ? (
-                                  <span className="inline-flex items-center gap-1 text-[11px] text-text-secondary bg-background border border-border rounded-full px-2 py-0.5">
+                            <div className="flex-1 min-w-0 pb-0.5">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="font-body font-body-medium text-[13px] text-text-primary leading-tight">{c.service?.name || 'Service'}</p>
+                                  <p className="font-data text-xs text-text-secondary mt-0.5">{toClock(c.start)} – {toClock(c.end)} <span className="text-text-tertiary">· {c.duration}min</span></p>
+                                </div>
+                                {c.defaultSameStaff && (
+                                  <span className="flex-shrink-0 inline-flex items-center gap-1 text-[11px] text-text-secondary bg-background border border-border rounded-full px-2 py-0.5">
                                     <Icon name="Link" size={10} />
                                     Same staff
                                   </span>
-                                ) : (
-                                  <CustomSelect
-                                    value={comboTherapistOverrides[c.serviceId] || ''}
-                                    onChange={(val) => setComboTherapistOverrides(prev => ({ ...prev, [c.serviceId]: val }))}
-                                    options={(therapists || []).map(t => ({ value: t.id, label: t.full_name || t.name }))}
-                                    placeholder="Select staff"
-                                    size="sm"
-                                    searchable
-                                    menuWidth="16rem"
-                                    menuAlign="right"
-                                  />
                                 )}
-                                {c.defaultSameRoom === false && (
+                              </div>
+                              {!c.defaultSameStaff && (
+                                <div className="mt-2">
+                                  <StaffPickRow
+                                    id={comboTherapistOverrides[c.serviceId] || null}
+                                    {...comboPick(index)}
+                                    problem={comboProblemText(index)}
+                                    emptyLabel={`Pick ${staffLabel.toLowerCase()}`}
+                                    title={`${staffLabel} for step ${index + 1}`}
+                                    renderPicker={(close) => (
+                                      <StaffPicker
+                                        people={pickerPeople}
+                                        selectedIds={comboTherapistOverrides[c.serviceId] ? [comboTherapistOverrides[c.serviceId]] : []}
+                                        onChange={(ids) => { setComboTherapistOverrides((prev) => ({ ...prev, [c.serviceId]: ids[0] || '' })); close(); }}
+                                        max={1}
+                                        header={{ title: `${staffLabel} for step ${index + 1} · ${c.service?.name || 'Service'}`, sub: `${c.service?.name || 'Service'} · ${toClock(c.start)}–${toClock(c.end)}` }}
+                                        onNone={() => { setComboTherapistOverrides((prev) => ({ ...prev, [c.serviceId]: '' })); close(); }}
+                                        noneLabel={`No ${staffLabel.toLowerCase()} · assign later`}
+                                        staffLabel={staffLabel}
+                                        staffLabelPlural={staffLabelPlural}
+                                        slot={bookingDate ? { date: bookingDate, start: minToHHMM(c.base + c.start), end: minToHHMM(c.base + c.end) } : null}
+                                        serviceId={c.serviceId || null}
+                                        bookings={dayBookings}
+                                        offById={comboOff}
+                                        lockedById={Object.fromEntries(Object.entries(heldFor).map(([sid, oi]) => [sid, { pill: `With step ${oi + 1}`, line: `With step ${oi + 1} at this time` }]))}
+                                      />
+                                    )}
+                                  />
+                                </div>
+                              )}
+                              {c.defaultSameRoom === false && (
+                                <div className="mt-2">
                                   <CustomSelect
                                     value={comboRoomOverrides[c.serviceId] || ''}
                                     onChange={(val) => setComboRoomOverrides(prev => ({ ...prev, [c.serviceId]: val }))}
@@ -1115,17 +1167,16 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                                     placeholder="Select room"
                                     size="sm"
                                     searchable
-                                    menuWidth="16rem"
                                     menuAlign="right"
                                   />
-                                )}
-                              </div>
+                                </div>
+                              )}
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    );
-                  })()}
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1314,7 +1365,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             )}
 
             {/* Fill free staff (ZNLY-303): only while some guest has no staff; afterwards a one-line result with Undo */}
-            {bookingDate && bookingTime && (emptyGuests > 0 || fillUndo) && (
+            {bookingDate && bookingTime && dayChecking && emptyGuests > 0 && (
+              <div className="flex items-center gap-3 px-3.5 py-2.5 border border-primary/20 rounded-[11px] bg-primary/5">
+                <p className="flex-1 min-w-0 text-[13px] text-text-secondary">{emptyGuests} of {people.length} guests have no {staffLabel.toLowerCase()}</p>
+                <button type="button" disabled className="min-h-[36px] text-[13px] font-body font-bold text-text-secondary whitespace-nowrap cursor-wait">Checking who&apos;s free…</button>
+              </div>
+            )}
+            {bookingDate && bookingTime && dayKnown && (emptyGuests > 0 || fillUndo) && (
               <div className="flex items-center gap-3 px-3.5 py-2.5 border border-primary/20 rounded-[11px] bg-primary/5">
                 {emptyGuests > 0 ? (
                   <>
@@ -1451,7 +1508,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                             staffLabelPlural={staffLabelPlural}
                             slot={guestSlots[idx] && bookingDate ? { date: bookingDate, start: bookingTime, end: `${String(Math.floor(guestSlots[idx].end / 60) % 24).padStart(2, '0')}:${String(guestSlots[idx].end % 60).padStart(2, '0')}` } : null}
                             serviceId={guestServiceId(p) || null}
-                            bookings={bookings}
+                            bookings={dayBookings}
                             offById={groupOff}
                             lockedById={Object.fromEntries(Object.entries(groupHeld[idx] || {}).map(([sid, oi]) => [sid, oi === 0 ? { pill: 'With contact', line: `With the booking contact${people[0]?.name?.trim() ? ` (${people[0].name.trim()})` : ''} at this time` } : { pill: `With Person ${oi + 1}`, line: `With ${guestLabel(oi)} at this time` }]))}
                           />

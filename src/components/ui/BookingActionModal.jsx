@@ -44,6 +44,8 @@ import { humanizePaymentMethod } from '../../services/paymentMethods';
 import { wordBranchCap } from '../../utils/industryTerms';
 import { canonicalMode } from 'lib/dayMoney';
 import StaffPicker from './StaffPicker';
+import StaffPickRow from './StaffPickRow';
+import { pickedRowStatus, staffDayRanges } from '../../utils/staffFit';
 import { useDayAvailability } from '../../hooks/useDayAvailability';
 import { staffPickIncomplete } from '../../utils/staffFit';
 
@@ -721,6 +723,24 @@ const BookingActionModal = ({
     therapistIds: newBookingForm.therapistId ? [newBookingForm.therapistId] : (newBookingMode === 'rebook' ? bookingTherapistIds : []),
     roomId: newBookingForm.roomId || (newBookingMode === 'rebook' ? booking?.roomId || null : null),
   }, !!newBookingMode);
+  // ZNLY-310: Rebook / Add another service pick staff for the FORM's own date + time + service length, not the original booking's.
+  // Day data: the caller's dayBookings only when the form date is that booking's date, else the panel's own fetch (own-only logins: plain list).
+  const reuseFormDay = dayBookings != null && !!booking?.date && newBookingForm.date === booking.date;
+  const formDay = useDayAvailability({
+    branchId: booking?.branchId || branchId,
+    date: newBookingForm.date,
+    enabled: !!(isOpen && newBookingMode && newBookingForm.date && newBookingForm.startTime && !reuseFormDay && !ownOnlyViewer),
+  });
+  const formDayBookings = reuseFormDay ? dayBookings : (formDay.ready ? formDay.bookings : null);
+  const formDayOff = reuseFormDay ? offStaff : (formDay.ready ? formDay.offById : {});
+  const formSlotMin = (() => { const [h, m] = String(newBookingForm.startTime || '').slice(0, 5).split(':').map(Number); return h * 60 + (m || 0); })();
+  const formSlotEnd = formSlotMin + (newService?.duration_minutes || currentDurationMin);
+  const formHHMM = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const formPickInfo = pickedRowStatus((therapists || []).find((x) => x.id === newBookingForm.therapistId), {
+    slot: formDayBookings ? { start: formSlotMin, end: formSlotEnd } : null,
+    rangesById: formDayBookings ? staffDayRanges(formDayBookings, { date: newBookingForm.date }) : {},
+    offById: formDayOff, date: newBookingForm.date, today: nepalNow().today,
+  });
 
   // Extend-duration options (same service, category, longer duration)
   const [showExtendPanel, setShowExtendPanel] = useState(false);
@@ -3839,29 +3859,50 @@ const BookingActionModal = ({
                     />
                   </div>
 
-                  {/* Therapist */}
-                  <div>
-                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">{staffLabel}</label>
-                    <CustomSelect
-                      value={newBookingForm.therapistId}
-                      onChange={(val) => setNewBookingForm(f => ({ ...f, therapistId: val }))}
-                      options={[{ value: '', label: 'Any available' }, ...therapists.map(t => ({ value: t.id, label: t.name }))]}
-                      placeholder="Any available"
-                      size="sm"
+                  {/* Staff (shared row + list, ZNLY-310) */}
+                  <div className="sm:col-span-2">
+                    <label className="flex items-baseline justify-between font-body font-body-medium text-xs text-text-secondary mb-1">{staffLabel} <span className="font-normal text-text-tertiary">optional</span></label>
+                    <StaffPickRow
+                      id={newBookingForm.therapistId || null}
+                      {...formPickInfo}
+                      emptyLabel={`Pick ${(staffLabel || 'team member').toLowerCase()}`}
+                      title={`${staffLabel} for ${newBookingMode === 'rebook' ? 'rebook' : 'add service'}`}
+                      renderPicker={(close) => (
+                        <StaffPicker
+                          people={therapists}
+                          selectedIds={newBookingForm.therapistId ? [newBookingForm.therapistId] : []}
+                          onChange={(ids) => { setNewBookingForm(f => ({ ...f, therapistId: ids[0] || '' })); close(); }}
+                          max={1}
+                          header={{
+                            title: `${staffLabel} for ${newBookingMode === 'rebook' ? 'rebook' : 'add service'} · ${booking.customerName}`,
+                            sub: `${newService?.name || booking.service || 'Service'}${newBookingForm.date && newBookingForm.startTime ? ` · ${new Date(`${newBookingForm.date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '')} ${format12h(newBookingForm.startTime)}` : ''}`,
+                          }}
+                          onNone={() => { setNewBookingForm(f => ({ ...f, therapistId: '' })); close(); }}
+                          noneLabel={`No ${(staffLabel || 'team member').toLowerCase()} · assign later`}
+                          staffLabel={staffLabel || 'Team member'}
+                          staffLabelPlural={staffLabelPlural || 'Team'}
+                          slot={newBookingForm.date && newBookingForm.startTime ? { date: newBookingForm.date, start: formHHMM(formSlotMin), end: formHHMM(formSlotEnd) } : null}
+                          serviceId={newBookingForm.serviceId || null}
+                          bookings={formDayBookings}
+                          offById={formDayOff}
+                        />
+                      )}
                     />
                   </div>
 
-                  {/* Room */}
-                  <div>
-                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Room</label>
-                    <CustomSelect
-                      value={newBookingForm.roomId}
-                      onChange={(val) => setNewBookingForm(f => ({ ...f, roomId: val }))}
-                      options={[{ value: '', label: 'Any available' }, ...rooms.map(r => ({ value: r.id, label: r.name }))]}
-                      placeholder="Any available"
-                      size="sm"
-                    />
-                  </div>
+                  {/* Room: only where the business has rooms */}
+                  {rooms.length > 0 && (
+                    <div className="sm:col-span-2">
+                      <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Room</label>
+                      <CustomSelect
+                        value={newBookingForm.roomId}
+                        onChange={(val) => setNewBookingForm(f => ({ ...f, roomId: val }))}
+                        options={[{ value: '', label: 'Any available' }, ...rooms.map(r => ({ value: r.id, label: r.name }))]}
+                        placeholder="Any available"
+                        size="sm"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <BlockOverlapWarning message={newBookingBlockMsg} />

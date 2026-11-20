@@ -4,6 +4,10 @@ import { formatDistanceToNow, format, parseISO } from 'date-fns';
 import Icon from '../../../../components/AppIcon';
 import SidePanel from '../../../../components/ui/SidePanel';
 import ConfirmDialog from '../../../../components/ui/ConfirmDialog';
+import StaffPickRow from '../../../../components/ui/StaffPickRow';
+import StaffPicker from '../../../../components/ui/StaffPicker';
+import { useDayAvailability } from '../../../../hooks/useDayAvailability';
+import { rangeLabel, pickedRowStatus, staffDayRanges } from '../../../../utils/staffFit';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
@@ -11,6 +15,7 @@ import TimeBoxInput from '../../../../components/ui/TimeBoxInput';
 import { PanelShell, FormBody, Field, TextInput, SelectField, DateField, InlineError, CONTROL } from '../../../../components/ui/PanelFormKit';
 import { fetchWaitlist, addToWaitlist, updateWaitlistEntry, removeFromWaitlist, isOverallBranch } from '../../../../services/api';
 import { to12h } from '../../../../services/bookingTransformers';
+import { nepalNow } from '../../../../utils/customerDirectory';
 import { useIndustry } from '../../../../hooks/useIndustry';
 
 const SORT_OPTIONS = [
@@ -91,6 +96,22 @@ const WaitlistEntryForm = ({ initial, services, therapists, branchId, staffLabel
   };
 
   const staffLower = staffLabel.toLowerCase();
+  const { staffLabelPlural } = useIndustry();
+  // ZNLY-310: Free / Busy only when the entry has BOTH a date and a time (otherwise there is nothing to check against: plain list).
+  const timed = !!(form.preferredDate && form.preferredTime);
+  const day = useDayAvailability({ branchId, date: form.preferredDate, enabled: timed });
+  const svc = services.find((x) => x.id === form.serviceId);
+  const slotStart = (() => { const [h, m] = String(form.preferredTime || '').slice(0, 5).split(':').map(Number); return h * 60 + (m || 0); })();
+  const slotEndMin = slotStart + (svc?.duration_minutes || 60);
+  const hhmm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const useFit = timed && day.ready;
+  const staffPeople = therapists || [];
+  const picked = staffPeople.find((t) => t.id === form.preferredTherapistId);
+  const pickInfo = pickedRowStatus(picked, {
+    slot: useFit ? { start: slotStart, end: slotEndMin } : null,
+    rangesById: useFit ? staffDayRanges(day.bookings, { date: form.preferredDate }) : {},
+    offById: useFit ? day.offById : {}, date: form.preferredDate, today: nepalNow().today, busyOk: true,
+  });
   return (
     <PanelShell
       title={isEdit ? 'Edit waitlist entry' : 'Add to waitlist'}
@@ -160,10 +181,29 @@ const WaitlistEntryForm = ({ initial, services, therapists, branchId, staffLabel
         </div>
 
         <Field label={`Preferred ${staffLower}`}>
-          <SelectField
-            value={form.preferredTherapistId}
-            onChange={(val) => setForm((f) => ({ ...f, preferredTherapistId: val }))}
-            options={[{ value: '', label: `Any ${staffLower}` }, ...therapists.map((t) => ({ value: t.id, label: t.name }))]}
+          <StaffPickRow
+            id={form.preferredTherapistId || null}
+            {...pickInfo}
+            emptyLabel={`Any ${staffLower}`}
+            title={`Preferred ${staffLower}`}
+            renderPicker={(close) => (
+              <StaffPicker
+                people={staffPeople}
+                selectedIds={form.preferredTherapistId ? [form.preferredTherapistId] : []}
+                onChange={(ids) => { setForm((f) => ({ ...f, preferredTherapistId: ids[0] || '' })); close(); }}
+                max={1}
+                header={{ title: `Preferred ${staffLower}${form.customerName.trim() ? ` · ${form.customerName.trim()}` : ''}`, sub: [svc?.name || 'Any service', useFit ? `${rangeLabel(slotStart, slotEndMin)}` : 'any time'].join(' · ') }}
+                note={useFit ? null : <p className="px-4 pb-2 text-[12.5px] text-text-secondary">Pick a time to see who&apos;s free</p>}
+                onNone={() => { setForm((f) => ({ ...f, preferredTherapistId: '' })); close(); }}
+                noneLabel={`Any ${staffLower}`}
+                staffLabel={staffLabel}
+                staffLabelPlural={staffLabelPlural}
+                slot={useFit ? { date: form.preferredDate, start: hhmm(slotStart), end: hhmm(slotEndMin) } : null}
+                serviceId={svc?.id || null}
+                bookings={useFit ? day.bookings : null}
+                offById={useFit ? day.offById : {}}
+              />
+            )}
           />
         </Field>
 

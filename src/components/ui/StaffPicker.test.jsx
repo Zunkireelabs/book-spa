@@ -4,11 +4,21 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 vi.mock('../../services/api', async (o) => ({ ...(await o()), fetchServiceEligibility: vi.fn(async () => ({ data: {}, error: null })) }));
 import StaffPicker from './StaffPicker';
+import { nepalNow } from '../../utils/customerDirectory';
 
 afterEach(cleanup);
 const people = [{ id: 'a', name: 'Asha K', gender: 'female' }, { id: 'b', name: 'Bina R', gender: 'female' }, { id: 'c', name: 'Cara T' }, { id: 'd', name: 'Dina S' }];
-const slot = { date: '2026-11-22', start: '14:00', end: '14:30' };
-const bookings = [{ id: 'x', date: '2026-11-22', start_time: '13:30:00', end_time: '14:15:00', status: 'Confirmed', therapist_id: 'b' }];
+const TODAY = nepalNow().today; // the Off heading is "Off today" only for today (ZNLY-310), so the fixture date follows the clock
+const slot = { date: TODAY, start: '14:00', end: '14:30' };
+const bookings = [{ id: 'x', date: TODAY, start_time: '13:30:00', end_time: '14:15:00', status: 'Confirmed', therapist_id: 'b' }];
+
+describe('StaffPicker Off label (ZNLY-310)', () => {
+  it('names the day in the heading and row for a future date', () => {
+    render(<StaffPicker people={people} selectedIds={[]} onChange={vi.fn()} max={1} slot={{ date: '2099-01-05', start: '14:00', end: '14:30' }} bookings={[]} offById={{ d: 'Off today' }} />);
+    expect(screen.getByText('Off Mon 5 Jan', { selector: 'p' })).toBeTruthy();
+    expect(screen.getByText('Off Mon 5 Jan', { selector: 'span.block' })).toBeTruthy();
+  });
+});
 
 describe('StaffPicker (ZNLY-303 look)', () => {
   const base = { people, selectedIds: [], onChange: vi.fn(), slot, bookings, offById: { d: 'Off today' } };
