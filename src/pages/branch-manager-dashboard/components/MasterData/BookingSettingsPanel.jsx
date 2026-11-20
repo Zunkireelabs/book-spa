@@ -8,6 +8,7 @@ import { useIndustry } from '../../../../hooks/useIndustry';
 import { DB_DOW_LABELS } from '../../../../utils/staffDay';
 import { updateOrgBookingSetting, fetchAvailabilityRolloutCheck, setEnforceStaffAvailability } from '../../../../services/api';
 import { localizeBranch } from '../../../../utils/industryTerms';
+import SettingsSectionHeading from '../../../../components/ui/SettingsSectionHeading';
 
 const TOGGLES = [
   {
@@ -147,7 +148,7 @@ const BookingSettingsPanel = () => {
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Booking Settings</h3>
+        <SettingsSectionHeading>Customer booking</SettingsSectionHeading>
         <p className="font-body text-sm text-text-secondary">Settings for the customer booking flow</p>
       </div>
 

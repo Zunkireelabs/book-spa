@@ -4,6 +4,7 @@ import Icon from '../../../../components/AppIcon';
 import { useIndustry } from '../../../../hooks/useIndustry';
 import { fetchBranchOnlineCapacity, updateBranchOnlineCapacity } from '../../../../services/api';
 import { wordBranch } from '../../../../utils/industryTerms';
+import SettingsSectionHeading from '../../../../components/ui/SettingsSectionHeading';
 
 // Per-branch cap on how many bookings customers can place online without a specific staff
 // member assigned (branches.online_booking_capacity, migration-138). The real enforcement is
@@ -61,7 +62,7 @@ const OnlineBookingCapacityPanel = ({ branchId }) => {
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="font-accent text-3xl text-text-primary leading-tight">Online booking limit</h3>
+        <SettingsSectionHeading>Online booking limit</SettingsSectionHeading>
         <p className="font-body text-sm text-text-secondary mt-1 max-w-xl">
           Caps how many bookings customers can place online at the same time for{' '}
           {branch?.name ? <span className="font-body-semibold text-text-primary">{branch.name}</span> : `this ${wordBranch()}`},

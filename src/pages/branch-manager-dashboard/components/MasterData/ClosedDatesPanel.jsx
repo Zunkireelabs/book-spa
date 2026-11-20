@@ -123,8 +123,8 @@ const ClosedDatesPanel = ({ branchId }) => {
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h3 className="font-accent text-3xl text-text-primary leading-tight">Closed dates</h3>
-          <p className="font-body text-sm text-text-secondary mt-1 max-w-xl">
+          {/* No heading: the AreaPage title is already "Closed Dates". */}
+          <p className="font-body text-sm text-text-secondary max-w-xl">
             List the dates your business is closed for public holidays, maintenance, or any other reason.
             Customers won't be able to place online bookings during these dates.
           </p>

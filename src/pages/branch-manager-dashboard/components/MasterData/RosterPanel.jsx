@@ -281,8 +281,8 @@ const RosterPanel = ({ branchId }) => {
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h3 className="font-accent text-3xl text-text-primary leading-tight">Roster</h3>
-          <p className="font-body text-sm text-text-secondary mt-1">
+          {/* No heading: the active tab right above is already "Roster". */}
+          <p className="font-body text-sm text-text-secondary">
             Per-date working hours — overrides each staff member's normal weekly schedule.
           </p>
         </div>
