@@ -43,6 +43,7 @@ Last synced: **2026-11-20** by Project Manager · 259 open tickets (epics exclud
 | ZNLY-291 | Sadin | high | QC: Notification settings (phone) — Sound row squeezes its description into a one-word column |
 | ZNLY-292 | Sadin | high | QC: Bookings sort/filters (phone) — Sort opens a plain list behind the nav; should use the Calendar-views bottom sheet pattern |
 | ZNLY-299 | Sadin | high | QC: Calendar day view (phone) — ~4.5 squeezed staff columns and tiny chips ("1:15", "Dee…"), hard to read; should be 3 readable columns like Fresha |
+| ZNLY-300 | Sadin | high | QC: Staff picker — New booking and the booking panel use two different lists, and "Assigned" means opposite things; one shared Staff picker everywhere |
 | ZNLY-136 | Anish | medium | Group booking (Fresha-style): book multiple people, one shared slot, one checkout |
 | ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
 | ZNLY-175 | Sadin | medium | Therapist inner page: outcomes bar total counts upcoming bookings that sit in no bucket |
@@ -166,7 +167,6 @@ Last synced: **2026-11-20** by Project Manager · 259 open tickets (epics exclud
 | ZNLY-296 | Sadin | high | QC: Notification panel (phone) — bottom line ("2 of 2 unread shown · Open Inbox") cut off behind the browser bar |
 | ZNLY-297 | Sadin | high | QC: Bookings list (phone) — rows cramped: status chip touches the next row, "Late · 4h 48m" wraps |
 | ZNLY-298 | Sadin | high | QC: Phone nav — current page not highlighted; More never lights up for pages inside it |
-| ZNLY-300 | Sadin | high | QC: Staff picker — New booking and the booking panel use two different lists, and "Assigned" means opposite things; one shared Staff picker everywhere |
 | ZNLY-301 | Sadin | high | QC: Two different New booking forms — Bookings tab opens a 4-step wizard with no staff choice; Calendar/Dashboard open the panel; one New booking everywhere |
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
