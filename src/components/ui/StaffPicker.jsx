@@ -32,7 +32,7 @@ const StaffPicker = ({
   people = [], selectedIds = [], onChange, max = Infinity,
   heading, note, staffLabel = 'Team member', staffLabelPlural = 'Team',
   slot = null, serviceId = null, bookings = null, excludeBookingId = null, offById = {}, lastStaffId = null,
-  assignedIds = [], disabled = false, stickyClass = 'sticky top-0 z-sticky-filter bg-surface pt-1 pb-2',
+  assignedIds = [], lockedById = {}, disabled = false, stickyClass = 'sticky top-0 z-sticky-filter bg-surface pt-1 pb-2',
 }) => {
   const [query, setQuery] = useState('');
   const staffLower = staffLabel.toLowerCase();
@@ -47,8 +47,8 @@ const StaffPicker = ({
     const s = toMin(slot.start);
     const e = toMin(slot.end) ?? s + 60;
     const rangesById = staffDayRanges(bookings, { date: slot.date, excludeBookingId, defaultMinutes: e - s });
-    return { s, e, ...arrangeByTime(people, { slotStart: s, slotEnd: e, rangesById, offById, eligibleIds: serviceId && eligibility ? eligibility[serviceId] : null, lastStaffId, max: finite ? max : 1 }) };
-  }, [timed, slot?.date, slot?.start, slot?.end, bookings, excludeBookingId, people, offById, serviceId, eligibility, lastStaffId, max, finite]);
+    return { s, e, ...arrangeByTime(people, { slotStart: s, slotEnd: e, rangesById, offById, eligibleIds: serviceId && eligibility ? eligibility[serviceId] : null, lastStaffId, max: finite ? max : 1, excludeIds: Object.keys(lockedById).length ? new Set(Object.keys(lockedById)) : null }) };
+  }, [timed, slot?.date, slot?.start, slot?.end, bookings, excludeBookingId, people, offById, serviceId, eligibility, lastStaffId, max, finite, lockedById]);
   const best = fit ? new Set(fit.bestIds) : null;
   const matchIds = new Set(arr.rows.map((p) => p.id));
   const assigned = new Set(assignedIds);
@@ -63,7 +63,8 @@ const StaffPicker = ({
   const rowBase = `flex items-center gap-3 min-h-[44px] px-3 py-1 border-t border-border first:border-t-0 spa-transition-fast`;
   const row = (p, extra = {}) => {
     const isSelected = selectedIds.includes(p.id);
-    const locked = disabled || extra.off || (!isSelected && finite && max > 1 && selectedIds.length >= max);
+    const hold = lockedById[p.id]; // ZNLY-303: held by another guest of the group (text shown as a tag, row not selectable)
+    const locked = disabled || extra.off || (!!hold && !isSelected) || (!isSelected && finite && max > 1 && selectedIds.length >= max);
     const order = selectedIds.indexOf(p.id) + 1;
     const sub = [p.gender && String(p.gender).replace(/^./, (c) => c.toUpperCase()),
       extra.bookings != null && fit ? (extra.bookings ? `${extra.bookings} ${slot?.date && slot.date !== nepalNow().today ? `on ${dayTag(slot.date)}` : 'today'}` : null) : (p.specialties?.length ? p.specialties.join(', ') : null)].filter(Boolean).join(' · ');
@@ -79,6 +80,7 @@ const StaffPicker = ({
         )}
         <span className="flex-1 min-w-0 flex items-center gap-1.5">
           <span className="truncate min-w-0 font-body font-body-medium text-sm text-text-primary" style={{ flex: '0 1 auto' }}>{p.name}</span>
+          {hold && <span className={`${TAG} bg-background text-text-secondary border border-border`}>{hold}</span>}
           {assigned.has(p.id) && <span className={`${TAG} bg-success/10 text-success`}>Assigned</span>}
           {best?.has(p.id) && <span className={`${TAG} bg-primary/10 text-primary`}>Best fit</span>}
           {sub && <span className="truncate min-w-0 text-xs font-caption text-text-secondary" style={{ flex: '1 1 0%' }}>· {sub}</span>}

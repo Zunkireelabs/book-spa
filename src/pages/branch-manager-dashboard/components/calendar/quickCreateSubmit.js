@@ -29,6 +29,7 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
         customerPhone: person.customerPhone,
         customerEmail: person.customerEmail,
         customerGender: person.customerGender,
+        knownCustomerId: person.knownCustomerId || undefined, // ZNLY-303: a guest picked from customer search links to that customer
         specialRequests: formData.specialRequests,
         therapistIds: person.therapistIds,
         roomId: person.roomId || undefined,
@@ -42,7 +43,7 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
       }
       created++;
     }
-    return { toast: { msg: `${created} group bookings created successfully` } };
+    return { toast: { msg: `${created} bookings created for ${people[0]?.customerName || 'the group'}` } };
   }
 
   const result = await guard((overrideReason) => createBooking({

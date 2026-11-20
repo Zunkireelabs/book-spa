@@ -17,8 +17,11 @@ import { getCustomerOutstandingBalance, fetchServiceComboComponents, fetchServic
 import { homeServiceNameSet, servicesBookableHere } from '../../../../utils/visitorServices';
 import { CUSTOMER_REFERRALS_ENABLED } from '../../../../lib/featureFlags';
 import { todayStr } from './calendarDates';
-import StaffPicker from '../../../../components/ui/StaffPicker';
-import { staffPickIncomplete } from '../../../../utils/staffFit';
+import StaffPicker, { useServiceEligibility } from '../../../../components/ui/StaffPicker';
+import { Segmented } from '../../../../components/ui/PanelFormKit';
+import { ExistingCustomerTag, EarlierBalanceNotice } from '../../../../components/ui/ExistingCustomerNotes';
+import StaffPickRow from '../../../../components/ui/StaffPickRow';
+import { staffPickIncomplete, staffDayRanges, arrangeByTime, staffHeldByOthers, pickProblems, fillFreeStaff, undoFill, rangeLabel, pillRange, clockShort } from '../../../../utils/staffFit';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { fieldForErrorCode } from '../../../../utils/quickCreateErrorField';
 
@@ -321,13 +324,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // Shared Staff picker input: service staff (plus any selected person the list filter hides), without people who are off on another day.
   const pickerPeople = useMemo(() => {
     const pool = [...(therapists || [])];
-    selectedTherapistIds.forEach((id) => {
+    [...selectedTherapistIds, ...people.map((p) => p.therapistId).filter(Boolean)].forEach((id) => {
       if (!pool.some((d) => d.id === id)) { const extra = (allTherapists || []).find((d) => d.id === id); if (extra) pool.push(extra); }
     });
     return pool
       .filter((t) => bookingDate === offDate || !offStaff[t.id])
       .map((t) => ({ id: t.id, name: t.full_name || t.name, gender: t.gender, specialties: t.specialties || [] }));
-  }, [therapists, allTherapists, selectedTherapistIds, bookingDate, offDate, offStaff]);
+  }, [therapists, allTherapists, selectedTherapistIds, people, bookingDate, offDate, offStaff]);
   const pickerSlotEnd = useMemo(() => {
     if (!bookingTime) return null;
     const [h, m] = bookingTime.split(':').map(Number);
@@ -362,6 +365,75 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   const setPerson = (idx, patch) =>
     setPeople((prev) => prev.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
+
+
+  // ── Group: staff per guest (ZNLY-303) ─────────────────────────────────────────────────────────────────────────────────────
+  const [fillUndo, setFillUndo] = useState(null); // { picks } of the last "Fill free staff", for Undo
+  const groupEligibility = useServiceEligibility(bookingMode === 'group');
+  const guestServiceId = (p) => (serviceMode === 'same' ? groupServiceId : p.serviceId);
+  const guestSlots = useMemo(() => {
+    if (bookingMode !== 'group' || !bookingTime) return [];
+    const [h, m] = bookingTime.split(':').map(Number);
+    const start = h * 60 + m;
+    return people.map((p, idx) => {
+      const sid = guestServiceId(p);
+      const dur = (services || []).find((t) => t.id === sid)?.duration_minutes || 60;
+      return { idx, staffId: p.therapistId || '', start, end: start + dur, serviceId: sid || null };
+    });
+  }, [bookingMode, bookingTime, people, serviceMode, groupServiceId, services]); // eslint-disable-line react-hooks/exhaustive-deps
+  const groupRanges = useMemo(() => (bookingMode === 'group' && bookingDate ? staffDayRanges(bookings, { date: bookingDate }) : {}), [bookingMode, bookingDate, bookings]);
+  const groupOff = bookingDate === offDate ? offStaff : {};
+  const groupHeld = useMemo(() => staffHeldByOthers(guestSlots), [guestSlots]);
+  const groupProblems = useMemo(() => pickProblems(guestSlots, { rangesById: groupRanges, offById: groupOff }), [guestSlots, groupRanges, groupOff]); // eslint-disable-line react-hooks/exhaustive-deps
+  const contactFirst = (people[0]?.name || '').trim().split(/\s+/)[0] || 'the contact';
+  const staffNameOf = (id) => pickerPeople.find((t) => t.id === id)?.name || '';
+  const guestLabel = (idx) => (people[idx]?.name?.trim() || (idx === 0 ? 'the booking contact' : `Person ${idx + 1}`));
+  const problemText = (idx) => {
+    const pr = groupProblems[idx]; if (!pr) return '';
+    const g = guestSlots[idx];
+    if (pr.kind === 'off') return `${staffNameOf(pr.staffId)} is off today`;
+    if (pr.kind === 'busy') return `${staffNameOf(pr.staffId)} is busy ${pillRange(pr.range.start, pr.range.end)}`;
+    return `${staffNameOf(pr.staffId)} is with ${guestLabel(pr.withIdx)}`;
+  };
+  const groupProblemFooter = useMemo(() => {
+    const idx = Object.keys(groupProblems)[0];
+    if (idx == null) return '';
+    const pr = groupProblems[idx]; const g = guestSlots[Number(idx)];
+    const who = people[Number(idx)]?.name?.trim() || (Number(idx) === 0 ? 'the booking contact' : `Person ${Number(idx) + 1}`);
+    const n = staffNameOf(pr.staffId);
+    if (pr.kind === 'off') return `${n} is off today for ${who}`;
+    if (pr.kind === 'busy') return `${n} is busy at ${clockShort(g.start)} for ${who}`;
+    return `${n} is already with ${people[pr.withIdx]?.name?.trim() || (pr.withIdx === 0 ? 'the booking contact' : `Person ${pr.withIdx + 1}`)} at that time`;
+  }, [groupProblems, guestSlots, people, pickerPeople]); // eslint-disable-line react-hooks/exhaustive-deps
+  const groupStaffIncomplete = bookingMode === 'group' && groupType === 'couple'
+    && staffPickIncomplete({ isCouple: true, count: people.filter((p) => p.therapistId).length, zeroOk: true });
+  const emptyGuests = guestSlots.filter((g) => !g.staffId).length;
+  const fillFree = () => {
+    const { picks } = fillFreeStaff(guestSlots, { people: pickerPeople, rangesById: groupRanges, offById: groupOff, eligibleByService: groupEligibility });
+    if (!Object.keys(picks).length) return;
+    setPeople((prev) => prev.map((p, i) => (picks[i] ? { ...p, therapistId: picks[i] } : p)));
+    setFillUndo({ picks, count: Object.keys(picks).length });
+  };
+  const undoFillFree = () => {
+    const next = undoFill(Object.fromEntries(people.map((p, i) => [i, p.therapistId])), fillUndo?.picks);
+    setPeople((prev) => prev.map((p, i) => ({ ...p, therapistId: next[i] })));
+    setFillUndo(null);
+  };
+  const guestPick = (idx) => {
+    const p = people[idx]; const g = guestSlots[idx];
+    if (!p?.therapistId || !g) return { name: '', statusLine: '', pill: null };
+    const { busy } = arrangeByTime(pickerPeople.filter((t) => t.id === p.therapistId), { slotStart: g.start, slotEnd: g.end, rangesById: groupRanges, offById: groupOff });
+    return { name: staffNameOf(p.therapistId), statusLine: busy.length ? `Busy ${pillRange(busy[0].busyRange.start, busy[0].busyRange.end)}` : `Free ${rangeLabel(g.start, g.end)}`, pill: busy.length ? 'busy' : 'free' };
+  };
+  const setGuestStaff = (idx, id) => { setFillUndo(null); setPerson(idx, { therapistId: id }); };
+  const handleGuestCustomerSelect = async (idx, customer) => {
+    const { dial, national } = parsePhone(customer.phone);
+    setPerson(idx, { name: customer.full_name, phone: national, countryCode: dial, email: customer.email || '', gender: customer.gender || '', customerId: customer.id, previousDue: null });
+    if (canViewPrices) {
+      const { data } = await getCustomerOutstandingBalance({ customerPhone: customer.phone, branchId });
+      setPeople((prev) => prev.map((q, i) => (i === idx && q.customerId === customer.id ? { ...q, previousDue: data && data.totalDue > 0 ? data : null } : q)));
+    }
+  };
 
   const ordinal = (n) => {
     const s = ['th', 'st', 'nd', 'rd'];
@@ -490,6 +562,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       serviceId: serviceMode === 'same' ? groupServiceId : p.serviceId,
       therapistIds: p.therapistId ? [p.therapistId] : null,
       roomId: groupType === 'couple' ? (groupRoomId || null) : (p.roomId || null),
+      // ZNLY-303: a picked customer links the booking; a guest left fully blank is the contact, so shares their link.
+      knownCustomerId: p.customerId || (idx > 0 && !p.name?.trim() && !p.phone?.replace(/\D/g, '') && !p.email?.trim() ? lead.customerId : null) || null,
     }));
   };
 
@@ -654,6 +728,15 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   // ── Footer: why Create is disabled, or the inline confirm ──────────────────────────────
   // Couple rule (same helper as the booking panel): 0 picks saves unassigned, 2 is fine, 1 is not.
+  const groupInvalidReason = !(people[0]?.name?.trim() && people[0]?.phone?.replace(/\D/g, '')) ? 'Add the booking contact'
+    : serviceMode === 'same' ? 'Pick a service'
+      : `Pick a service for ${people.findIndex((q) => !q.serviceId) === 0 ? 'the booking contact' : `Person ${people.findIndex((q) => !q.serviceId) + 1}`}`;
+  // Neutral note while Create is enabled (mockup step 3-7): what happens on tap.
+  const groupReadyNote = bookingMode === 'group' && groupValid && !groupProblemFooter && !groupStaffIncomplete && bookingTime
+    ? (people.some((q) => !q.therapistId) ? `${staffLabel} is optional`
+      : groupType === 'couple' ? `Couple · 2 ${staffLabelPlural.toLowerCase()} picked`
+        : `${peopleCount} bookings · ${clockShort(guestSlots[0]?.start ?? 0)}`.replace(/(\d+):(\d\d)$/, (m0, h, mm) => `${h}:${mm}${(guestSlots[0]?.start ?? 0) >= 720 ? 'pm' : 'am'}`))
+    : '';
   const couplePickIncomplete = bookingMode === 'individual' && !comboAllDifferentStaff && staffPickIncomplete({ isCouple: !!selectedService?.is_couple, optional: !serviceRequiresTherapist, count: selectedTherapistIds.length, zeroOk: true });
   const activeError = error && errorKey === formKey ? error : null; // cleared the moment the user changes anything relevant
   const errField = activeError ? (fieldForErrorCode(errorCode) || errorField(activeError)) : null;
@@ -661,9 +744,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const disabledReason = submitting ? '' : activeError ? activeError : precheck.blocked ? `${staffLabel} unavailable at this time` : blockOverlapMsg
     ? (/^Overlaps '(Transferred|Visiting)/.test(blockOverlapMsg) ? `${staffLabel} unavailable` : 'Overlaps a block')
     : bookingMode === 'group'
-      ? (groupValid ? '' : 'Complete the group details')
+      ? (!groupValid ? groupInvalidReason : groupProblemFooter || (groupStaffIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : ''))
       : !serviceId ? 'Pick a service' : couplePickIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : !customerName.trim() ? 'Enter the customer name' : (!customerPhone.replace(/\D/g, '') && !knownCustomerId) ? 'Enter the customer phone' : '';
-  const createDisabled = submitting || !!activeError || !!blockOverlapMsg || precheck.blocked || couplePickIncomplete || (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || (!customerPhone.replace(/\D/g, '') && !knownCustomerId)));
+  const createDisabled = submitting || !!activeError || !!blockOverlapMsg || precheck.blocked || couplePickIncomplete || (bookingMode === 'group' && (!!groupProblemFooter || groupStaffIncomplete)) || (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || (!customerPhone.replace(/\D/g, '') && !knownCustomerId)));
   const confirmSlotLabel = confirm?.type === 'move'
     ? [therapists.find((d) => d.id === confirm.slot.colId)?.name || rooms.find((c) => c.id === confirm.slot.colId)?.name || confirm.slot.colName,
        confirm.slot.day,
@@ -699,7 +782,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   ) : (
     <div key="actions" className="flex flex-wrap sm:flex-nowrap items-center justify-end gap-x-3 gap-y-2">
       {/* Phone: the reason gets its own full-width line (max 2 lines) above the buttons; from sm it sits beside them as before. */}
-      <p className={`min-w-0 text-xs ${activeError || precheck.blocked || blockOverlapMsg ? 'text-error font-medium' : 'text-text-secondary'} basis-full line-clamp-2 sm:basis-auto sm:flex-1 sm:line-clamp-3 ${createDisabled && disabledReason ? '' : 'hidden sm:block'}`} role={activeError ? 'alert' : undefined} aria-live="polite">{createDisabled ? disabledReason : ''}</p>
+      <p className={`min-w-0 text-xs ${activeError || precheck.blocked || blockOverlapMsg ? 'text-error font-medium' : 'text-text-secondary'} basis-full line-clamp-2 sm:basis-auto sm:flex-1 sm:line-clamp-3 ${(createDisabled && disabledReason) || groupReadyNote ? '' : 'hidden sm:block'}`} role={activeError ? 'alert' : undefined} aria-live="polite">{createDisabled ? disabledReason : groupReadyNote}</p>
       <button
         type="button"
         onClick={requestClose}
@@ -809,22 +892,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         />
 
             {/* Booking mode: Individual | Group */}
-            <div className="grid grid-cols-2 gap-0.5 p-0.5 h-9 bg-background border border-border rounded-spa">
-              {[['individual', 'Individual'], ['group', 'Group']].map(([val, label]) => (
-                <button
-                  key={val}
-                  type="button"
-                  onClick={() => setBookingMode(val)}
-                  className={`px-3 text-[13px] font-body font-body-medium rounded-[4px] transition-colors ${
-                    bookingMode === val
-                      ? 'bg-primary text-white'
-                      : 'text-text-secondary hover:text-text-primary'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <Segmented options={[['individual', 'Individual'], ['group', 'Group']]} value={bookingMode} onChange={setBookingMode} />
 
             {bookingMode === 'individual' && (
             <>
@@ -1061,6 +1129,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             <div data-qc-field="customer" className={fieldRing('customer')}>
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                 Customer Name <span className="text-error">*</span>
+                {isExistingCustomer && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
               </label>
               <CustomerAutocomplete
                 value={customerName}
@@ -1092,19 +1161,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               </div>
             </div>
 
-            {canViewPrices && previousDue && (
-              <div className="flex items-start gap-2 p-3 bg-warning/5 border border-warning/20 rounded-spa">
-                <Icon name="AlertTriangle" size={14} className="text-warning flex-shrink-0 mt-0.5" />
-                <p className="font-body font-body-normal text-sm text-warning">
-                  <span className="font-body-medium">{customerName.trim() || 'This customer'}</span> has an outstanding
-                  balance — NPR {previousDue.totalDue.toLocaleString('en-IN')} across {previousDue.bookingCount} earlier
-                  visit{previousDue.bookingCount > 1 ? 's' : ''}.
-                  {previousDue.collectableDue > 0 && <> You'll be able to collect NPR {previousDue.collectableDue.toLocaleString('en-IN')} together with this
-                  booking's payment.</>}
-                  {previousDue.lockedDue > 0 && <> NPR {previousDue.lockedDue.toLocaleString('en-IN')} on closed days can’t be collected here.</>}
-                </p>
-              </div>
-            )}
+            {canViewPrices && <EarlierBalanceNotice name={customerName} due={previousDue} />}
 
             {/* Email */}
             <div>
@@ -1147,69 +1204,47 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
             {bookingMode === 'group' && (
             <>
-            {/* Couple | Separate */}
+            {/* Couple | Separate (+ How many? on the same row) */}
             <div>
-              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                Group type
-              </label>
-              <div className="flex gap-2">
-                {[['couple', 'Couple'], ['separate', 'Separate']].map(([val, label]) => (
-                  <button
-                    key={val}
-                    type="button"
-                    onClick={() => setGroupType(val)}
-                    className={`px-4 py-2 text-sm border rounded-spa transition-colors ${
-                      groupType === val
-                        ? 'border-primary bg-primary/10 text-primary font-medium'
-                        : 'border-border bg-surface text-text-secondary hover:bg-background'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {groupType === 'separate' && (
-                <div className="flex items-center gap-3 mt-2.5">
-                  <span className="text-sm text-text-secondary whitespace-nowrap">How many people?</span>
-                  <div className="relative w-24" ref={countDropdownRef}>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={countText}
-                      onChange={(e) => {
-                        const raw = e.target.value.replace(/\D/g, '');
-                        setCountText(raw);
-                        const n = parseInt(raw, 10);
-                        if (!Number.isNaN(n) && n >= 2 && n <= 20) setSeparateCount(n);
-                      }}
-                      onFocus={(e) => { e.target.select(); setCountDropdownOpen(true); }}
-                      onBlur={() => commitCount(countText)}
-                      className="w-full h-10 pl-3 pr-8 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setCountDropdownOpen((v) => !v)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-primary transition-colors"
-                    >
-                      <Icon name="ChevronDown" size={14} />
-                    </button>
-                    {countDropdownOpen && (
-                      <div className="absolute top-full left-0 mt-1 w-full max-h-48 overflow-y-auto bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown">
-                        {[2, 3, 4, 5, 6, 8, 10].map((n) => (
-                          <button
-                            key={n}
-                            type="button"
-                            onClick={() => { commitCount(String(n)); setCountDropdownOpen(false); }}
-                            className={`w-full text-left px-3 py-1.5 text-sm font-body cursor-pointer hover:bg-primary/10 ${n === separateCount ? 'bg-primary/10 font-body-medium text-primary' : 'text-text-primary'}`}
-                          >
-                            {n}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Group type</label>
+              <div className="flex items-center gap-3">
+                <div className="flex-1 min-w-0"><Segmented options={[['couple', 'Couple (2)'], ['separate', 'Separate']]} value={groupType} onChange={setGroupType} /></div>
+                {groupType === 'separate' && (
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="text-[13px] font-body-medium text-text-primary whitespace-nowrap">How many?</span>
+                    <div className="relative w-20" ref={countDropdownRef}>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        aria-label="How many people"
+                        value={countText}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/\D/g, '');
+                          setCountText(raw);
+                          const n = parseInt(raw, 10);
+                          if (!Number.isNaN(n) && n >= 2 && n <= 20) setSeparateCount(n);
+                        }}
+                        onFocus={(e) => { e.target.select(); setCountDropdownOpen(true); }}
+                        onBlur={() => commitCount(countText)}
+                        className="w-full h-10 max-md:h-11 pl-3 pr-7 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                      <button type="button" aria-label="Show counts" onClick={() => setCountDropdownOpen((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-primary transition-colors">
+                        <Icon name="ChevronDown" size={14} />
+                      </button>
+                      {countDropdownOpen && (
+                        <div className="absolute top-full right-0 mt-1 w-full max-h-48 overflow-y-auto bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown">
+                          {[2, 3, 4, 5, 6, 8, 10].map((n) => (
+                            <button key={n} type="button" onClick={() => { commitCount(String(n)); setCountDropdownOpen(false); }}
+                              className={`w-full text-left px-3 py-1.5 text-sm font-body cursor-pointer hover:bg-primary/10 ${n === separateCount ? 'bg-primary/10 font-body-medium text-primary' : 'text-text-primary'}`}>
+                              {n}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
             {/* Same | Different service */}
@@ -1218,22 +1253,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 Service for the group
                 <span className="text-error"> *</span>
               </label>
-              <div className="flex gap-2">
-                {[['same', 'Same service'], ['different', 'Different services']].map(([val, label]) => (
-                  <button
-                    key={val}
-                    type="button"
-                    onClick={() => setServiceMode(val)}
-                    className={`px-4 py-2 text-sm border rounded-spa transition-colors ${
-                      serviceMode === val
-                        ? 'border-primary bg-primary/10 text-primary font-medium'
-                        : 'border-border bg-surface text-text-secondary hover:bg-background'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <Segmented options={[['same', 'Same for everyone'], ['different', 'Different per guest']]} value={serviceMode} onChange={setServiceMode} />
               {serviceMode === 'same' && (
                 <div className="mt-2">
                   <CustomSelect
@@ -1288,70 +1308,103 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               </div>
             )}
 
+            {/* Fill free staff (ZNLY-303): only while some guest has no staff; afterwards a one-line result with Undo */}
+            {bookingDate && bookingTime && (emptyGuests > 0 || fillUndo) && (
+              <div className="flex items-center gap-3 px-3.5 py-2.5 border border-primary/20 rounded-[11px] bg-primary/5">
+                {emptyGuests > 0 ? (
+                  <>
+                    <p className="flex-1 min-w-0 text-[13px] text-text-primary">{emptyGuests} of {people.length} guests have no {staffLabel.toLowerCase()}</p>
+                    <button type="button" onClick={fillFree} className="min-h-[36px] text-[13px] font-body font-bold text-primary hover:underline whitespace-nowrap">Fill free {staffLabelPlural.toLowerCase()}</button>
+                  </>
+                ) : (
+                  <>
+                    <p className="flex-1 min-w-0 text-[13px] text-text-primary">All {people.length} guests have {staffLabelPlural.toLowerCase()} · {fillUndo.count} filled</p>
+                    <button type="button" onClick={undoFillFree} className="min-h-[36px] text-[13px] font-body font-bold text-primary hover:underline">Undo</button>
+                  </>
+                )}
+              </div>
+            )}
+
             {/* Per-person rows */}
             <div className="space-y-3">
               {people.map((p, idx) => (
-                <div key={idx} className="border border-border rounded-spa p-3 space-y-2.5 bg-background/40">
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-body-medium">
-                      {idx + 1}
-                    </span>
-                    <span className="text-sm font-body font-body-medium text-text-primary">
+                <div key={idx} className="border border-border rounded-[14px] p-3.5 space-y-3 bg-surface">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-sm font-body font-body-semibold text-text-primary">
                       {idx === 0 ? 'Booking contact' : `Person ${idx + 1}`}
                       {idx === 0 && <span className="text-error"> *</span>}
                     </span>
+                    {idx > 0 && <span className="text-xs text-text-secondary text-right">optional · blank uses the contact's details</span>}
                   </div>
 
-                  <input
-                    type="text"
-                    value={p.name}
-                    onChange={(e) => setPerson(idx, { name: e.target.value })}
-                    placeholder={idx === 0 ? 'Name (required)' : 'Name (optional — uses booking contact if blank)'}
-                    className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                  />
-
-                  <div className="flex">
-                    <CountryCodeSelect
-                      value={p.countryCode || '+977'}
-                      onChange={(code) => setPerson(idx, { countryCode: code })}
+                  <div>
+                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                      Name {idx === 0 && <span className="text-error">*</span>}
+                      {p.customerId && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
+                    </label>
+                    <CustomerAutocomplete
+                      value={p.name}
+                      onChange={(v) => setPerson(idx, { name: v, customerId: null, previousDue: null })}
+                      onSelect={(c) => handleGuestCustomerSelect(idx, c)}
+                      branchId={branchId}
+                      searchBy="any"
+                      placeholder={idx === 0 ? 'Search or type a name' : `Name (blank = ${contactFirst}'s)`}
                     />
+                  </div>
+
+                  <div>
+                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Phone {idx === 0 && <span className="text-error">*</span>}</label>
+                    <div className="flex">
+                      <CountryCodeSelect
+                        value={p.countryCode || '+977'}
+                        onChange={(code) => setPerson(idx, { countryCode: code })}
+                      />
+                      <input
+                        type="tel"
+                        value={p.phone}
+                        onChange={(e) => setPerson(idx, { phone: e.target.value, customerId: null, previousDue: null })}
+                        placeholder={idx === 0 ? '98XXXXXXXX' : `Blank = ${contactFirst}'s`}
+                        className="flex-1 min-w-0 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                      />
+                    </div>
+                  </div>
+
+                  {canViewPrices && <EarlierBalanceNotice name={p.name} due={p.previousDue} />}
+
+                  <div>
+                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Email</label>
                     <input
-                      type="tel"
-                      value={p.phone}
-                      onChange={(e) => setPerson(idx, { phone: e.target.value })}
-                      placeholder={idx === 0 ? 'Phone (required)' : 'Phone (optional — uses booking contact if blank)'}
-                      className="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                      type="email"
+                      value={p.email}
+                      onChange={(e) => setPerson(idx, { email: e.target.value })}
+                      placeholder={idx === 0 ? 'customer@email.com' : `Blank = ${contactFirst}'s`}
+                      className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                     />
                   </div>
 
-                  <input
-                    type="email"
-                    value={p.email}
-                    onChange={(e) => setPerson(idx, { email: e.target.value })}
-                    placeholder="Email (optional)"
-                    className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                  />
-
-                  <div className="flex gap-2">
-                    {['Male', 'Female'].map((g) => (
-                      <button
-                        key={g}
-                        type="button"
-                        onClick={() => setPerson(idx, { gender: p.gender === g.toLowerCase() ? '' : g.toLowerCase() })}
-                        className={`px-4 py-1.5 text-sm border rounded-spa transition-colors ${
-                          p.gender === g.toLowerCase()
-                            ? 'border-primary bg-primary/10 text-primary font-medium'
-                            : 'border-border bg-surface text-text-secondary hover:bg-background'
-                        }`}
-                      >
-                        {g}
-                      </button>
-                    ))}
+                  <div>
+                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Gender</label>
+                    <div className="flex gap-2">
+                      {['Male', 'Female'].map((g) => (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={() => setPerson(idx, { gender: p.gender === g.toLowerCase() ? '' : g.toLowerCase() })}
+                          className={`px-4 py-2 text-sm border rounded-spa transition-colors ${
+                            p.gender === g.toLowerCase()
+                              ? 'border-primary bg-primary/10 text-primary font-medium'
+                              : 'border-border bg-surface text-text-secondary hover:bg-background'
+                          }`}
+                        >
+                          {g}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   {serviceMode === 'different' && (
                     <div>
-                      <label className="block text-xs font-body-medium text-text-secondary mb-1">
+                      <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                         Service <span className="text-error">*</span>
                       </label>
                       <CustomSelect
@@ -1371,22 +1424,41 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     </div>
                   )}
 
-                  <CustomSelect
-                    value={p.therapistId}
-                    onChange={(val) => setPerson(idx, { therapistId: val })}
-                    options={[
-                      { value: '', label: `No ${staffLabel.toLowerCase()}` },
-                      ...(therapists || []).map((t) => ({
-                        value: t.id,
-                        label: t.full_name || t.name,
-                      })),
-                    ]}
-                    placeholder={`${staffLabel} (optional)`}
-                    size="md"
-                    searchable
-                  />
+                  <div>
+                    <label className="flex items-baseline justify-between font-body font-body-medium text-[13px] text-text-primary mb-1.5">{staffLabel} <span className="text-xs font-normal text-text-secondary">optional</span></label>
+                    <StaffPickRow
+                      id={p.therapistId}
+                      {...guestPick(idx)}
+                      problem={problemText(idx)}
+                      emptyLabel={`Pick ${staffLabel.toLowerCase()}`}
+                      title={`${staffLabel} for ${guestLabel(idx)}`}
+                      renderPicker={(close) => (
+                        <>
+                          <button type="button" data-pick-none onClick={() => { setGuestStaff(idx, ''); close(); }}
+                            className="w-full min-h-[44px] mb-2 px-3 text-left text-sm border border-border rounded-spa hover:bg-background spa-transition-fast">
+                            No {staffLabel.toLowerCase()} · assign later
+                          </button>
+                          <StaffPicker
+                            people={pickerPeople}
+                            selectedIds={p.therapistId ? [p.therapistId] : []}
+                            onChange={(ids) => { setGuestStaff(idx, ids[0] || ''); close(); }}
+                            max={1}
+                            staffLabel={staffLabel}
+                            staffLabelPlural={staffLabelPlural}
+                            slot={guestSlots[idx] && bookingDate ? { date: bookingDate, start: bookingTime, end: `${String(Math.floor(guestSlots[idx].end / 60) % 24).padStart(2, '0')}:${String(guestSlots[idx].end % 60).padStart(2, '0')}` } : null}
+                            serviceId={guestServiceId(p) || null}
+                            bookings={bookings}
+                            offById={groupOff}
+                            lockedById={Object.fromEntries(Object.entries(groupHeld[idx] || {}).map(([sid, oi]) => [sid, `With ${guestLabel(oi)}`]))}
+                          />
+                        </>
+                      )}
+                    />
+                  </div>
 
                   {groupType === 'separate' && rooms && rooms.length > 0 && (
+                    <div>
+                    <label className="flex items-baseline justify-between font-body font-body-medium text-[13px] text-text-primary mb-1.5">Room <span className="text-xs font-normal text-text-secondary">optional</span></label>
                     <CustomSelect
                       value={p.roomId}
                       onChange={(val) => setPerson(idx, { roomId: val })}
@@ -1401,6 +1473,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                       size="md"
                       searchable
                     />
+                    </div>
                   )}
                 </div>
               ))}
@@ -1465,8 +1538,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
             {/* Special requests */}
             <div>
-              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                Special Requests
+              <label className="flex items-baseline justify-between font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                Special requests
+                {bookingMode === 'group' && <span className="text-xs font-normal text-text-secondary">for every booking in this group</span>}
               </label>
               <textarea
                 value={specialRequests}
