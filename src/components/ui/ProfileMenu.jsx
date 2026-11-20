@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
+import { useBodyScrollLock } from './BottomSheet';
 import { useGuardedNavigate } from '../../contexts/DirtyGuardContext';
 import Icon from '../AppIcon';
 import { useAuth } from 'contexts/AuthContext';
@@ -42,6 +43,7 @@ const ProfileMenu = () => {
   const menuRef = useRef(null);
   const triggerRef = useRef(null);
   const close = useCallback(() => setOpen(false), []);
+  useBodyScrollLock(open);
   useMenuNav({ open, onClose: close, menuRef, triggerRef });
 
   const role = profile?.role;

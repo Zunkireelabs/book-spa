@@ -344,6 +344,14 @@ aside:has(.sidebar-scroll:focus-within) .sidebar-scroll::-webkit-scrollbar-thumb
   }
 }
 
+/* While any overlay holds the scroll lock (BottomSheet.jsx lockScroll), the page scrollers inside the app shell freeze too: on phone
+   .content-scroll and the calendar grid scroll, not the body. overflow:hidden keeps scrollTop, so unlocking restores the position. */
+.scroll-locked .content-scroll,
+.scroll-locked .calendar-grid-scroll {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+}
+
 /* Print: let the frame grow to its content so long pages print in full. */
 @media print {
   .app-shell, .app-shell-main, .app-shell-frame, .content-scroll {

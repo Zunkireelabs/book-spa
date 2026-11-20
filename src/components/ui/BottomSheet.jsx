@@ -14,8 +14,21 @@ const stack = []; // ids of open sheets, top = last
 let lockCount = 0;
 let prevOverflow = '';
 
-const lockScroll = () => { if (lockCount++ === 0) { prevOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden'; } };
-const unlockScroll = () => { if (--lockCount <= 0) { lockCount = 0; document.body.style.overflow = prevOverflow; } };
+// Also tags <html> so CSS can freeze the app's inner page scrollers (.content-scroll, the calendar grid): on phone those, not the body, are what scrolls.
+const lockScroll = () => { if (lockCount++ === 0) { prevOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden'; document.documentElement.classList.add('scroll-locked'); } };
+const unlockScroll = () => { if (--lockCount <= 0) { lockCount = 0; document.body.style.overflow = prevOverflow; document.documentElement.classList.remove('scroll-locked'); } };
+
+// Shared body-scroll lock for any overlay that covers the page (same ref-counted lock the sheets use, so stacked overlays can't unlock each other).
+// `phoneOnly` (default): lock only below md, where the overlay covers the screen; desktop popovers leave the page scrollable.
+// overflow:hidden keeps scrollTop, so closing restores the page exactly. Pair the overlay's own scroller with `overscroll-contain`.
+export function useBodyScrollLock(active, phoneOnly = true) {
+  useEffect(() => {
+    if (!active || typeof window === 'undefined') return undefined;
+    if (phoneOnly && !window.matchMedia?.('(max-width: 767.98px)').matches) return undefined;
+    lockScroll();
+    return unlockScroll;
+  }, [active, phoneOnly]);
+}
 
 // Expand / collapse chevron, placed inline in the sheet header (between the edit pencil and the close button).
 export const SheetExpandButton = ({ full, onToggle }) => (
