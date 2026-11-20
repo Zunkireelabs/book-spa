@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-20** by Project Manager · 274 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-20** by Project Manager · 275 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -73,6 +73,7 @@ Last synced: **2026-11-20** by Project Manager · 274 open tickets (epics exclud
 | ZNLY-303 | Sadin | medium | Staff picker in Group mode: per-guest pick with the shared StaffPicker (follow-up to ZNLY-300) |
 | ZNLY-307 | Sadin | medium | QC: Booking settings — the "Advance booking window" heading is oversized compared with the other settings headings |
 | ZNLY-309 | Sadin | medium | One width for every booking side panel: New booking (420px today) and Assign list (fixed 560) use the booking panel's width rule |
+| ZNLY-310 | Sadin | medium | Consistency: three remaining single-staff pickers still use a plain dropdown instead of the shared StaffPicker / StaffPickRow |
 | ZNLY-312 | Sadin | medium | Consistency: booking Staff tab opened from Bookings or Inbox shows no Free / Busy / Off (only the calendar day view passes that day's bookings) |
 
 ## In review / on stage
@@ -252,10 +253,10 @@ Last synced: **2026-11-20** by Project Manager · 274 open tickets (epics exclud
 | ZNLY-242 | — | medium | New org first run: dashboard with 0 locations misbehaves, and location open/close defaults (09–21) disagree with per-day hours |
 | ZNLY-246 | — | medium | Insight: flag tiered services missing tier prices, and team members with no price tier |
 | ZNLY-259 | — | medium | Harden PIN login: PINs are compared as plain text and have no server-side attempt limit |
-| ZNLY-310 | Sadin | medium | Consistency: three remaining single-staff pickers still use a plain dropdown instead of the shared StaffPicker / StaffPickRow |
 | ZNLY-313 | Sadin | medium | Staff picker Best fit: prefer the customer's last staff member when free (follow-up from ZNLY-303) |
 | ZNLY-314 | Sadin | medium | Staff picker: "Change the time" link when the wanted person is busy (follow-up from ZNLY-303) |
 | ZNLY-315 | Sadin | medium | Own-bookings-only logins: Staff list can't show who is busy (RLS hides colleagues' bookings); needs a busy-times-only source |
+| ZNLY-317 | Sadin | medium | Phone staff list sheet: empty title bar with only an ✕ above the "Staff for …" header (mockup has the header right under the grab handle) |
 | ZNLY-19 | — | low | Remaining "Zenly" strings (PlatformNav, docs, favicon, skill footer) |
 | ZNLY-22 | — | low | Booking confirmation + day-before reminder emails; wire 2 stub "Send Email" buttons |
 | ZNLY-29 | — | low | Supabase dashboard cleanup: Postgres ERROR logging off, name the original 25P02 trigger |
