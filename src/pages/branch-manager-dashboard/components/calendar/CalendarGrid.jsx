@@ -1086,6 +1086,8 @@ const CalendarGrid = ({
     setHeaderTooltip({ name, x: rect.left + rect.width / 2, y: rect.bottom + 4 });
   }, [isHeaderDragging]);
   const hideHeaderTooltip = useCallback(() => setHeaderTooltip(null), []);
+  const headerTipTimer = useRef(null);
+  useEffect(() => () => clearTimeout(headerTipTimer.current), []);
 
   // ── Header drag-to-reorder (nested DndContext) ────────────
   const headerSensors = useSensors(
@@ -1107,25 +1109,49 @@ const CalendarGrid = ({
       : null;
     const hdrShift = col.type === 'therapist' && viewMode === 'day' ? shiftHeaderInfo(shiftOf(col.id, currentDate), { isToday: currentDate === todayStr, nowMin: hhmmToMinutes(nowTime), attendance: attendanceByTherapist?.[col.id], branchClosed: isClosedByBlocks(blockOccurrences, currentDate) }) : null;
     const trDesc = col.type === 'therapist' ? describeColumnTransfer(col, { day: currentDate, use24h, labels: { branch: (locationLabel || 'branch').toLowerCase() } }) : null;
+    // The one status line under the name: transfer, else "back at", else the shift. Desktop and phone share this (phone only gets a larger size).
+    const statusLine = (phone) => (trDesc ? (
+      <TransferHeaderLine desc={trDesc} onOpen={() => onEditTransfer?.(col)} phone={phone} />
+    ) : activeBlock ? (
+      <span className={`font-body ${phone ? 'text-[10.5px] max-w-full' : 'text-[10px]'} leading-tight text-text-tertiary truncate`}>
+        back at {formatClockTime(activeBlock.toTime, use24h)}
+      </span>
+    ) : hdrShift && (
+      <span
+        data-shift-line={hdrShift.tone}
+        className={`font-data ${phone ? 'text-[10.5px] max-w-full' : 'text-[10px]'} leading-tight truncate text-text-tertiary`}
+        style={{ color: hdrShift.tone === 'leave' ? SHADE_STYLES.leave.color : hdrShift.tone === 'alert' ? '#B45309' : hdrShift.tone === 'shift' ? undefined : SHADE_STYLES.off.color }}
+      >
+        <i className="inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle" style={{ background: STATUS_DOT_COLOR[hdrShift.dot] }} />
+        {hdrShift.text}
+      </span>
+    ));
     const initials = col.name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
     return (
       <div
         key={col.id}
         data-col-header
-        className={`relative flex-1 border-r border-border last:border-r-0 ${phoneDay ? 'h-[62px]' : 'h-10'} flex items-center justify-center px-2`}
+        className={`relative flex-1 border-r border-border last:border-r-0 ${phoneDay ? 'h-[76px]' : 'h-10'} flex items-center justify-center px-2`}
         style={{ minWidth: minColWidth }}
         onMouseEnter={(e) => showHeaderTooltip(e, onlineUnassignedTooltip || [col.name, hdrShift?.full, trDesc?.sentence].filter(Boolean).join(' · '))}
         onMouseLeave={hideHeaderTooltip}
+        onClick={phoneDay && col.type === 'therapist' ? (e) => {
+          // Touch: a tap shows the same full-sentence tooltip desktop shows on hover; it clears itself after a few seconds.
+          showHeaderTooltip(e, [col.name, hdrShift?.full, trDesc?.sentence].filter(Boolean).join(' · '));
+          clearTimeout(headerTipTimer.current);
+          headerTipTimer.current = setTimeout(hideHeaderTooltip, 4000);
+        } : undefined}
       >
         {phoneDay ? (
           <div className="flex flex-col items-center justify-center gap-[3px] min-w-0 w-full" title={col.name}>
             <span className="relative flex items-center">
-              <span className="w-[30px] h-[30px] rounded-full text-white flex items-center justify-center text-[11px] font-semibold" style={{ background: avatarColor(col.id) }}>
+              <span className="w-7 h-7 rounded-full text-white flex items-center justify-center text-[11px] font-semibold" style={{ background: avatarColor(col.id) }}>
                 {col.type === 'therapist' ? initials : <Icon name={col.icon} size={14} />}
               </span>
               {col.type === 'therapist' && <span className={`absolute -right-px -top-px w-[9px] h-[9px] rounded-full border-2 border-white ${col.attendance ? 'bg-gray-300' : 'bg-success'}`} />}
             </span>
             <span className="font-body text-[12px] font-medium leading-tight text-text-primary truncate max-w-[94%]">{col.type === 'therapist' ? shortName(col.name) : col.name}</span>
+            {col.type === 'therapist' && statusLine(true)}
           </div>
         ) : (
         <div className="flex items-center gap-2 overflow-hidden min-w-0">
@@ -1138,22 +1164,7 @@ const CalendarGrid = ({
             >
               {col.name}
             </span>
-            {trDesc ? (
-              <TransferHeaderLine desc={trDesc} onOpen={() => onEditTransfer?.(col)} />
-            ) : activeBlock ? (
-              <span className="font-body text-[10px] leading-tight text-text-tertiary truncate">
-                back at {formatClockTime(activeBlock.toTime, use24h)}
-              </span>
-            ) : hdrShift && (
-              <span
-                data-shift-line={hdrShift.tone}
-                className="font-data text-[10px] leading-tight truncate text-text-tertiary"
-                style={{ color: hdrShift.tone === 'leave' ? SHADE_STYLES.leave.color : hdrShift.tone === 'alert' ? '#B45309' : hdrShift.tone === 'shift' ? undefined : SHADE_STYLES.off.color }}
-              >
-                <i className="inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle" style={{ background: STATUS_DOT_COLOR[hdrShift.dot] }} />
-                {hdrShift.text}
-              </span>
-            )}
+            {statusLine(false)}
           </span>
           {isUnassigned && col.onlineUnassignedCount > 0 && (
             <span
@@ -1814,7 +1825,7 @@ const CalendarGrid = ({
       >
         <div className="flex relative" style={{ width: '100%', minWidth: TIME_COL_WIDTH + columnsMinWidth }}>
           {draftSpacer > 0 && <div aria-hidden="true" data-draft-spacer="true" style={{ position: 'absolute', top: 0, left: `calc(100% + ${draftSpacer}px)`, width: 1, height: 1 }} />}
-          <div className="flex-shrink-0 border-r border-border px-2 h-10 flex items-center sticky left-0 z-header bg-background" style={{ width: TIME_COL_WIDTH }}>
+          <div className={`flex-shrink-0 border-r border-border px-2 ${phoneDay ? 'h-[76px]' : 'h-10'} flex items-center sticky left-0 z-header bg-background`} style={{ width: TIME_COL_WIDTH }}>
             <Icon name="Clock" size={14} className="text-text-secondary" />
           </div>
           {unassignedCol && (
