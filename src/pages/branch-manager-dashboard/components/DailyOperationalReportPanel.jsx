@@ -9,10 +9,7 @@ import { getDailyOperationalReport, exportDailyReportCSV, closeDay, fetchAttenda
 import { useIndustry } from '../../../hooks/useIndustry';
 import { paymentStatusLabel } from '../../../utils/paymentStatusLabel';
 import { wordBranch } from '../../../utils/industryTerms';
-
-function formatNPR(amount) {
-  return `NPR ${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+import { formatNPR } from '../../../services/bookingTransformers';
 
 function formatDate(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
