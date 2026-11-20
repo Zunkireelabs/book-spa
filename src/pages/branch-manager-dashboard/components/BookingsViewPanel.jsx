@@ -618,8 +618,11 @@ const BookingsViewPanel = ({ branchId }) => {
         </Menu>
       )}
       {/* Off-screen copy used only to measure every chip's natural width. */}
-      <div ref={tabsMeasureRef} aria-hidden="true" className="absolute left-0 top-0 invisible pointer-events-none flex whitespace-nowrap" style={{ gap: tabGap }}>
-        {VIEWS.map((v) => tabButton(v, true))}
+      {/* Clipped (h-0 overflow-hidden) so its natural width (wider than a phone) never adds page scroll width, which iOS Safari counts even for invisible absolutes. */}
+      <div aria-hidden="true" className="absolute left-0 top-0 w-full h-0 overflow-hidden invisible pointer-events-none">
+        <div ref={tabsMeasureRef} className="flex w-max whitespace-nowrap" style={{ gap: tabGap }}>
+          {VIEWS.map((v) => tabButton(v, true))}
+        </div>
       </div>
     </div>
   );
