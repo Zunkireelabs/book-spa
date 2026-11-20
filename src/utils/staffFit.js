@@ -1,0 +1,89 @@
+// Time-aware staff list for the shared Staff picker (ZNLY-300). Pure: callers pass already-fetched data.
+// Minutes are Nepal-local minutes since midnight for ONE day. "Assigned" never appears here: it only ever means "on this booking".
+const ACTIVE = (b) => !['cancelled', 'no show', 'completed'].includes(String(b.status || '').toLowerCase());
+const mins = (t) => { if (t == null || t === '') return null; const [h, m] = String(t).slice(0, 5).split(':').map(Number); return h * 60 + (m || 0); };
+
+/** "1:15pm" / "1–2:30" helpers for the pill and group headings. */
+export const clockShort = (m) => { const h = Math.floor(m / 60) % 24; return `${h % 12 === 0 ? 12 : h % 12}:${String(m % 60).padStart(2, '0')}`; };
+const ap = (m) => (Math.floor(m / 60) % 24 >= 12 ? 'pm' : 'am');
+const trim0 = (s) => s.replace(/:00$/, '');
+/** "1–2:30pm", "11:30am–12:15pm" */
+export function rangeLabel(a, b) {
+  const sa = trim0(clockShort(a)); const sb = trim0(clockShort(b));
+  return ap(a) === ap(b) ? `${sa}–${sb}${ap(b)}` : `${sa}${ap(a)}–${sb}${ap(b)}`;
+}
+/** Pill text: "1–2:30" (no am/pm, as in the mockup). */
+export const pillRange = (a, b) => `${trim0(clockShort(a))}–${trim0(clockShort(b))}`;
+
+/** Raw calendar bookings (snake_case) of `date` -> { [staffId]: [{ start, end }] }, active only, `excludeBookingId` left out. */
+export function staffDayRanges(bookings, { date, excludeBookingId = null, defaultMinutes = 60 } = {}) {
+  const out = {};
+  for (const b of bookings || []) {
+    if (!ACTIVE(b) || b.date !== date || (excludeBookingId && b.id === excludeBookingId)) continue;
+    const start = mins(b.start_time);
+    if (start == null) continue;
+    const end = mins(b.end_time) ?? start + defaultMinutes;
+    const ids = b.booking_therapists?.length ? b.booking_therapists.map((bt) => bt.therapist_id) : b.therapist_id ? [b.therapist_id] : [];
+    for (const id of ids) (out[id] ||= []).push({ start, end });
+  }
+  return out;
+}
+
+const overlaps = (r, s, e) => s < r.end && e > r.start;
+
+/**
+ * Group people for a slot [slotStart, slotEnd).
+ *  free  = not off, no overlapping booking; eligible (can do the service) first, then fewest booked minutes, last person, A-Z
+ *  busy  = overlapping booking (still selectable); busyRange = the overlapping range(s) as { start, end }
+ *  off   = off/leave (not selectable), reason from offById
+ *  bestIds = up to `max` free + eligible people by the rule above; empty when nobody qualifies
+ * eligibleIds null/empty = nobody is restricted (everyone can do it).
+ */
+export function arrangeByTime(people, { slotStart, slotEnd, rangesById = {}, offById = {}, eligibleIds = null, lastStaffId = null, max = 1 } = {}) {
+  const elig = eligibleIds && eligibleIds.length ? new Set(eligibleIds) : null;
+  const booked = (id) => (rangesById[id] || []).reduce((t, r) => t + (r.end - r.start), 0);
+  const info = (p) => ({ person: p, bookedMinutes: booked(p.id), bookings: (rangesById[p.id] || []).length, eligible: !elig || elig.has(p.id) });
+  const free = []; const busy = []; const off = [];
+  for (const p of people) {
+    if (offById[p.id]) { off.push({ ...info(p), reason: offById[p.id] }); continue; }
+    const hit = (rangesById[p.id] || []).filter((r) => overlaps(r, slotStart, slotEnd));
+    if (hit.length) {
+      busy.push({ ...info(p), busyRange: { start: Math.min(...hit.map((r) => r.start)), end: Math.max(...hit.map((r) => r.end)) } });
+    } else free.push(info(p));
+  }
+  const nm = (x) => String(x.person.name || '');
+  const rank = (a, b) => (b.eligible - a.eligible)
+    || (a.bookedMinutes - b.bookedMinutes)
+    || ((b.person.id === lastStaffId) - (a.person.id === lastStaffId))
+    || nm(a).localeCompare(nm(b));
+  free.sort(rank);
+  busy.sort((a, b) => a.busyRange.start - b.busyRange.start || nm(a).localeCompare(nm(b)));
+  off.sort((a, b) => nm(a).localeCompare(nm(b)));
+  const bestIds = free.filter((x) => x.eligible).slice(0, Math.max(0, max)).map((x) => x.person.id);
+  return { free, busy, off, bestIds, noneFree: free.length === 0 };
+}
+
+/**
+ * Is the staff pick incomplete? The app's one couple rule: a couple service with staff required needs 2 picks.
+ *  optional (service/room needs no staff) -> never incomplete
+ *  couple -> fewer than 2 (zeroOk: 0 is allowed, so only 1 pick is incomplete)
+ *  single -> 0 picks (zeroOk: never)
+ * Booking panel (assigning): zeroOk false. New booking (can save unassigned): zeroOk true.
+ */
+export function staffPickIncomplete({ isCouple = false, optional = false, count = 0, zeroOk = false } = {}) {
+  if (optional) return false;
+  if (isCouple) return zeroOk ? count === 1 : count < 2;
+  return zeroOk ? false : count === 0;
+}
+
+/** { [id]: 'Off today' | 'On leave' } from the calendar's attendance map (id -> 'Absent' | 'Leave' | ...) and shift rows for `date`. */
+export function offStaffReasons(people, { attendanceMap = {}, shiftsByTherapist = {}, date } = {}) {
+  const out = {};
+  for (const p of people || []) {
+    const a = attendanceMap[p.id];
+    const row = shiftsByTherapist?.[p.id]?.[date];
+    if (a) out[p.id] = /leave/i.test(a) ? 'On leave' : 'Off today';
+    else if (row && row.works === false && (row.source === 'roster' || row.source === 'weekly')) out[p.id] = 'Off today';
+  }
+  return out;
+}

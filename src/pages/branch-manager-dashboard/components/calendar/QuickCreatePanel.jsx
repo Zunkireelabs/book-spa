@@ -17,11 +17,13 @@ import { getCustomerOutstandingBalance, fetchServiceComboComponents, fetchServic
 import { homeServiceNameSet, servicesBookableHere } from '../../../../utils/visitorServices';
 import { CUSTOMER_REFERRALS_ENABLED } from '../../../../lib/featureFlags';
 import { todayStr } from './calendarDates';
+import StaffPicker from '../../../../components/ui/StaffPicker';
+import { staffPickIncomplete } from '../../../../utils/staffFit';
 
 
 // ── Quick Create Panel ────────────────────────────────────────
 
-const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours, retarget, onDraftChange, columnMode = 'therapist', allTherapists = [], guardRef }) => {
+const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours, retarget, onDraftChange, columnMode = 'therapist', allTherapists = [], guardRef, offStaff = {}, offDate = null }) => {
   const { profile: viewerProfile } = useAuth();
   // ZNLY-278: an own-only login books only itself; the data layer hands it a single team member, so that one is the default.
   const defaultTherapistId = viewerAccess(viewerProfile).ownOnly && therapists?.length === 1 ? therapists[0].id : null;
@@ -67,7 +69,6 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [submitting, setSubmitting] = useState(false);
   const submitInFlightRef = useRef(false);
   const [error, setError] = useState(null);
-  const [therapistSearch, setTherapistSearch] = useState('');
   const [timeDropdownOpen, setTimeDropdownOpen] = useState(false);
   const nameRef = useRef(null);
   const initialDraftRef = useRef({ date: '', time: '', therapist: '', room: '' });
@@ -165,7 +166,6 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setReferringCustomerName('');
     setReferringRewardAmount('');
     setSelectedTherapistIds(slotInfo?.colType === 'therapist' && slotInfo.colId ? [slotInfo.colId] : (defaultTherapistId ? [defaultTherapistId] : []));
-    setTherapistSearch('');
     setRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
     setTherapistRoomOverrides({});
     setCompanionName('');
@@ -304,6 +304,23 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
     return { therapistIds: busyTherapists, roomBookingCounts };
   }, [bookings, bookingDate, bookingTime, selectedService, services]);
+
+  // Shared Staff picker input: service staff (plus any selected person the list filter hides), without people who are off on another day.
+  const pickerPeople = useMemo(() => {
+    const pool = [...(therapists || [])];
+    selectedTherapistIds.forEach((id) => {
+      if (!pool.some((d) => d.id === id)) { const extra = (allTherapists || []).find((d) => d.id === id); if (extra) pool.push(extra); }
+    });
+    return pool
+      .filter((t) => bookingDate === offDate || !offStaff[t.id])
+      .map((t) => ({ id: t.id, name: t.full_name || t.name, gender: t.gender, specialties: t.specialties || [] }));
+  }, [therapists, allTherapists, selectedTherapistIds, bookingDate, offDate, offStaff]);
+  const pickerSlotEnd = useMemo(() => {
+    if (!bookingTime) return null;
+    const [h, m] = bookingTime.split(':').map(Number);
+    const e = h * 60 + m + (selectedService?.duration_minutes || dragMinutes || 60);
+    return `${String(Math.floor(e / 60) % 24).padStart(2, '0')}:${String(e % 60).padStart(2, '0')}`;
+  }, [bookingTime, selectedService, dragMinutes]);
 
   // Autofocus the name field once the panel is in place. preventScroll: focusing must never scroll an
   // ancestor (a horizontal page shift was reported when focus fired while the panel was still sliding in).
@@ -609,12 +626,14 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   }, [retarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Footer: why Create is disabled, or the inline confirm ──────────────────────────────
+  // Couple rule (same helper as the booking panel): 0 picks saves unassigned, 2 is fine, 1 is not.
+  const couplePickIncomplete = bookingMode === 'individual' && !comboAllDifferentStaff && staffPickIncomplete({ isCouple: !!selectedService?.is_couple, optional: !serviceRequiresTherapist, count: selectedTherapistIds.length, zeroOk: true });
   const disabledReason = submitting ? '' : precheck.blocked ? `${staffLabel} unavailable at this time` : blockOverlapMsg
     ? (/^Overlaps '(Transferred|Visiting)/.test(blockOverlapMsg) ? `${staffLabel} unavailable` : 'Overlaps a block')
     : bookingMode === 'group'
       ? (groupValid ? '' : 'Complete the group details')
-      : !serviceId ? 'Pick a service' : !customerName.trim() ? 'Enter the customer name' : (!customerPhone.replace(/\D/g, '') && !knownCustomerId) ? 'Enter the customer phone' : '';
-  const createDisabled = submitting || !!blockOverlapMsg || precheck.blocked || (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || (!customerPhone.replace(/\D/g, '') && !knownCustomerId)));
+      : !serviceId ? 'Pick a service' : couplePickIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : !customerName.trim() ? 'Enter the customer name' : (!customerPhone.replace(/\D/g, '') && !knownCustomerId) ? 'Enter the customer phone' : '';
+  const createDisabled = submitting || !!blockOverlapMsg || precheck.blocked || couplePickIncomplete || (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || (!customerPhone.replace(/\D/g, '') && !knownCustomerId)));
   const confirmSlotLabel = confirm?.type === 'move'
     ? [therapists.find((d) => d.id === confirm.slot.colId)?.name || rooms.find((c) => c.id === confirm.slot.colId)?.name || confirm.slot.colName,
        confirm.slot.day,
@@ -648,8 +667,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       </button>
     </div>
   ) : (
-    <div key="actions" className="flex items-center gap-3">
-      <p className="flex-1 min-w-0 text-xs text-text-secondary" aria-live="polite">{createDisabled ? disabledReason : ''}</p>
+    <div key="actions" className="flex flex-wrap sm:flex-nowrap items-center justify-end gap-x-3 gap-y-2">
+      {/* Phone: the reason gets its own full-width line (max 2 lines) above the buttons; from sm it sits beside them as before. */}
+      <p className={`min-w-0 text-xs text-text-secondary basis-full line-clamp-2 sm:basis-auto sm:flex-1 sm:line-clamp-none ${createDisabled && disabledReason ? '' : 'hidden sm:block'}`} aria-live="polite">{createDisabled ? disabledReason : ''}</p>
       <button
         type="button"
         onClick={requestClose}
@@ -869,68 +889,19 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
             {/* Therapist(s): hidden for a combo whose every component needs its own staff, and for self-service amenities */}
             {!comboAllDifferentStaff && serviceRequiresTherapist && (
-            <div>
-              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                {selectedTherapistIds.length > 1 ? staffLabelPlural : staffLabel}
-                {selectedTherapistIds.length > 0 && (
-                  <span className="ml-2 text-xs text-text-secondary font-normal">({selectedTherapistIds.length} selected)</span>
-                )}
-              </label>
-              <div className="border border-border rounded-spa bg-background overflow-hidden">
-                <div className="relative px-2 pt-2">
-                  <Icon name="Search" size={14} className="absolute left-4 top-1/2 mt-1 -translate-y-1/2 text-text-secondary" />
-                  <input
-                    type="text"
-                    value={therapistSearch}
-                    onChange={(e) => setTherapistSearch(e.target.value)}
-                    placeholder={`Search ${staffLabelPlural.toLowerCase()}...`}
-                    className="w-full pl-7 pr-3 py-1.5 bg-surface border border-border rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
-                  />
-                </div>
-                <div className="space-y-1 max-h-[140px] overflow-y-auto p-2">
-                  {(() => {
-                    // Selected therapists are pinned to the top and always listed (even when the list filter, e.g.
-                    // "service staff only", would otherwise hide the therapist whose column was clicked).
-                    const pool = [...(therapists || [])];
-                    selectedTherapistIds.forEach((id) => {
-                      if (!pool.some((d) => d.id === id)) {
-                        const extra = (allTherapists || []).find((d) => d.id === id);
-                        if (extra) pool.push(extra);
-                      }
-                    });
-                    const sel = (id) => (selectedTherapistIds.includes(id) ? 0 : 1);
-                    return pool
-                      .filter(t => sel(t.id) === 0 || !therapistSearch.trim() || (t.full_name || t.name).toLowerCase().includes(therapistSearch.toLowerCase()))
-                      .sort((a, b) => sel(a.id) - sel(b.id));
-                  })()
-                    .map((t) => {
-                      const isBusy = busyResources.therapistIds.has(t.id);
-                      const isChecked = selectedTherapistIds.includes(t.id);
-                      const name = t.full_name || t.name;
-                      return (
-                        <label key={t.id} className={`flex items-center gap-2.5 px-2 py-1.5 rounded cursor-pointer hover:bg-primary/5 ${isChecked ? 'bg-primary/5' : ''}`}>
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedTherapistIds(prev => [...prev, t.id]);
-                              } else {
-                                setSelectedTherapistIds(prev => prev.filter(id => id !== t.id));
-                              }
-                            }}
-                            className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
-                          />
-                          <span className="font-body text-sm text-text-primary truncate">
-                            {name}
-                            {isBusy && <span className="text-warning font-bold"> — Assigned</span>}
-                          </span>
-                        </label>
-                      );
-                    })}
-                </div>
-              </div>
-            </div>
+            <StaffPicker
+              people={pickerPeople}
+              selectedIds={selectedTherapistIds}
+              onChange={setSelectedTherapistIds}
+              max={selectedService?.is_couple ? 2 : Infinity}
+              heading={selectedTherapistIds.length > 1 ? staffLabelPlural : staffLabel}
+              staffLabel={staffLabel}
+              staffLabelPlural={staffLabelPlural}
+              slot={bookingDate && bookingTime ? { date: bookingDate, start: bookingTime, end: pickerSlotEnd } : null}
+              serviceId={selectedService?.id || null}
+              bookings={bookings}
+              offById={bookingDate === offDate ? offStaff : {}}
+            />
             )}
 
             {/* Couple — separate rooms & companion; only for a couple service with 2+ therapists */}

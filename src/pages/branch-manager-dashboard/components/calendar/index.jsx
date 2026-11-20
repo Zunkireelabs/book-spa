@@ -34,6 +34,7 @@ import { todayStr, addDays, addMonths, getStepDays } from './calendarDates';
 import { staffWord } from '../../../../utils/industryTerms';
 import { useViewportWidth, PHONE_MAX } from '../../../../hooks/useViewportWidth';
 import { clampPhoneZoom } from './phoneCalendarLayout';
+import { offStaffReasons } from '../../../../utils/staffFit';
 
 // ── Component ────────────────────────────────────────────────
 
@@ -244,10 +245,16 @@ const OperationalCalendar = ({ branchId }) => {
     () => (selectedBooking ? clientDayInfo(clientIndexAll, { customerId: selectedBooking.customerId, date: selectedBooking.date }) : null),
     [clientIndexAll, selectedBooking]
   );
+  // People who are off / on leave on the shown day (the Staff picker lists them under "Off today", not selectable). Day view only:
+  // the attendance + shift data is for one day, so other views keep the old rule of hiding them.
+  const offStaff = useMemo(
+    () => (calendarData && viewMode === 'day' ? offStaffReasons(calendarData.therapists.filter(t => t.is_service_staff !== false), { attendanceMap, shiftsByTherapist, date: currentDate }) : {}),
+    [calendarData, viewMode, attendanceMap, shiftsByTherapist, currentDate]
+  );
   const therapistsForModal = useMemo(() =>
     calendarData
       ? calendarData.therapists
-          .filter(t => t.is_service_staff !== false && !attendanceMap[t.id])
+          .filter(t => t.is_service_staff !== false && (!attendanceMap[t.id] || offStaff[t.id]))
           .map(t => ({
             id: t.id,
             name: t.name,
@@ -255,7 +262,7 @@ const OperationalCalendar = ({ branchId }) => {
             specialties: t.specialties || [],
           }))
       : [],
-    [calendarData, attendanceMap]
+    [calendarData, attendanceMap, offStaff]
   );
 
   // ── Error state ────────────────────────────────────────────
@@ -445,7 +452,9 @@ const OperationalCalendar = ({ branchId }) => {
               slotInfo={quickCreateSlot}
               services={servicesCache}
               servicesLoading={servicesLoading}
-              therapists={(calendarData?.therapists || []).filter(t => t.is_service_staff !== false && !attendanceMap[t.id])}
+              therapists={(calendarData?.therapists || []).filter(t => t.is_service_staff !== false && (!attendanceMap[t.id] || offStaff[t.id]))}
+              offStaff={offStaff}
+              offDate={currentDate}
               rooms={calendarData?.rooms || []}
               bookings={calendarData?.bookings || []}
               onClose={handleQuickCreateClose}
@@ -525,6 +534,8 @@ const OperationalCalendar = ({ branchId }) => {
         booking={selectedBooking}
         clientDay={selectedClientDay}
         therapists={therapistsForModal}
+        dayBookings={viewMode === 'day' ? (calendarData?.bookings || []) : null}
+        offStaff={offStaff}
         rooms={calendarData?.rooms || []}
         services={servicesCache || []}
         onUpdateStatus={handleStatusUpdate}

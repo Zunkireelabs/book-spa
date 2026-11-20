@@ -43,7 +43,8 @@ import { MEMBERSHIP_ENABLED, PRODUCTS_ENABLED } from '../../lib/featureFlags';
 import { humanizePaymentMethod } from '../../services/paymentMethods';
 import { wordBranchCap } from '../../utils/industryTerms';
 import { canonicalMode } from 'lib/dayMoney';
-import { arrangeAssignees, STICKY_SEARCH_MIN } from '../../utils/assignList';
+import StaffPicker from './StaffPicker';
+import { staffPickIncomplete } from '../../utils/staffFit';
 
 function getNepalNow() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
@@ -271,6 +272,8 @@ const BookingActionModal = ({
   branchHours,
   defaultNewBookingMode,
   userRole = 'staff',
+  dayBookings = null, // raw calendar bookings of the day: turns on the time-aware Staff list (Free / Busy then / Best fit); null = plain list
+  offStaff = {}, // { staffId: 'Off today' | 'On leave' } for the Staff list's Off today group
   initialTab = null, // tab to open on for a newly opened booking (e.g. 'assign'); default Details
   // variant: 'modal' (default, centered dialog — every other caller) | 'panel' (docked SidePanel, used by the calendar).
   // Printing an invoice hands the customer their own name/phone on paper: an account with customer details hidden must not
@@ -309,7 +312,6 @@ const BookingActionModal = ({
   const [activeTab, setActiveTab] = useState('details');
   const [isFirstBooking, setIsFirstBooking] = useState(false);
   const [selectedTherapists, setSelectedTherapists] = useState([]);
-  const [therapistSearch, setTherapistSearch] = useState('');
   const [selectedRoom, setSelectedRoom] = useState('');
   // Per-companion (non-primary therapist) room override for couple bookings where each
   // person is in a separate room — { [therapistId]: roomId }. Primary therapist (index 0
@@ -472,7 +474,6 @@ const BookingActionModal = ({
     setIsEditing(false);
     setEditError(null);
     setActionError(null);
-    setTherapistSearch('');
     setNewBookingMode(null);
     setNewBookingError(null);
     setNewBookingForm({});
@@ -1433,6 +1434,8 @@ const BookingActionModal = ({
   // rooms.requires_therapist, not a hardcoded room/branch list.
   const selectedRoomObj = rooms.find(r => r.id === selectedRoom);
   const isTherapistOptional = selectedRoomObj?.requires_therapist === false;
+  // Save assignment waits for a complete pick: someone, or both people for a couple service (ZNLY-300).
+  const assignIncomplete = staffPickIncomplete({ isCouple: !!currentServiceObj?.is_couple, optional: isTherapistOptional, count: selectedTherapists.length });
 
   const nextStatuses = isViewer ? [] : getNextStatuses(booking.status);
   // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).
@@ -1822,7 +1825,7 @@ const BookingActionModal = ({
           </div>
           <div className="flex-1" />
           {activeTab === 'assign' && !isAssignmentBlocked ? (
-            <Button variant="primary" size="sm" onClick={handleAssignTherapist} loading={isLoading} disabled={selectedTherapists.length === 0 && !isTherapistOptional}>Save assignment</Button>
+            <Button variant="primary" size="sm" onClick={handleAssignTherapist} loading={isLoading} disabled={assignIncomplete}>Save assignment</Button>
           ) : primaryAction ? (
             <Button variant="primary" size="sm" onClick={primaryAction.run} loading={isLoading} disabled={!!primaryAction.blocked} title={primaryAction.blocked || undefined}>{primaryAction.label}</Button>
           ) : null}
@@ -2571,37 +2574,8 @@ const BookingActionModal = ({
                   const isPlural = !!currentServiceObj?.is_couple || selectedTherapists.length > 1;
                   const staffHeading = isPlural ? (staffLabelPlural || 'Team') : (staffLabel || 'Team member');
                   const staffLower = (staffLabel || 'team member').toLowerCase();
-                  const staffPluralLower = (staffLabelPlural || 'team members').toLowerCase();
                   const assignedIds = (booking?.therapists?.length ? booking.therapists.map(t => t.id) : (booking?.therapist?.id ? [booking.therapist.id] : []));
-                  const arr = arrangeAssignees(therapists, { assignedIds, selectedIds: selectedTherapists, query: therapistSearch });
-                  const stickySearch = therapists.length >= STICKY_SEARCH_MIN;
                   const rowBase = `flex items-center gap-3 min-h-[44px] px-3 py-1.5 border-t border-border first:border-t-0 spa-transition-fast ${isAssignmentBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`;
-                  const staffRow = (t) => {
-                    const isSelected = selectedTherapists.includes(t.id);
-                    const sub = [t.gender && String(t.gender).replace(/^./, c => c.toUpperCase()), t.specialties?.length ? t.specialties.join(', ') : null].filter(Boolean).join(' · ');
-                    return (
-                      <label key={t.id} className={`${rowBase} ${isSelected ? 'bg-primary/5' : 'hover:bg-background'}`}>
-                        <input
-                          type="checkbox"
-                          value={t.id}
-                          checked={isSelected}
-                          disabled={isAssignmentBlocked}
-                          onChange={(e) => {
-                            if (e.target.checked) setSelectedTherapists(prev => [...prev, t.id]);
-                            else setSelectedTherapists(prev => prev.filter(id => id !== t.id));
-                          }}
-                          className="w-5 h-5 flex-shrink-0 rounded text-primary focus:ring-primary disabled:cursor-not-allowed"
-                        />
-                        <span className="flex-1 min-w-0">
-                          <span className="block truncate font-body font-body-medium text-sm text-text-primary">
-                            {t.name}
-                            {assignedIds.includes(t.id) && <span className={TAG}>Assigned</span>}
-                          </span>
-                          {sub && <span className="block truncate text-xs font-caption text-text-secondary">{sub}</span>}
-                        </span>
-                      </label>
-                    );
-                  };
                   const roomRow = (id, name, allocated) => (
                     <label key={id || 'none'} className={`${rowBase} ${selectedRoom === id ? 'bg-primary/5' : 'hover:bg-background'}`}>
                       <input
@@ -2622,59 +2596,30 @@ const BookingActionModal = ({
                   );
                   return (
                     <>
-                      {/* Section 1: staff */}
-                      <div>
-                        <div className={stickySearch ? 'sticky top-11 z-sticky-filter bg-surface pt-1 pb-2' : ''}>
-                          <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">{staffHeading}</h3>
-                          {isTherapistOptional && (
-                            <p className="mt-1 font-caption font-caption-normal text-xs text-text-secondary">
-                              Optional for {selectedRoomObj?.name} — self-service room, no {staffLower} required.
-                            </p>
-                          )}
-                          {therapists.length > 0 && (
-                            <>
-                              <div className="relative mt-2">
-                                <Icon name="Search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
-                                <input
-                                  type="text"
-                                  value={therapistSearch}
-                                  onChange={(e) => setTherapistSearch(e.target.value)}
-                                  placeholder={`Search ${staffPluralLower}...`}
-                                  className="w-full h-11 pl-9 pr-3 bg-background border border-border rounded-spa text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
-                                />
-                              </div>
-                              <div className="mt-1.5 flex justify-between text-xs text-text-secondary">
-                                <span>{arr.selectedVisible} selected</span>
-                                <span>{arr.filtering ? `${arr.matchCount} of ${arr.total} match` : `${arr.total} ${arr.total === 1 ? staffLower : staffPluralLower}`}</span>
-                              </div>
-                              {arr.hiddenSelected > 0 && (
-                                <p className="mt-0.5 text-xs text-text-tertiary">+{arr.hiddenSelected} assigned outside your view</p>
-                              )}
-                            </>
-                          )}
-                        </div>
-                        {therapists.length === 0 ? (
-                          <p className="font-body font-body-normal text-sm text-text-secondary">No {staffPluralLower} available.</p>
-                        ) : (
-                          <>
-                            {arr.pinned.length > 0 && (
-                              <>
-                                <p className="mt-2 mb-1 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">Selected</p>
-                                <div className="border border-border rounded-spa overflow-hidden">{arr.pinned.map(staffRow)}</div>
-                                <p className="mt-3 mb-1 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">Matches</p>
-                              </>
-                            )}
-                            <div className="mt-2 border border-border rounded-spa overflow-hidden">
-                              {arr.rows.length === 0 ? (
-                                <div className="py-5 px-3 text-center text-sm text-text-secondary">
-                                  No {staffPluralLower} match &ldquo;{therapistSearch.trim()}&rdquo;.
-                                  <button type="button" onClick={() => setTherapistSearch('')} className="block mx-auto mt-1 min-h-[44px] px-3 text-sm font-medium text-primary hover:underline">Clear search</button>
-                                </div>
-                              ) : arr.rows.map(staffRow)}
-                            </div>
-                          </>
-                        )}
-                      </div>
+                      {/* Section 1: staff (shared picker, ZNLY-300) */}
+                      <StaffPicker
+                        key={booking?.bookingId}
+                        people={therapists}
+                        selectedIds={selectedTherapists}
+                        onChange={setSelectedTherapists}
+                        max={currentServiceObj?.is_couple ? 2 : Infinity}
+                        heading={staffHeading}
+                        note={isTherapistOptional ? (
+                          <p className="mt-1 font-caption font-caption-normal text-xs text-text-secondary">
+                            Optional for {selectedRoomObj?.name} — self-service room, no {staffLower} required.
+                          </p>
+                        ) : null}
+                        staffLabel={staffLabel || 'Team member'}
+                        staffLabelPlural={staffLabelPlural || 'Team'}
+                        slot={booking?.date && booking?.startTime ? { date: booking.date, start: booking.startTime, end: booking.endTime } : null}
+                        serviceId={booking?.serviceId || null}
+                        bookings={dayBookings}
+                        excludeBookingId={booking?.bookingId || null}
+                        offById={offStaff}
+                        assignedIds={assignedIds}
+                        disabled={isAssignmentBlocked}
+                        stickyClass="sticky top-11 z-sticky-filter bg-surface pt-1 pb-2"
+                      />
 
                       {/* Section 2: Room */}
                       {rooms.length > 0 && (
@@ -4329,7 +4274,7 @@ const BookingActionModal = ({
                       variant="primary"
                       onClick={handleAssignTherapist}
                       loading={isLoading}
-                      disabled={selectedTherapists.length === 0 && !isTherapistOptional}
+                      disabled={assignIncomplete}
                       className="min-h-[44px] sm:min-h-0"
                     >
                       Save Assignment
