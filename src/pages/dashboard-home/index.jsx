@@ -142,7 +142,7 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
   const scope = isOverall ? `${branches.length} ${(branches.length === 1 ? wordBranch() : wordBranches())}` : branchName;
 
   return (
-    <div className="space-y-3 sm:space-y-4 max-lg:pb-[calc(6rem+env(safe-area-inset-bottom))]">
+    <div className="space-y-3 sm:space-y-4">
       <header className="flex flex-wrap items-end gap-x-4 gap-y-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">

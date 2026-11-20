@@ -335,6 +335,15 @@ aside:has(.sidebar-scroll:focus-within) .sidebar-scroll::-webkit-scrollbar-thumb
   }
 }
 
+/* Phone: the content surface runs to the screen's bottom edge behind the floating pill nav (no band), and every scroller
+   ends with clearance = pill + its offset + safe area (+ the FAB), so the last item scrolls fully clear of both. */
+@media (max-width: 1023.98px) {
+  .app-shell .content-scroll,
+  .app-shell .calendar-grid-scroll {
+    padding-bottom: calc(6rem + env(safe-area-inset-bottom));
+  }
+}
+
 /* Print: let the frame grow to its content so long pages print in full. */
 @media print {
   .app-shell, .app-shell-main, .app-shell-frame, .content-scroll {

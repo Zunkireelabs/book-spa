@@ -39,7 +39,7 @@ const AppShell = ({ sidebar, header, banner = null, floating = null, aside = nul
     <div className={`app-shell min-h-screen bg-surface-sidebar lg:h-dvh lg:overflow-hidden ${fill ? 'h-dvh overflow-hidden' : ''}`}>
       <StaffSidebar {...sidebar} onCollapseChange={setCollapsed} />
 
-      <div className={`app-shell-main ${collapsed ? 'lg:ml-16' : 'lg:ml-60'} transition-all duration-200 flex flex-col pb-24 lg:pb-0 lg:h-dvh ${fill ? 'h-dvh' : ''}`}>
+      <div className={`app-shell-main ${collapsed ? 'lg:ml-16' : 'lg:ml-60'} transition-all duration-200 flex flex-col lg:h-dvh ${fill ? 'h-dvh' : ''}`}>
         <AppHeader {...header} />
         {banner}
         {floating}
