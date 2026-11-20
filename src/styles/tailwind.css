@@ -305,6 +305,21 @@ aside:has(.sidebar-scroll:focus-within) .sidebar-scroll::-webkit-scrollbar-thumb
   }
 }
 
+/* Floating panels (dropdowns, notification panel, palette...): ONE rule to fit the VISIBLE viewport. 100vh is the large viewport on
+   phones (browser bar not subtracted), so the panel's footer hid behind it; dvh follows the bar (the vh line is the fallback for
+   browsers without dvh). Set --panel-top (where the panel starts) and --panel-gap (space to leave at the bottom).
+   .panel-fit-nav also keeps the panel clear of the floating phone nav + safe area below lg. Desktop: vh == dvh, so unchanged. */
+.panel-fit {
+  max-height: calc(100vh - var(--panel-top, 0px) - var(--panel-gap, 1rem));
+  max-height: calc(100dvh - var(--panel-top, 0px) - var(--panel-gap, 1rem));
+}
+@media (max-width: 1023.98px) {
+  .panel-fit-nav {
+    max-height: calc(100vh - var(--panel-top, 0px) - max(var(--panel-gap, 1rem), 6rem + env(safe-area-inset-bottom)));
+    max-height: calc(100dvh - var(--panel-top, 0px) - max(var(--panel-gap, 1rem), 6rem + env(safe-area-inset-bottom)));
+  }
+}
+
 /* Calendar scroller: never chains scroll to the page. Phone column snapping is done in JS (CalendarGrid axis lock), not CSS snap. */
 .calendar-grid-scroll { overscroll-behavior: contain; }
 

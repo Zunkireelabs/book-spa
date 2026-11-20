@@ -84,7 +84,7 @@ const ProfileMenu = () => {
           ref={menuRef}
           role="menu"
           aria-label="Account"
-          className="absolute right-0 top-[calc(50%+32px)] w-64 bg-surface border border-border rounded-xl shadow-spa-elevated z-dropdown p-1.5"
+          className="absolute right-0 top-[calc(50%+32px)] [--panel-top:4.5rem] [--panel-gap:1rem] panel-fit panel-fit-nav overflow-y-auto overscroll-contain w-64 bg-surface border border-border rounded-xl shadow-spa-elevated z-dropdown p-1.5"
         >
           <div className="p-3 mb-1 rounded-spa-lg bg-background">
             <div className="min-w-0">

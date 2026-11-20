@@ -208,8 +208,8 @@ const NotificationBell = ({
       {open && createPortal(
         <div
           ref={panelRef}
-          style={{ position: 'fixed', top: coords.top, left: coords.left, right: coords.right, maxHeight: `calc(100vh - ${coords.top}px - 64px)` }}
-          className="flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 z-notification overflow-hidden overscroll-contain"
+          style={{ position: 'fixed', top: coords.top, left: coords.left, right: coords.right, '--panel-top': `${coords.top}px`, '--panel-gap': '64px' }}
+          className="panel-fit panel-fit-nav flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 z-notification overflow-hidden overscroll-contain"
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <h3 className="text-sm font-semibold text-gray-900">Notifications</h3>

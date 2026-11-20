@@ -174,7 +174,7 @@ const CalendarToolbar = ({
               <Icon name="ChevronDown" size={14} className={`spa-transition-fast ${open === 'filter' ? 'rotate-180' : ''}`} />
             </button>
             {open === 'filter' && (
-              <div className="absolute left-0 top-full mt-1 w-64 max-h-[calc(100vh-120px)] flex flex-col bg-surface border border-border rounded-spa-lg shadow-spa-elevated z-dropdown">
+              <div className="absolute left-0 top-full mt-1 w-64 [--panel-gap:120px] panel-fit panel-fit-nav flex flex-col bg-surface border border-border rounded-spa-lg shadow-spa-elevated z-dropdown">
                 <label className="flex items-center gap-2 px-3 min-h-[36px] border-b border-border cursor-pointer hover:bg-background flex-shrink-0">
                   <input type="checkbox" checked={showServiceOnly} onChange={(e) => setShowServiceOnly(e.target.checked)} className="text-primary focus:ring-primary w-3.5 h-3.5 rounded" />
                   <span className="text-[13px] text-text-primary">Show only service staff</span>
@@ -264,7 +264,7 @@ const CalendarToolbar = ({
               <Icon name="MoreVertical" size={16} />
             </button>
             {open === 'menu' && (
-              <div className="absolute right-0 top-full mt-1 w-72 max-h-[calc(100vh-96px)] overflow-y-auto bg-surface border border-border rounded-spa-lg shadow-spa-elevated z-dropdown py-1">
+              <div className="absolute right-0 top-full mt-1 w-72 [--panel-gap:96px] panel-fit panel-fit-nav overflow-y-auto bg-surface border border-border rounded-spa-lg shadow-spa-elevated z-dropdown py-1">
                 {iconsView && (
                   <div>
                     <button type="button" onClick={() => setIconsView(false)} className="w-full min-h-[40px] flex items-center gap-1.5 px-3 text-[13px] font-medium text-text-primary hover:bg-background border-b border-border">

@@ -129,7 +129,7 @@ const CommandPalette = ({ onClose }) => {
         role="dialog"
         aria-modal="true"
         aria-label="Search"
-        className="relative mx-auto mt-[15vh] w-[640px] max-w-[calc(100vw-24px)] max-h-[70vh] flex flex-col bg-surface rounded-spa-lg shadow-spa-elevated border border-border overflow-hidden max-sm:mt-3"
+        className="relative mx-auto mt-[15dvh] [--panel-top:15dvh] [--panel-gap:15dvh] max-sm:[--panel-top:0.75rem] max-sm:[--panel-gap:0.75rem] panel-fit w-[640px] max-w-[calc(100vw-24px)] flex flex-col bg-surface rounded-spa-lg shadow-spa-elevated border border-border overflow-hidden max-sm:mt-3"
       >
         <div className="flex items-center gap-3 px-4 h-12 border-b border-border flex-shrink-0">
           <Icon name="Search" size={16} className="text-text-tertiary flex-shrink-0" />
