@@ -1,3 +1,4 @@
+import { dayProgress } from './dayProgress';
 // Pure helpers for the dashboard's floor and pulse (V36c). Times are minutes since midnight, Nepal day.
 
 /** 90 -> '1h 30m', 45 -> '45m', 120 -> '2h'. */
@@ -83,7 +84,7 @@ export function axisBounds(therapists, open = null, close = null) {
 export function bookingSplit(pulse) {
   const p = pulse || {};
   const late = p.late || 0;
-  return { done: p.completed || 0, now: p.in_progress || 0, late, toCome: Math.max(0, (p.confirmed || 0) + (p.pending || 0) - late) };
+  return { done: dayProgress(p).finished, now: p.in_progress || 0, late, toCome: Math.max(0, (p.confirmed || 0) + (p.pending || 0) - late) };
 }
 
 /** '1 done · 3 late · 2 to come' (now and late only when there are some). */

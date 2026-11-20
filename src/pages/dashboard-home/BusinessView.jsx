@@ -1,3 +1,4 @@
+import { dayProgress } from '../../lib/dayProgress';
 import React, { useEffect, useState } from 'react';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
@@ -105,7 +106,7 @@ const BusinessView = ({ data, dataError, branchIds, today, role, onOpenBranch, o
                           className="border-b border-gray-100 last:border-0 cursor-pointer hover:bg-gray-50 focus:outline-none focus-visible:bg-gray-50">
                           <td className="px-3.5 py-2.5"><div className="font-semibold text-gray-900">{r.name}</div>{r.manager && <div className="text-[11px] text-gray-500">Manager {r.manager}</div>}</td>
                           <td className="px-3.5 py-2.5 text-right font-data text-[12.5px] whitespace-nowrap">{r.busy_now} of {r.working} busy</td>
-                          <td className="px-3.5 py-2.5 text-right font-data text-[12.5px]">{r.completed} / {r.bookings}</td>
+                          <td className="px-3.5 py-2.5 text-right font-data text-[12.5px]">{dayProgress(r).finished} / {dayProgress(r).total}</td>
                           {canMoney && <td className="px-3.5 py-2.5 text-right font-data text-[12.5px] whitespace-nowrap">{npr(r.revenue)}</td>}
                           {canMoney && <td className="px-3.5 py-2.5 text-right font-data text-[12.5px]"><Change pct={pctChange(r.revenue, r.revenue_prev)} /></td>}
                           <td className="px-3.5 py-2.5 text-right font-data text-[12.5px] whitespace-nowrap">

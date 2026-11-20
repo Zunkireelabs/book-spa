@@ -1,3 +1,4 @@
+import { dayProgressOf, dayProgressText } from './dayProgress';
 import { lateMinutes } from '../utils/bookingsList';
 import { computeCommissionParts, computeReferralCommission } from '../services/payrollCalc';
 
@@ -38,14 +39,14 @@ export function dayStatus(bookings, nowHm, today = null) {
   const open = list.filter((b) => ['Pending', 'Confirmed', 'In-Progress'].includes(b.status));
   const late = open.filter((b) => lateMinutes({ status: b.status, date: today || '', startTime: b.start }, { today: today || '', nowHM: nowHm }) != null).length;
   return {
-    total: list.length, done: list.filter((b) => b.status === 'Completed').length, open: open.length, late, allClosed: list.length > 0 && open.length === 0,
+    total: list.length - list.filter((b) => b.status === 'Cancelled').length, done: dayProgressOf(list).finished, open: open.length, late, allClosed: list.length > 0 && open.length === 0,
     cancelled: list.filter((b) => b.status === 'Cancelled').length, noShow: list.filter((b) => b.status === 'No Show').length,
   };
 }
 
 /** "4 of 5 done" plus what the other finished ones were: "4 of 5 done · 1 no-show" (same terminal statuses as the Bookings list). */
 export function dayMeta(s) {
-  return [`${s.done} of ${s.total} done`, s.noShow ? `${s.noShow} no-show` : null, s.cancelled ? `${s.cancelled} cancelled` : null].filter(Boolean).join(' · ');
+  return [dayProgressText({ finished: s.done, total: s.total, noShow: s.noShow }), s.cancelled ? `${s.cancelled} cancelled` : null].filter(Boolean).join(' · ');
 }
 
 /** The status chip of a My day row, using the Bookings list's status mapping (bookingsList.lateMinutes): "Late" ONLY for Pending/Confirmed past their start. */

@@ -9,6 +9,7 @@ import SetupChecklist from './SetupChecklist';
 import { DashPanels } from './DashboardPanels';
 import { fetchNeeds, updateBookingStatus } from '../../services/api';
 import { supabase } from '../../lib/supabase';
+import { dayProgress, dayProgressText } from '../../lib/dayProgress';
 import { bookingSplit, splitLine, fmtClock, fmtDuration, fmtRange, fmtFreeTotal, freeNow, freeTime } from '../../lib/dashboardFloor';
 import DeskButtons from './DeskButtons';
 import { paidNote } from '../../lib/dashboardMoney';
@@ -92,6 +93,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
   const floor = data?.floor?.[0];
   const pulse = data?.pulse || {};
   const split = bookingSplit(pulse);
+  const progress = dayProgress(pulse);
   const free = freeTime(floor?.therapists, phase === 'live' ? nowMin : null);
   const share = data?.week?.[0]?.booked_share;
   const bad = dataError; // get_dashboard failed
@@ -155,7 +157,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
           {mineNext ? (mineNext.status === 'In-Progress' ? 'MY DAY · WITH YOU NOW' : mineIn > 0 ? `MY DAY · NEXT CLIENT IN ${fmtDuration(mineIn).replace(/m$/, ' MIN').toUpperCase()}` : 'MY DAY · NEXT CLIENT IS DUE') : mineDay.allClosed ? 'MY DAY · ALL DONE' : 'MY DAY · NO MORE CLIENTS TODAY'}
         </div>
         {mineNext && <div className="text-[15px] font-semibold truncate">{clock12(mineNext.start)} · {mineNext.customer || mineNext.number} · {mineNext.service}</div>}
-        <div className="text-xs opacity-85">{[mineNext?.room, !mineNext && !mineDay.allClosed ? `${mineDay.open} not closed yet` : null, `${mineDay.done} of ${mineList.length} done today`].filter(Boolean).join(' · ')}</div>
+        <div className="text-xs opacity-85">{[mineNext?.room, !mineNext && !mineDay.allClosed ? `${mineDay.open} not closed yet` : null, `${dayProgressText({ finished: mineDay.done, total: mineDay.total, noShow: mineDay.noShow })} today`].filter(Boolean).join(' · ')}</div>
       </div>
       <button type="button" onClick={onOpenMyDay} className="ml-auto bg-white text-primary text-xs font-medium rounded-lg px-3 py-1.5 hover:bg-white/90">Open my day</button>
     </section>
@@ -198,7 +200,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
     body = (
       <>
         {brief('Moon', <>
-          <b>{pulse.completed || 0} of {pulse.bookings || 0}</b> done{pulse.no_show > 0 && <> ({pulse.no_show} no-show)</>}
+          <b>{progress.finished} of {progress.total}</b> finished{progress.noShow > 0 && <> · {progress.noShow} no-show</>}
           {canMoney && <>{sep}<b>{npr(taken)}</b> taken</>}
           {sep}{needsLoading ? <span className="text-gray-400">loose ends…</span> : <span className={needCount ? 'text-warning' : ''}>{needCount} loose ends</span>}
           {sep}tomorrow {data?.tomorrow?.bookings ?? 0} booked
