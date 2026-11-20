@@ -6,6 +6,9 @@ export const ROLE_LABELS = { staff: 'Staff', manager: 'Manager', admin: 'Admin',
 export const CALENDAR_LABELS = { own: 'Own calendar', own_view: 'Own calendar (view only)', all: 'All calendars', all_view: 'All calendars (view only)' };
 export const CALENDAR_OPTIONS = Object.entries(CALENDAR_LABELS).map(([value, label]) => ({ value, label }));
 
+// An own-only calendar login: 'own' and 'own_view' (view only). The one definition viewerAccess (dataMasking) and resolveVisibility (api) share.
+export const isOwnCalendar = (visibility) => ['own', 'own_view'].includes(visibility);
+
 // Who sees the Access section at all: managers and admins edit, an admin viewer reads.
 export const canViewAccess = (viewerRole) => ['manager', 'admin', 'admin_viewer'].includes(viewerRole);
 

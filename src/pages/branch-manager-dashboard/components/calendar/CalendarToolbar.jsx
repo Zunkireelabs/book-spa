@@ -56,7 +56,7 @@ const CalendarToolbar = ({
   onNewBooking, onOpenWaitlist, waitlistCount = 0, branchId,
   userRole, onPrint, onEditRoster, onBlockWholeCalendar, onCalendarSettings, onClosedDates,
   zoomScale, onZoomChange, minZoom, maxZoom, use24h, setUse24h, hideSensitive, setHideSensitive,
-  onGroupByChange, staffOptions = [], teamUniverse = [], hiddenStaffIds = [], setHiddenStaffIds = () => {},
+  ownOnly = false, onGroupByChange, staffOptions = [], teamUniverse = [], hiddenStaffIds = [], setHiddenStaffIds = () => {},
 }) => {
   const ZOOM_STEP = 0.2;
   const [open, setOpen] = useState(null); // 'date' | 'filter' | 'view' | 'menu' | null
@@ -128,7 +128,7 @@ const CalendarToolbar = ({
       goToday={goToday} goPrev={goPrev} goNext={goNext} setTipOpen={setTipOpen}
       showServiceOnly={showServiceOnly} setShowServiceOnly={setShowServiceOnly}
       selectedPositions={selectedPositions} setSelectedPositions={setSelectedPositions} calendarPositionOptions={calendarPositionOptions}
-      staffOptions={staffOptions} teamUniverse={teamUniverse} hiddenStaffIds={hiddenStaffIds} setHiddenStaffIds={setHiddenStaffIds} staffLabelPlural={staffLabelPlural} filterLabel={filterLabel}
+      ownOnly={ownOnly} staffOptions={staffOptions} teamUniverse={teamUniverse} hiddenStaffIds={hiddenStaffIds} setHiddenStaffIds={setHiddenStaffIds} staffLabelPlural={staffLabelPlural} filterLabel={filterLabel}
       onNewBooking={onNewBooking} onOpenWaitlist={onOpenWaitlist} waitlistCount={waitlistCount} branchId={branchId}
       userRole={userRole} onPrint={onPrint} onEditRoster={onEditRoster} onBlockWholeCalendar={onBlockWholeCalendar}
       onCalendarSettings={onCalendarSettings} onClosedDates={onClosedDates}
@@ -165,7 +165,7 @@ const CalendarToolbar = ({
             </div>
           )}
         </div>
-        {columnMode === 'therapist' && (
+        {columnMode === 'therapist' && !ownOnly && (
           <div className="relative" ref={refs.filter}>
             <button onClick={() => toggle('filter')} aria-haspopup="true" aria-expanded={open === 'filter'} title={`Filter ${(staffLabelPlural || 'staff').toLowerCase()}`}
               className={`h-9 flex items-center gap-1.5 px-3 text-[13px] font-body font-body-medium border rounded-spa spa-transition-fast whitespace-nowrap ${filterActive ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-surface text-text-primary hover:bg-background'}`}>

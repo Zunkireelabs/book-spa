@@ -7,7 +7,8 @@ import { workedAtNote } from './visitorAttendance';
 import { computeReferralCommission, payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, computeNetPay, splitServiceRevenueByBranch, visitorPayrollHelpLine } from './payrollCalc';
 import { supabase, supabaseCustomer, supabaseProvision } from '../lib/supabase';
 import { isReadingViaSafeViews } from '../lib/restrictedReads';
-import { maskCustomerName, maskPhone, viewerAccess } from './dataMasking';
+import { maskCustomerName, maskPhone, viewerAccess, calendarColumnsFor } from './dataMasking';
+import { isOwnCalendar } from './staffAccessRules';
 import { transformMembership, transformMemberships, toTitleCase, isNoShow, futureBookingMessage } from './bookingTransformers';
 import { dedupeTransfersByKey, sortTransfersByTime } from './transferDedup';
 import { capture } from '../lib/analytics';
@@ -6934,7 +6935,8 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
           closeTime: branch.close_time || '21:00:00',
           timezone: branch.timezone || 'Asia/Kathmandu',
         },
-        therapists: finalTherapists,
+        // ZNLY-278: an own-only login gets only its own team member back: colleagues' columns would look free while they are busy.
+        therapists: calendarColumnsFor(vis.ownBookingsOnly, finalTherapists, vis.therapistId),
         rooms: roomsResult.data || [],
         bookings: bookingsWithNewFlag,
         checkedOutByTherapistAndDate,
@@ -19281,7 +19283,7 @@ const CUSTOMER_DETAIL_FIELDS = ['customer_email', 'notes', 'customer_notes'];
 async function resolveVisibility(profile) {
   const privileged = profile.role === 'manager' || profile.role === 'admin';
   const vis = {
-    ownBookingsOnly: !privileged && profile.calendar_visibility === 'own',
+    ownBookingsOnly: !privileged && isOwnCalendar(profile.calendar_visibility),
     canViewCustomerDetails: privileged || profile.can_view_customer_details !== false,
     canViewPrices: privileged || profile.can_view_prices !== false,
     therapistId: null,

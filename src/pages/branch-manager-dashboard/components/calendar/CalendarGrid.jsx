@@ -197,6 +197,7 @@ const CalendarGrid = ({
   activeDragId = null,
   gridRef, // Ref to get grid position for time calculation
   freezeUnassigned = true,
+  hideUnassigned = false, // own-only login (ZNLY-278): no Unassigned column, it would show colleagues' work
   onToggleFreezeUnassigned,
   onTherapistReorder,
   onRoomReorder,
@@ -481,9 +482,9 @@ const CalendarGrid = ({
       transferFromBranch: t.transferFromBranch,
       transferToBranch: t.transferToBranch,
     }));
-    cols.push({ id: 'unassigned', name: 'Unassigned', type: 'unassigned', icon: 'AlertCircle', subtitle: null, attendance: null });
+    if (!hideUnassigned) cols.push({ id: 'unassigned', name: 'Unassigned', type: 'unassigned', icon: 'AlertCircle', subtitle: null, attendance: null });
     return cols;
-  }, [therapists, rooms, attendanceMap, columnMode]);
+  }, [therapists, rooms, attendanceMap, columnMode, hideUnassigned]);
 
   // ── Group bookings by day and column ─────────────────────
   const bookingsByDayAndCol = useMemo(() => {
@@ -1008,8 +1009,8 @@ const CalendarGrid = ({
     };
   }, [days, todayStr, nowTop]);
 
-  const minColWidth = Math.round((isMultiDay ? 80 : phoneDay ? (viewportW - (PHONE_TIME_COL + PHONE_UNASSIGNED_W)) / 3 : 200) * zoomScale);
-  const pinUnassigned = freezeUnassigned || phoneDay; // always pinned on phone (the pin toggle stays desktop-only)
+  const minColWidth = Math.round((isMultiDay ? 80 : phoneDay ? (viewportW - (PHONE_TIME_COL + (hideUnassigned ? 0 : PHONE_UNASSIGNED_W))) / 3 : 200) * zoomScale);
+  const pinUnassigned = !hideUnassigned && (freezeUnassigned || phoneDay); // always pinned on phone (the pin toggle stays desktop-only)
   const unassignedW = phoneDay ? PHONE_UNASSIGNED_W : minColWidth;
 
   // ── Column header tooltip (fixed-position to escape overflow-hidden) ──

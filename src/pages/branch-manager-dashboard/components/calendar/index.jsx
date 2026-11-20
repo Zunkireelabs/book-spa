@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
+import { viewerAccess } from 'services/dataMasking';
 import UnlinkedLoginNotice from 'components/ui/UnlinkedLoginNotice';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { DndContext, pointerWithin } from '@dnd-kit/core';
@@ -57,6 +58,7 @@ const OperationalCalendar = ({ branchId }) => {
   const calendarShowFullDay = orgSettings?.calendar_show_full_day === true;
   // Industry-specific labels from auth context
   const industry = profile?.organizations?.industries;
+  const ownOnly = viewerAccess(profile).ownOnly; // ZNLY-278: an own-only login sees only its own column (the data layer already returns just its own team member)
   const staffLabel = industry?.staff_label || 'Therapist';
   const staffLabelPlural = industry?.staff_label_plural || 'Therapists';
   const locationLabel = industry?.location_label || 'Room';
@@ -96,7 +98,7 @@ const OperationalCalendar = ({ branchId }) => {
   });
   // Default to staff view if rooms are disabled
   // The Group by choice is remembered per device (group_by pref), phone and desktop alike.
-  const [columnMode, setColumnMode] = useState(() => (enableRooms && readPref('group_by', null) === 'room' ? 'room' : 'therapist')); // therapist | room
+  const [columnMode, setColumnMode] = useState(() => (enableRooms && !viewerAccess(profile).ownOnly && readPref('group_by', null) === 'room' ? 'room' : 'therapist')); // therapist | room
   const setGroupBy = (mode) => { setColumnMode(mode); writePref('group_by', mode); };
   const [freezeUnassigned, setFreezeUnassigned] = useState(true);
   const [showServiceOnly, setShowServiceOnly] = useState(true);
@@ -280,7 +282,8 @@ const OperationalCalendar = ({ branchId }) => {
             staffLabel={staffLabel}
             staffLabelPlural={staffLabelPlural}
             locationLabel={locationLabel}
-            enableRooms={enableRooms}
+            enableRooms={enableRooms && !ownOnly}
+            ownOnly={ownOnly}
             columnMode={columnMode}
             setColumnMode={setColumnMode}
             onGroupByChange={setGroupBy}
@@ -370,6 +373,7 @@ const OperationalCalendar = ({ branchId }) => {
                   activeDragId={activeDragId}
                   gridRef={gridRef}
                   freezeUnassigned={freezeUnassigned}
+                  hideUnassigned={ownOnly}
                   onToggleFreezeUnassigned={() => setFreezeUnassigned(prev => !prev)}
                   onTherapistReorder={canReorderTherapists ? handleTherapistReorder : undefined}
                   onRoomReorder={canReorderTherapists ? handleRoomReorder : undefined}

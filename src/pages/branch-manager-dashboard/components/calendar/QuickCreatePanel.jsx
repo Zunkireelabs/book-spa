@@ -23,6 +23,8 @@ import { todayStr } from './calendarDates';
 
 const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours, retarget, onDraftChange, columnMode = 'therapist', allTherapists = [], guardRef }) => {
   const { profile: viewerProfile } = useAuth();
+  // ZNLY-278: an own-only login books only itself; the data layer hands it a single team member, so that one is the default.
+  const defaultTherapistId = viewerAccess(viewerProfile).ownOnly && therapists?.length === 1 ? therapists[0].id : null;
   const canViewPrices = viewerAccess(viewerProfile).canViewPrices; // ZNLY-235: no prices for this login
   const [serviceId, setServiceId] = useState('');
   const [customerName, setCustomerName] = useState('');
@@ -162,7 +164,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setReferringCustomerCountryCode('+977');
     setReferringCustomerName('');
     setReferringRewardAmount('');
-    setSelectedTherapistIds(slotInfo?.colType === 'therapist' && slotInfo.colId ? [slotInfo.colId] : []);
+    setSelectedTherapistIds(slotInfo?.colType === 'therapist' && slotInfo.colId ? [slotInfo.colId] : (defaultTherapistId ? [defaultTherapistId] : []));
     setTherapistSearch('');
     setRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
     setTherapistRoomOverrides({});

@@ -72,7 +72,7 @@ const CalendarMobileHeader = ({
   staffLabel, locationLabel, enableRooms, columnMode, onGroupByChange, awayList,
   currentDate, setCurrentDate, viewMode, setViewMode, goToday, goPrev, goNext, setTipOpen,
   showServiceOnly, setShowServiceOnly, selectedPositions, setSelectedPositions, calendarPositionOptions,
-  staffOptions = [], teamUniverse = [], hiddenStaffIds = [], setHiddenStaffIds = () => {}, staffLabelPlural = 'Team', filterLabel = 'All',
+  ownOnly = false, staffOptions = [], teamUniverse = [], hiddenStaffIds = [], setHiddenStaffIds = () => {}, staffLabelPlural = 'Team', filterLabel = 'All',
   onNewBooking, onOpenWaitlist, waitlistCount = 0, branchId,
   userRole, onPrint, onEditRoster, onBlockWholeCalendar, onCalendarSettings, onClosedDates,
   zoomScale, onZoomChange, minZoom, maxZoom, use24h, setUse24h, hideSensitive, setHideSensitive,
@@ -170,7 +170,7 @@ const CalendarMobileHeader = ({
           ) : <SheetRow icon="User" label={staffLabel} />}
         </SheetSection>
         <SheetSection title="Show">
-          {columnMode === 'therapist' && (
+          {columnMode === 'therapist' && !ownOnly && (
             <SheetRow icon="Filter" label="Filters" value={filterLabel} onClick={() => setSub('filters')} />
           )}
           {onOpenWaitlist && <SheetRow icon="ListOrdered" label="Waitlist" value={waitlistCount || null} onClick={() => { closeAll(); onOpenWaitlist(); }} />}

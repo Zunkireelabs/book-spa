@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { maskCustomerName, maskPhone, phoneTail, nameWithTail, viewerAccess, isRestricted, maskBookingForViewer, moneyOrDash } from './dataMasking';
+import { calendarColumnsFor, maskCustomerName, maskPhone, phoneTail, nameWithTail, viewerAccess, isRestricted, maskBookingForViewer, moneyOrDash } from './dataMasking';
 import { rewriteForRestricted, setRestrictedReads } from '../lib/restrictedReads';
 
 describe('tails', () => {
@@ -65,5 +65,29 @@ describe('embedded joins', () => {
     const out = rewriteEmbeds('?select=id%2Cbooking%3Abookings%28status%29&user_id=eq.1');
     expect(new URLSearchParams(out).get('select')).toBe('id,booking:bookings_safe(status)');
     expect(new URLSearchParams(out).get('user_id')).toBe('eq.1');
+  });
+});
+
+describe('calendarColumnsFor (ZNLY-278): an own-only login sees one column', () => {
+  const team = [{ id: 'sami', name: 'Sami Rai' }, { id: 'tara', name: 'Tara' }, { id: 'jay', name: 'Jayanti' }];
+  const own = { role: 'staff', calendar_visibility: 'own' };
+  it('own: only the login\'s own team member', () => {
+    expect(calendarColumnsFor(viewerAccess(own).ownOnly, team, 'sami')).toEqual([{ id: 'sami', name: 'Sami Rai' }]);
+  });
+  it('own but not linked: no column at all (the unlinked notice explains why)', () => {
+    expect(calendarColumnsFor(viewerAccess(own).ownOnly, team, null)).toEqual([]);
+  });
+  it('all / all_view / manager / admin: unchanged', () => {
+    for (const p of [{ role: 'staff', calendar_visibility: 'all' }, { role: 'staff', calendar_visibility: 'all_view' }, { role: 'manager', calendar_visibility: 'own' }, { role: 'admin' }]) {
+      expect(calendarColumnsFor(viewerAccess(p).ownOnly, team, 'sami')).toBe(team);
+    }
+  });
+});
+
+describe('own_view is own-only too (ZNLY-278)', () => {
+  it('own_view -> ownOnly; all_view -> not', () => {
+    expect(viewerAccess({ role: 'staff', calendar_visibility: 'own_view' }).ownOnly).toBe(true);
+    expect(viewerAccess({ role: 'staff', calendar_visibility: 'all_view' }).ownOnly).toBe(false);
+    expect(viewerAccess({ role: 'manager', calendar_visibility: 'own_view' }).ownOnly).toBe(false);
   });
 });
