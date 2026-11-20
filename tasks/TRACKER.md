@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-20** by Project Manager · 237 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-20** by Project Manager · 242 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -13,6 +13,7 @@ Last synced: **2026-11-20** by Project Manager · 237 open tickets (epics exclud
 ## In progress
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
+| ZNLY-282 | Sadin | urgent | "Own calendar (view only)" logins can read every colleague's bookings: the own-bookings RLS (migration 322) only checks 'own' |
 | ZNLY-66 | Sadin | high | UI/UX Upgrade (feat/ui-port-from-clinicmd) |
 | ZNLY-159 | Sadin | high | Reports redesign: 17 reports in 5 groups, Start here row, headline vs last period, ✦ flags |
 | ZNLY-182 | Anish | high | Online combo-service bookings never split into per-component booking_combo_items |
@@ -31,6 +32,7 @@ Last synced: **2026-11-20** by Project Manager · 237 open tickets (epics exclud
 | ZNLY-277 | Sadin | high | Closed-day Payment Breakdown: uneven row spacing (tall method rows, cramped totals and section headings) |
 | ZNLY-278 | Sadin | high | "Own bookings only" login: calendar shows every colleague's column empty, so busy colleagues look free |
 | ZNLY-279 | Sadin | high | Calendar team filter: all staff are showing but every checkbox is unticked ("All positions", "Clear all" with nothing to clear) |
+| ZNLY-280 | Sadin | high | Payment Breakdown: no repeated numbers on a closed day, highlight the cash figure that matters, "of which" lines under the methods, whole-rupee money everywhere |
 | ZNLY-136 | Anish | medium | Group booking (Fresha-style): book multiple people, one shared slot, one checkout |
 | ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
 | ZNLY-175 | Sadin | medium | Therapist inner page: outcomes bar total counts upcoming bookings that sit in no bucket |
@@ -46,6 +48,7 @@ Last synced: **2026-11-20** by Project Manager · 237 open tickets (epics exclud
 | ZNLY-271 | Sadin | medium | Calendar card icons: one calm icon set (payment tag, note vs customer alert, first visit, online, package session, group) + Icons legend with on/off |
 | ZNLY-273 | Sadin | medium | Bookings "Needs you now" says "Everything's on track" while finished bookings are still unpaid |
 | ZNLY-276 | Sadin | medium | Dashboard strip "50 of 54 done (1 no-show)" reads as 4 left when 3 are open |
+| ZNLY-281 | Sadin | medium | Calendar: hover/open a booking lights up every booking of the same client on screen (Fresha-style), no link lines |
 
 ## In review / on stage
 | Ticket | Owner | Priority | State | What |
@@ -147,6 +150,7 @@ Last synced: **2026-11-20** by Project Manager · 237 open tickets (epics exclud
 | ZNLY-183 | — | high | Attendance numbers ignore the branch "Expect check-in" switch: unmarked rostered days are "counted present" on the Attendance page but "not marked" in reports |
 | ZNLY-197 | — | high | Remove zenly.zunkireelabs.com from prod Traefik router rule in docker-compose.yml |
 | ZNLY-245 | Sadin | high | Sami's onboarding: import the Fresha export (staff, customers, services, products) into production, rehearsed and reconciled |
+| ZNLY-284 | Sadin | high | Interim: Staff › Access stops offering "(view only)" calendar options until ZNLY-283 enforces them; existing view-only logins get an honest note |
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-180 | — | medium | Attendance worked time rounded to 0.1 h before display (1 h 32 min shows as 1 h 30 min) |
@@ -183,6 +187,7 @@ Last synced: **2026-11-20** by Project Manager · 237 open tickets (epics exclud
 | ZNLY-258 | — | high | Cash expected in drawer subtracts card refunds (payment_refunds has no refund method) |
 | ZNLY-266 | Sadin | high | Confirm booking fails silently when the room is at capacity (HTTP 500 ROOM_AT_CAPACITY, no message shown) |
 | ZNLY-270 | Sadin | high | Padding & Processing time is saved on the service but every booking ignores it (setting promises staff are freed; they aren't) |
+| ZNLY-283 | Sadin | high | "View only" calendar access (own_view / all_view) is not enforced: those logins can still create, edit, start and collect |
 | ZNLY-16 | — | medium | RLS access harness (6 principals x 64 tables) — confirm merged |
 | ZNLY-20 | — | medium | Legacy-domain redirect (zenly.zunkireelabs.com → app.zennly.io) + retire old domains |
 | ZNLY-21 | — | medium | Auth email via Resend SMTP (no-reply@mail.zennly.io) + DKIM/SPF/DMARC + templates |
