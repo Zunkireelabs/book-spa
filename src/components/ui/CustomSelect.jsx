@@ -4,6 +4,7 @@ import Icon from '../AppIcon';
 const SIZE_CLASSES = {
   sm: 'h-9 px-3 text-sm',
   md: 'h-10 px-3 text-sm',
+  lg: 'h-11 px-3 text-sm', // 44px phone touch target
 };
 
 const CustomSelect = ({
