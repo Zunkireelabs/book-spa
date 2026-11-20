@@ -1,7 +1,7 @@
 import React from 'react';
 import Icon from '../../../../components/AppIcon';
 
-const DOT = { online: '#2D5A27', late: '#F59E0B', assign: '#B45309' };
+const DOT = { online: '#2D5A27', late: '#F59E0B', assign: '#B45309', unpaid: '#D97706' }; // unpaid = the app's warning amber (tailwind `warning`), same as the Unpaid pill
 
 // "✦ Needs you now": the few things a person should act on right now (today only). Each item filters the list (or calls).
 // Items may bring their own `dot` colour and an external `href` (opened in a new tab, e.g. a WhatsApp reminder); Packages uses both.
