@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-20** by Project Manager · 243 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-20** by Project Manager · 244 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -34,6 +34,7 @@ Last synced: **2026-11-20** by Project Manager · 243 open tickets (epics exclud
 | ZNLY-279 | Sadin | high | Calendar team filter: all staff are showing but every checkbox is unticked ("All positions", "Clear all" with nothing to clear) |
 | ZNLY-280 | Sadin | high | Payment Breakdown: no repeated numbers on a closed day, highlight the cash figure that matters, "of which" lines under the methods, whole-rupee money everywhere |
 | ZNLY-285 | Sadin | high | Phone: booking opens as a half-height sheet over the calendar (not full screen), so the calendar, incl. ZNLY-281 same-client outlines, stays visible |
+| ZNLY-286 | Sadin | high | Booking panel Staff tab: the org's own staff word everywhere (beauty shows "Therapist") and no cramped inner scroll boxes for the staff/room lists |
 | ZNLY-136 | Anish | medium | Group booking (Fresha-style): book multiple people, one shared slot, one checkout |
 | ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
 | ZNLY-175 | Sadin | medium | Therapist inner page: outcomes bar total counts upcoming bookings that sit in no bucket |
