@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useId, useMemo, useState } from 'react';
 import Icon from '../AppIcon';
 import { arrangeAssignees, STICKY_SEARCH_MIN } from '../../utils/assignList';
-import { arrangeByTime, staffDayRanges, rangeLabel, pillRange } from '../../utils/staffFit';
+import { arrangeByTime, staffDayRanges, rangeClock, clockAmPm, clockShort, pillRange } from '../../utils/staffFit';
+import { avatarColor } from '../../pages/branch-manager-dashboard/components/calendar/phoneCalendarLayout';
 import { fetchServiceEligibility } from '../../services/api';
 import { nepalNow } from '../../utils/customerDirectory';
 import { dayTag } from '../../utils/unassignedList';
@@ -10,6 +11,10 @@ import { dayTag } from '../../utils/unassignedList';
 // One list, 44px rows, no inner scroll box (the parent scrolls). "Assigned" only ever means "on this booking" (assignedIds).
 // With a `slot` + `bookings` the list is grouped "Free <range>" / "Busy then" / "Off today" and the best-fit people are tagged.
 // Without them it is the plain list (Inbox and other callers that have no day data).
+// Look (ZNLY-303 mockup step 4): flat full-width 56px rows with a hairline, 32px avatar in the person's calendar colour, name + BEST FIT,
+// a grey subline, a right-hand pill (Busy / With <guest> / Off) and a radio (max=1) or a checkbox (several can be picked).
+// `header` {title, sub}: opened from a row (sheet / popover). `onNone`: adds the last "No staff · assign later" row.
+// `lockedById` values: a string ("Person 2") or { pill, line } for people held by another guest of the group.
 
 let eligibilityPromise = null; // service_therapists is small and static for a session: fetch once, share
 const loadEligibility = () => (eligibilityPromise ||= fetchServiceEligibility().then((r) => r.data || {}).catch(() => ({})));
@@ -26,20 +31,24 @@ export function useServiceEligibility(enabled) {
 
 const toMin = (t) => { if (!t) return null; const [h, m] = String(t).slice(0, 5).split(':').map(Number); return h * 60 + (m || 0); };
 const TAG = 'inline-flex items-center flex-shrink-0 whitespace-nowrap px-1.5 py-0.5 rounded text-[10px] font-bold uppercase';
-const SECTION = 'px-3 pt-2.5 pb-1 text-[11px] font-medium uppercase tracking-wider text-text-tertiary';
+const SECTION = 'px-4 pt-3 pb-1.5 text-[11px] font-medium uppercase tracking-wider text-text-tertiary';
+const PILL = 'flex-shrink-0 whitespace-nowrap text-[11.5px] rounded-full px-2.5 py-0.5';
+const initials = (n) => String(n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 
 const StaffPicker = ({
   people = [], selectedIds = [], onChange, max = Infinity,
-  heading, note, staffLabel = 'Team member', staffLabelPlural = 'Team',
+  heading, note, header = null, onNone = null, noneLabel = 'No staff · assign later', staffLabel = 'Team member', staffLabelPlural = 'Team',
   slot = null, serviceId = null, bookings = null, excludeBookingId = null, offById = {}, lastStaffId = null,
   assignedIds = [], lockedById = {}, disabled = false, stickyClass = 'sticky top-0 z-sticky-filter bg-surface pt-1 pb-2',
 }) => {
   const [query, setQuery] = useState('');
+  const groupName = useId();
   const staffLower = staffLabel.toLowerCase();
   const staffPluralLower = staffLabelPlural.toLowerCase();
   const timed = !!(slot && slot.date && slot.start && bookings);
   const eligibility = useServiceEligibility(timed && !!serviceId);
   const finite = Number.isFinite(max);
+  const single = max === 1;
 
   const arr = useMemo(() => arrangeAssignees(people, { assignedIds, selectedIds, query }), [people, assignedIds, selectedIds, query]);
   const fit = useMemo(() => {
@@ -55,59 +64,66 @@ const StaffPicker = ({
 
   const toggle = (id) => {
     if (disabled) return;
-    if (selectedIds.includes(id)) onChange(selectedIds.filter((x) => x !== id));
-    else if (max === 1) onChange([id]);
+    if (selectedIds.includes(id)) { if (!single) onChange(selectedIds.filter((x) => x !== id)); }
+    else if (single) onChange([id]);
     else if (selectedIds.length < max) onChange([...selectedIds, id]);
   };
 
-  const rowBase = `flex items-center gap-3 min-h-[44px] px-3 py-1 border-t border-border first:border-t-0 spa-transition-fast`;
   const row = (p, extra = {}) => {
     const isSelected = selectedIds.includes(p.id);
-    const hold = lockedById[p.id]; // ZNLY-303: held by another guest of the group (text shown as a tag, row not selectable)
-    const locked = disabled || extra.off || (!!hold && !isSelected) || (!isSelected && finite && max > 1 && selectedIds.length >= max);
+    const hold = lockedById[p.id];
+    const holdObj = typeof hold === 'string' ? { pill: hold, line: `${hold} at this time` } : hold;
+    const dim = !!extra.off || (!!holdObj && !isSelected);
+    const locked = disabled || dim || (!isSelected && finite && max > 1 && selectedIds.length >= max);
     const order = selectedIds.indexOf(p.id) + 1;
-    const sub = [p.gender && String(p.gender).replace(/^./, (c) => c.toUpperCase()),
-      extra.bookings != null && fit ? (extra.bookings ? `${extra.bookings} ${slot?.date && slot.date !== nepalNow().today ? `on ${dayTag(slot.date)}` : 'today'}` : null) : (p.specialties?.length ? p.specialties.join(', ') : null)].filter(Boolean).join(' · ');
+    const gender = p.gender && String(p.gender).replace(/^./, (c) => c.toUpperCase());
+    const today = extra.bookings != null && fit ? (extra.bookings ? `${extra.bookings} ${slot?.date && slot.date !== nepalNow().today ? `on ${dayTag(slot.date)}` : 'today'}` : null) : null;
+    const sub = holdObj ? holdObj.line
+      : extra.off ? extra.off
+        : extra.busy ? `Busy ${pillRange(extra.busy.start, extra.busy.end)} · free after ${clockShort(extra.busy.end)}`
+          : [gender, fit ? today : (p.specialties?.length ? p.specialties.join(', ') : null)].filter(Boolean).join(' · ');
+    const pill = holdObj ? { text: holdObj.pill, cls: 'bg-indigo-50 text-indigo-600' }
+      : extra.off ? { text: 'Off', cls: 'bg-background text-text-secondary' }
+        : extra.busy ? { text: 'Busy', cls: 'bg-amber-100 text-amber-800' } : null;
     return (
-      <label key={p.id} className={`${rowBase} ${locked && !isSelected ? 'cursor-not-allowed' : 'cursor-pointer'} ${extra.off || extra.busy ? 'opacity-70' : ''} ${isSelected ? 'bg-primary/5' : locked ? '' : 'hover:bg-background'}`}>
-        {finite && max > 1 ? (
-          <>
-            <input type="checkbox" className="sr-only" checked={isSelected} disabled={locked} onChange={() => toggle(p.id)} />
-            <span aria-hidden="true" className={`w-5 h-5 flex-shrink-0 rounded flex items-center justify-center text-[11px] font-bold ${isSelected ? 'bg-primary text-white' : 'border border-border bg-surface'}`}>{isSelected ? order : ''}</span>
-          </>
-        ) : (
-          <input type="checkbox" value={p.id} checked={isSelected} disabled={locked} onChange={() => toggle(p.id)} className="w-5 h-5 flex-shrink-0 rounded text-primary focus:ring-primary disabled:cursor-not-allowed" />
-        )}
-        <span className="flex-1 min-w-0 flex items-center gap-1.5">
-          <span className="truncate min-w-0 font-body font-body-medium text-sm text-text-primary" style={{ flex: '0 1 auto' }}>{p.name}</span>
-          {hold && <span className={`${TAG} bg-background text-text-secondary border border-border`}>{hold}</span>}
-          {assigned.has(p.id) && <span className={`${TAG} bg-success/10 text-success`}>Assigned</span>}
-          {best?.has(p.id) && <span className={`${TAG} bg-primary/10 text-primary`}>Best fit</span>}
-          {sub && <span className="truncate min-w-0 text-xs font-caption text-text-secondary" style={{ flex: '1 1 0%' }}>· {sub}</span>}
+      <label key={p.id} className={`flex items-center gap-3 min-h-[56px] px-4 py-2 border-t border-border first:border-t-0 spa-transition-fast ${locked && !isSelected ? 'cursor-not-allowed' : 'cursor-pointer'} ${dim ? 'opacity-50' : ''} ${isSelected ? 'bg-primary/5' : locked ? '' : 'hover:bg-background'}`}>
+        <input type={single ? 'radio' : 'checkbox'} name={single ? groupName : undefined} value={p.id} className="sr-only" checked={isSelected} disabled={locked} onChange={() => toggle(p.id)} />
+        <span aria-hidden="true" className="w-8 h-8 flex-shrink-0 rounded-full text-white flex items-center justify-center text-[11px] font-semibold" style={{ background: extra.off ? '#D1D5DB' : avatarColor(p.id) }}>{initials(p.name)}</span>
+        <span className="flex-1 min-w-0">
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span className="truncate font-body text-[15px] text-text-primary">{p.name}</span>
+            {assigned.has(p.id) && <span className={`${TAG} bg-success/10 text-success`}>Assigned</span>}
+            {best?.has(p.id) && <span className={`${TAG} bg-primary/10 text-primary`}>Best fit</span>}
+          </span>
+          {sub && <span className="block text-[13px] leading-snug text-text-secondary">{sub}</span>}
         </span>
-        {extra.busy && <span className="flex-shrink-0 whitespace-nowrap text-[11.5px] text-amber-800 bg-amber-100 rounded-full px-2 py-0.5">Busy {pillRange(extra.busy.start, extra.busy.end)}</span>}
-        {extra.off && <span className="flex-shrink-0 whitespace-nowrap text-[11.5px] text-text-secondary bg-background border border-border rounded-full px-2 py-0.5">{extra.off}</span>}
+        {pill && <span className={`${PILL} ${pill.cls}`}>{pill.text}</span>}
+        {!single && finite ? (
+          <span aria-hidden="true" className={`w-5 h-5 flex-shrink-0 rounded flex items-center justify-center text-[11px] font-bold ${isSelected ? 'bg-primary text-white' : 'border border-border bg-surface'}`}>{isSelected ? order : ''}</span>
+        ) : !single ? (
+          <span aria-hidden="true" className={`w-5 h-5 flex-shrink-0 rounded flex items-center justify-center ${isSelected ? 'bg-primary text-white' : 'border border-border bg-surface'}`}>{isSelected && <Icon name="Check" size={13} />}</span>
+        ) : (
+          <span aria-hidden="true" className={`w-[22px] h-[22px] flex-shrink-0 rounded-full flex items-center justify-center ${isSelected ? 'bg-primary' : 'border-2 border-border bg-surface'}`}>{isSelected && <span className="w-2 h-2 rounded-full bg-white" />}</span>
+        )}
       </label>
     );
   };
 
-  const box = (children) => <div className="mt-1 border border-border rounded-spa overflow-hidden">{children}</div>;
+  const flat = (children) => <div className="border-y border-border">{children}</div>;
   const section = (label, items) => (items.length === 0 ? null : (
     <div key={label}>
       <p className={SECTION}>{label}</p>
-      {box(items)}
+      {flat(items)}
     </div>
   ));
 
   let body;
-  if (people.length === 0) body = <p className="font-body font-body-normal text-sm text-text-secondary">No {staffPluralLower} available.</p>;
+  if (people.length === 0) body = <p className="px-4 font-body font-body-normal text-sm text-text-secondary">No {staffPluralLower} available.</p>;
   else if (!fit) {
     body = (
       <>
-        {arr.pinned.length > 0 && (<><p className="mt-2 mb-1 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">Selected</p><div className="border border-border rounded-spa overflow-hidden">{arr.pinned.map((p) => row(p))}</div><p className="mt-3 mb-1 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">Matches</p></>)}
-        <div className="mt-2 border border-border rounded-spa overflow-hidden">
-          {arr.rows.length === 0 ? <NoMatch query={query} staffPluralLower={staffPluralLower} onClear={() => setQuery('')} /> : arr.rows.map((p) => row(p))}
-        </div>
+        {arr.pinned.length > 0 && (<><p className={SECTION}>Selected</p>{flat(arr.pinned.map((p) => row(p)))}<p className={SECTION}>Matches</p></>)}
+        {flat(arr.rows.length === 0 ? <NoMatch query={query} staffPluralLower={staffPluralLower} onClear={() => setQuery('')} /> : arr.rows.map((p) => row(p)))}
       </>
     );
   } else {
@@ -117,14 +133,14 @@ const StaffPicker = ({
     body = (
       <>
         {fit.noneFree && fit.free.length === 0 && !query && (
-          <div className="mt-2 rounded-spa border border-amber-300 bg-amber-50 px-3 py-2.5 text-[12.5px] leading-snug text-amber-800">
-            <b>No one is free {rangeLabel(fit.s, fit.e)}.</b> You can still assign someone (they&apos;ll be double-booked), or change the time.
+          <div className="mx-4 mt-2 rounded-spa border border-amber-300 bg-amber-50 px-3 py-2.5 text-[12.5px] leading-snug text-amber-800">
+            <b>No one is free {rangeClock(fit.s, fit.e)}.</b> You can still assign someone (they&apos;ll be double-booked), or change the time.
           </div>
         )}
-        {arr.pinned.length > 0 && (<><p className={SECTION}>Selected</p>{box(arr.pinned.map((p) => row(p)))}</>)}
+        {arr.pinned.length > 0 && (<><p className={SECTION}>Selected</p>{flat(arr.pinned.map((p) => row(p)))}</>)}
         {arr.rows.length === 0 && <NoMatch query={query} staffPluralLower={staffPluralLower} onClear={() => setQuery('')} />}
-        {section(`Free ${rangeLabel(fit.s, fit.e)}`, free.map((x) => row(x.person, { bookings: x.bookings })))}
-        {section('Busy then', busy.map((x) => row(x.person, { busy: x.busyRange, bookings: x.bookings })))}
+        {section(`Free ${rangeClock(fit.s, fit.e)}`, free.map((x) => row(x.person, { bookings: x.bookings })))}
+        {section(`Busy at ${clockAmPm(fit.s)}`, busy.map((x) => row(x.person, { busy: x.busyRange, bookings: x.bookings })))}
         {section('Off today', off.map((x) => row(x.person, { off: x.reason })))}
       </>
     );
@@ -133,24 +149,36 @@ const StaffPicker = ({
   return (
     <div>
       <div className={people.length >= STICKY_SEARCH_MIN ? stickyClass : ''}>
+        {header && (
+          <div className="px-4 pt-4 pb-3">
+            <h3 className="font-heading font-heading-semibold text-[17px] leading-snug text-text-primary">{header.title}</h3>
+            {header.sub && <p className="text-[13.5px] text-text-secondary">{header.sub}</p>}
+          </div>
+        )}
         {heading && <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">{heading}{finite && max > 1 && <span className="ml-2 text-xs font-normal text-text-secondary">Pick {max}</span>}</h3>}
         {note}
         {people.length > 0 && (
           <>
-            <div className="relative mt-2">
-              <Icon name="Search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
+            <div className={`relative ${header ? 'px-3' : 'mt-2'}`}>
               <input type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${staffPluralLower}...`}
-                className="w-full h-11 pl-9 pr-3 bg-background border border-border rounded-spa text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary" />
+                className="w-full h-11 px-4 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary" />
             </div>
-            <div className="mt-1.5 flex justify-between text-xs text-text-secondary">
-              <span>{finite && max > 1 ? <><b className="text-text-primary">{arr.selectedVisible} of {max}</b> picked</> : `${arr.selectedVisible} selected`}</span>
-              <span>{arr.filtering ? `${arr.matchCount} of ${arr.total} match` : `${arr.total} ${arr.total === 1 ? staffLower : staffPluralLower}`}</span>
-            </div>
-            {arr.hiddenSelected > 0 && <p className="mt-0.5 text-xs text-text-tertiary">+{arr.hiddenSelected} assigned outside your view</p>}
+            {!header && !single && (
+              <>
+                <div className="mt-1.5 flex justify-between text-xs text-text-secondary">
+                  <span>{finite && max > 1 ? <><b className="text-text-primary">{arr.selectedVisible} of {max}</b> picked</> : `${arr.selectedVisible} selected`}</span>
+                  <span>{arr.filtering ? `${arr.matchCount} of ${arr.total} match` : `${arr.total} ${arr.total === 1 ? staffLower : staffPluralLower}`}</span>
+                </div>
+                {arr.hiddenSelected > 0 && <p className="mt-0.5 text-xs text-text-tertiary">+{arr.hiddenSelected} assigned outside your view</p>}
+              </>
+            )}
           </>
         )}
       </div>
       {body}
+      {onNone && (
+        <button type="button" data-pick-none onClick={onNone} className="w-full min-h-[56px] px-4 text-left text-[15px] text-text-secondary hover:bg-background spa-transition-fast">{noneLabel}</button>
+      )}
     </div>
   );
 };

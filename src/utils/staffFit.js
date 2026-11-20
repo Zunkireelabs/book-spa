@@ -12,6 +12,9 @@ export function rangeLabel(a, b) {
   const sa = trim0(clockShort(a)); const sb = trim0(clockShort(b));
   return ap(a) === ap(b) ? `${sa}–${sb}${ap(b)}` : `${sa}${ap(a)}–${sb}${ap(b)}`;
 }
+/** Mockup heading style: "2:00–2:30pm" and "2:00pm" (minutes always shown). */
+export const rangeClock = (a, b) => (ap(a) === ap(b) ? `${clockShort(a)}–${clockShort(b)}${ap(b)}` : `${clockShort(a)}${ap(a)}–${clockShort(b)}${ap(b)}`);
+export const clockAmPm = (m) => `${clockShort(m)}${ap(m)}`;
 /** Pill text: "1–2:30" (no am/pm, as in the mockup). */
 export const pillRange = (a, b) => `${trim0(clockShort(a))}–${trim0(clockShort(b))}`;
 

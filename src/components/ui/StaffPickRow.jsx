@@ -19,7 +19,7 @@ const StaffPickRow = ({ id = null, name = '', statusLine = '', pill = null, prob
   // Desktop popover: outside click / Esc close; ↑ ↓ move between rows, Enter picks the focused one.
   useEffect(() => {
     if (!open || isPhone) return undefined;
-    const rows = () => Array.from(popRef.current?.querySelectorAll('input[type="checkbox"]:not([disabled]), [data-pick-none]') || []);
+    const rows = () => Array.from(popRef.current?.querySelectorAll('input[type="checkbox"]:not([disabled]), input[type="radio"]:not([disabled]), [data-pick-none]') || []);
     const onDown = (e) => { if (!wrapRef.current?.contains(e.target)) setOpen(false); };
     const onKey = (e) => {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false); btnRef.current?.focus(); return; }
@@ -77,13 +77,13 @@ const StaffPickRow = ({ id = null, name = '', statusLine = '', pill = null, prob
         <Icon name="ChevronRight" size={16} className="flex-shrink-0 text-text-secondary" />
       </button>
       {open && !isPhone && (
-        <div ref={popRef} role="dialog" aria-label={title} style={fitH ? { maxHeight: fitH } : undefined} className="absolute left-0 right-0 top-full mt-1 z-dropdown panel-fit [--panel-gap:6rem] bg-surface border border-border rounded-spa-lg shadow-spa-elevated p-3 overflow-y-auto overscroll-contain">
+        <div ref={popRef} role="dialog" aria-label={title} style={fitH ? { maxHeight: fitH } : undefined} className="absolute left-0 right-0 top-full mt-1 z-dropdown panel-fit [--panel-gap:6rem] bg-surface border border-border rounded-spa-lg shadow-spa-elevated overflow-y-auto overscroll-contain">
           {renderPicker(close)}
         </div>
       )}
       {isPhone && (
-        <BottomSheet isOpen={open} title={title} onClose={close}>
-          <div className="px-4 pb-4">{renderPicker(close)}</div>
+        <BottomSheet isOpen={open} title="" onClose={close}>
+          <div className="pb-4">{renderPicker(close)}</div>
         </BottomSheet>
       )}
     </div>

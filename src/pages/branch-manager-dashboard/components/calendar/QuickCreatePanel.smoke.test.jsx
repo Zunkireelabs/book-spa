@@ -92,7 +92,7 @@ describe('QuickCreatePanel smoke', () => {
       const busy = [{ id: 'bk', date: '2026-11-20', start_time: '14:00:00', end_time: '15:00:00', status: 'Confirmed', therapist_id: 't1' }];
       openSeparate({ bookings: busy });
       fireEvent.click(screen.getAllByRole('button', { name: /Pick therapist/ })[0]);
-      fireEvent.click(screen.getByRole('checkbox', { name: /Tara Gurung/ }));
+      fireEvent.click(screen.getByRole('radio', { name: /Tara Gurung/ }));
       expect(screen.getAllByText(/Tara Gurung is busy/).length).toBeGreaterThan(0);
       expect(document.querySelector('.border-amber-300')).toBeTruthy();
     });

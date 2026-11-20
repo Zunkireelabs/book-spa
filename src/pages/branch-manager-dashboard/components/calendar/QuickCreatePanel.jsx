@@ -21,7 +21,7 @@ import StaffPicker, { useServiceEligibility } from '../../../../components/ui/St
 import { Segmented } from '../../../../components/ui/PanelFormKit';
 import { ExistingCustomerTag, EarlierBalanceNotice } from '../../../../components/ui/ExistingCustomerNotes';
 import StaffPickRow from '../../../../components/ui/StaffPickRow';
-import { staffPickIncomplete, staffDayRanges, arrangeByTime, staffHeldByOthers, pickProblems, fillFreeStaff, undoFill, rangeLabel, pillRange, clockShort } from '../../../../utils/staffFit';
+import { staffPickIncomplete, staffDayRanges, arrangeByTime, staffHeldByOthers, pickProblems, fillFreeStaff, undoFill, rangeLabel, rangeClock, pillRange, clockShort } from '../../../../utils/staffFit';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { fieldForErrorCode } from '../../../../utils/quickCreateErrorField';
 
@@ -385,6 +385,11 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const groupOff = bookingDate === offDate ? offStaff : {};
   const groupHeld = useMemo(() => staffHeldByOthers(guestSlots), [guestSlots]);
   const groupProblems = useMemo(() => pickProblems(guestSlots, { rangesById: groupRanges, offById: groupOff }), [guestSlots, groupRanges, groupOff]); // eslint-disable-line react-hooks/exhaustive-deps
+  const guestSub = (idx) => {
+    const g = guestSlots[idx]; if (!g) return '';
+    const svc = (services || []).find((t) => t.id === g.serviceId);
+    return [svc?.name, rangeClock(g.start, g.end)].filter(Boolean).join(' · ');
+  };
   const contactFirst = (people[0]?.name || '').trim().split(/\s+/)[0] || 'the contact';
   const staffNameOf = (id) => pickerPeople.find((t) => t.id === id)?.name || '';
   const guestLabel = (idx) => (people[idx]?.name?.trim() || (idx === 0 ? 'the booking contact' : `Person ${idx + 1}`));
@@ -992,7 +997,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               people={pickerPeople}
               selectedIds={selectedTherapistIds}
               onChange={setSelectedTherapistIds}
-              max={selectedService?.is_couple ? 2 : Infinity}
+              max={selectedService?.is_couple ? 2 : (selectedTherapistIds.length > 1 ? Infinity : 1)}
               heading={selectedTherapistIds.length > 1 ? staffLabelPlural : staffLabel}
               staffLabel={staffLabel}
               staffLabelPlural={staffLabelPlural}
@@ -1434,22 +1439,21 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                       title={`${staffLabel} for ${guestLabel(idx)}`}
                       renderPicker={(close) => (
                         <>
-                          <button type="button" data-pick-none onClick={() => { setGuestStaff(idx, ''); close(); }}
-                            className="w-full min-h-[44px] mb-2 px-3 text-left text-sm border border-border rounded-spa hover:bg-background spa-transition-fast">
-                            No {staffLabel.toLowerCase()} · assign later
-                          </button>
                           <StaffPicker
                             people={pickerPeople}
                             selectedIds={p.therapistId ? [p.therapistId] : []}
                             onChange={(ids) => { setGuestStaff(idx, ids[0] || ''); close(); }}
                             max={1}
+                            header={{ title: `${staffLabel} for ${idx === 0 ? 'Booking contact' : `Person ${idx + 1}`}${p.name?.trim() ? ` · ${p.name.trim()}` : ''}`, sub: guestSub(idx) }}
+                            onNone={() => { setGuestStaff(idx, ''); close(); }}
+                            noneLabel={`No ${staffLabel.toLowerCase()} · assign later`}
                             staffLabel={staffLabel}
                             staffLabelPlural={staffLabelPlural}
                             slot={guestSlots[idx] && bookingDate ? { date: bookingDate, start: bookingTime, end: `${String(Math.floor(guestSlots[idx].end / 60) % 24).padStart(2, '0')}:${String(guestSlots[idx].end % 60).padStart(2, '0')}` } : null}
                             serviceId={guestServiceId(p) || null}
                             bookings={bookings}
                             offById={groupOff}
-                            lockedById={Object.fromEntries(Object.entries(groupHeld[idx] || {}).map(([sid, oi]) => [sid, `With ${guestLabel(oi)}`]))}
+                            lockedById={Object.fromEntries(Object.entries(groupHeld[idx] || {}).map(([sid, oi]) => [sid, oi === 0 ? { pill: 'With contact', line: `With the booking contact${people[0]?.name?.trim() ? ` (${people[0].name.trim()})` : ''} at this time` } : { pill: `With Person ${oi + 1}`, line: `With ${guestLabel(oi)} at this time` }]))}
                           />
                         </>
                       )}
