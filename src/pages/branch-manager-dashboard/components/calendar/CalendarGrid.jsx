@@ -1097,6 +1097,7 @@ const CalendarGrid = ({
   );
 
   // ── Column header renderer ────────────────────────────────
+  const stackedHeader = !isMultiDay; // Day view (phone and desktop) uses the stacked avatar / name / status header
   const renderColumnHeader = (col) => {
     const isUnassigned = col.type === 'unassigned';
     const activeBlock = col.type !== 'unassigned' && days.includes(todayStr)
@@ -1115,13 +1116,13 @@ const CalendarGrid = ({
     const statusLine = (phone) => (trDesc ? (
       <TransferHeaderLine desc={trDesc} onOpen={() => onEditTransfer?.(col)} phone={phone} />
     ) : activeBlock ? (
-      <span className={`font-body ${phone ? 'text-[10.5px] max-w-full' : 'text-[10px]'} leading-tight text-text-tertiary truncate`}>
+      <span className={`font-body ${phone ? `${phoneDay ? 'text-[10.5px]' : 'text-[11px]'} max-w-full` : 'text-[10px]'} leading-tight text-text-tertiary truncate`}>
         back at {formatClockTime(activeBlock.toTime, use24h)}
       </span>
     ) : hdrShift && (
       <span
         data-shift-line={hdrShift.tone}
-        className={`font-data ${phone ? 'text-[10.5px] max-w-full' : 'text-[10px]'} leading-tight truncate text-text-tertiary`}
+        className={`font-data ${phone ? `${phoneDay ? 'text-[10.5px]' : 'text-[11px]'} max-w-full` : 'text-[10px]'} leading-tight truncate text-text-tertiary`}
         style={{ color: hdrShift.tone === 'leave' ? SHADE_STYLES.leave.color : hdrShift.tone === 'alert' ? '#B45309' : hdrShift.tone === 'shift' ? undefined : SHADE_STYLES.off.color }}
       >
         <i className="inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle" style={{ background: STATUS_DOT_COLOR[hdrShift.dot] }} />
@@ -1133,7 +1134,7 @@ const CalendarGrid = ({
       <div
         key={col.id}
         data-col-header
-        className={`relative flex-1 border-r border-border last:border-r-0 ${phoneDay ? 'h-[76px]' : 'h-10'} flex items-center justify-center px-2`}
+        className={`relative flex-1 border-r border-border last:border-r-0 ${phoneDay ? 'h-[76px]' : stackedHeader ? 'h-[72px]' : 'h-10'} flex items-center justify-center px-2 ${stackedHeader && isUnassigned && columnMode !== 'room' && assignCount > 0 ? 'bg-warning/10' : ''}`}
         style={{ minWidth: minColWidth }}
         onMouseEnter={(e) => showHeaderTooltip(e, onlineUnassignedTooltip || [col.name, hdrShift?.full, trDesc?.sentence].filter(Boolean).join(' · '))}
         onMouseLeave={hideHeaderTooltip}
@@ -1144,16 +1145,64 @@ const CalendarGrid = ({
           headerTipTimer.current = setTimeout(hideHeaderTooltip, 4000);
         } : undefined}
       >
-        {phoneDay ? (
-          <div className="flex flex-col items-center justify-center gap-[3px] min-w-0 w-full" title={col.name}>
-            <span className="relative flex items-center">
-              <span className="w-7 h-7 rounded-full text-white flex items-center justify-center text-[11px] font-semibold" style={{ background: avatarColor(col.id) }}>
-                {col.type === 'therapist' ? initials : <Icon name={col.icon} size={14} />}
+        {stackedHeader ? (
+          <div className="flex flex-col items-center justify-center gap-[2px] min-w-0 w-full" title={phoneDay ? col.name : undefined}>
+            {isUnassigned && col.onlineUnassignedCount > 0 && (
+              <span
+                className="absolute left-1.5 top-1.5 min-w-[16px] h-4 px-1 bg-warning text-white rounded-full text-[10px] font-medium flex items-center justify-center"
+                title={onlineUnassignedTooltip}
+                aria-label={onlineUnassignedTooltip}
+              >
+                {col.onlineUnassignedCount}
               </span>
-              {col.type === 'therapist' && <span className={`absolute -right-px -top-px w-[9px] h-[9px] rounded-full border-2 border-white ${col.attendance ? 'bg-gray-300' : 'bg-success'}`} />}
-            </span>
-            <span className="font-body text-[12px] font-medium leading-tight text-text-primary truncate max-w-[94%]">{col.type === 'therapist' ? shortName(col.name) : col.name}</span>
-            {col.type === 'therapist' && statusLine(true)}
+            )}
+            {isUnassigned && onToggleFreezeUnassigned && !phoneDay && (
+              <button
+                data-no-drag-create
+                onClick={(e) => { e.stopPropagation(); onToggleFreezeUnassigned(); }}
+                className={`absolute right-1.5 top-1.5 p-0.5 rounded hover:bg-black/5 spa-transition-fast ${freezeUnassigned ? 'text-primary' : 'text-text-tertiary'}`}
+                title={freezeUnassigned ? 'Unpin column' : 'Pin column'}
+              >
+                <Icon name={freezeUnassigned ? 'Pin' : 'PinOff'} size={13} />
+              </button>
+            )}
+            {isUnassigned && columnMode !== 'room' ? (
+              <>
+                <span className={`flex items-center gap-1.5 font-body text-[13px] leading-tight ${assignCount > 0 ? 'font-semibold text-[#B45309]' : 'italic text-text-tertiary'}`}>
+                  {assignCount > 0 && <Icon name="AlertTriangle" size={13} />}
+                  {col.name}
+                  {assignCount > 0 && <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-warning text-white text-[11px] font-bold flex items-center justify-center">{assignCount}</span>}
+                </span>
+                {assignCount > 0 && onOpenAssignList && (
+                  <button
+                    type="button"
+                    data-no-drag-create
+                    onClick={(e) => { e.stopPropagation(); onOpenAssignList(); }}
+                    className="mt-0.5 min-h-[32px] px-3 rounded-full border border-[#E9C46A] bg-white font-body text-[12px] font-semibold text-[#B45309] hover:bg-warning/10"
+                  >
+                    Assign ›
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <span className="relative flex items-center">
+                  <span className={`${phoneDay ? 'w-7 h-7' : 'w-[30px] h-[30px]'} rounded-full text-white flex items-center justify-center text-[11px] font-semibold`} style={{ background: isUnassigned ? '#9CA3AF' : avatarColor(col.id) }}>
+                    {col.type === 'therapist' ? initials : <Icon name={col.icon} size={14} />}
+                  </span>
+                  {col.type === 'therapist' && (
+                    <span
+                      className={`absolute -right-px -top-px w-[9px] h-[9px] rounded-full border-2 border-white ${col.attendance ? 'bg-gray-300' : 'bg-success'}`}
+                      title={col.attendance === 'Absent' ? 'Absent' : col.attendance === 'Leave' ? 'On leave' : 'Present'}
+                    />
+                  )}
+                </span>
+                <span className={`font-body ${phoneDay ? 'text-[12px] max-w-[94%]' : 'text-[13px] max-w-full'} font-medium leading-tight text-text-primary truncate`}>
+                  {col.type === 'therapist' && phoneDay ? shortName(col.name) : col.name}
+                </span>
+                {col.type === 'therapist' && statusLine(true)}
+              </>
+            )}
           </div>
         ) : (
         <div className="flex items-center gap-2 overflow-hidden min-w-0">
@@ -1838,7 +1887,7 @@ const CalendarGrid = ({
       >
         <div className="flex relative" style={{ width: '100%', minWidth: TIME_COL_WIDTH + columnsMinWidth }}>
           {draftSpacer > 0 && <div aria-hidden="true" data-draft-spacer="true" style={{ position: 'absolute', top: 0, left: `calc(100% + ${draftSpacer}px)`, width: 1, height: 1 }} />}
-          <div className={`flex-shrink-0 border-r border-border px-2 ${phoneDay ? 'h-[76px]' : 'h-10'} flex items-center sticky left-0 z-header bg-background`} style={{ width: TIME_COL_WIDTH }}>
+          <div className={`flex-shrink-0 border-r border-border px-2 ${phoneDay ? 'h-[76px]' : !isMultiDay ? 'h-[72px]' : 'h-10'} flex items-center sticky left-0 z-header bg-background`} style={{ width: TIME_COL_WIDTH }}>
             <Icon name="Clock" size={14} className="text-text-secondary" />
           </div>
           {unassignedCol && (
