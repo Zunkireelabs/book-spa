@@ -29,6 +29,7 @@ const TECHNICAL = new RegExp([
 
 // Known booking / customer failures that reach the screen as raw Postgres text, mapped to the sentence staff need.
 const KNOWN = [
+  [/P0275|FUTURE_BOOKING/, (raw) => String(raw).replace(/^[\s\S]*?(This booking is for [^.]+\. Move it to today to [^.]+\.)[\s\S]*$/, '$1')],
   [/excl_therapist_overlap|conflicting key value violates exclusion constraint/i,
     () => localizeTerms('This therapist already has a booking at that time. Pick another time or person.')],
   [/customers_org_nphone_uniq|duplicate key[\s\S]*phone|phone[\s\S]*duplicate key/i,
@@ -40,7 +41,7 @@ export const looksTechnical = (msg) => TECHNICAL.test(msg || '');
 export const friendlyError = (err, fallback = GENERIC_SAVE_ERROR_COPY) => {
   const raw = (typeof err === 'string' ? err : err?.message) || '';
   if (!raw.trim()) return fallback;
-  for (const [re, say] of KNOWN) if (re.test(raw)) return say();
+  for (const [re, say] of KNOWN) if (re.test(raw)) return say(raw);
   if (NETWORK.test(raw)) return NETWORK_ERROR_COPY;
   if (err?.name === 'TypeError') return fallback;
   const msg = raw.replace(/^\s*(?:[a-z][a-z0-9_]*|[A-Z][A-Z0-9_]{2,}):\s+/, '').trim();   // 'fn_name: ' and 'ERROR_CODE: ' (LOCATION_INACTIVE, DAY_LOCKED) prefixes

@@ -1,5 +1,6 @@
 // Pure helpers for the Bookings list (V15): date ranges, view-chip classification, row signals (late / now line / dimming),
 // search, sorting and day grouping. Everything takes the spa's local (Nepal) `today` / `nowHM` explicitly — never the browser clock.
+import { futureBookingMessage } from '../services/bookingTransformers';
 import { classifyBooking } from './bookingMoney';
 import { phoneSearchDigits } from './customerDirectory';
 import { teamMemberWord } from './industryTerms';
@@ -189,8 +190,9 @@ export function nextAction(b, { readOnly = false } = {}) {
   const s = dbStatus(b);
   const assigned = (b.therapists && b.therapists.length > 0) || !!b.therapist;
   if (s === 'Pending') return assigned ? { id: 'confirm', label: 'Confirm', to: 'confirmed' } : { id: 'assign', label: 'Assign' };
-  if (s === 'Confirmed') return assigned ? { id: 'start', label: 'Start', to: 'in-progress' } : { id: 'assign', label: 'Assign' };
-  if (s === 'In-Progress') return { id: 'complete', label: 'Complete', to: 'completed' };
+  // ZNLY-275: a later-day booking can't be started or completed; `blocked` carries the sentence (button disabled, same text as its title).
+  if (s === 'Confirmed') return assigned ? { id: 'start', label: 'Start', to: 'in-progress', blocked: futureBookingMessage(b.date, 'start') || undefined } : { id: 'assign', label: 'Assign' };
+  if (s === 'In-Progress') return { id: 'complete', label: 'Complete', to: 'completed', blocked: futureBookingMessage(b.date, 'complete') || undefined };
   return null;
 }
 

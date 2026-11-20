@@ -107,7 +107,7 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
       <td className={`${cell} w-[88px] pl-1 pr-1`}>
         <div className="flex gap-1.5 justify-end items-center text-[#8A8A90]">
           {action && (
-            <button type="button" disabled={busy} onClick={(e) => { e.stopPropagation(); onAction(action); }}
+            <button type="button" disabled={busy || !!action.blocked} title={action.blocked || undefined} onClick={(e) => { e.stopPropagation(); onAction(action); }}
               className="h-[26px] px-[9px] border border-[#CFDCCC] rounded-md bg-white text-[12px] font-medium text-primary hover:bg-[#F2F6F0] disabled:opacity-50">{busy ? '…' : action.label}</button>
           )}
           <Icon name="ChevronRight" size={15} />

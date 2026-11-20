@@ -8,7 +8,7 @@ import { computeReferralCommission, payrollMonthBounds, tallyBookingEarnings, co
 import { supabase, supabaseCustomer, supabaseProvision } from '../lib/supabase';
 import { isReadingViaSafeViews } from '../lib/restrictedReads';
 import { maskCustomerName, maskPhone, viewerAccess } from './dataMasking';
-import { transformMembership, transformMemberships, toTitleCase, isNoShow } from './bookingTransformers';
+import { transformMembership, transformMemberships, toTitleCase, isNoShow, futureBookingMessage } from './bookingTransformers';
 import { dedupeTransfersByKey, sortTransfersByTime } from './transferDedup';
 import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
@@ -3044,7 +3044,7 @@ export async function updateBookingStatus({ bookingId, newStatus, reason }) {
     // 1. Fetch booking
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, is_locked')
+      .select('id, status, is_locked, date')
       .eq('id', bookingId)
       .single();
 
@@ -3054,6 +3054,10 @@ export async function updateBookingStatus({ bookingId, newStatus, reason }) {
       }
       throw fetchError;
     }
+
+    // 1b. ZNLY-275: no Start / Complete / No-show for a later day (the DB trigger enforces it too; this gives the same sentence without a round trip)
+    const futureMsg = futureBookingMessage(booking.date, { 'In-Progress': 'start', Completed: 'complete', 'No Show': 'noshow' }[newStatus] || null);
+    if (futureMsg && ['In-Progress', 'Completed', 'No Show'].includes(newStatus)) return { data: null, error: { code: 'FUTURE_BOOKING', message: futureMsg } };
 
     // 2. Lifecycle checks
     const mutationError = validateBookingMutation(booking);

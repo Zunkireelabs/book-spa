@@ -1,3 +1,4 @@
+import { futureBookingMessage } from '../../services/bookingTransformers';
 import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -1591,11 +1592,15 @@ const BookingActionModal = ({
 
   // Primary next action for the booking's status; everything else lives in the "⋯" overflow.
   const primaryStatusTarget = booking.status === 'pending' ? 'confirmed' : booking.status === 'confirmed' ? 'in-progress' : booking.status === 'in-progress' ? 'completed' : null;
+  // ZNLY-275: a booking for a later day can't be started, completed or marked no-show; staff move it to today first.
+  const futureStart = futureBookingMessage(booking.date, 'start');
+  const futureComplete = futureBookingMessage(booking.date, 'complete');
+  const futureNoShow = futureBookingMessage(booking.date, 'noshow');
   const primaryAction = (() => {
     if (isLocked || isViewer) return null;
     if (booking.status === 'pending') return { key: 'confirm', label: 'Confirm', run: () => handleStatusUpdate('confirmed') };
-    if (booking.status === 'confirmed') return { key: 'start', label: 'Start', run: () => handleStatusUpdate('in-progress') };
-    if (booking.status === 'in-progress') return { key: 'complete', label: 'Complete', run: () => handleStatusUpdate('completed') };
+    if (booking.status === 'confirmed') return { key: 'start', label: 'Start', blocked: futureStart, run: () => handleStatusUpdate('in-progress') };
+    if (booking.status === 'in-progress') return { key: 'complete', label: 'Complete', blocked: futureComplete, run: () => handleStatusUpdate('completed') };
     if (canPay) return { key: 'pay', label: 'Collect payment', run: () => { setActiveTab('payment'); setShowPaymentModal(true); } };
     return null;
   })();
@@ -1623,13 +1628,13 @@ const BookingActionModal = ({
     // Other status transitions that aren't the primary action (e.g. Pending → Start isn't valid, so only no-show/cancel remain).
     ...nextStatuses
       .filter((st) => st !== 'cancelled' && st !== 'no show' && st !== primaryStatusTarget)
-      .map((st) => ({ key: `st-${st}`, label: st === 'in-progress' ? 'Start' : st.charAt(0).toUpperCase() + st.slice(1), icon: 'ArrowRight', run: () => handleStatusUpdate(st) })),
+      .map((st) => ({ key: `st-${st}`, label: st === 'in-progress' ? 'Start' : st.charAt(0).toUpperCase() + st.slice(1), icon: 'ArrowRight', disabled: (st === 'in-progress' && !!futureStart) || (st === 'completed' && !!futureComplete), reason: st === 'completed' ? futureComplete : futureStart, run: () => handleStatusUpdate(st) })),
     // Zennly-only: Reschedule creates a new booking and cancels this one (the caller runs the slot picker).
     !isViewer && onRescheduleStart && !isTerminal && !isLocked && (() => {
       const blocked = isServiceStarted || booking.paymentStatus === 'paid';
       return { key: 'reschedule', label: 'Reschedule', icon: 'CalendarClock', disabled: blocked, reason: booking.paymentStatus === 'paid' ? 'Cannot reschedule a paid booking.' : 'This service has already started.', run: () => onRescheduleStart(booking) };
     })(),
-    !isTerminal && !isLocked && nextStatuses.includes('no show') && { key: 'noshow', label: 'Mark no-show', icon: 'UserX', disabled: noShowGated, reason: "Available after the booking's scheduled time", run: () => setPendingStatus('no show') },
+    !isTerminal && !isLocked && nextStatuses.includes('no show') && { key: 'noshow', label: 'Mark no-show', icon: 'UserX', disabled: noShowGated || !!futureNoShow, reason: futureNoShow || "Available after the booking's scheduled time", run: () => setPendingStatus('no show') },
     !isTerminal && !isLocked && nextStatuses.includes('cancelled') && { key: 'cancel', label: 'Cancel booking', icon: 'XCircle', danger: true, run: () => setPendingStatus('cancelled') },
   ].filter(Boolean);
 
@@ -1725,12 +1730,15 @@ const BookingActionModal = ({
           {activeTab === 'assign' && !isAssignmentBlocked ? (
             <Button variant="primary" size="sm" onClick={handleAssignTherapist} loading={isLoading} disabled={selectedTherapists.length === 0 && !isTherapistOptional}>Save assignment</Button>
           ) : primaryAction ? (
-            <Button variant="primary" size="sm" onClick={primaryAction.run} loading={isLoading}>{primaryAction.label}</Button>
+            <Button variant="primary" size="sm" onClick={primaryAction.run} loading={isLoading} disabled={!!primaryAction.blocked} title={primaryAction.blocked || undefined}>{primaryAction.label}</Button>
           ) : null}
         </>
       )}
     </div>
   );
+  // Visible reason next to the disabled Start / Complete / No-show (the same sentence is on their tooltips).
+  const futureNote = !isTerminal && !isLocked && !isViewer && !panelConfirm && !isEditing && ((booking.status === 'confirmed' ? futureStart : booking.status === 'in-progress' ? futureComplete : null) || null);
+  const panelFooterWithNote = futureNote ? (<div><p className="px-1 pb-2 text-[12px] text-text-secondary" data-future-note>{futureNote}</p>{panelFooter}</div>) : panelFooter;
 
   // Equal-fit tab bar for the panel: never scrolls horizontally.
   const panelTabs = [
@@ -1911,7 +1919,8 @@ const BookingActionModal = ({
                     <div className="flex flex-wrap gap-2">
                       {nextStatuses.map((status) => {
                         const needsConfirm = status === 'cancelled' || status === 'no show';
-                        const noShowBlocked = status === 'no show' && !hasBookingStarted(booking);
+                        const futureBlock = status === 'in-progress' ? futureStart : status === 'completed' ? futureComplete : status === 'no show' ? futureNoShow : null;
+                        const noShowBlocked = (status === 'no show' && !hasBookingStarted(booking)) || !!futureBlock;
                         const rescheduleDisabled = isServiceStarted || isLocked || booking.paymentStatus === 'paid';
                         return (
                           <React.Fragment key={status}>
@@ -1934,7 +1943,7 @@ const BookingActionModal = ({
                               onClick={() => needsConfirm ? setPendingStatus(status) : handleStatusUpdate(status)}
                               loading={isLoading}
                               disabled={noShowBlocked}
-                              title={noShowBlocked ? "Available after the booking's scheduled time" : undefined}
+                              title={noShowBlocked ? (futureBlock || "Available after the booking's scheduled time") : undefined}
                             >
                               {status === 'in-progress' ? 'Start' : status === 'no show' ? 'No show' : status.charAt(0).toUpperCase() + status.slice(1)}
                             </Button>
@@ -4080,7 +4089,7 @@ const BookingActionModal = ({
   if (isPanel) {
     return (
       <>
-        <SidePanel isOpen={isOpen} width={BOOKING_PANEL_WIDTH} header={panelHeader} titleId="booking-panel-title" onClose={requestPanelClose} footer={panelFooter}>
+        <SidePanel isOpen={isOpen} width={BOOKING_PANEL_WIDTH} header={panelHeader} titleId="booking-panel-title" onClose={requestPanelClose} footer={panelFooterWithNote}>
           {panelTabsNode}
           {contentNode}
         </SidePanel>

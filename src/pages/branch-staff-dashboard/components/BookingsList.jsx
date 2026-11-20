@@ -4,7 +4,7 @@ import Button from '../../../components/ui/Button';
 import BookingActionModal from '../../../components/ui/BookingActionModal';
 import StatusLegend from '../../../components/ui/StatusLegend';
 import { fetchBookingById } from '../../../services/api';
-import { transformBooking } from '../../../services/bookingTransformers';
+import { transformBooking, futureBookingMessage } from '../../../services/bookingTransformers';
 
 const DATE_RANGE_LABELS = {
   today: "Today's Appointments",
@@ -124,6 +124,8 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
             size={buttonSize}
             className={buttonClass}
             onClick={() => handleQuickStatusUpdate(booking, 'in-progress')}
+            disabled={!!futureBookingMessage(booking.date, 'start')}
+            title={futureBookingMessage(booking.date, 'start') || undefined}
           >
             Start
           </Button>
@@ -134,6 +136,8 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
             size={buttonSize}
             className={buttonClass}
             onClick={() => handleQuickStatusUpdate(booking, 'completed')}
+            disabled={!!futureBookingMessage(booking.date, 'complete')}
+            title={futureBookingMessage(booking.date, 'complete') || undefined}
           >
             Complete
           </Button>
