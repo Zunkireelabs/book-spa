@@ -101,3 +101,20 @@ describe('Settings -> Staff access is gone', () => {
     expect(getSettingByView('staff-access')).toBeNull();
   });
 });
+
+describe('calendar picker (ZNLY-284): view-only is no longer offered', () => {
+  it('offers only Own and All; labels still name all four', async () => {
+    const m = await import('./staffAccessRules');
+    expect(m.CALENDAR_OPTIONS.map((o) => o.value)).toEqual(['own', 'all']);
+    expect(Object.keys(m.CALENDAR_LABELS)).toEqual(['own', 'own_view', 'all', 'all_view']);
+  });
+  it('a login that already has a view-only value keeps it, flagged; others never see it', async () => {
+    const m = await import('./staffAccessRules');
+    expect(m.calendarOptionsFor('own').map((o) => o.value)).toEqual(['own', 'all']);
+    expect(m.calendarOptionsFor('own_view').map((o) => o.value)).toEqual(['own', 'all', 'own_view']);
+    expect(m.calendarOptionsFor('all_view').map((o) => o.value)).toEqual(['own', 'all', 'all_view']);
+    expect(m.isViewOnlyCalendar('own_view')).toBe(true);
+    expect(m.isViewOnlyCalendar('all')).toBe(false);
+    expect(m.calendarOptionsFor('all').length).toBe(2); // after choosing All the view-only option is gone
+  });
+});
