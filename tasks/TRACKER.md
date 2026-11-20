@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-20** by Project Manager · 263 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-20** by Project Manager · 265 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -44,6 +44,8 @@ Last synced: **2026-11-20** by Project Manager · 263 open tickets (epics exclud
 | ZNLY-292 | Sadin | high | QC: Bookings sort/filters (phone) — Sort opens a plain list behind the nav; should use the Calendar-views bottom sheet pattern |
 | ZNLY-299 | Sadin | high | QC: Calendar day view (phone) — ~4.5 squeezed staff columns and tiny chips ("1:15", "Dee…"), hard to read; should be 3 readable columns like Fresha |
 | ZNLY-300 | Sadin | high | QC: Staff picker — New booking and the booking panel use two different lists, and "Assigned" means opposite things; one shared Staff picker everywhere |
+| ZNLY-304 | Sadin | high | QC: New booking — a blocked save shows its reason far down the form while Create booking stays green, so tapping it seems to do nothing |
+| ZNLY-305 | Sadin | high | QC: Toasts (phone) — bottom messages sit behind the floating bottom nav |
 | ZNLY-136 | Anish | medium | Group booking (Fresha-style): book multiple people, one shared slot, one checkout |
 | ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
 | ZNLY-175 | Sadin | medium | Therapist inner page: outcomes bar total counts upcoming bookings that sit in no bucket |
@@ -125,6 +127,7 @@ Last synced: **2026-11-20** by Project Manager · 263 open tickets (epics exclud
 | ZNLY-248 | Sadin | high | QC Accepted | Payment mode spelling: Business Health report (mig 371) and other readers match 'Cash' exactly, so 'cash' payments count as "other" |
 | ZNLY-250 | Sadin | high | QC Accepted | Customer detail page numbers use old rules: Amount owing counts upcoming/cancelled bookings; Last Visit can be a future booking (disagrees with Customers list + panel) |
 | ZNLY-263 | Sadin | high | In Review | Login pages redesign (/login org finder and /:org/login): split layout, our current stack |
+| ZNLY-302 | Sadin | high | QC Accepted | QC: Calendar (phone + desktop) — the grid pans diagonally; should lock to one direction per swipe (sideways OR up/down), like Fresha and Google Calendar |
 | ZNLY-67 | Sadin | medium | In Review | UI-1: Calendar exact-match port + app shell from ClinicMD (pre-V5) |
 | ZNLY-68 | Sadin | medium | In Review | UI-2 (V5–V9): Panel unification — forms, details, settings, campaigns → right-hand panels |
 | ZNLY-69 | Sadin | medium | In Review | UI-3 (V11–V13): Customers redesign — list, lifecycle strip, panel, collect, Spotlight, one-scroll header |
@@ -168,13 +171,12 @@ Last synced: **2026-11-20** by Project Manager · 263 open tickets (epics exclud
 | ZNLY-297 | Sadin | high | QC: Bookings list (phone) — rows cramped: status chip touches the next row, "Late · 4h 48m" wraps |
 | ZNLY-298 | Sadin | high | QC: Phone nav — current page not highlighted; More never lights up for pages inside it |
 | ZNLY-301 | Sadin | high | QC: Two different New booking forms — Bookings tab opens a 4-step wizard with no staff choice; Calendar/Dashboard open the panel; one New booking everywhere |
-| ZNLY-302 | Sadin | high | QC: Calendar (phone + desktop) — the grid pans diagonally; should lock to one direction per swipe (sideways OR up/down), like Fresha and Google Calendar |
-| ZNLY-304 | Sadin | high | QC: New booking — a blocked save shows its reason far down the form while Create booking stays green, so tapping it seems to do nothing |
-| ZNLY-305 | Sadin | high | QC: Toasts (phone) — bottom messages sit behind the floating bottom nav |
+| ZNLY-306 | Sadin | high | QC: Services settings (phone) — the services table squeezes each service name onto about 5 lines |
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-180 | — | medium | Attendance worked time rounded to 0.1 h before display (1 h 32 min shows as 1 h 30 min) |
 | ZNLY-303 | Sadin | medium | Staff picker in Group mode: per-guest pick with the shared StaffPicker (follow-up to ZNLY-300) |
+| ZNLY-307 | Sadin | medium | QC: Booking settings — the "Advance booking window" heading is oversized compared with the other settings headings |
 
 ## Waiting on owner
 | Ticket | Owner | Priority | What |
