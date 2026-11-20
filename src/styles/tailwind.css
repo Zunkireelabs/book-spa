@@ -305,6 +305,9 @@ aside:has(.sidebar-scroll:focus-within) .sidebar-scroll::-webkit-scrollbar-thumb
   }
 }
 
+/* Calendar scroller: never chains scroll to the page. Phone column snapping is done in JS (CalendarGrid axis lock), not CSS snap. */
+.calendar-grid-scroll { overscroll-behavior: contain; }
+
 /* ── Calendar grid scroller — thicker horizontal bar, always visible ── */
 .calendar-grid-scroll {
   scrollbar-width: auto;

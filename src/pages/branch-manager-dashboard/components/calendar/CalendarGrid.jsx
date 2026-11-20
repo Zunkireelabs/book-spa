@@ -14,6 +14,7 @@ import { STATUS_DOT_COLOR, isClosedByBlocks } from '../../../../utils/todayStatu
 import OverflowBadge from './OverflowBadge';
 import { useViewportWidth, PHONE_MAX } from '../../../../hooks/useViewportWidth';
 import { transferShadeSegments, dedupeAgainst } from '../../../../utils/transferShade';
+import { pickTouchAxis, createWheelBurst, snapTarget, coastTarget } from './scrollAxisLock';
 import TransferHeaderLine, { describeColumnTransfer, describeTransferOnDay } from './TransferHeaderLine';
 import { useIndustry } from '../../../../hooks/useIndustry';
 import ManualBlockOverlay from './ManualBlockOverlay';
@@ -229,7 +230,6 @@ const CalendarGrid = ({
 }) => {
   const { locationLabel } = useIndustry();
   const scrollRef = useRef(null);
-  const headerScrollRef = useRef(null);
   const gridBodyRef = useRef(null);
 
   // Linked highlight for shared bookings: the booking under the pointer/focus (cleared after a short delay so moving
@@ -296,6 +296,104 @@ const CalendarGrid = ({
   const pinchAnchorRef = useRef(null); // { viewportX, viewportY, contentX, contentY }
   const pinchRAFRef = useRef(null);
 
+  // ZNLY-302 axis lock, built so nothing fights the browser:
+  //  - Phone: the body is `touch-action: pan-y`, so vertical is 100% native and can never drift sideways. A horizontal-dominant
+  //    drag is ours: it moves scrollLeft with the finger (header and gutter live in the same scroller, so nothing can lag),
+  //    and on release eases to the nearest staff column (or the next one on a flick; Week / 4-day coast instead of snapping).
+  //  - Desktop wheel / trackpad: events pass through untouched unless clearly diagonal; those get the minor axis dropped and
+  //    are applied once per animation frame. Shift+wheel is left to the browser.
+  // The values it needs live in a ref (assigned each render, after they are declared) so this effect never reads them early.
+  const lockCfgRef = useRef({ phoneDay: false, colW: 0 });
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return undefined;
+    const st = { touching: false, x0: 0, y0: 0, sl: 0, axis: null, dragging: false, multi: false, lastLeft: 0, lastT: 0, v: 0, raf: null };
+    const cancelAnim = () => { if (st.raf) { cancelAnimationFrame(st.raf); st.raf = null; } };
+    const maxLeft = () => Math.max(0, el.scrollWidth - el.clientWidth);
+    const animateTo = (target) => {
+      const from = el.scrollLeft;
+      if (Math.abs(target - from) < 1) { el.scrollLeft = target; return; }
+      const t0 = performance.now();
+      const step = (now) => {
+        const k = Math.min(1, (now - t0) / 220);
+        el.scrollLeft = from + (target - from) * (1 - Math.pow(1 - k, 3));
+        st.raf = k < 1 ? requestAnimationFrame(step) : null;
+      };
+      st.raf = requestAnimationFrame(step);
+    };
+    // Phone Day: after any scroll that wasn't a finger drag (Assign scroll-to-card, retarget...) settle on a whole column.
+    let settleT = null;
+    const onScrollSettle = () => {
+      const cfg = lockCfgRef.current;
+      if (!cfg.phoneDay || st.touching || st.raf) return;
+      clearTimeout(settleT);
+      settleT = setTimeout(() => {
+        if (st.touching || st.raf) return;
+        const target = snapTarget({ left: el.scrollLeft, velocity: 0, colW: cfg.colW, max: maxLeft() });
+        if (Math.abs(target - el.scrollLeft) > 1) animateTo(target);
+      }, 140);
+    };
+    const onStart = (e) => {
+      st.touching = true;
+      cancelAnim();
+      if (e.touches.length > 1) { st.multi = true; st.axis = null; st.dragging = false; return; }
+      st.multi = false; st.axis = null; st.dragging = false; st.v = 0;
+      st.x0 = e.touches[0].clientX; st.y0 = e.touches[0].clientY; st.sl = el.scrollLeft;
+      st.lastLeft = st.sl; st.lastT = e.timeStamp;
+    };
+    const onMove = (e) => {
+      if (st.multi || e.touches.length > 1) return;
+      const x = e.touches[0].clientX;
+      if (!st.axis) st.axis = pickTouchAxis(st.x0 - x, st.y0 - e.touches[0].clientY);
+      if (st.axis !== 'x' || el.closest('.scroll-locked')) return;
+      st.dragging = true;
+      const left = Math.max(0, Math.min(maxLeft(), st.sl + (st.x0 - x)));
+      el.scrollLeft = left;
+      const dt = e.timeStamp - st.lastT;
+      if (dt > 0) { st.v = 0.7 * ((left - st.lastLeft) / dt) + 0.3 * st.v; st.lastLeft = left; st.lastT = e.timeStamp; }
+    };
+    const onEnd = (e) => {
+      if (e.touches.length > 0) return;
+      st.touching = false;
+      if (st.multi) { st.multi = false; return; }
+      if (!st.dragging) return;
+      st.dragging = false;
+      // the finger that dragged must not also "tap" the card it lifted from
+      const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+      el.addEventListener('click', swallow, true);
+      setTimeout(() => el.removeEventListener('click', swallow, true), 350);
+      const cfg = lockCfgRef.current;
+      const quiet = e.timeStamp - st.lastT > 100; // finger rested before lifting: no flick
+      const v = quiet ? 0 : st.v;
+      animateTo(cfg.phoneDay
+        ? snapTarget({ left: el.scrollLeft, velocity: v, colW: cfg.colW, max: maxLeft() })
+        : coastTarget({ left: el.scrollLeft, velocity: v, max: maxLeft() }));
+    };
+    let wx = 0; let wy = 0; let wraf = null;
+    const burst = createWheelBurst();
+    const onWheel = (e) => {
+      if (e.shiftKey || e.ctrlKey || e.metaKey || e.deltaMode !== 0) return;
+      const r = burst.feed(e.timeStamp, e.deltaX, e.deltaY);
+      if (!r.changed) return;
+      e.preventDefault();
+      wx += r.dx; wy += r.dy;
+      if (wraf) return;
+      wraf = requestAnimationFrame(() => { wraf = null; el.scrollBy(wx, wy); wx = 0; wy = 0; });
+    };
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: true });
+    el.addEventListener('touchend', onEnd, { passive: true });
+    el.addEventListener('touchcancel', onEnd, { passive: true });
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('scroll', onScrollSettle, { passive: true });
+    return () => {
+      cancelAnim(); clearTimeout(settleT); el.removeEventListener('scroll', onScrollSettle); if (wraf) cancelAnimationFrame(wraf);
+      el.removeEventListener('touchstart', onStart); el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd); el.removeEventListener('touchcancel', onEnd);
+      el.removeEventListener('wheel', onWheel);
+    };
+  }, [viewMode]);
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -361,7 +459,6 @@ const CalendarGrid = ({
     if (!anchor || !el) return;
     el.scrollLeft = anchor.contentX * zoomScale - anchor.viewportX;
     el.scrollTop = anchor.contentY * zoomScale - anchor.viewportY;
-    if (headerScrollRef.current) headerScrollRef.current.scrollLeft = el.scrollLeft;
     pinchAnchorRef.current = null;
   }, [zoomScale]);
 
@@ -1044,7 +1141,9 @@ const CalendarGrid = ({
     const tryScroll = () => {
       const el = scrollRef.current;
       if (!el || el.clientHeight === 0 || el.scrollHeight <= el.clientHeight) return false;
-      el.scrollTop = Math.max(0, (nowTop || 0) - el.clientHeight / 2);
+      // The sticky header sits inside the scroller: centre the now-line in the part of the view below it.
+      const headerH = el.firstElementChild?.offsetHeight || 0;
+      el.scrollTop = Math.max(0, (nowTop || 0) - (el.clientHeight - headerH) / 2);
       hasScrolledToNowRef.current = true;
       return true;
     };
@@ -1067,6 +1166,7 @@ const CalendarGrid = ({
   // Phone day: columns fill the screen in whole units (3 at 360-430) and zoom never changes their width.
   const minColWidth = phoneDay ? phoneColumnWidth(viewportW) : Math.round((isMultiDay ? 80 : 200) * zoomScale);
   const pinUnassigned = !hideUnassigned && !phoneDay && freezeUnassigned;
+  lockCfgRef.current = { phoneDay, colW: minColWidth };
   const unassignedW = minColWidth;
 
   // Phone "+N" tile: the bookings it hides, listed in a bottom sheet (each row opens the booking).
@@ -1881,9 +1981,21 @@ const CalendarGrid = ({
         </button>
       )}
       {/* Fixed header — outside scroll container */}
+
+      {/* Scrollable grid body */}
       <div
-        ref={headerScrollRef}
-        className="flex-shrink-0 z-header bg-background border-b border-border overflow-hidden"
+        ref={scrollRef}
+        className="flex-1 overflow-x-scroll overflow-y-auto calendar-grid-scroll"
+        style={{ ...(isPhone ? { touchAction: 'pan-y' } : null), ...(!isMultiDay ? { scrollPaddingLeft: TIME_COL_WIDTH + (pinUnassigned ? unassignedW : 0), scrollPaddingTop: phoneDay ? 76 : 72 } : null) }}
+        onScroll={(e) => {
+          const scrolled = e.target.scrollLeft > 0;
+          if (scrolled !== gridScrolledRef.current) { gridScrolledRef.current = scrolled; setGridScrolled(scrolled); }
+          if (phoneDay) updateMoreRight();
+        }}
+      >
+      <div
+        className="sticky top-0 z-sidebar bg-background border-b border-border"
+        style={{ width: '100%', minWidth: TIME_COL_WIDTH + columnsMinWidth }}
       >
         <div className="flex relative" style={{ width: '100%', minWidth: TIME_COL_WIDTH + columnsMinWidth }}>
           {draftSpacer > 0 && <div aria-hidden="true" data-draft-spacer="true" style={{ position: 'absolute', top: 0, left: `calc(100% + ${draftSpacer}px)`, width: 1, height: 1 }} />}
@@ -1922,20 +2034,6 @@ const CalendarGrid = ({
           )}
         </div>
       </div>
-      {/* Scrollable grid body */}
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-x-scroll overflow-y-auto calendar-grid-scroll"
-        style={!isMultiDay ? { scrollSnapType: 'x proximity', scrollPaddingLeft: TIME_COL_WIDTH + (pinUnassigned ? unassignedW : 0) } : undefined}
-        onScroll={(e) => {
-          if (headerScrollRef.current) {
-            headerScrollRef.current.scrollLeft = e.target.scrollLeft;
-          }
-          const scrolled = e.target.scrollLeft > 0;
-          if (scrolled !== gridScrolledRef.current) { gridScrolledRef.current = scrolled; setGridScrolled(scrolled); }
-          if (phoneDay) updateMoreRight();
-        }}
-      >
         <div
           ref={gridBodyRef}
           className="flex relative"
@@ -2007,9 +2105,20 @@ const CalendarGrid = ({
   const renderMultiDayView = () => (
     <div className="flex flex-col h-full overflow-hidden isolate">
       {/* Fixed header — outside scroll container */}
+
+      {/* Scrollable grid body */}
       <div
-        ref={headerScrollRef}
-        className="flex-shrink-0 z-header bg-background border-b border-border overflow-hidden"
+        ref={scrollRef}
+        className="flex-1 overflow-x-scroll overflow-y-auto calendar-grid-scroll"
+        style={isPhone ? { touchAction: 'pan-y' } : undefined}
+        onScroll={(e) => {
+          const scrolled = e.target.scrollLeft > 0;
+          if (scrolled !== gridScrolledRef.current) { gridScrolledRef.current = scrolled; setGridScrolled(scrolled); }
+        }}
+      >
+      <div
+        className="sticky top-0 z-sidebar bg-background border-b border-border"
+        style={{ width: '100%', minWidth: TIME_COL_WIDTH + daysMinWidth }}
       >
         <div className="flex relative" style={{ width: '100%', minWidth: TIME_COL_WIDTH + daysMinWidth }}>
           {draftSpacer > 0 && <div aria-hidden="true" data-draft-spacer="true" style={{ position: 'absolute', top: 0, left: `calc(100% + ${draftSpacer}px)`, width: 1, height: 1 }} />}
@@ -2044,18 +2153,6 @@ const CalendarGrid = ({
           </div>
         </div>
       </div>
-      {/* Scrollable grid body */}
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-x-scroll overflow-y-auto calendar-grid-scroll"
-        onScroll={(e) => {
-          if (headerScrollRef.current) {
-            headerScrollRef.current.scrollLeft = e.target.scrollLeft;
-          }
-          const scrolled = e.target.scrollLeft > 0;
-          if (scrolled !== gridScrolledRef.current) { gridScrolledRef.current = scrolled; setGridScrolled(scrolled); }
-        }}
-      >
         <div
           ref={gridBodyRef}
           className="flex relative"
