@@ -1496,7 +1496,7 @@ const CalendarGrid = ({
   // Booking cards for a column with overlap handling: overlapping bookings are clustered side by side, with a
   // "+N" overflow badge past MAX_VISIBLE_OVERLAP and a hover "+" to add a booking at the cluster's start.
   const renderClusteredCards = (col, day, colBookings, v) => {
-    const clusters = clusterOverlapping(colBookings);
+    const clusters = clusterOverlapping(colBookings, (24 / eHH) * 60); // 24px = the shortest a card is drawn (timeToHeight)
     return clusters.map(cluster => {
       const layout = getOverlapLayout(cluster.length);
       const clusterTop = timeToTop(cluster[0].startTime);

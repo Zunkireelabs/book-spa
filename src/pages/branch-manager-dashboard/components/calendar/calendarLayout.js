@@ -1,7 +1,7 @@
 // Pure layout math for overlapping bookings in a grid column: clustering, the side-by-side card slots and the
 // "+N" overflow badge geometry.
 // ── Overlap layout constants & helpers ─────────────────
-export const MAX_VISIBLE_OVERLAP = 2;
+export const MAX_VISIBLE_OVERLAP = 3;
 const OVERLAP_GAP = 2;       // px between side-by-side cards
 export const OVERLAP_PADDING = 4;   // px from column edges
 
@@ -13,7 +13,13 @@ export const OVERLAP_PADDING = 4;   // px from column edges
  * whichever booking was actually placed first (down to the millisecond) lands
  * in the leftmost card slot.
  */
-export function clusterOverlapping(bookings) {
+// minMinutes (ZNLY-265c): a card is never drawn shorter than the grid's minimum height, so a 15-minute booking really covers that many
+// minutes on screen. Two back-to-back short bookings then collide visually (the later card sits on the earlier one's text); counting the
+// minimum as the booking's length makes them share a cluster, and so sit side by side. 0 (default) keeps the strict time-only rule.
+const toMin = (t) => { const [h, m] = String(t).split(':').map(Number); return h * 60 + (m || 0); };
+const shownEnd = (b, minMinutes) => Math.max(toMin(b.endTime), toMin(b.startTime) + (minMinutes || 0));
+
+export function clusterOverlapping(bookings, minMinutes = 0) {
   const valid = bookings.filter(b => b.startTime && b.endTime);
   if (valid.length === 0) return [];
 
@@ -26,15 +32,15 @@ export function clusterOverlapping(bookings) {
     return 0;
   });
   const clusters = [[sorted[0]]];
-  let clusterEnd = sorted[0].endTime;
+  let clusterEnd = shownEnd(sorted[0], minMinutes);
 
   for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i].startTime < clusterEnd) {
+    if (toMin(sorted[i].startTime) < clusterEnd) {
       clusters[clusters.length - 1].push(sorted[i]);
-      if (sorted[i].endTime > clusterEnd) clusterEnd = sorted[i].endTime;
+      if (shownEnd(sorted[i], minMinutes) > clusterEnd) clusterEnd = shownEnd(sorted[i], minMinutes);
     } else {
       clusters.push([sorted[i]]);
-      clusterEnd = sorted[i].endTime;
+      clusterEnd = shownEnd(sorted[i], minMinutes);
     }
   }
   return clusters;
