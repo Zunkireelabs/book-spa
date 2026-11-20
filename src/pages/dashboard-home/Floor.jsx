@@ -22,13 +22,14 @@ const LEGEND = [
 const hourLabel = (m) => `${(m / 60) % 12 || 12}${m === 720 ? 'pm' : ''}`;
 const initials = (name) => String(name || '').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 
+const compact = (m) => fmtClock(m).replace(' ', ''); // "11:45 am" -> "11:45am" (the app's compact time), so the status stays on one line
 const subline = (t, nowMin) => {
   if (nowMin == null) return t.blocks[0] ? `first ${t.blocks.find((b) => b.booking_id)?.from || t.shift_from}` : 'free all day';
   const cur = t.blocks.find((b) => b.from_min <= nowMin && nowMin < b.to_min);
-  if (cur?.kind === 'now') return `with client · till ${fmtClock(cur.to_min)}`;
-  if (cur && (cur.kind === 'break' || cur.kind === 'leave')) return `${cur.kind === 'break' ? 'break' : 'off'} till ${fmtClock(cur.to_min)}`;
+  if (cur?.kind === 'now') return `with client till ${compact(cur.to_min)}`;
+  if (cur && (cur.kind === 'break' || cur.kind === 'leave')) return `${cur.kind === 'break' ? 'break' : 'off'} till ${compact(cur.to_min)}`;
   const next = t.blocks.find((b) => b.from_min > nowMin && b.booking_id);
-  return next ? `free till ${fmtClock(next.from_min)}` : 'free';
+  return next ? `free till ${compact(next.from_min)}` : 'free';
 };
 
 /** A free gap: "+ Free 1h 1m" when it fits on one line, else just "Free" (the full text is in the tooltip). */
@@ -71,7 +72,7 @@ const Floor = ({ floor, nowMin, open, close, collapsedCount = 6, onOpenBooking, 
   const shown = all ? people : people.slice(0, collapsedCount);
   const others = Math.max(0, (floor.headcount || 0) - (floor.working || 0));
   // Phone (< md): the timeline scrolls sideways inside the card at 64px per hour with the staff column pinned; desktop keeps the fluid 190px | 1fr grid.
-  const PHONE_NAME_W = 120;
+  const PHONE_NAME_W = 164; // 16px card gutter + 148px name column
   const tlPx = Math.round((span / 60) * 64);
   const scrollRef = useRef(null);
   useLayoutEffect(() => {
@@ -82,10 +83,10 @@ const Floor = ({ floor, nowMin, open, close, collapsedCount = 6, onOpenBooking, 
 
   return (
     <div>
-      <div ref={scrollRef} className="max-md:overflow-x-auto max-md:-mx-4 max-md:px-4 max-md:pb-1" data-floor-scroll>
-        <div className="relative max-md:min-w-max [--nc:120px] md:[--nc:190px] [--tw:calc(100%_-_var(--nc))] max-md:[--tw:var(--tl)]" style={{ '--tl': `${tlPx}px` }}>
+      <div ref={scrollRef} className="max-md:overflow-x-auto max-md:-mx-4 max-md:pb-1" data-floor-scroll>
+        <div className="relative isolate max-md:min-w-max max-md:pr-4 [--nc:164px] md:[--nc:190px] [--tw:calc(100%_-_var(--nc))] max-md:[--tw:var(--tl)]" style={{ '--tl': `${tlPx}px` }}>
           <div className="grid grid-cols-[var(--nc)_var(--tw)] text-[10px] text-gray-400 mb-1">
-            <div className="max-md:sticky max-md:left-0 max-md:z-20 max-md:bg-white" />
+            <div className="max-md:sticky max-md:left-0 max-md:z-header max-md:bg-surface" />
             <div className="relative h-4">
               {hours.map((m) => (
                 <span key={m} className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: pos(m) }}><span className="md:hidden">{`${Math.floor(m / 60) % 12 || 12}${Math.floor(m / 60) % 24 >= 12 ? 'pm' : 'am'}`}</span><span className="max-md:hidden">{hourLabel(m)}</span></span>
@@ -94,18 +95,20 @@ const Floor = ({ floor, nowMin, open, close, collapsedCount = 6, onOpenBooking, 
           </div>
           <div className="relative">
             {nowMin != null && nowMin >= start && nowMin <= end && (
-              <div className="absolute top-0 bottom-0 w-px bg-error z-10 pointer-events-none" style={{ left: `calc(var(--nc) + var(--tw) * ${(nowMin - start) / span})` }} />
+              <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: 'var(--nc)', width: 'var(--tw)' }}>
+                <div className="absolute top-0 bottom-0 w-px bg-error z-sticky-filter" style={{ left: pos(nowMin) }} />
+              </div>
             )}
             {shown.map((t) => (
-              <div key={t.therapist_id} className="grid grid-cols-[var(--nc)_var(--tw)] items-center border-t border-gray-100 py-1.5 max-md:min-h-11">
-                <div className="flex items-center gap-2 pr-2 min-w-0 max-md:sticky max-md:left-0 max-md:z-20 max-md:bg-white">
+              <div key={t.therapist_id} className="grid grid-cols-[var(--nc)_var(--tw)] items-stretch border-t border-gray-100 max-md:min-h-11">
+                <div className="flex items-center gap-2 pr-2 py-1.5 min-w-0 max-md:sticky max-md:left-0 max-md:z-header max-md:bg-surface max-md:pl-4 max-md:border-r max-md:border-gray-100">
                   <span className="w-7 h-7 rounded-full bg-primary/10 text-primary text-[11px] font-medium flex items-center justify-center flex-shrink-0">{initials(t.name)}</span>
                   <div className="min-w-0">
                     <div className="text-sm text-gray-900 leading-tight line-clamp-2 break-words" title={t.name}>{t.name}</div>
-                    <div className="text-[11px] text-gray-500 leading-tight break-words" title={subline(t, nowMin)}>{subline(t, nowMin)}</div>
+                    <div className="text-[11px] text-gray-500 leading-tight truncate" title={subline(t, nowMin)}>{subline(t, nowMin)}</div>
                   </div>
                 </div>
-                <div className="relative h-9">
+                <div className="relative h-9 my-1.5 self-center">
                   {t.blocks.map((b, i) => {
                     const clickable = !!b.booking_id;
                     const Tag = clickable ? 'button' : 'div';
