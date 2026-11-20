@@ -989,7 +989,7 @@ const AttendancePanel = ({ branchId }) => {
         />
       )}
       {toast && (
-        <div role="status" className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-toast px-4 py-2.5 rounded-lg shadow-lg text-[13px] font-medium flex items-center gap-3 ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-text-primary text-white'}`}>
+        <div role="status" className={`fixed toast-bottom left-1/2 -translate-x-1/2 z-toast px-4 py-2.5 rounded-lg shadow-lg text-[13px] font-medium flex items-center gap-3 ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-text-primary text-white'}`}>
           <span>{toast.msg}</span>
           {toast.undo && <button type="button" onClick={() => undo(toast.undo)} className="underline text-white/90 hover:text-white">Undo</button>}
         </div>

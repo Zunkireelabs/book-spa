@@ -542,11 +542,11 @@ const BranchManagerDashboard = () => {
         }
         floating={
           actionSuccess ? (
-            <div className="fixed top-16 sm:top-20 left-4 right-4 sm:left-1/2 sm:right-auto sm:transform sm:-translate-x-1/2 z-toast bg-success text-white px-4 sm:px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in">
+            <div className="fixed toast-top left-4 right-4 sm:left-1/2 sm:right-auto sm:transform sm:-translate-x-1/2 z-toast bg-success text-white px-4 sm:px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in">
               <span className="font-body font-body-medium text-sm">{actionSuccess}</span>
             </div>
           ) : newBookingNotification && (
-            <div className="fixed top-16 sm:top-20 left-4 right-4 sm:left-auto sm:right-6 z-toast bg-primary text-white px-4 sm:px-5 py-3 rounded-lg shadow-lg animate-fade-in sm:max-w-sm">
+            <div className="fixed toast-top left-4 right-4 sm:left-auto sm:right-6 z-toast bg-primary text-white px-4 sm:px-5 py-3 rounded-lg shadow-lg animate-fade-in sm:max-w-sm">
               <div className="flex items-start space-x-3">
                 <div className="flex-shrink-0 mt-0.5">
                   <Icon name="CalendarPlus" size={20} />

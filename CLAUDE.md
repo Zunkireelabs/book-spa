@@ -313,7 +313,7 @@ Thin PostHog wrapper — every export (`init / identify / reset / capture / setG
 | `z-header` | 100 | Main header |
 | `z-sidebar` | 200 | Navigation sidebars |
 | `z-dropdown` | 300 | Dropdown menus |
-| `z-toast` | 900 | Toast notifications |
+| `z-toast` | 1150 | Toast notifications (above panels, sheets and modals; position with `.toast-bottom` / `.toast-top`) |
 | `z-modal` | 1000 | Modal dialogs |
 | `z-modal-overlay` | 1100 | Modal backdrop |
 | `z-notification` | 1200 | Top-level notifications |

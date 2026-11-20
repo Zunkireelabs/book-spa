@@ -354,6 +354,13 @@ aside:has(.sidebar-scroll:focus-within) .sidebar-scroll::-webkit-scrollbar-thumb
   }
 }
 
+/* Toasts / snackbars / undo bars: ONE position rule. Bottom ones clear the floating phone nav (same clearance as .content-scroll),
+   and sit at --toast-lg (default 1.5rem) from lg up, where the nav is gone. Top ones clear the safe area. Always pair with z-toast. */
+.toast-bottom { bottom: calc(6rem + env(safe-area-inset-bottom)); }
+.toast-top { top: calc(4rem + env(safe-area-inset-top)); }
+@media (min-width: 640px) { .toast-top { top: 5rem; } }
+@media (min-width: 1024px) { .toast-bottom { bottom: var(--toast-lg, 1.5rem); } }
+
 /* Phone: the content surface runs to the screen's bottom edge behind the floating pill nav (no band), and every scroller
    ends with clearance = pill + its offset + safe area (+ the FAB), so the last item scrolls fully clear of both. */
 @media (max-width: 1023.98px) {

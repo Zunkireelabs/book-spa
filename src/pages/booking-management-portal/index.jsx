@@ -130,7 +130,7 @@ const BookingManagementPortal = () => {
 
         {/* Notification */}
         {notification && (
-          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-notification">
+          <div className="fixed toast-top left-1/2 transform -translate-x-1/2 z-notification">
             <div className={`flex items-center space-x-3 px-4 py-3 rounded-spa border spa-shadow-elevated animate-fade-in ${getNotificationColor(notification.type)}`}>
               <Icon name={getNotificationIcon(notification.type)} size={16} />
               <span className="font-body font-body-normal text-sm">

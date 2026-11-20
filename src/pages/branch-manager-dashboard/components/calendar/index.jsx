@@ -627,7 +627,7 @@ const OperationalCalendar = ({ branchId }) => {
       />
 
       {assignedToast && (
-        <div role="status" className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] lg:bottom-6 left-1/2 -translate-x-1/2 z-toast px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center gap-4 bg-success text-white">
+        <div role="status" className="fixed toast-bottom left-1/2 -translate-x-1/2 z-toast px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center gap-4 bg-success text-white">
           <Icon name="CheckCircle" size={16} />
           <span className="font-body font-body-medium text-sm">{assignedToast.msg}</span>
           <button type="button" onClick={assignedToast.undo} className="min-h-[44px] -my-2 px-2 text-sm font-semibold underline">Undo</button>
@@ -636,7 +636,7 @@ const OperationalCalendar = ({ branchId }) => {
 
       {/* Toast */}
       {actionToast && (
-        <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-toast px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2 ${
+        <div className={`fixed toast-top left-1/2 transform -translate-x-1/2 z-toast px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2 ${
           actionToast.type === 'error' ? 'bg-error text-white' :
           actionToast.type === 'info' ? 'bg-primary text-white' :
           'bg-success text-white'

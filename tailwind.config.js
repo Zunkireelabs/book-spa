@@ -111,7 +111,7 @@ module.exports = {
           'sidebar': '200',
           'staff-sidebar': '200',
           'dropdown': '300',
-          'toast': '900',
+          'toast': '1150',
           'modal': '1000',
           'modal-overlay': '1100',
           'notification': '1200',

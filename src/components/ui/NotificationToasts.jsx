@@ -75,7 +75,7 @@ const NotificationToasts = () => {
 
   return (
     <>
-      <div className="fixed right-5 bottom-5 w-[368px] max-w-[calc(100vw-24px)] flex flex-col gap-2.5 z-toast">
+      <div className="fixed right-5 toast-bottom [--toast-lg:1.25rem] w-[368px] max-w-[calc(100vw-24px)] flex flex-col gap-2.5 z-toast">
         {extra > 0 && (
           <Link to={inboxPath} className="self-end bg-text-primary text-white rounded-full px-3 py-1 text-xs font-body-medium shadow-spa-elevated">
             +{extra} more · Open Inbox
@@ -95,7 +95,7 @@ const NotificationToasts = () => {
         ))}
       </div>
       {soundPill && !pillDismissed && (
-        <div className="fixed left-5 bottom-5 z-toast bg-white border border-gray-200 rounded-full px-3 py-1.5 shadow-spa-elevated flex items-center gap-2 text-xs text-text-secondary">
+        <div className="fixed left-5 toast-bottom [--toast-lg:1.25rem] z-toast bg-white border border-gray-200 rounded-full px-3 py-1.5 shadow-spa-elevated flex items-center gap-2 text-xs text-text-secondary">
           <Icon name="VolumeX" size={13} /> Sound is off until you click anywhere on the page ·
           <button type="button" className="text-primary font-body-medium" onClick={() => setPillDismissed(true)}>Turn on</button>
         </div>

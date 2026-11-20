@@ -51,7 +51,7 @@ export const useToast = () => {
     return () => clearTimeout(t);
   }, [toast]);
   const toastNode = toast ? (
-    <div role="status" className={`fixed top-20 left-1/2 -translate-x-1/2 z-toast px-4 py-2.5 rounded-lg shadow-lg text-[13px] font-medium ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-text-primary text-white'}`}>
+    <div role="status" className={`fixed toast-top left-1/2 -translate-x-1/2 z-toast px-4 py-2.5 rounded-lg shadow-lg text-[13px] font-medium ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-text-primary text-white'}`}>
       {toast.msg}
     </div>
   ) : null;
