@@ -70,26 +70,35 @@ const Floor = ({ floor, nowMin, open, close, collapsedCount = 6, onOpenBooking, 
   for (let m = start; m <= end; m += 60) hours.push(m);
   const shown = all ? people : people.slice(0, collapsedCount);
   const others = Math.max(0, (floor.headcount || 0) - (floor.working || 0));
+  // Phone (< md): the timeline scrolls sideways inside the card at 64px per hour with the staff column pinned; desktop keeps the fluid 190px | 1fr grid.
+  const PHONE_NAME_W = 120;
+  const tlPx = Math.round((span / 60) * 64);
+  const scrollRef = useRef(null);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || nowMin == null || nowMin < start || nowMin > end || !window.matchMedia?.('(max-width: 767px)').matches) return;
+    el.scrollLeft = Math.max(0, PHONE_NAME_W + tlPx * ((nowMin - start) / span) - el.clientWidth / 3); // "now" about a third from the left
+  }, [nowMin, start, end, span, tlPx, people.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>
-      <div>
-        <div className="relative">
-          <div className="grid grid-cols-[190px_1fr] text-[10px] text-gray-400 mb-1">
-            <div />
+      <div ref={scrollRef} className="max-md:overflow-x-auto max-md:-mx-4 max-md:px-4 max-md:pb-1" data-floor-scroll>
+        <div className="relative max-md:min-w-max [--nc:120px] md:[--nc:190px] [--tw:calc(100%_-_var(--nc))] max-md:[--tw:var(--tl)]" style={{ '--tl': `${tlPx}px` }}>
+          <div className="grid grid-cols-[var(--nc)_var(--tw)] text-[10px] text-gray-400 mb-1">
+            <div className="max-md:sticky max-md:left-0 max-md:z-20 max-md:bg-white" />
             <div className="relative h-4">
               {hours.map((m) => (
-                <span key={m} className="absolute -translate-x-1/2" style={{ left: pos(m) }}>{hourLabel(m)}</span>
+                <span key={m} className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: pos(m) }}><span className="md:hidden">{`${Math.floor(m / 60) % 12 || 12}${Math.floor(m / 60) % 24 >= 12 ? 'pm' : 'am'}`}</span><span className="max-md:hidden">{hourLabel(m)}</span></span>
               ))}
             </div>
           </div>
           <div className="relative">
             {nowMin != null && nowMin >= start && nowMin <= end && (
-              <div className="absolute top-0 bottom-0 w-px bg-error z-10 pointer-events-none" style={{ left: `calc(190px + (100% - 190px) * ${(nowMin - start) / span})` }} />
+              <div className="absolute top-0 bottom-0 w-px bg-error z-10 pointer-events-none" style={{ left: `calc(var(--nc) + var(--tw) * ${(nowMin - start) / span})` }} />
             )}
             {shown.map((t) => (
-              <div key={t.therapist_id} className="grid grid-cols-[190px_1fr] items-center border-t border-gray-100 py-1.5">
-                <div className="flex items-center gap-2 pr-2 min-w-0">
+              <div key={t.therapist_id} className="grid grid-cols-[var(--nc)_var(--tw)] items-center border-t border-gray-100 py-1.5 max-md:min-h-11">
+                <div className="flex items-center gap-2 pr-2 min-w-0 max-md:sticky max-md:left-0 max-md:z-20 max-md:bg-white">
                   <span className="w-7 h-7 rounded-full bg-primary/10 text-primary text-[11px] font-medium flex items-center justify-center flex-shrink-0">{initials(t.name)}</span>
                   <div className="min-w-0">
                     <div className="text-sm text-gray-900 leading-tight line-clamp-2 break-words" title={t.name}>{t.name}</div>

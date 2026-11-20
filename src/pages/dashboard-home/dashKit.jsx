@@ -32,13 +32,13 @@ export const Skeleton = ({ rows = 2 }) => (
   </div>
 );
 
-export const Card = ({ icon, title, count, meta, children, className = '', error = false, onRetry, loading = false }) => (
+export const Card = ({ icon, title, count, meta, children, className = '', error = false, onRetry, loading = false, metaBelow = false }) => (
   <section className={`bg-white rounded-lg border border-gray-200 ${className}`}>
-    <header className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
+    <header className={`flex items-center gap-2 px-4 py-3 border-b border-gray-100 ${metaBelow ? 'max-md:flex-wrap' : ''}`}>
       {icon && <Icon name={icon} size={16} className="text-gray-500" />}
-      <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
+      <h2 className="text-sm font-semibold text-gray-900 whitespace-nowrap">{title}</h2>
       {!error && !loading && count > 0 && <span className="text-[11px] font-medium bg-error/10 text-error rounded-full px-1.5 min-w-[18px] text-center">{count}</span>}
-      {!error && !loading && meta && <span className="ml-auto text-xs text-gray-500">{meta}</span>}
+      {!error && !loading && meta && <span className={`ml-auto text-xs text-gray-500 ${metaBelow ? 'max-md:basis-full max-md:ml-0 max-md:text-left' : ''}`}>{meta}</span>}
     </header>
     <div className="p-4">{error ? <LoadError onRetry={onRetry} /> : loading ? <Skeleton /> : children}</div>
   </section>
@@ -51,8 +51,8 @@ export const Row = ({ tone = 'text-gray-500', icon, title, sub, actions, chip })
   <div className="flex items-center gap-3 py-2.5 border-b border-gray-100 last:border-0">
     <span className={`w-[30px] h-[30px] rounded-lg flex items-center justify-center flex-shrink-0 ${TILE[tone] || 'bg-gray-100'} ${TILE[tone] ? tone : 'text-gray-600'}`}><Icon name={icon} size={16} /></span>
     <div className="min-w-0 flex-1">
-      <div className="text-sm font-medium text-gray-900 truncate">{title}{chip && <span className="ml-1.5 align-middle text-[10.5px] font-semibold text-gray-600 bg-gray-100 rounded px-1.5 py-px">{chip}</span>}</div>
-      {sub && <div className="text-xs text-gray-500 truncate">{sub}</div>}
+      <div className="text-sm font-medium text-gray-900 truncate max-md:whitespace-normal max-md:line-clamp-2">{title}{chip && <span className="ml-1.5 align-middle text-[10.5px] font-semibold text-gray-600 bg-gray-100 rounded px-1.5 py-px">{chip}</span>}</div>
+      {sub && <div className="text-xs text-gray-500 truncate max-md:whitespace-normal max-md:line-clamp-2">{sub}</div>}
     </div>
     {actions && <div className="flex gap-1.5 flex-shrink-0 max-md:[&>button]:min-h-11 max-md:[&>a]:min-h-11">{actions}</div>}
   </div>

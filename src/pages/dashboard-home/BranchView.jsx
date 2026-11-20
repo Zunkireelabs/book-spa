@@ -138,7 +138,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
   );
   const nextSeven = <Card icon="CalendarDays" title="Next 7 days" error={bad} onRetry={refresh} meta={`Booked share of ${(staffLabel || 'staff').toLowerCase()} hours`}><WeekStrip week={data?.week} /></Card>;
   const floorCard = (title, meta) => (
-    <Card icon="Users" title={title} meta={meta} error={bad} onRetry={refresh}>
+    <Card icon="Users" title={title} meta={meta} metaBelow error={bad} onRetry={refresh}>
       <Floor floor={floor} nowMin={phase === 'live' ? nowMin : null} open={hours?.open} close={hours?.close} onOpenBooking={openBooking}
         onBookGap={bookGap} staffPlural={(staffLabelPlural || 'staff').toLowerCase()} />
     </Card>
