@@ -165,7 +165,7 @@ export const RangeMenu = ({ id, from, to, today, onPick }) => {
   const [ct, setCt] = useState(to);
   useEffect(() => { setCf(from); setCt(to); }, [from, to]);
   return (
-    <Menu trigger={(open, toggle) => (
+    <Menu title="Date range" trigger={(open, toggle) => (
       <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} data-range
         className="h-[34px] px-3 rounded-[7px] border border-border bg-white text-[13px] font-medium inline-flex items-center gap-2 hover:bg-[#FAFAF9] whitespace-nowrap">
         <Icon name="Calendar" size={14} className="text-[#8A8A90]" />{rangeLabel(id, from, to)}<Icon name="ChevronDown" size={13} className="text-[#8A8A90]" />
@@ -205,7 +205,7 @@ SearchBox.displayName = 'SearchBox';
 
 /** "Sort <b>Label</b> ▾" menu over `{ id: { label } }`. */
 export const SortMenu = ({ sorts, value, onChange, label = 'Sort' }) => (
-  <Menu trigger={(open, toggle) => (
+  <Menu title="Sort by" trigger={(open, toggle) => (
     <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} className="h-7 px-2 rounded-md text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:bg-[#FAFAF9] whitespace-nowrap">
       {label} <b className="text-text-primary font-medium">{localizeBranch(sorts[value].label)}</b><Icon name="ChevronDown" size={13} />
     </button>)}>

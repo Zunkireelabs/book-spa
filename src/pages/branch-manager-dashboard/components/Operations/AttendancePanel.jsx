@@ -708,7 +708,7 @@ const AttendancePanel = ({ branchId }) => {
       item('Open profile', () => navigate(`/${orgSlug}/staff/${r.id}`)),
     ];
     return (
-      <Menu trigger={(open, toggle) => (
+      <Menu title={`Actions for ${r.name}`} trigger={(open, toggle) => (
         <button type="button" aria-label={`More for ${r.name}`} aria-expanded={open} onClick={toggle} className="w-7 h-7 rounded-md text-text-secondary hover:bg-[#F1F1EF] flex items-center justify-center"><Icon name="MoreHorizontal" size={16} /></button>
       )}>
         {(close) => items.map((it, i) => (it.divider ? <div key={i} className="my-1 border-t border-border" /> : (

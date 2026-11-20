@@ -533,7 +533,7 @@ const BookingsViewPanel = ({ branchId }) => {
   );
   const sortCols = (
     <div className="flex items-center gap-2 sm:ml-auto">
-      <Menu trigger={(open, toggle) => (
+      <Menu title="Sort by" trigger={(open, toggle) => (
         <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} className="h-7 px-2 rounded-md text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:bg-[#FAFAF9]">
           Sort <b className="text-text-primary font-medium">{SORTS[sort].label}</b><Icon name="ChevronDown" size={13} />
         </button>)}>
@@ -542,7 +542,7 @@ const BookingsViewPanel = ({ branchId }) => {
             {s.label}{sort === id && <Icon name="Check" size={13} />}
           </button>))}
       </Menu>
-      <Menu trigger={(open, toggle) => (
+      <Menu title="Columns" trigger={(open, toggle) => (
         <button type="button" onClick={toggle} aria-label="Columns" aria-haspopup="menu" aria-expanded={open} className="w-[30px] h-[30px] border border-border rounded-md grid place-items-center text-[#515152] hover:bg-[#FAFAF9]"><Icon name="Columns" size={15} /></button>)}>
         {() => COLUMN_DEFS.map((c) => (
           <label key={c.id} className="flex items-center gap-2 px-3 py-1.5 text-[13px] hover:bg-[#FAFAF9] cursor-pointer">
@@ -604,7 +604,7 @@ const BookingsViewPanel = ({ branchId }) => {
     <div ref={tabsBoxRef} className="relative flex items-center whitespace-nowrap min-w-0 flex-1" style={{ gap: tabGap }} role="tablist" aria-label="Booking views">
       {VIEWS.filter((v) => visibleIds.includes(v.id)).map((v) => tabButton(v))}
       {hiddenViews.length > 0 && (
-        <Menu trigger={(open, toggle) => (
+        <Menu title="Show bookings" trigger={(open, toggle) => (
           <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} data-views-more
             className="h-[38px] inline-flex items-center gap-1 text-[13px] font-medium text-[#515152] hover:text-text-primary flex-shrink-0">
             More<Icon name="ChevronDown" size={13} />

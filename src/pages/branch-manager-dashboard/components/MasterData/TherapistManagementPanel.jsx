@@ -88,7 +88,7 @@ const Row = ({ t, cols, rosterReadable, selected, sortable, canManage, busy, bra
           : <span className={`text-[12px] ${t.isActive ? 'text-primary' : 'text-[#8A8A90]'}`}>{t.isActive ? 'Active' : 'Inactive'}</span>}
       </td>
       <td className={`${CELL} pr-1`} onClick={(e) => e.stopPropagation()}>
-        <Menu trigger={(open, toggle) => (
+        <Menu title={`Actions for ${t.name}`} trigger={(open, toggle) => (
           <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} aria-label={`Actions for ${t.name}`} data-row-menu
             className="w-7 h-7 rounded-md grid place-items-center text-[#8A8A90] hover:bg-black/[0.05] hover:text-text-primary"><Icon name="MoreHorizontal" size={16} /></button>)}>
           {(close) => menuItems(t).map((it, i) => (it.divider

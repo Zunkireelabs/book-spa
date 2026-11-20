@@ -410,7 +410,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
       )}
       <FilterChip label="Last visit" value={filters.last} options={LAST_VISIT_OPTIONS} onChange={setFilter('last')} selectedLabel={LAST_VISIT_OPTIONS.find((o) => o.id === filters.last)?.label} />
       <div className="ml-auto flex items-center gap-2">
-        <Menu trigger={(open, toggle) => (
+        <Menu title="Sort by" trigger={(open, toggle) => (
           <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} className="h-7 px-2 rounded-md text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:bg-[#FAFAF9]">
             Sort <b className="text-text-primary font-medium">{SORTS[sort].label}</b><Icon name="ChevronDown" size={13} />
           </button>)}>
@@ -419,7 +419,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
               {s.label}{sort === id && <Icon name="Check" size={13} />}
             </button>))}
         </Menu>
-        <Menu trigger={(open, toggle) => (
+        <Menu title="Columns" trigger={(open, toggle) => (
           <button type="button" onClick={toggle} aria-label="Columns" aria-haspopup="menu" aria-expanded={open} className="w-[30px] h-[30px] border border-border rounded-md grid place-items-center text-[#515152] hover:bg-[#FAFAF9]"><Icon name="Columns" size={15} /></button>)}>
           {() => ['visits', 'spent', 'balance'].filter((k) => k !== 'spent' || isMgrUp).map((k) => (
             <label key={k} className="flex items-center gap-2 px-3 py-1.5 text-[13px] hover:bg-[#FAFAF9] cursor-pointer capitalize">

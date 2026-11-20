@@ -112,7 +112,7 @@ const PackageOverviewPanel = ({ packages, types, today, error, onRetry, onChange
   const anyFilter = !!(query || service || show !== 'all');
 
   const showMenu = (
-    <Menu trigger={(open, toggleMenu) => (
+    <Menu title="Show" trigger={(open, toggleMenu) => (
       <button type="button" onClick={toggleMenu} aria-haspopup="menu" aria-expanded={open} className="h-7 px-2 rounded-md text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:bg-[#FAFAF9] whitespace-nowrap">
         Show <b className="text-text-primary font-medium">{SHOW[show]}</b><Icon name="ChevronDown" size={13} />
       </button>)}>

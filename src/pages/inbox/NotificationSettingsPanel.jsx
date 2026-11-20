@@ -51,6 +51,7 @@ const BranchMulti = ({ branches, selected, onToggle }) => {
   const label = selected.size === n ? `All ${wordBranches()} (${n})` : selected.size === 1 ? branches.find((b) => selected.has(b.id))?.name : `${selected.size} of ${n} ${wordBranches()}`;
   return (
     <Menu
+      title={`Choose ${wordBranches()}`}
       trigger={(open, toggle) => (
         <button type="button" onClick={toggle} aria-haspopup="listbox" aria-expanded={open}
           className={`h-9 px-3 min-w-[170px] flex items-center justify-between gap-2 text-sm bg-surface border rounded-spa-lg ${open ? 'border-primary ring-2 ring-primary/20' : 'border-border hover:border-gray-300'}`}>
