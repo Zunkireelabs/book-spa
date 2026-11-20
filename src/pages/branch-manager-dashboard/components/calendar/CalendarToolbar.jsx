@@ -4,7 +4,7 @@ import Icon from '../../../../components/AppIcon';
 import MiniMonthCalendar from './MiniMonthCalendar';
 import { addDays, addMonths } from './calendarDates';
 import CalendarMobileHeader from './CalendarMobileHeader';
-import { teamFilterLabel, isTeamFilterActive, teamAllLabel, staffInitials } from './calendarFilter';
+import { teamFilterLabel, isTeamFilterActive, teamAllLabel, staffInitials, toggleStaff, isLastTicked } from './calendarFilter';
 
 function formatDateTitle(dateStr, viewMode) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -56,7 +56,7 @@ const CalendarToolbar = ({
   onNewBooking, onOpenWaitlist, waitlistCount = 0, branchId,
   userRole, onPrint, onEditRoster, onBlockWholeCalendar, onCalendarSettings, onClosedDates,
   zoomScale, onZoomChange, minZoom, maxZoom, use24h, setUse24h, hideSensitive, setHideSensitive,
-  onGroupByChange, staffOptions = [], selectedStaffIds = [], setSelectedStaffIds = () => {},
+  onGroupByChange, staffOptions = [], teamUniverse = [], hiddenStaffIds = [], setHiddenStaffIds = () => {},
 }) => {
   const ZOOM_STEP = 0.2;
   const [open, setOpen] = useState(null); // 'date' | 'filter' | 'view' | 'menu' | null
@@ -91,11 +91,11 @@ const CalendarToolbar = ({
   }, [open, tipOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const teamAll = teamAllLabel(staffLabel, staffLabelPlural);
-  const filterLabel = teamFilterLabel({ selectedStaffIds, selectedPositions, staffOptions, allLabel: teamAll });
-  const filterActive = isTeamFilterActive({ selectedStaffIds, selectedPositions });
+  const filterLabel = teamFilterLabel({ hiddenStaffIds, selectedPositions, universe: teamUniverse, allLabel: teamAll, plural: (staffLabelPlural || 'staff').toLowerCase() }) + (showServiceOnly ? '' : ' · incl. non-service');
+  const filterActive = isTeamFilterActive({ hiddenStaffIds, selectedPositions, universe: teamUniverse });
   const [teamQuery, setTeamQuery] = useState('');
   const shownStaff = staffOptions.filter((p) => p.name.toLowerCase().includes(teamQuery.trim().toLowerCase()));
-  const clearFilter = () => { setSelectedPositions([]); setSelectedStaffIds([]); };
+  const clearFilter = () => { setSelectedPositions([]); setHiddenStaffIds([]); };
   const viewLabel = (VIEW_MODE_OPTIONS.find((v) => v.key === viewMode) || VIEW_MODE_OPTIONS[0]).label;
 
   const btn = 'h-9 min-w-[36px] flex items-center justify-center gap-1.5 px-3 text-[13px] font-body font-body-medium text-text-primary border border-border rounded-spa bg-surface hover:bg-background spa-transition-fast whitespace-nowrap';
@@ -128,7 +128,7 @@ const CalendarToolbar = ({
       goToday={goToday} goPrev={goPrev} goNext={goNext} setTipOpen={setTipOpen}
       showServiceOnly={showServiceOnly} setShowServiceOnly={setShowServiceOnly}
       selectedPositions={selectedPositions} setSelectedPositions={setSelectedPositions} calendarPositionOptions={calendarPositionOptions}
-      staffOptions={staffOptions} selectedStaffIds={selectedStaffIds} setSelectedStaffIds={setSelectedStaffIds} staffLabelPlural={staffLabelPlural}
+      staffOptions={staffOptions} teamUniverse={teamUniverse} hiddenStaffIds={hiddenStaffIds} setHiddenStaffIds={setHiddenStaffIds} staffLabelPlural={staffLabelPlural} filterLabel={filterLabel}
       onNewBooking={onNewBooking} onOpenWaitlist={onOpenWaitlist} waitlistCount={waitlistCount} branchId={branchId}
       userRole={userRole} onPrint={onPrint} onEditRoster={onEditRoster} onBlockWholeCalendar={onBlockWholeCalendar}
       onCalendarSettings={onCalendarSettings} onClosedDates={onClosedDates}
@@ -191,10 +191,11 @@ const CalendarToolbar = ({
                       )}
                       <div className="px-1.5 pb-1.5 space-y-0.5">
                         {shownStaff.map((p) => {
-                          const on = selectedStaffIds.includes(p.id);
+                          const on = !hiddenStaffIds.includes(p.id);
+                          const locked = isLastTicked(hiddenStaffIds, p.id, teamUniverse);
                           return (
-                            <label key={p.id} className={`flex items-center gap-2 px-2 min-h-[36px] rounded cursor-pointer hover:bg-background ${on ? 'bg-background' : ''}`}>
-                              <input type="checkbox" checked={on} onChange={(e) => setSelectedStaffIds((prev) => (e.target.checked ? [...prev, p.id] : prev.filter((x) => x !== p.id)))} className="text-primary focus:ring-primary w-3.5 h-3.5 rounded" />
+                            <label key={p.id} title={locked ? 'At least one stays on' : undefined} className={`flex items-center gap-2 px-2 min-h-[36px] rounded ${locked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-background'}`}>
+                              <input type="checkbox" checked={on} disabled={locked} onChange={() => setHiddenStaffIds((prev) => toggleStaff(prev, p.id, teamUniverse))} className="text-primary focus:ring-primary w-3.5 h-3.5 rounded" />
                               <span className="w-6 h-6 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center text-[10px] font-medium flex-shrink-0">{staffInitials(p.name)}</span>
                               <span className="text-[13px] text-text-primary truncate">{p.name}</span>
                             </label>
@@ -220,9 +221,9 @@ const CalendarToolbar = ({
                     </>
                   )}
                 </div>
-                <div className="p-1.5 border-t border-border flex-shrink-0">
-                  <button onClick={clearFilter} disabled={!filterActive} className="w-full text-left px-2 min-h-[32px] text-[13px] text-primary hover:bg-primary/5 rounded disabled:opacity-40">Clear all</button>
-                </div>
+                {filterActive && <div className="p-1.5 border-t border-border flex-shrink-0">
+                  <button onClick={clearFilter} className="w-full text-left px-2 min-h-[32px] text-[13px] text-primary hover:bg-primary/5 rounded">Select all</button>
+                </div>}
               </div>
             )}
           </div>

@@ -101,7 +101,7 @@ const OperationalCalendar = ({ branchId }) => {
   const [freezeUnassigned, setFreezeUnassigned] = useState(true);
   const [showServiceOnly, setShowServiceOnly] = useState(true);
   const [selectedPositions, setSelectedPositions] = useState([]); // empty = all
-  const [selectedStaffIds, setSelectedStaffIds] = useState([]); // empty = everyone; ANDed with positions + service-staff
+  const [hiddenStaffIds, setHiddenStaffIds] = useState([]); // people UNTICKED in the team filter; empty = everyone; ANDed with positions + service-staff
   const [tipOpen, setTipOpen] = useState(false);
   const [actionToast, setActionToast] = useState(null);
 
@@ -142,6 +142,13 @@ const OperationalCalendar = ({ branchId }) => {
       .map(t => ({ id: t.id, name: t.name }));
   }, [calendarData?.therapists, attendanceMap, showServiceOnly]);
 
+  // The people the calendar would show before team narrowing: staffOptions, further narrowed by any picked positions. Ticks, the lock and the button count are all measured against this.
+  const teamUniverse = useMemo(() => {
+    if (selectedPositions.length === 0) return staffOptions;
+    const byId = new Map((calendarData?.therapists || []).map(t => [t.id, t]));
+    return staffOptions.filter(p => { const t = byId.get(p.id); return t?.position && t.position.split('/').some(x => selectedPositions.includes(x.trim())); });
+  }, [staffOptions, selectedPositions, calendarData?.therapists]);
+
   // Filter therapists for calendar display (hide absent/leave)
   const filteredTherapists = useMemo(() => {
     if (!calendarData?.therapists) return [];
@@ -155,11 +162,11 @@ const OperationalCalendar = ({ branchId }) => {
     if (selectedPositions.length > 0) {
       list = list.filter(t => t.position && t.position.split('/').some(p => selectedPositions.includes(p.trim())));
     }
-    if (selectedStaffIds.length > 0) {
-      list = list.filter(t => selectedStaffIds.includes(t.id));
+    if (hiddenStaffIds.length > 0) {
+      list = list.filter(t => !hiddenStaffIds.includes(t.id));
     }
     return list;
-  }, [calendarData?.therapists, showServiceOnly, selectedPositions, selectedStaffIds, attendanceMap, currentDate, focusTherapistId]);
+  }, [calendarData?.therapists, showServiceOnly, selectedPositions, hiddenStaffIds, attendanceMap, currentDate, focusTherapistId]);
 
   // Absent / on-leave therapists (hidden from columns) for the toolbar "N away" summary
   const awayList = useMemo(() => {
@@ -292,8 +299,9 @@ const OperationalCalendar = ({ branchId }) => {
             selectedPositions={selectedPositions}
             setSelectedPositions={setSelectedPositions}
             staffOptions={staffOptions}
-            selectedStaffIds={selectedStaffIds}
-            setSelectedStaffIds={setSelectedStaffIds}
+            teamUniverse={teamUniverse}
+            hiddenStaffIds={hiddenStaffIds}
+            setHiddenStaffIds={setHiddenStaffIds}
             calendarPositionOptions={calendarPositionOptions}
             onNewBooking={isOverallBranch(branchId) ? undefined : handleNewBooking}
             onOpenWaitlist={() => setWaitlistSheetOpen(true)}
@@ -321,10 +329,10 @@ const OperationalCalendar = ({ branchId }) => {
               <button type="button" onClick={clearFocusTherapist} className="text-primary hover:underline">Show everyone</button>
             </div>
           )}
-          {columnMode === 'therapist' && viewMode !== 'month' && !focusTherapistId && calendarData && filteredTherapists.length === 0 && (selectedStaffIds.length > 0 || selectedPositions.length > 0) && (
+          {columnMode === 'therapist' && viewMode !== 'month' && !focusTherapistId && calendarData && filteredTherapists.length === 0 && (hiddenStaffIds.length > 0 || selectedPositions.length > 0) && (
             <div className="flex items-center gap-2 px-4 py-1.5 text-[13px] bg-background border-b border-border" data-calendar-no-match>
               <span className="text-text-secondary">No {staffLabelPlural.toLowerCase()} match this filter.</span>
-              <button type="button" onClick={() => { setSelectedStaffIds([]); setSelectedPositions([]); }} className="text-primary hover:underline">Clear filter</button>
+              <button type="button" onClick={() => { setHiddenStaffIds([]); setSelectedPositions([]); }} className="text-primary hover:underline">Clear filter</button>
             </div>
           )}
           {/* Main content area: Grid */}
