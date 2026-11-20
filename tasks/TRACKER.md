@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-20** by Project Manager · 266 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-20** by Project Manager · 270 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -70,7 +70,9 @@ Last synced: **2026-11-20** by Project Manager · 266 open tickets (epics exclud
 | ZNLY-276 | Sadin | medium | Dashboard strip "50 of 54 done (1 no-show)" reads as 4 left when 3 are open |
 | ZNLY-281 | Sadin | medium | Calendar: hover/open a booking lights up every booking of the same client on screen (Fresha-style), no link lines |
 | ZNLY-293 | Sadin | medium | QC: Bookings list (phone) — row chevron is cut off when the action button is "Confirm" (wider than "Start") |
+| ZNLY-303 | Sadin | medium | Staff picker in Group mode: per-guest pick with the shared StaffPicker (follow-up to ZNLY-300) |
 | ZNLY-307 | Sadin | medium | QC: Booking settings — the "Advance booking window" heading is oversized compared with the other settings headings |
+| ZNLY-309 | Sadin | medium | One width for every booking side panel: New booking (420px today) and Assign list (fixed 560) use the booking panel's width rule |
 
 ## In review / on stage
 | Ticket | Owner | Priority | State | What |
@@ -177,7 +179,6 @@ Last synced: **2026-11-20** by Project Manager · 266 open tickets (epics exclud
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-180 | — | medium | Attendance worked time rounded to 0.1 h before display (1 h 32 min shows as 1 h 30 min) |
-| ZNLY-303 | Sadin | medium | Staff picker in Group mode: per-guest pick with the shared StaffPicker (follow-up to ZNLY-300) |
 
 ## Waiting on owner
 | Ticket | Owner | Priority | What |
@@ -185,6 +186,7 @@ Last synced: **2026-11-20** by Project Manager · 266 open tickets (epics exclud
 | ZNLY-213 | — | high | DECIDE: enable the Supabase Auth "Custom Access Token" hook (auth_hook_block_login_off) on staging and production so "login off" is enforced on the server |
 | ZNLY-214 | Sadin | high | DECIDE: confirm with the accountant how VAT treats tips and product sales on a Nepal tax invoice (before 19 Nov) |
 | ZNLY-252 | Sadin | high | DECIDE: 747 old completed Nuad bookings with no payment (NPR 2,855,386.81, May-Nov) will appear as money to collect after release. Settle, cut off, or leave? |
+| ZNLY-311 | Sadin | high | DECIDE: Design system sit-down: final mockups of every component and spacing (like Zone POS), so every screen is built from the same parts |
 | ZNLY-30 | — | medium | Decide on required_linear_history for main/stage |
 | ZNLY-84 | Sadin | medium | DECIDE A-2: admin_viewer sees write actions on customer-detail (Anish's page) — hand to Anish or fix here? |
 | ZNLY-85 | Sadin | medium | DECIDE V-4: staff voucher limits (100% discount, price edit, back-dating) — match booking limits? |
@@ -249,6 +251,8 @@ Last synced: **2026-11-20** by Project Manager · 266 open tickets (epics exclud
 | ZNLY-242 | — | medium | New org first run: dashboard with 0 locations misbehaves, and location open/close defaults (09–21) disagree with per-day hours |
 | ZNLY-246 | — | medium | Insight: flag tiered services missing tier prices, and team members with no price tier |
 | ZNLY-259 | — | medium | Harden PIN login: PINs are compared as plain text and have no server-side attempt limit |
+| ZNLY-310 | Sadin | medium | Consistency: three remaining single-staff pickers still use a plain dropdown instead of the shared StaffPicker / StaffPickRow |
+| ZNLY-312 | Sadin | medium | Consistency: booking Staff tab opened from Bookings or Inbox shows no Free / Busy / Off (only the calendar day view passes that day's bookings) |
 | ZNLY-19 | — | low | Remaining "Zenly" strings (PlatformNav, docs, favicon, skill footer) |
 | ZNLY-22 | — | low | Booking confirmation + day-before reminder emails; wire 2 stub "Send Email" buttons |
 | ZNLY-29 | — | low | Supabase dashboard cleanup: Postgres ERROR logging off, name the original 25P02 trigger |
