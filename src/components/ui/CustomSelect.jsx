@@ -258,7 +258,7 @@ const CustomSelect = ({
                       isOptionDisabled ? '' : isSelected ? 'text-primary font-medium' : 'text-gray-700'
                     } ${isOptionDisabled ? '' : 'hover:bg-gray-50'}`}
                   >
-                    {opt.label}
+                    {opt.label}{opt.suffix && <span className="ml-1.5 text-text-tertiary font-normal">{opt.suffix}</span>}
                   </button>
                 );
               })

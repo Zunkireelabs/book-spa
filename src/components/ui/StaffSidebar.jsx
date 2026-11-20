@@ -13,7 +13,6 @@ import { fetchPendingApprovalCount } from 'services/api';
 import { useOptionalCommandPalette, SHORTCUT_LABEL } from 'components/CommandPalette/useCommandPalette';
 import { getNav, navPath } from 'navigation/navRegistry';
 import { resolveActiveNav } from 'navigation/navActive';
-import { isSettingsView } from 'pages/branch-manager-dashboard/components/Settings/settingsRegistry';
 import { useNotifications } from 'contexts/NotificationsContext';
 import { pinHint } from './pinHint';
 
@@ -106,7 +105,6 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const currentView = onDashboard ? (new URLSearchParams(location.search).get('view') || (userRole === 'staff' ? 'calendar' : 'dashboard')) : null;
 
   // New Booking is no longer a nav item (it is a tab under Bookings); the mobile FAB remains.
-  const showNewBookingFab = !isOverall && currentView !== 'calendar' && currentView !== 'dashboard' && !(currentView && isSettingsView(currentView)); // none on Settings views (it covered the rows' › and ⋮) // calendar and dashboard have their own New booking; the FAB covered content there // the calendar header has its own primary "+"
 
   // Mobile: a few primary pills, everything else in the "More" sheet (grouped by section, Settings last).
   const flatItems = [
@@ -119,6 +117,9 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   // One shared rule (navigation/navActive.js): the single current item, and the phone pill it lights ('more' for pages inside More).
   const active = resolveActiveNav({ pathname: location.pathname, view: onDashboard ? new URLSearchParams(location.search).get('view') : null, role: userRole, items: flatItems, primaryIds });
   const isItemActive = (item) => item.id === active.itemId;
+  // The FAB is hidden on calendar and dashboard (they have their own New booking) and on everything that belongs to Settings (views and the
+  // /services, /locations editors): it covered rows and form fields there. Same shared rule as the nav highlight, no hand list.
+  const showNewBookingFab = !isOverall && currentView !== 'calendar' && currentView !== 'dashboard' && active.itemId !== 'settings';
 
   const renderNavItem = (item) => {
     const badgeCount = item.id === 'inbox' ? inboxUnread : (item.id === 'dashboard' ? pendingApprovals : 0);
