@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-20** by Project Manager · 257 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-20** by Project Manager · 259 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -166,6 +166,8 @@ Last synced: **2026-11-20** by Project Manager · 257 open tickets (epics exclud
 | ZNLY-296 | Sadin | high | QC: Notification panel (phone) — bottom line ("2 of 2 unread shown · Open Inbox") cut off behind the browser bar |
 | ZNLY-297 | Sadin | high | QC: Bookings list (phone) — rows cramped: status chip touches the next row, "Late · 4h 48m" wraps |
 | ZNLY-298 | Sadin | high | QC: Phone nav — current page not highlighted; More never lights up for pages inside it |
+| ZNLY-300 | Sadin | high | QC: Staff picker — New booking and the booking panel use two different lists, and "Assigned" means opposite things; one shared Staff picker everywhere |
+| ZNLY-301 | Sadin | high | QC: Two different New booking forms — Bookings tab opens a 4-step wizard with no staff choice; Calendar/Dashboard open the panel; one New booking everywhere |
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-180 | — | medium | Attendance worked time rounded to 0.1 h before display (1 h 32 min shows as 1 h 30 min) |
