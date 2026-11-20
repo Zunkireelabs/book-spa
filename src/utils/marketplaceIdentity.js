@@ -63,3 +63,43 @@ export async function fetchMarketplaceIdentity() {
     return null;
   }
 }
+
+// The reverse direction: after a booking is CONFIRMED, offer what the customer typed back to the
+// marketplace so it can fill in any profile field they hadn't set yet -- the point being that they
+// shouldn't retype their own name and number on every booking.
+//
+// This does not weaken the invariant in the header above. Nothing flows INTO book-spa here, and
+// book-spa is not vouching for anyone: the request is same-origin, so the browser attaches the
+// MARKETPLACE's own httpOnly session cookie, and that app takes the user id from its own verified
+// session and never from this body. It is the customer's own browser submitting the customer's own
+// typed details to the customer's own profile.
+//
+// The marketplace fills EMPTY fields only (COALESCE, server-side) -- a customer who deliberately
+// shortened their name must not have it rewritten by their next booking.
+//
+// Fire-and-forget, and deliberately never awaited by the caller: the booking has already succeeded
+// by the time this runs. A profile that didn't auto-fill is a minor annoyance; an error surfaced on
+// a confirmed booking is alarming and would be actively misleading.
+export function backfillMarketplaceProfile(customerInfo) {
+  if (!isMarketplaceContext() || !customerInfo) return;
+
+  const payload = {
+    firstName: customerInfo.firstName || undefined,
+    lastName: customerInfo.lastName || undefined,
+    phone: customerInfo.phone || undefined,
+    dialCode: customerInfo.phoneCountryCode || undefined,
+    gender: customerInfo.gender || undefined,
+  };
+  if (!Object.values(payload).some(Boolean)) return;
+
+  try {
+    void fetch('/api/account/profile/backfill', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+  } catch {
+    // Same rule as fetchMarketplaceIdentity: never block or alter booking.
+  }
+}

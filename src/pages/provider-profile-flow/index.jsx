@@ -9,7 +9,7 @@ import { fetchBranchesByOrgId, fetchBookableServicesByOrgSlug, fetchBookableTher
 import { useResolvedServicePricing } from '../../hooks/useCustomerServicePricing';
 import { splitE164 } from '../../utils/phone';
 import { scrollToTopInstant } from '../../utils/scroll';
-import { fetchMarketplaceIdentity } from '../../utils/marketplaceIdentity';
+import { fetchMarketplaceIdentity, backfillMarketplaceProfile } from '../../utils/marketplaceIdentity';
 import BookingSuccess from '../customer-booking-flow/components/BookingSuccess';
 import ProfileHero from './components/ProfileHero';
 import ServicesSection from './components/ServicesSection';
@@ -413,6 +413,10 @@ const ProviderProfileFlow = () => {
       status: 'confirmed',
     });
     setBookingOpen(false);
+    // Offer the typed details back to the marketplace profile (empty fields only, server-side) so
+    // this customer doesn't retype their own name and number next time. Fire-and-forget by
+    // design — the booking is already confirmed and nothing here may affect it.
+    backfillMarketplaceProfile(customerInfo);
   };
 
   // GroupBookingView owns its own date/time and people selections (not lifted here,
@@ -437,6 +441,9 @@ const ProviderProfileFlow = () => {
       status: 'confirmed',
     });
     setGroupModeOpen(false);
+    // Lead contact only — the guests' details belong to them, not to whoever's marketplace
+    // account happens to be signed in on this device.
+    backfillMarketplaceProfile(leadContact);
   };
 
   if (tenantError) {
