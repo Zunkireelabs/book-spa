@@ -1,9 +1,11 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 import FilterBar from '../../../components/ui/FilterBar';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../utils/periodPresets';
 import { fetchAttendanceReport } from '../../../services/api';
+import { wordBranch } from '../../../utils/industryTerms';
 
 const STAFF_TYPE_OPTIONS = [
   { value: 'all', label: 'All staff' },
@@ -248,7 +250,7 @@ const AttendanceReportPanel = ({ branchId }) => {
     setError(null);
     const result = await fetchAttendanceReport({ branchId, ...range });
     if (result.error) {
-      setError(result.error.message || 'Failed to load attendance report.');
+      setError(friendlyError(result.error, 'Failed to load attendance report.'));
     } else {
       setData(result.data);
     }
@@ -493,7 +495,7 @@ const AttendanceReportPanel = ({ branchId }) => {
           {perStaff.length === 0 ? (
             <div className="p-8 text-center">
               <Icon name="CalendarCheck" size={32} className="text-text-tertiary mx-auto mb-3" />
-              <p className="font-body text-sm text-text-tertiary">No active staff for this branch.</p>
+              <p className="font-body text-sm text-text-tertiary">No active staff for this {wordBranch()}.</p>
             </div>
           ) : totals.marked === 0 ? (
             <div className="p-8 text-center">

@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { friendlyError } from '../../../../utils/friendlyError';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
-import TimeBoxInput from '../../../../components/ui/TimeBoxInput';
 import {
   fetchTherapistsForManagement,
   fetchBranchWorkingHours,
@@ -11,7 +10,11 @@ import {
   upsertRosterOverrides,
   fetchBlocksForRange,
 } from '../../../../services/api';
-import { isoDayOfWeek } from '../../../../services/rosterSchedule';
+import { useAvailabilityConflictGuard } from '../../../../hooks/useAvailabilityConflictGuard';
+import { rosterChange } from '../../../../services/availabilityConflicts';
+import { SHADE_STYLES } from '../../../../services/availabilityShading';
+import ModalShell from '../../../../components/ui/ModalShell';
+import { wordBranch } from '../../../../utils/industryTerms';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -21,12 +24,18 @@ function toLocalISO(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// JS Date#getDay() is 0=Sunday..6=Saturday; therapist_working_hours.day_of_week (migration-275)
+// is 0=Monday..6=Sunday. This converts between the two.
+function isoDayOfWeek(d) {
+  return (d.getDay() + 6) % 7;
+}
+
 function to12h(timeStr) {
   if (!timeStr) return '';
   const [h, m] = timeStr.split(':').map(Number);
   const period = h >= 12 ? 'pm' : 'am';
   const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return m === 0 ? `${h12}${period}` : `${h12}:${String(m).padStart(2, '0')}${period}`;
+  return `${h12}:${String(m).padStart(2, '0')}${period}`;
 }
 
 function initials(name) {
@@ -38,6 +47,11 @@ function avatarColor(name) {
   for (let i = 0; i < (name || '').length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
   return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
 }
+
+const formatDialogDate = (iso) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+};
 
 const cellKey = (therapistId, date) => `${therapistId}_${date}`;
 
@@ -61,11 +75,9 @@ const RosterPanel = ({ branchId }) => {
   const [overrides, setOverrides] = useState(new Map());       // cellKey -> {startTime,endTime,isDayOff}
   const [pending, setPending] = useState(new Map());            // cellKey -> {startTime,endTime,isDayOff} (unsaved)
   const [closedDates, setClosedDates] = useState(new Set());    // dates with a whole-location Calendar block ("Business closed")
-  const [editingKey, setEditingKey] = useState(null);
-  const [editDraft, setEditDraft] = useState({ startTime: '', endTime: '' });
-  const [popoverPos, setPopoverPos] = useState(null); // {top, left} in viewport coords, for the portal-rendered time editor
-  const [anchorRect, setAnchorRect] = useState(null); // the clicked cell's rect, kept so the layout effect below can re-measure against the popover's real size
-  const popoverRef = useRef(null);
+  const [editDraft, setEditDraft] = useState({ startTime: '', endTime: '', breaks: [] });
+  const [editTarget, setEditTarget] = useState(null);           // { therapist, dateInfo } the date-change dialog is open for
+  const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
 
   const [staffLoading, setStaffLoading] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -89,8 +101,8 @@ const RosterPanel = ({ branchId }) => {
       fetchTherapistsForManagement(branchId),
       fetchBranchWorkingHours(branchId),
     ]);
-    if (staffErr) { setError(staffErr.message || 'Failed to load staff.'); setStaffLoading(false); return; }
-    if (hoursErr) { setError(hoursErr.message || 'Failed to load working hours.'); setStaffLoading(false); return; }
+    if (staffErr) { setError(friendlyError(staffErr, 'Failed to load staff.')); setStaffLoading(false); return; }
+    if (hoursErr) { setError(friendlyError(hoursErr, 'Failed to load working hours.')); setStaffLoading(false); return; }
     setTherapists(staffData || []);
     setDefaultHours(hoursMap || new Map());
     setStaffLoading(false);
@@ -108,9 +120,9 @@ const RosterPanel = ({ branchId }) => {
       fetchBlocksForRange(branchId, startDate, endDate),
     ]);
     if (fetchErr) {
-      setError(fetchErr.message || 'Failed to load roster.');
+      setError(friendlyError(fetchErr, 'Failed to load roster.'));
     } else if (blocksErr) {
-      setError(blocksErr.message || 'Failed to load calendar blocks.');
+      setError(friendlyError(blocksErr, 'Failed to load calendar blocks.'));
     } else {
       setOverrides(data || new Map());
       setPending(new Map());
@@ -145,24 +157,6 @@ const RosterPanel = ({ branchId }) => {
   };
   const scrollContainerRef = useRef(null);
   const STICKY_NAME_COL_WIDTH = 200; // matches the sticky name column's min-w-[200px] below
-
-  // The time-editor popover is portaled to <body> and positioned from the anchor
-  // cell's viewport rect (see startEditing) — close it on scroll rather than tracking
-  // position, since the popover would otherwise drift away from its cell.
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container || editingKey === null) return;
-    const close = () => setEditingKey(null);
-    container.addEventListener('scroll', close);
-    // A resize (or orientation change) invalidates the anchor cell's captured rect
-    // the same way a scroll does — close rather than try to re-anchor against stale
-    // coordinates.
-    window.addEventListener('resize', close);
-    return () => {
-      container.removeEventListener('scroll', close);
-      window.removeEventListener('resize', close);
-    };
-  }, [editingKey]);
   useEffect(() => {
     if (scrollToTodayTick === 0) return;
     const raf = requestAnimationFrame(() => {
@@ -181,7 +175,7 @@ const RosterPanel = ({ branchId }) => {
   const defaultForCell = useCallback((therapistId, dayOfWeek) => {
     const rows = defaultHours.get(therapistId);
     const row = rows?.find(r => r.dayOfWeek === dayOfWeek);
-    return row || { startTime: null, endTime: null, isDayOff: true };
+    return row || { startTime: null, endTime: null, isDayOff: true, breaks: [], noHours: !rows?.length };
   }, [defaultHours]);
 
   // Effective state for a cell, preferring an unsaved edit, then a saved override, then
@@ -200,7 +194,6 @@ const RosterPanel = ({ branchId }) => {
       next.set(cellKey(therapistId, date), { ...current, ...patch });
       return next;
     });
-    setEditingKey(null);
   };
 
   const toggleCell = (therapistId, dateInfo, state) => {
@@ -209,45 +202,41 @@ const RosterPanel = ({ branchId }) => {
         isDayOff: false,
         startTime: state.startTime || '10:00',
         endTime: state.endTime || '18:00',
+        breaks: state.breaks || [],
       });
     } else {
-      setCell(therapistId, dateInfo.date, { isDayOff: true, startTime: null, endTime: null });
+      setCell(therapistId, dateInfo.date, { isDayOff: true, startTime: null, endTime: null, breaks: [] });
     }
   };
 
-  const startEditing = (therapistId, dateInfo, state, anchorEl) => {
-    setEditingKey(cellKey(therapistId, dateInfo.date));
-    setEditDraft({ startTime: state.startTime || '10:00', endTime: state.endTime || '18:00' });
-    const rect = anchorEl.getBoundingClientRect();
-    setAnchorRect({ top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width });
-    // Rough first-paint guess (anchored below, roughly centered) — corrected against the
-    // popover's real measured size by the layout effect below before the browser paints,
-    // so this placeholder is never actually visible to the user.
-    setPopoverPos({ top: rect.bottom + 6, left: rect.left + rect.width / 2 });
+  // A date change replaces that day's weekly hours AND breaks, so the dialog starts from what applies today (breaks included).
+  const startEditing = (therapist, dateInfo, state) => {
+    setEditTarget({ therapist, dateInfo });
+    setEditDraft({
+      startTime: String(state.startTime || '10:00').slice(0, 5),
+      endTime: String(state.endTime || '18:00').slice(0, 5),
+      breaks: (state.breaks || []).map((b) => ({ name: b.name || '', startTime: b.startTime, endTime: b.endTime })),
+    });
   };
 
-  // Once the popover has actually rendered, re-anchor it using its real measured size
-  // instead of a guessed height/width — flip above the cell if there's no room below,
-  // and clamp horizontally so it can't run off either edge of the viewport.
-  useLayoutEffect(() => {
-    if (!editingKey || !anchorRect || !popoverRef.current) return;
-    const pw = popoverRef.current.offsetWidth;
-    const ph = popoverRef.current.offsetHeight;
-    const opensBelow = anchorRect.bottom + 6 + ph <= window.innerHeight;
-    const top = opensBelow ? anchorRect.bottom + 6 : anchorRect.top - 6 - ph;
-    const idealLeft = anchorRect.left + anchorRect.width / 2;
-    const left = Math.min(Math.max(idealLeft, pw / 2 + 8), window.innerWidth - pw / 2 - 8);
-    setPopoverPos({ top: Math.max(top, 8), left });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editingKey, anchorRect]);
-
-  const commitEdit = (therapistId, dateInfo) => {
-    if (!editDraft.startTime || !editDraft.endTime || editDraft.startTime >= editDraft.endTime) {
-      setError('Start time must be before end time.');
-      setEditingKey(null);
-      return;
+  const draftError = (() => {
+    if (!editTarget) return null;
+    const { startTime, endTime, breaks } = editDraft;
+    if (!startTime || !endTime || startTime >= endTime) return 'Start time must be before end time.';
+    for (const b of breaks) {
+      if (!b.startTime || !b.endTime || b.startTime >= b.endTime) return 'Each break needs a start before its end.';
+      if (b.startTime < startTime || b.endTime > endTime) return 'Breaks must sit inside the working hours.';
     }
-    setCell(therapistId, dateInfo.date, { isDayOff: false, startTime: editDraft.startTime, endTime: editDraft.endTime });
+    return null;
+  })();
+
+  const commitEdit = () => {
+    if (!editTarget || draftError) return;
+    setCell(editTarget.therapist.id, editTarget.dateInfo.date, {
+      isDayOff: false, startTime: editDraft.startTime, endTime: editDraft.endTime,
+      breaks: editDraft.breaks.filter((b) => b.startTime && b.endTime),
+    });
+    setEditTarget(null);
   };
 
   const handleSave = async () => {
@@ -258,12 +247,23 @@ const RosterPanel = ({ branchId }) => {
 
     const payload = Array.from(pending.entries()).map(([key, value]) => {
       const [therapistId, date] = [key.slice(0, key.indexOf('_')), key.slice(key.indexOf('_') + 1)];
-      return { therapistId, date, isDayOff: value.isDayOff, startTime: value.startTime, endTime: value.endTime };
+      return { therapistId, date, isDayOff: value.isDayOff, startTime: value.startTime, endTime: value.endTime, breaks: value.isDayOff ? [] : (value.breaks || []) };
     });
+
+    // List the upcoming bookings these date changes would strand before saving (kept either way).
+    const checks = payload.map((o) => ({
+      therapistId: o.therapistId,
+      name: therapists.find((t) => t.id === o.therapistId)?.name,
+      change: rosterChange({ date: o.date, isDayOff: o.isDayOff, start: o.startTime, end: o.endTime, breaks: o.breaks.map((b) => ({ start: b.startTime, end: b.endTime })) }),
+    }));
+    if (!(await confirmConflicts({ checks, summary: 'You are changing these dates in the roster.', titleFor: (n) => `${n} upcoming booking${n === 1 ? '' : 's'} ${n === 1 ? 'falls' : 'fall'} outside the new schedule`, saveLabel: 'Save roster' }))) {
+      setSaving(false);
+      return;
+    }
 
     const { error: saveErr } = await upsertRosterOverrides(payload);
     if (saveErr) {
-      setError(saveErr.message || 'Failed to save roster.');
+      setError(friendlyError(saveErr, 'Failed to save roster.'));
       setSaving(false);
       return;
     }
@@ -281,8 +281,8 @@ const RosterPanel = ({ branchId }) => {
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h3 className="font-accent text-3xl text-text-primary leading-tight">Roster</h3>
-          <p className="font-body text-sm text-text-secondary mt-1">
+          {/* No heading: the active tab right above is already "Roster". */}
+          <p className="font-body text-sm text-text-secondary">
             Per-date working hours — overrides each staff member's normal weekly schedule.
           </p>
         </div>
@@ -452,7 +452,7 @@ const RosterPanel = ({ branchId }) => {
                     </td>
                     {days.map(d => (
                       <td key={d.date} className="border-b border-border p-1.5">
-                        <div className="h-20 rounded-spa bg-background animate-pulse" />
+                        <div className="h-16 rounded-spa bg-background animate-pulse" />
                       </td>
                     ))}
                   </tr>
@@ -461,7 +461,7 @@ const RosterPanel = ({ branchId }) => {
                 <tr>
                   <td colSpan={days.length + 1} className="px-4 py-14 text-center">
                     <Icon name="Users" size={28} className="text-text-tertiary mx-auto mb-2" />
-                    <p className="font-body text-sm text-text-secondary">No staff found for this branch.</p>
+                    <p className="font-body text-sm text-text-secondary">No staff found for this {wordBranch()}.</p>
                   </td>
                 </tr>
               ) : (
@@ -492,7 +492,7 @@ const RosterPanel = ({ branchId }) => {
                         return (
                           <td key={d.date} className={`border-b border-border text-center align-middle p-1.5 ${isToday ? 'bg-primary/5' : ''}`}>
                             <div
-                              className="w-full h-20 flex items-center justify-center rounded-spa bg-slate-700 text-white text-[10px] font-body font-body-medium gap-1"
+                              className="w-full h-16 flex items-center justify-center rounded-spa bg-slate-700 text-white text-[10px] font-body font-body-medium gap-1"
                               title="Business closed"
                             >
                               <Icon name="Lock" size={11} />
@@ -505,7 +505,6 @@ const RosterPanel = ({ branchId }) => {
                       const state = stateForCell(t.id, d);
                       const key = cellKey(t.id, d.date);
                       const isModified = state.source !== 'default';
-                      const isEditing = editingKey === key;
 
                       // Shared segmented ✕/✓ pill — always visible (not a hover-only corner
                       // badge) so the undo path for a toggle is never a mystery. The active
@@ -539,14 +538,14 @@ const RosterPanel = ({ branchId }) => {
                         return (
                           <td key={d.date} className={`border-b border-border text-center align-middle p-1.5 ${isToday ? 'bg-primary/5' : ''}`}>
                             <div
-                              className={`flex flex-col items-center justify-center h-20 rounded-spa border spa-transition-fast ${
+                              className={`flex flex-col items-center justify-center h-16 rounded-spa border spa-transition-fast ${
                                 isModified
                                   ? 'bg-amber-50 border-amber-200'
                                   : 'border-dashed border-border/70 bg-background/30 hover:bg-background/70 hover:border-border'
                               }`}
                             >
                               <span className={`font-caption text-[10px] font-caption-medium ${isModified ? 'text-amber-700' : 'text-text-tertiary'}`}>
-                                {isModified ? 'Day off' : 'Off'}
+                                {isModified ? 'Day off' : state.noHours ? 'No set hours' : 'Off'}
                               </span>
                               {renderToggle(false)}
                             </div>
@@ -557,9 +556,7 @@ const RosterPanel = ({ branchId }) => {
                       return (
                         <td key={d.date} className={`border-b border-border text-center align-middle p-1.5 ${isToday ? 'bg-primary/5' : ''}`}>
                           <div
-                            className={`flex flex-col items-center justify-center h-20 rounded-spa spa-transition-fast hover:shadow-spa-resting ${
-                              isEditing ? 'ring-2 ring-primary' : ''
-                            } ${
+                            className={`flex flex-col items-center justify-center min-h-[64px] py-1 rounded-spa spa-transition-fast hover:shadow-spa-resting ${
                               isModified
                                 ? 'bg-gradient-to-br from-amber-400 to-amber-500 text-white'
                                 : 'bg-gradient-to-br from-primary to-primary/85 text-white'
@@ -567,13 +564,23 @@ const RosterPanel = ({ branchId }) => {
                           >
                             <button
                               type="button"
-                              onClick={(e) => startEditing(t.id, d, state, e.currentTarget)}
-                              title="Click to change hours"
-                              className="flex flex-col items-center leading-tight hover:underline mt-1.5"
+                              onClick={() => startEditing(t, d, state)}
+                              title="Click to change hours and breaks"
+                              className="flex flex-col items-center leading-tight hover:underline"
                             >
-                              <span className="font-data text-sm font-data-medium">{to12h(state.startTime)}</span>
-                              <span className="font-data text-sm opacity-90">{to12h(state.endTime)}</span>
+                              <span className="font-data text-[11px] font-data-medium">{to12h(state.startTime)}</span>
+                              <span className="font-data text-[11px] opacity-90">{to12h(state.endTime)}</span>
                             </button>
+                            {(state.breaks || []).length > 0 && (
+                              <span
+                                data-testid="roster-cell-breaks"
+                                title={state.breaks.map((b) => `${b.name || 'Break'} ${b.startTime}–${b.endTime}`).join(', ')}
+                                className="mt-1 inline-flex items-center rounded px-1 font-data text-[9px] leading-4 whitespace-nowrap"
+                                style={{ background: SHADE_STYLES.break.solid, color: SHADE_STYLES.break.color }}
+                              >
+                                {state.breaks.length === 1 ? `${state.breaks[0].name ? `${state.breaks[0].name} ` : ''}${state.breaks[0].startTime}–${state.breaks[0].endTime}` : `${state.breaks.length} breaks`}
+                              </span>
+                            )}
                             {renderToggle(true)}
                           </div>
                         </td>
@@ -587,49 +594,70 @@ const RosterPanel = ({ branchId }) => {
         </div>
       </div>
 
-      {editingKey && popoverPos && createPortal(
-        <div
-          ref={popoverRef}
-          className="fixed z-dropdown w-56 p-4 rounded-spa bg-surface border border-border shadow-spa-elevated animate-fade-in text-left -translate-x-1/2"
-          style={{ top: popoverPos.top, left: popoverPos.left }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-center justify-between mb-3">
-            <span className="font-heading text-sm font-heading-medium text-text-primary">Set start and end time</span>
-            <button type="button" onClick={() => setEditingKey(null)} className="text-text-tertiary hover:text-text-primary">
-              <Icon name="X" size={14} />
-            </button>
+      {editTarget && (
+        <ModalShell onClose={() => setEditTarget(null)} className="max-w-sm" aria-label="Change hours for this date" data-testid="roster-date-dialog">
+          <div>
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <h4 className="font-heading font-heading-semibold text-base text-text-primary">
+                {formatDialogDate(editTarget.dateInfo.date)} · {editTarget.therapist.name}
+              </h4>
+              <button type="button" onClick={() => setEditTarget(null)} className="p-1.5 rounded-spa hover:bg-background" aria-label="Close"><Icon name="X" size={18} className="text-text-secondary" /></button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <p className="font-caption text-xs text-text-secondary mb-1.5">Works</p>
+                <div className="flex items-center gap-2">
+                  <input type="time" aria-label="Works from" value={editDraft.startTime} onChange={(e) => setEditDraft((p) => ({ ...p, startTime: e.target.value }))}
+                    className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data text-sm" />
+                  <span className="text-text-tertiary">–</span>
+                  <input type="time" aria-label="Works until" value={editDraft.endTime} onChange={(e) => setEditDraft((p) => ({ ...p, endTime: e.target.value }))}
+                    className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data text-sm" />
+                </div>
+              </div>
+              <div>
+                <p className="font-caption text-xs text-text-secondary mb-1.5">Breaks that day</p>
+                <div className="space-y-2">
+                  {editDraft.breaks.map((b, i) => {
+                    const setBreak = (patch) => setEditDraft((p) => ({ ...p, breaks: p.breaks.map((x, n) => (n === i ? { ...x, ...patch } : x)) }));
+                    return (
+                      <div key={i} className="space-y-1.5 rounded-spa border border-border/70 p-2">
+                        <div className="flex items-center gap-2">
+                          <input type="text" aria-label={`Break ${i + 1} name`} placeholder="Name, e.g. Tea" maxLength={40} value={b.name || ''} onChange={(e) => setBreak({ name: e.target.value })}
+                            className="min-w-0 flex-1 px-2 py-1.5 rounded-spa border border-border bg-surface font-body text-sm" />
+                          <button type="button" aria-label={`Remove break ${i + 1}`} onClick={() => setEditDraft((p) => ({ ...p, breaks: p.breaks.filter((_, n) => n !== i) }))} className="p-1.5 rounded-spa hover:bg-background text-text-tertiary hover:text-error">
+                            <Icon name="X" size={14} />
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input type="time" aria-label={`Break ${i + 1} from`} value={b.startTime} onChange={(e) => setBreak({ startTime: e.target.value })}
+                            className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data text-sm" />
+                          <span className="text-text-tertiary">–</span>
+                          <input type="time" aria-label={`Break ${i + 1} until`} value={b.endTime} onChange={(e) => setBreak({ endTime: e.target.value })}
+                            className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data text-sm" />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => setEditDraft((p) => ({ ...p, breaks: [...p.breaks, { name: '', startTime: '13:00', endTime: '14:00' }] }))}
+                    className="inline-flex items-center gap-1 font-caption text-xs text-primary hover:underline"
+                  >
+                    <Icon name="Plus" size={12} /> Add break
+                  </button>
+                </div>
+              </div>
+              {draftError && <p role="alert" className="font-caption text-xs text-error">{draftError}</p>}
+              <p className="font-caption text-[11px] text-text-tertiary">A date change replaces that day's usual hours and breaks.</p>
+            </div>
+            <div className="flex items-center justify-end gap-2 p-4 border-t border-border">
+              <button type="button" onClick={() => setEditTarget(null)} className="h-9 px-3 text-[13px] font-body font-body-medium border border-border rounded-spa hover:bg-background">Cancel</button>
+              <button type="button" onClick={commitEdit} disabled={!!draftError} className="h-9 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed">Apply to date</button>
+            </div>
           </div>
-          <div className="mb-3">
-            <div className="font-caption text-[11px] font-caption-medium text-text-secondary mb-1">Start</div>
-            <TimeBoxInput
-              value={editDraft.startTime}
-              onChange={(v) => setEditDraft(prev => ({ ...prev, startTime: v }))}
-            />
-          </div>
-          <div className="mb-3">
-            <div className="font-caption text-[11px] font-caption-medium text-text-secondary mb-1">End</div>
-            <TimeBoxInput
-              value={editDraft.endTime}
-              onChange={(v) => setEditDraft(prev => ({ ...prev, endTime: v }))}
-            />
-          </div>
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() => {
-                const therapistId = editingKey.slice(0, editingKey.indexOf('_'));
-                const date = editingKey.slice(editingKey.indexOf('_') + 1);
-                commitEdit(therapistId, { date });
-              }}
-              className="px-3 py-1.5 rounded-spa bg-primary text-white text-xs font-caption-medium hover:bg-primary/90 spa-transition-fast"
-            >
-              Update
-            </button>
-          </div>
-        </div>,
-        document.body
+        </ModalShell>
       )}
+      {conflictModal}
 
       {/* Legend */}
       <div className="flex items-center gap-2 flex-wrap">

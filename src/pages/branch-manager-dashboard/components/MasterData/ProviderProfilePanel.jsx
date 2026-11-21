@@ -1,13 +1,15 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import { useOrg } from '../../../../contexts/OrgContext';
 import { updateOrgProfileSetting, updateOrgBranding, uploadOrgBrandingImage } from '../../../../services/api';
+import { useIndustry } from '../../../../hooks/useIndustry';
 
 const LIST_FIELDS = [
   { key: 'amenities', label: 'Amenities', placeholder: 'e.g. Free WiFi' },
   { key: 'included_with_visit', label: 'Included With Every Visit', placeholder: 'e.g. Welcome drink' },
-  { key: 'optional_extras', label: 'Optional Extras', placeholder: 'e.g. Hot towel upgrade' },
+  { key: 'optional_extras', label: 'Optional Extras', placeholder: null },
 ];
 
 const ListFieldEditor = ({ label, placeholder, items, onChange }) => {
@@ -128,6 +130,7 @@ const BrandingImageField = ({ label, hint, preview, onFileSelected, onRemove, up
 };
 
 const ProviderProfilePanel = () => {
+  const { examples } = useIndustry();
   const org = useOrg();
   const { refreshOrg } = org;
   const [saving, setSaving] = useState(null);
@@ -171,7 +174,7 @@ const ProviderProfilePanel = () => {
     setError(null);
     const result = await updateOrgProfileSetting(key, value);
     if (result.error) {
-      setError(result.error.message || 'Failed to save.');
+      setError(friendlyError(result.error, 'Failed to save.'));
     } else {
       await refreshOrg();
     }
@@ -201,20 +204,20 @@ const ProviderProfilePanel = () => {
     let finalLogoUrl = logoPreview;
     if (logoFile) {
       const { url, error: uploadErr } = await uploadOrgBrandingImage('logo', logoFile);
-      if (uploadErr) { setError(uploadErr.message || 'Failed to upload logo.'); setSaving(null); return; }
+      if (uploadErr) { setError(friendlyError(uploadErr, 'Failed to upload logo.')); setSaving(null); return; }
       finalLogoUrl = url;
     }
 
     let finalHeroUrl = heroPreview;
     if (heroFile) {
       const { url, error: uploadErr } = await uploadOrgBrandingImage('hero', heroFile);
-      if (uploadErr) { setError(uploadErr.message || 'Failed to upload hero image.'); setSaving(null); return; }
+      if (uploadErr) { setError(friendlyError(uploadErr, 'Failed to upload hero image.')); setSaving(null); return; }
       finalHeroUrl = url;
     }
 
     const result = await updateOrgBranding({ logoUrl: finalLogoUrl, heroImageUrl: finalHeroUrl });
     if (result.error) {
-      setError(result.error.message || 'Failed to save branding.');
+      setError(friendlyError(result.error, 'Failed to save branding.'));
     } else {
       setLogoFile(null);
       setHeroFile(null);
@@ -226,7 +229,7 @@ const ProviderProfilePanel = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Provider Profile</h3>
+        <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Business Profile</h3>
         <p className="font-body text-sm text-text-secondary">
           About, amenities, and branding for the profile-page-style customer booking layout.
         </p>
@@ -281,7 +284,7 @@ const ProviderProfilePanel = () => {
         <div key={field.key} className="p-4 border border-border rounded-spa">
           <ListFieldEditor
             label={field.label}
-            placeholder={field.placeholder}
+            placeholder={field.placeholder || `e.g. ${examples.extra}`}
             items={settingsLists[field.key]}
             onChange={(next) => saveSetting(field.key, next)}
           />

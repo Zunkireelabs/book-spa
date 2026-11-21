@@ -1,7 +1,9 @@
 import React from 'react';
-import { Navigate, useParams } from 'react-router-dom';
+import { Navigate, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useLock } from '../contexts/LockContext';
 import BrandMark from './ui/BrandMark';
+import LockScreenOverlay from './ui/LockScreenOverlay';
 
 const LoadingScreen = () => (
   <div className="min-h-screen bg-background flex items-center justify-center">
@@ -50,7 +52,11 @@ const ServiceUnavailableScreen = ({ onRetry }) => (
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { user, profile, loading, authUnavailable, retryProfile } = useAuth();
+  const { isLocked } = useLock();
   const { orgSlug: urlOrgSlug } = useParams();
+  const location = useLocation();
+  // Remember where the user was headed so login can send them back (LoginForm only honours same-org in-app paths).
+  const loginState = { from: { pathname: location.pathname, search: location.search, hash: location.hash } };
 
   if (loading) {
     return <LoadingScreen />;
@@ -68,17 +74,17 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   if (!user) {
     // If we have an org slug in the URL, redirect to that org's login
     if (urlOrgSlug) {
-      return <Navigate to={`/${urlOrgSlug}/login`} replace />;
+      return <Navigate to={`/${urlOrgSlug}/login`} replace state={loginState} />;
     }
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" replace state={loginState} />;
   }
 
   // No profile loaded - something went wrong
   if (!profile) {
     if (urlOrgSlug) {
-      return <Navigate to={`/${urlOrgSlug}/login`} replace />;
+      return <Navigate to={`/${urlOrgSlug}/login`} replace state={loginState} />;
     }
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" replace state={loginState} />;
   }
 
   // Check role authorization
@@ -100,6 +106,10 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
       // URL org doesn't match user's org - redirect to user's actual org
       return <Navigate to={`/${userOrgSlug}/dashboard`} replace />;
     }
+  }
+
+  if (isLocked) {
+    return <LockScreenOverlay />;
   }
 
   return children;

@@ -4,6 +4,7 @@ import Icon from '../AppIcon';
 const SIZE_CLASSES = {
   sm: 'h-9 px-3 text-sm',
   md: 'h-10 px-3 text-sm',
+  lg: 'h-11 px-3 text-sm', // 44px phone touch target
 };
 
 const CustomSelect = ({
@@ -168,7 +169,7 @@ const CustomSelect = ({
         onKeyDown={handleKeyDown}
         disabled={disabled}
         className={`
-          flex items-center justify-between gap-2 w-full
+          field-text flex items-center justify-between gap-2 w-full
           border ${error ? 'border-error' : 'border-border'} rounded-spa bg-surface
           font-body font-body-normal
           focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary
@@ -257,7 +258,7 @@ const CustomSelect = ({
                       isOptionDisabled ? '' : isSelected ? 'text-primary font-medium' : 'text-gray-700'
                     } ${isOptionDisabled ? '' : 'hover:bg-gray-50'}`}
                   >
-                    {opt.label}
+                    {opt.label}{opt.suffix && <span className="ml-1.5 text-text-tertiary font-normal">{opt.suffix}</span>}
                   </button>
                 );
               })

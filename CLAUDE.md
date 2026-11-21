@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Project**: Zenly — Multi-tenant Booking Web App
 **Type**: React 18 + Vite SPA with Supabase backend
 **Tech Stack**: React 18, Vite 5 (`vite.config.mjs`), Tailwind CSS 3, Supabase (Postgres, Auth, RLS, Realtime), Lucide Icons
-**Key Libraries**: date-fns (date handling), Recharts (charts), @dnd-kit (drag-and-drop), FullCalendar (calendar views, resource-timeline), posthog-js (analytics — prod only)
+**Key Libraries**: date-fns (date handling), Recharts (charts), @dnd-kit (drag-and-drop), in-house calendar (@dnd-kit-based day/4-day grid), posthog-js (analytics — prod only)
 
 ---
 
@@ -313,9 +313,10 @@ Thin PostHog wrapper — every export (`init / identify / reset / capture / setG
 | `z-header` | 100 | Main header |
 | `z-sidebar` | 200 | Navigation sidebars |
 | `z-dropdown` | 300 | Dropdown menus |
-| `z-toast` | 900 | Toast notifications |
+| `z-toast` | 1150 | Toast notifications (above panels, sheets and modals; position with `.toast-bottom` / `.toast-top`) |
 | `z-modal` | 1000 | Modal dialogs |
 | `z-modal-overlay` | 1100 | Modal backdrop |
+| `z-popover` | 1125 | Portalled dropdown lists opened from inside a panel or modal (above z-modal-overlay, below z-toast) |
 | `z-notification` | 1200 | Top-level notifications |
 
 ### Shadows & Radii
@@ -453,6 +454,10 @@ plan or track there. If the `plane` tools are missing, run `/mcp` → plane → 
   `Backlog → Todo → In Progress → In Review (PR open) → On Stage (merged to stage) → Done (live on main)`
 - Done means live on `main`, not merged to `stage`.
 - Anything you can't verify gets the `needs-verification` label — never state it as fact.
+- **Which path:** one quick question or one write → Plane MCP. A known, repeated job (tracker sync) →
+  `~/Projects/zunkireelabs-org/tools/plane/plane-tracker.py` (one shell call, ~90% fewer tokens). A big
+  job needing judgement → a separate fresh session, summary back. Ids come from `plane.md`, never re-list.
+  One-time machine setup: `INSTALL.md`.
 - Full rules: `.claude/skills/project-pm/SKILL.md` ("Plane workflow").
 
 **HARD RULE — every developer, every session (human or Claude), no exceptions:**

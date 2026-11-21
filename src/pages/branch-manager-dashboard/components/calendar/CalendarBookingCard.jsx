@@ -1,35 +1,40 @@
-import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useState, useRef, useEffect, useCallback, useId, useLayoutEffect } from 'react';
+import { nameForList } from '../../../../services/dataMasking';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import Icon from '../../../../components/AppIcon';
-import { isNoShow } from '../../../../services/bookingTransformers';
+
+import { getBookingStatusColors } from '../../../../utils/bookingStatusColors';
+import { useBookingHover, HOVER_CARD_ID } from './BookingHoverCard';
 import { formatClockTime } from './timeFormat';
-import { useIndustry } from '../../../../hooks/useIndustry';
+import { isNoShow } from '../../../../services/bookingTransformers';
+import { OUTSIDE_HOURS_OUTLINE } from '../../../../services/availabilityShading';
+import { cardTier, iconsForBooking, splitForShortCard, statusTag, shouldMoveNameDown, lockReason, fitTinyItems, planFullCard, LINE_PX } from '../../../../services/calendarCardLayout';
+import Tooltip from '../../../../components/ui/Tooltip';
+import CardIcon, { LockMark } from './CardIcon';
+import { useCardIconPrefs } from './cardIconPrefs';
+import { phoneCardPlan, startNoMeridiem, coupleName, shortName, oneLineShowsIcon } from './phoneCalendarLayout';
 
-const STATUS_COLORS = {
-  'Pending':     { bg: '#f59e0b', text: '#fff', light: '#fef3c7' },
-  'Confirmed':   { bg: '#3b82f6', text: '#fff', light: '#dbeafe' },
-  'In-Progress': { bg: '#6366f1', text: '#fff', light: '#e0e7ff' },
-  'Completed':   { bg: '#22c55e', text: '#fff', light: '#dcfce7' },
-  'No Show':     { bg: '#6b7280', text: '#fff', light: '#f3f4f6' },
-};
+// Row of 13px icons; `wrap` lets them flow onto a second row before they clip. `more` = "+N" for icons a short card has no room for.
+const IconRow = ({ icons, more = 0, uid, wrap = false, className = '', rowRef }) => (
+  <span ref={rowRef} className={`flex items-center gap-[5px] text-[rgba(45,90,39,0.75)] ${wrap ? 'flex-wrap gap-y-[3px]' : ''} ${className}`}>
+    {icons.map(i => <CardIcon key={i.key} icon={i} uid={uid} />)}
+    {more > 0 && <Tooltip label={`${more} more: open the booking`}><span className="font-data text-[10px] text-text-tertiary leading-none">+{more}</span></Tooltip>}
+  </span>
+);
 
-const UNPAID_BORDER = '#facc15';
+// Compact range: "2:30–3:15pm", or "11:30am–12:15pm" when the period differs; "14:30–15:15" in 24h mode
+function compactRange12h(startStr, endStr, use24h = false) {
+  if (!startStr) return '';
+  const start = formatClockTime(startStr, use24h);
+  if (!endStr) return start;
+  const end = formatClockTime(endStr, use24h);
+  if (use24h) return `${start}–${end}`;
+  const sp = start.slice(-2);
+  return sp === end.slice(-2) ? `${start.slice(0, -2)}–${end}` : `${start}–${end}`;
+}
 
 // Statuses that cannot be dragged (terminal states)
 const NON_DRAGGABLE_STATUSES = ['Completed', 'Cancelled', 'No Show'];
-
-function formatDateLabel(dateStr) {
-  if (!dateStr) return '';
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-function formatAmount(amount) {
-  if (amount == null) return null;
-  return Number(amount).toLocaleString('en-IN');
-}
 
 function getNepalNow() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
@@ -46,14 +51,11 @@ function isTimeLocked(booking) {
 
 // Check if booking can be dragged
 export function canDragBooking(booking) {
-  // A couple booking exploded into two room columns (isRoomShared) has no
-  // per-companion drag target yet — a plain drag would move bookings.room_id
-  // only, desyncing it from the companion's booking_therapists.room_id
-  // override. Reassign rooms via BookingActionModal instead.
+  // A couple booking split across two room columns (isRoomShared) has no per-companion drag target: a plain drag would move
+  // bookings.room_id only and desync it from the companion's booking_therapists.room_id. Reassign rooms in the booking panel.
   if (booking.isRoomShared) return false;
-  // Combo components are time-offset from each other (sequential/concurrent) and
-  // conflict-checked by compute_combo_item_datetimes — no per-component drag
-  // target exists yet, same reasoning as isRoomShared above.
+  // Combo components are time-offset from each other (sequential/concurrent) and conflict-checked server-side:
+  // no per-component drag target exists yet.
   if (booking.isCombo) return false;
   // Cannot drag terminal statuses
   if (NON_DRAGGABLE_STATUSES.includes(booking.status)) return false;
@@ -68,20 +70,12 @@ export function canDragBooking(booking) {
   return true;
 }
 
-const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, hideSensitive = false, use24h = false }) => {
-  const colorKey = isNoShow(booking) ? 'No Show' : booking.status;
-  const colors = STATUS_COLORS[colorKey] || STATUS_COLORS['Pending'];
-  const isUnpaid = booking.paymentStatus === 'unpaid';
-  const isPaid = booking.paymentStatus === 'paid';
+const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate, onClientActivate, onClientDeactivate, sameClient = false, hideSensitive = false, use24h = false, outsideHours = null, phone = false, narrow = false, chipWidth = 0 }) => {
+  const colors = getBookingStatusColors(isNoShow(booking) ? 'No Show' : booking.status);
   const isDraggable = canDragBooking(booking);
-  // status check catches a service started before its scheduled slot, which
-  // isTimeLocked (wall-clock vs. scheduled start) would otherwise miss.
-  const isLocked = booking.isLocked || booking.status === 'In-Progress' || isTimeLocked(booking);
 
-  const cardRef = useRef(null);
-  const [showPopover, setShowPopover] = useState(false);
-  const [popoverPos, setPopoverPos] = useState(null);
-  const hoverTimer = useRef(null);
+  // Hover card: one shared popover (see BookingHoverCard.jsx). Not shown for the booking already open in the side panel.
+  const { ref: cardRef, handlers: hoverHandlers, open: hoverOpen, hideNow } = useBookingHover(booking, { draggable: isDraggable, suppress: isPanelSelected || hideSensitive });
   const [isResizing, setIsResizing] = useState(false);
   const [resizeDir, setResizeDir] = useState(null); // 'top' or 'bottom'
   const [resizeDelta, setResizeDelta] = useState(0);
@@ -126,8 +120,8 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
     transform,
     isDragging,
   } = useDraggable({
-    id: booking._colTherapistId
-      ? `${booking.bookingId || booking.id}__${booking._colTherapistId}`
+    id: (booking._colTherapistId || booking._colRoomId)
+      ? `${booking.bookingId || booking.id}__${booking._colTherapistId || booking._colRoomId}${booking._comboIndex != null ? `__c${booking._comboIndex}` : ''}` // combo parts can share a column
       : (booking.bookingId || booking.id),
     data: {
       booking,
@@ -143,55 +137,91 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
     boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,0.2)' : undefined,
   } : {};
 
-  const durationMins = (() => {
-    if (!booking.startTime || !booking.endTime) return null;
-    const [sh, sm] = booking.startTime.split(':').map(Number);
-    const [eh, em] = booking.endTime.split(':').map(Number);
-    return (eh * 60 + em) - (sh * 60 + sm);
-  })();
+  const rangeLabel = compactRange12h(booking.startTime, booking.endTime, use24h);
+  const cardHeight = typeof style?.height === 'number' ? style.height : parseFloat(style?.height) || 0;
+  const tier = cardTier(cardHeight);
+  const uid = useId().replace(/:/g, '');
+  const prefs = useCardIconPrefs();
+  const icons = iconsForBooking(booking, prefs);
+  const shortIcons = splitForShortCard(icons);
+  const tag = statusTag(booking);
+  const lockWhy = prefs.lock !== false ? lockReason(booking, getNepalNow()) : null;
+  const tagColor = tag === 'No-show' ? '#374151' : '#991B1B';
+  const displayName = hideSensitive ? '•••••' : nameForList(booking.customerName, booking.customerPhone);
+  // Phone day view (ZNLY-299): its own simple card, rules in phoneCalendarLayout.js. Desktop never takes this branch.
+  const phonePlan = phone ? phoneCardPlan(cardHeight) : null;
+  const phoneName = hideSensitive ? displayName : coupleName(displayName, booking.companionName);
+  const WORDS = { wordBreak: 'keep-all', overflowWrap: 'normal' }; // whole words only; overflow ends in an ellipsis
+  const CLAMP2 = { display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden', ...WORDS };
 
-  const timeLabel = booking.startTime && booking.endTime
-    ? `${formatClockTime(booking.startTime, use24h)} – ${formatClockTime(booking.endTime, use24h)}`
-    : '';
-
-  const handleMouseEnter = useCallback(() => {
-    if (isDragging) return;
-    hoverTimer.current = setTimeout(() => {
-      if (cardRef.current) {
-        const rect = cardRef.current.getBoundingClientRect();
-        const side = rect.right > window.innerWidth * 0.6 ? 'left' : 'right';
-        // Vertical clamping against the popover's REAL (content-dependent)
-        // height happens inside BookingHoverPreview itself, post-render — its
-        // content varies a lot (notes, discount line, etc.) so a fixed-height
-        // guess here previously ran it off the bottom of the viewport for
-        // taller cards. This is just the initial anchor.
-        setPopoverPos({
-          side,
-          top: Math.max(10, rect.top),
-          left: side === 'right' ? rect.right + 8 : rect.left - 288,
-        });
-      }
-      setShowPopover(true);
-    }, 200);
-  }, [isDragging]);
-
-  const handleMouseLeave = useCallback(() => {
-    clearTimeout(hoverTimer.current);
-    setShowPopover(false);
-    setPopoverPos(null);
-  }, []);
-
-  useEffect(() => {
-    return () => clearTimeout(hoverTimer.current);
-  }, []);
-
-  // Hide popover when dragging
-  useEffect(() => {
-    if (isDragging) {
-      clearTimeout(hoverTimer.current);
-      setShowPopover(false);
-    }
-  }, [isDragging]);
+  // Name drops to its own line only when time + name don't fit line 1 AND the card has a row to spare (height never grows).
+  const lineRef = useRef(null);
+  const timeRef = useRef(null);
+  const nameRef = useRef(null);
+  const iconsRef = useRef(null);
+  const [nameDown, setNameDown] = useState(false);
+  const tagRef = useRef(null);
+  const svcMeasureRef = useRef(null);
+  const [svcNeeded, setSvcNeeded] = useState(1); // natural (wrapped) line count of the status words + service
+  useLayoutEffect(() => {
+    if (tier !== 'full') return undefined;
+    const m = svcMeasureRef.current;
+    if (!m) return undefined;
+    const measure = () => setSvcNeeded(Math.max(1, Math.round(m.offsetHeight / LINE_PX.service)));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(measure);
+    ro.observe(m);
+    return () => ro.disconnect();
+  }, [tier, booking.serviceName, tag, outsideHours]);
+  const serviceBits = (
+    <>
+      {booking.isWalkIn && <span className="font-bold text-[10px] uppercase tracking-wide text-warning">Walk-in · </span>}
+      {tag && <span className="font-medium text-[11px]" style={{ color: tagColor }}>· {tag}{booking.serviceName ? ' · ' : ''}</span>}
+      {outsideHours && <span className="font-medium text-[11px]" style={{ color: OUTSIDE_HOURS_OUTLINE }}>· {outsideHours}{booking.serviceName ? ' · ' : ''}</span>}
+      {booking.serviceName}
+    </>
+  );
+  const roomLine = columnMode === 'room' ? booking.therapistName : columnMode === 'therapist' ? booking.roomName : null;
+  const hasLead = !!(tag || outsideHours || booking.serviceName);
+  const plan = tier === 'full'
+    ? planFullCard({ height: cardHeight, nameDown, hasLead, serviceLines: svcNeeded, hasRoom: !!roomLine, hasIcons: icons.length > 0 || !!lockWhy })
+    : null;
+  const measureRef = useRef(null);
+  const [tinyVisible, setTinyVisible] = useState(null); // null = not measured yet (show all)
+  const tinyItems = tier === 'tiny' ? [
+    ...shortIcons.shown.map(i => ({ key: i.key, node: <CardIcon key={i.key} icon={i} uid={uid} /> })),
+    ...(shortIcons.more > 0 ? [{ key: 'more', node: <Tooltip key="more" label={`${shortIcons.more} more: open the booking`}><span className="font-data text-[10px] text-text-tertiary leading-none">+{shortIcons.more}</span></Tooltip> }] : []),
+    ...(lockWhy ? [{ key: 'lock', node: <LockMark key="lock" reason={lockWhy} /> }] : []),
+  ] : [];
+  const tinyKeys = tinyItems.map(i => i.key).join(',');
+  useLayoutEffect(() => {
+    if (tier !== 'tiny') return undefined;
+    const fit = () => {
+      const line = lineRef.current, time = timeRef.current, name = nameRef.current, m = measureRef.current;
+      if (!line || !time || !name || !m) return;
+      const items = [...m.children].map(c => ({ key: c.dataset.k, width: c.offsetWidth }));
+      setTinyVisible(fitTinyItems({ lineWidth: line.clientWidth, fixedWidth: time.offsetWidth + 4 + (tagRef.current ? tagRef.current.offsetWidth + 4 : 0), nameWidth: name.scrollWidth, items }));
+    };
+    fit();
+    if (typeof ResizeObserver === 'undefined' || !lineRef.current) return undefined;
+    const ro = new ResizeObserver(fit);
+    ro.observe(lineRef.current);
+    return () => ro.disconnect();
+  }, [tier, tinyKeys, displayName, tag]);
+  useLayoutEffect(() => {
+    if (tier === 'tiny') { setNameDown(false); return undefined; }
+    const measure = () => {
+      const line = lineRef.current, time = timeRef.current, name = nameRef.current;
+      if (!line || !time || !name) return;
+      setNameDown(shouldMoveNameDown({ height: cardHeight, timeWidth: time.scrollWidth, nameWidth: name.scrollWidth, lineWidth: line.clientWidth - (iconsRef.current ? iconsRef.current.offsetWidth + 4 : 0) }));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined' || !lineRef.current) return undefined;
+    const ro = new ResizeObserver(measure);
+    ro.observe(lineRef.current);
+    return () => ro.disconnect();
+  }, [tier, cardHeight, displayName, rangeLabel]);
 
   return (
     <div
@@ -199,29 +229,36 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         cardRef.current = node;
         setNodeRef(node);
       }}
-      className={`absolute left-1 right-1 rounded-md overflow-visible transition-all duration-150 ease-out hover:shadow-lg hover:z-dropdown ${
+      className={`absolute left-1 right-1 rounded-spa overflow-visible outline-none focus-visible:ring-2 focus-visible:ring-primary/60 transition-colors duration-150 ease-out hover:z-dropdown hover:brightness-[0.97] ${
         isDraggable && !isResizing ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
-      } ${isSelected ? 'ring-2 ring-violet-500 ring-offset-1' : ''}`}
+      } ${isSelected ? 'ring-2 ring-primary ring-offset-1' : ''} ${isPanelSelected ? 'ring-2 ring-primary z-[3] shadow-spa-elevated' : ''} ${booking.isWalkIn && !isPanelSelected ? 'shadow-[inset_4px_0_0_0_theme(colors.warning/40%)]' : ''}`}
+      data-booking-card="true"
+      data-booking-key={booking.bookingId || booking.id}
+      data-outside-hours={outsideHours ? 'true' : undefined}
       data-booking-id={(booking.isShared || booking.isRoomShared || booking.isCombo) ? booking.bookingId : undefined}
       data-shared={(booking.isShared || booking.isRoomShared || booking.isCombo) ? 'true' : undefined}
+      data-bar={(booking.isShared || booking.isRoomShared || booking.isCombo) ? colors.bar : undefined}
       style={{
         ...style,
         ...(isResizing ? {} : dragStyle),
         ...(isResizing && resizeDir === 'bottom' ? { height: Math.max((style?.height || 60) + resizeDelta, 20), zIndex: 9999 } : {}),
         ...(isResizing && resizeDir === 'top' ? { top: (style?.top || 0) + resizeDelta, height: Math.max((style?.height || 60) - resizeDelta, 20), zIndex: 9999 } : {}),
-        backgroundColor: colors.light,
-        borderLeft: `3px solid ${colors.bg}`,
-        borderTop: isUnpaid ? `2px solid ${UNPAID_BORDER}` : 'none',
-        borderRight: isUnpaid ? `1px solid ${UNPAID_BORDER}` : `1px solid ${colors.bg}20`,
-        borderBottom: isUnpaid ? `1px solid ${UNPAID_BORDER}` : `1px solid ${colors.bg}20`,
-        opacity: isDragging ? 0.3 : booking._isFaded ? 0.4 : 1,
+        // Secondary copies of a shared booking stay readable: a lighter fill and a softer bar, not ghosted.
+        // The open booking: one step deeper than its own status fill (ZNLY-285), so it stands out from same-client outlines.
+        backgroundColor: isPanelSelected ? `color-mix(in srgb, ${colors.fill} 80%, ${colors.bar})` : booking._isFaded ? `color-mix(in srgb, ${colors.fill} 55%, white)` : colors.fill,
+        borderLeft: `3px solid ${booking._isFaded ? `color-mix(in srgb, ${colors.bar} 50%, transparent)` : colors.bar}`,
+        opacity: isDragging ? 0.3 : 1,
+        // Booked before the therapist's hours / break / leave changed: left where it is, flagged (ZNLY-100).
+        ...(outsideHours && !isDragging ? { boxShadow: `inset 0 0 0 1.5px ${OUTSIDE_HOURS_OUTLINE}` } : {}),
+        // Linked highlight (all copies of the hovered/focused/open shared booking); the panel ring wins on the open card.
+        ...(isLinkedActive && !isPanelSelected && !isDragging ? { outline: `1.5px solid ${colors.bar}`, outlineOffset: 1 } : {}),
+        // Same client as the hovered / focused / open booking (ZNLY-281): brand outline; a linked (spa) copy keeps its own status-colour outline.
+        ...(sameClient && !isLinkedActive && !isPanelSelected && !isDragging ? { outline: '2px solid #2D5A27', outlineOffset: 1 } : {}),
       }}
       onClick={(e) => {
         if (!isDragging && !isResizing) {
           e.stopPropagation();
-          clearTimeout(hoverTimer.current);
-          setShowPopover(false);
-          setPopoverPos(null);
+          hideNow();
           if (onSelect && (e.metaKey || e.ctrlKey)) {
             onSelect(booking, e);
           } else {
@@ -229,64 +266,115 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
           }
         }
       }}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      tabIndex={0}
+      aria-label={`${hideSensitive ? 'Booking' : booking.customerName}, ${booking.status}, ${rangeLabel}${booking.serviceName ? `, ${booking.serviceName}` : ''}`}
+      aria-describedby={hoverOpen ? HOVER_CARD_ID : undefined}
+      onKeyDown={(e) => {
+        hoverHandlers.onKeyDown(e);
+        if (!e.defaultPrevented && e.key === 'Enter' && e.target === e.currentTarget && !isResizing) { e.preventDefault(); hideNow(); onClick(booking); }
+      }}
+      onPointerEnter={(e) => { hoverHandlers.onPointerEnter?.(e); onClientActivate?.(booking.bookingId || booking.id); if (booking.isShared || booking.isRoomShared || booking.isCombo) onSharedActivate?.(booking.bookingId); }}
+      onPointerLeave={(e) => { hoverHandlers.onPointerLeave?.(e); onClientDeactivate?.(); if (booking.isShared || booking.isRoomShared || booking.isCombo) onSharedDeactivate?.(); }}
+      onFocus={(e) => { hoverHandlers.onFocus?.(e); onClientActivate?.(booking.bookingId || booking.id); if (booking.isShared || booking.isRoomShared || booking.isCombo) onSharedActivate?.(booking.bookingId); }}
+      onBlur={(e) => { hoverHandlers.onBlur?.(e); onClientDeactivate?.(); if (booking.isShared || booking.isRoomShared || booking.isCombo) onSharedDeactivate?.(); }}
     >
       {/* Drag handle area — middle section of card, not edges */}
       <div
-        className="px-2 py-1.5 h-full flex flex-col overflow-hidden"
-        {...(isDraggable && !isResizing ? { ...listeners, ...attributes } : {})}
+        className={`${tier === 'tiny' ? 'px-2 py-0 justify-center' : tier === 'short' ? 'px-2 py-[2px]' : 'px-2 py-[3px]'} h-full flex flex-col overflow-hidden`}
+        {...(isDraggable && !isResizing ? { ...listeners, ...attributes, tabIndex: -1, role: undefined, 'aria-describedby': undefined } : {})}
       >
-        {timeLabel && (
-          <div className="font-data text-[10px] text-text-secondary leading-none mb-0.5 flex-shrink-0">
-            {timeLabel}
-          </div>
-        )}
-        <div className="font-body font-semibold text-xs text-text-primary leading-tight truncate flex-shrink-0">
-          {hideSensitive ? '•••••' : booking.customerName}
-        </div>
-        <div className="font-body text-[11px] text-text-secondary leading-tight truncate flex-shrink-0">
-          {booking.serviceName}
-        </div>
-        {columnMode === 'room' && booking.therapistName && (
-          <div className="font-caption text-[10px] text-primary/70 leading-tight truncate flex-shrink-0">
-            {booking.therapistName}
-          </div>
-        )}
-        {columnMode === 'therapist' && booking.roomName && (
-          <div className="font-caption text-[10px] text-secondary/70 leading-tight truncate flex-shrink-0">
-            {booking.roomName}
-          </div>
-        )}
-        {durationMins && (
-          <div className="font-caption text-[10px] text-text-secondary/70 mt-auto flex-shrink-0">
-            {durationMins} mins
-          </div>
-        )}
-        {(isUnpaid || isLocked || isPaid || booking.specialRequests) && (
-          <div className="flex items-center gap-1 mt-0.5 flex-shrink-0">
-            {booking.specialRequests && (
-              <Icon name="AlertTriangle" size={14} className="text-warning" title="Special request" />
-            )}
-            {isUnpaid && (
-              <span className="inline-flex items-center gap-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-yellow-400" />
-                <span className="text-[9px] text-yellow-600 font-medium">Unpaid</span>
+        {phonePlan ? (
+          phonePlan.mode === 'one' ? (
+            <div className="flex items-center gap-1 min-w-0 h-full leading-tight">
+              <span className="font-data text-[11px] text-text-secondary whitespace-nowrap flex-shrink-0">{narrow ? formatClockTime(booking.startTime, use24h) : startNoMeridiem(formatClockTime(booking.startTime, use24h))}</span>
+              <span className="font-body font-semibold text-[12.5px] text-text-primary truncate min-w-0 flex-1" style={WORDS}>{hideSensitive ? phoneName : shortName(booking.companionName ? phoneName : displayName)}</span>
+              {!narrow && oneLineShowsIcon(chipWidth) && icons.length > 0 && <IconRow icons={icons.slice(0, 1)} uid={uid} className="flex-shrink-0" />}
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-1 min-w-0 flex-shrink-0 leading-[1.3]">
+                <span className="font-data text-[11px] text-text-secondary whitespace-nowrap truncate min-w-0">{narrow ? formatClockTime(booking.startTime, use24h) : rangeLabel}</span>
+                {!narrow && (icons.length > 0 || lockWhy) && (
+                  <span className="ml-auto flex items-center gap-[5px] flex-shrink-0">
+                    <IconRow icons={shortIcons.shown} more={shortIcons.more} uid={uid} />
+                    {lockWhy && <LockMark reason={lockWhy} />}
+                  </span>
+                )}
+              </div>
+              <div className="font-body font-semibold text-[12.5px] text-text-primary leading-[1.25]" style={narrow ? { ...WORDS, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } : CLAMP2}>
+                {narrow ? (hideSensitive ? phoneName : shortName(displayName)) : phoneName}
+              </div>
+              {phonePlan.showService && !narrow && (
+                <div className="font-body text-[12px] text-text-secondary leading-[1.25] mt-px" style={CLAMP2}>
+                  {tag && <span className="font-medium" style={{ color: tagColor }}>· {tag} · </span>}
+                  {booking.serviceName}
+                </div>
+              )}
+            </>
+          )
+        ) : tier === 'tiny' ? (
+          <div ref={lineRef} className="relative flex items-center gap-1 min-w-0 leading-tight">
+            <span ref={timeRef} className="font-data text-[11px] text-text-secondary whitespace-nowrap flex-shrink-0">{formatClockTime(booking.startTime, use24h)}</span>
+            <span ref={nameRef} className="font-body font-semibold text-[13px] text-text-primary truncate min-w-0">{displayName}</span>
+            {tag && <span ref={tagRef} className="text-[11px] font-medium flex-shrink-0 whitespace-nowrap" style={{ color: tagColor }}>· {tag}</span>}
+            {tinyItems.some(it => !tinyVisible || tinyVisible.has(it.key)) && (
+              <span className="ml-auto flex items-center gap-[5px] flex-shrink-0 text-[rgba(45,90,39,0.75)]">
+                {tinyItems.filter(it => !tinyVisible || tinyVisible.has(it.key)).map(it => it.node)}
               </span>
             )}
-            {isLocked && <span className="text-[9px]">🔒</span>}
-            {!isLocked && isPaid && <span className="text-[9px]">✓</span>}
+            {/* invisible measurer: natural width of each right-hand item */}
+            <span ref={measureRef} aria-hidden="true" className="absolute left-0 top-0 invisible pointer-events-none flex items-center gap-[5px] whitespace-nowrap">
+              {tinyItems.map(it => <span key={it.key} data-k={it.key} className="inline-flex">{it.node}</span>)}
+            </span>
           </div>
+        ) : tier === 'short' ? (
+          <>
+            <div ref={lineRef} className="flex items-center gap-1 min-w-0 flex-shrink-0 leading-[1.3]">
+              <span ref={timeRef} className="font-data text-[11px] text-text-secondary whitespace-nowrap flex-shrink-0">{rangeLabel}</span>
+              {!nameDown && <span ref={nameRef} className="font-body font-semibold text-[13px] text-text-primary truncate min-w-0">{displayName}</span>}
+              {(shortIcons.shown.length > 0 || shortIcons.more > 0 || lockWhy) && (
+                <span ref={iconsRef} className="ml-auto flex items-center gap-[5px] flex-shrink-0">
+                  <IconRow icons={shortIcons.shown} more={shortIcons.more} uid={uid} />
+                  {lockWhy && <LockMark reason={lockWhy} />}
+                </span>
+              )}
+            </div>
+            {nameDown ? (
+              <div ref={nameRef} className="font-body font-semibold text-[13px] text-text-primary leading-[1.3] truncate flex-shrink-0">{displayName}</div>
+            ) : (
+              <div className="font-body text-[11px] text-text-secondary leading-[1.3] truncate flex-shrink-0">
+                {tag && <span className="font-medium" style={{ color: tagColor }}>· {tag}{booking.serviceName ? ' · ' : ''}</span>}
+                {outsideHours && <span className="font-medium" style={{ color: OUTSIDE_HOURS_OUTLINE }}>· {outsideHours}{booking.serviceName ? ' · ' : ''}</span>}
+                {booking.serviceName}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div ref={lineRef} className="flex items-center gap-1 min-w-0 flex-shrink-0 leading-[1.3]">
+              <span ref={timeRef} className="font-data text-[11px] text-text-secondary whitespace-nowrap flex-shrink-0">{rangeLabel}</span>
+              {!nameDown && <span ref={nameRef} className="font-body font-semibold text-[13px] text-text-primary truncate min-w-0">{displayName}</span>}
+            </div>
+            {nameDown && <div ref={nameRef} className="font-body font-semibold text-[13px] text-text-primary leading-[1.3] truncate flex-shrink-0">{displayName}</div>}
+            {plan.serviceLines > 0 && (
+              <div className="font-body text-[12px] text-text-secondary leading-[1.3] overflow-hidden break-words flex-shrink-0 mt-px" style={{ maxHeight: `${plan.serviceLines * LINE_PX.service}px`, display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: plan.serviceLines }}>
+                {serviceBits}
+              </div>
+            )}
+            {plan.showRoom && (
+              <div className="font-body text-[11px] text-text-tertiary leading-tight truncate flex-shrink-0">{roomLine}</div>
+            )}
+            {plan.showIcons && (
+              <div className="flex items-end gap-1 flex-shrink-0 mt-auto">
+                <IconRow icons={icons} uid={uid} wrap className="flex-1 min-w-0" />
+                {lockWhy && <LockMark reason={lockWhy} />}
+              </div>
+            )}
+            {/* invisible measurer: natural wrapped height of status words + service */}
+            <div ref={svcMeasureRef} aria-hidden="true" className="absolute left-2 right-2 top-0 invisible pointer-events-none font-body text-[12px] leading-[1.3] break-words">{serviceBits}</div>
+          </>
         )}
       </div>
-
-      {booking.isNewCustomer && (
-        <div className="absolute top-0 right-0 w-9 h-9 overflow-hidden pointer-events-none rounded-tr-md z-10">
-          <div className="absolute top-[5px] right-[-19px] w-[68px] rotate-45 bg-red-600 text-white text-[7px] font-bold tracking-wide text-center leading-none py-[3px] shadow-sm">
-            NEW
-          </div>
-        </div>
-      )}
 
       {/* Resize handles for shared booking cards */}
       {canResize && (
@@ -296,197 +384,18 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
             onMouseDown={(e) => handleResizeStart(e, 'top')}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="absolute top-1 left-1 right-1 h-1 rounded-full bg-violet-400/60 group-hover/resize-top:bg-violet-500 transition-colors" />
+            <div className="absolute top-1 left-1 right-1 h-1 rounded-full bg-primary/40 group-hover/resize-top:bg-primary transition-colors" />
           </div>
           <div
             className="absolute -bottom-1 left-0 right-0 h-3 cursor-s-resize z-10 group/resize-bottom"
             onMouseDown={(e) => handleResizeStart(e, 'bottom')}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="absolute bottom-1 left-1 right-1 h-1 rounded-full bg-violet-400/60 group-hover/resize-bottom:bg-violet-500 transition-colors" />
+            <div className="absolute bottom-1 left-1 right-1 h-1 rounded-full bg-primary/40 group-hover/resize-bottom:bg-primary transition-colors" />
           </div>
         </>
       )}
 
-      {/* Rich hover popover — rendered via portal to escape overflow clipping */}
-      {showPopover && !isDragging && popoverPos && (
-        <BookingHoverPreview booking={booking} position={popoverPos} draggable={isDraggable} hideSensitive={hideSensitive} use24h={use24h} />
-      )}
-    </div>
-  );
-};
-
-// Rich hover-preview card (status, service, date/duration, therapist/room,
-// amount, notes) shown via portal on hover — shared by CalendarBookingCard
-// itself and by OverflowPopoverRow (the "+N" hidden-bookings list) so both
-// give the same detail preview instead of just a native title tooltip.
-export const BookingHoverPreview = ({ booking, position, draggable, hideSensitive = false, use24h = false }) => {
-  const { staffLabel } = useIndustry();
-  const colorKey = isNoShow(booking) ? 'No Show' : booking.status;
-  const colors = STATUS_COLORS[colorKey] || STATUS_COLORS['Pending'];
-  const isUnpaid = booking.paymentStatus === 'unpaid';
-
-  const durationMins = (() => {
-    if (!booking.startTime || !booking.endTime) return null;
-    const [sh, sm] = booking.startTime.split(':').map(Number);
-    const [eh, em] = booking.endTime.split(':').map(Number);
-    return (eh * 60 + em) - (sh * 60 + sm);
-  })();
-
-  const timeLabel = booking.startTime && booking.endTime
-    ? `${formatClockTime(booking.startTime, use24h)} – ${formatClockTime(booking.endTime, use24h)}`
-    : '';
-
-  const cardRef = useRef(null);
-  const [top, setTop] = useState(position?.top ?? 0);
-
-  // Re-anchor to the new target's initial estimate whenever a different
-  // booking/position comes in (new hover), then re-clamp below once the
-  // real height is known.
-  useEffect(() => {
-    setTop(position?.top ?? 0);
-  }, [position?.top, position?.left]);
-
-  useLayoutEffect(() => {
-    if (!position || !cardRef.current) return;
-    const height = cardRef.current.offsetHeight;
-    const margin = 10;
-    const maxTop = window.innerHeight - height - margin;
-    const clamped = Math.max(margin, Math.min(position.top, maxTop));
-    if (Math.abs(clamped - top) > 0.5) setTop(clamped);
-  }, [position, top]);
-
-  if (!position) return null;
-
-  return createPortal(
-    <div
-      ref={cardRef}
-      className="fixed z-dropdown pointer-events-none"
-      style={{
-        top,
-        left: position.left,
-        width: 280,
-      }}
-    >
-      <div className="bg-surface rounded-lg border border-border spa-shadow-elevated overflow-hidden animate-fade-in">
-        {/* Status banner */}
-        <div
-          className="px-3 py-1.5 text-center text-xs font-body font-semibold"
-          style={{ backgroundColor: colors.bg, color: colors.text }}
-        >
-          {booking.status}
-        </div>
-
-        {/* Customer info */}
-        <div className="px-3 pt-2.5 pb-2 border-b border-border">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-1">
-              <div className="font-body font-semibold text-sm text-text-primary">
-                {hideSensitive ? '•••••' : booking.customerName}
-              </div>
-              {booking.isNewCustomer && (
-                <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-medium bg-red-600 text-white flex-shrink-0">
-                  New
-                </span>
-              )}
-            </div>
-            {booking.bookingNumber && (
-              <span className="font-data text-[10px] text-text-secondary bg-background px-1.5 py-0.5 rounded">
-                #{booking.bookingNumber}
-              </span>
-            )}
-          </div>
-          {booking.customerPhone && !hideSensitive && (
-            <div className="font-caption text-xs text-text-secondary mt-0.5">
-              📞 {booking.customerPhone}
-            </div>
-          )}
-        </div>
-
-        {/* Booking details table */}
-        <div className="px-3 py-2 space-y-1.5 border-b border-border">
-          <DetailRow label="Service" value={booking.serviceName} />
-          <DetailRow
-            label="Date"
-            value={`${formatDateLabel(booking.date)}, ${timeLabel}`}
-          />
-          <DetailRow
-            label="Duration"
-            value={durationMins ? `${durationMins} mins` : (booking.serviceDuration ? `${booking.serviceDuration} mins` : null)}
-          />
-          <DetailRow label={staffLabel} value={booking.therapistName || '—'} />
-          <DetailRow label="Room" value={booking.roomName || '—'} />
-          <DetailRow label="Created by" value={booking.createdByName || 'Online booking'} />
-        </div>
-
-        {/* Financial info */}
-        <div className="px-3 py-2 border-b border-border">
-          <div className="flex items-center justify-between">
-            <div className="flex items-baseline gap-1">
-              <span className="font-caption text-[10px] text-text-secondary uppercase tracking-wider">Amount</span>
-              {hideSensitive ? (
-                <span className="font-data text-sm text-text-primary font-semibold">NPR •••</span>
-              ) : booking.finalAmount != null ? (
-                <span className="font-data text-sm text-text-primary font-semibold">
-                  NPR {formatAmount(booking.finalAmount)}
-                </span>
-              ) : booking.baseAmount != null ? (
-                <span className="font-data text-sm text-text-primary font-semibold">
-                  NPR {formatAmount(booking.baseAmount)}
-                </span>
-              ) : (
-                <span className="font-body text-xs text-text-secondary">—</span>
-              )}
-            </div>
-            <span
-              className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                isUnpaid
-                  ? 'bg-yellow-100 text-yellow-700'
-                  : 'bg-green-100 text-green-700'
-              }`}
-            >
-              {isUnpaid ? 'Unpaid' : 'Paid'}
-            </span>
-          </div>
-          {booking.discountAmount > 0 && !hideSensitive && (
-            <div className="font-caption text-[10px] text-text-secondary mt-0.5">
-              Discount: NPR {formatAmount(booking.discountAmount)}
-            </div>
-          )}
-        </div>
-
-        {/* Special requests */}
-        {booking.specialRequests && (
-          <div className="px-3 py-2 border-b border-border">
-            <div className="font-caption text-[10px] text-text-secondary uppercase tracking-wider mb-0.5">Notes</div>
-            <div className="font-body text-xs text-text-primary italic leading-snug">
-              "{booking.specialRequests}"
-            </div>
-          </div>
-        )}
-
-        {/* CTA hint */}
-        <div className="px-3 py-1.5 bg-background/50">
-          <div className="font-caption text-[10px] text-text-secondary text-center">
-            {draggable ? 'Drag to reschedule • Click for details →' : 'Click for full details →'}
-          </div>
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
-};
-
-const DetailRow = ({ label, value }) => {
-  if (!value) return null;
-  return (
-    <div className="flex items-start gap-2">
-      <span className="font-caption text-[10px] text-text-secondary uppercase tracking-wider w-16 flex-shrink-0 pt-px">
-        {label}
-      </span>
-      <span className="font-body text-xs text-text-primary leading-snug">
-        {value}
-      </span>
     </div>
   );
 };

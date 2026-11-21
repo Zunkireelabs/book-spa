@@ -52,7 +52,7 @@ const computed = [];
 for (const file of files) {
   const src = readFileSync(file, 'utf8');
 
-  for (const [, literal] of src.matchAll(/['"]([A-Z][A-Za-z0-9]{1,40})['"]/g)) {
+  for (const [, literal] of src.matchAll(/['"]([A-Z][A-Za-z0-9]{0,40})['"]/g)) {
     if (lucideExports.has(literal)) used.add(literal);
   }
 

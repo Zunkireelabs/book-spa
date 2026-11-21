@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import Icon from '../../../components/AppIcon';
@@ -18,7 +19,7 @@ const TherapistUtilizationChart = ({ branchId, period }) => {
     const result = await getUtilizationIntelligence({ branchId, from: period?.from, to: period?.to });
 
     if (result.error) {
-      setError(result.error.message || 'Failed to load utilization data.');
+      setError(friendlyError(result.error, 'Failed to load utilization data.'));
       setLoading(false);
       return;
     }

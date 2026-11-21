@@ -1,7 +1,9 @@
+import { friendlyError } from '../utils/friendlyError';
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import { getOrgPaymentMethods } from '../services/paymentMethods';
+import { setIndustryTerms } from '../utils/industryTerms';
 
 const OrgContext = createContext(null);
 
@@ -22,19 +24,19 @@ export const OrgProvider = ({ children }) => {
     try {
       const { data, error: fetchError } = await supabase
         .from('organizations')
-        .select('id, name, code, slug, timezone, currency, is_active, settings, industry_type, logo_url, hero_image_url')
+        .select('id, name, code, slug, timezone, currency, is_active, settings, industry_type, logo_url, hero_image_url, enforce_staff_availability')
         .eq('id', profile.org_id)
         .single();
 
       if (fetchError) {
         console.error('[OrgContext] Error fetching organization:', fetchError.message);
-        setError(fetchError.message);
+        setError(friendlyError(fetchError));
       } else {
         setOrg(data);
       }
     } catch (err) {
       console.error('[OrgContext] Unexpected error:', err.message);
-      setError(err.message);
+      setError(friendlyError(err));
     } finally {
       setLoading(false);
     }
@@ -74,6 +76,13 @@ export const OrgProvider = ({ children }) => {
     fetchIndustry();
   }, [org?.industry_type]);
 
+  // Plain modules (api.js messages, friendlyError) read the org's own words from here; idempotent, so safe in render.
+  setIndustryTerms({
+    staff: industry?.staff_label, staffPlural: industry?.staff_label_plural,
+    room: industry?.location_label, roomPlural: industry?.location_label_plural,
+    spa: (org?.industry_type || 'spa') === 'spa',
+  });
+
   const value = {
     // Existing org values
     org,
@@ -84,6 +93,7 @@ export const OrgProvider = ({ children }) => {
     orgCurrency: org?.currency || 'NPR',
     orgSettings: org?.settings || {},
     paymentMethods: getOrgPaymentMethods(org?.settings),
+    enforceStaffAvailability: org?.enforce_staff_availability === true,
     showStaffSelection: org?.settings?.show_staff_selection === true,
     enableStaffRatings: org?.settings?.enable_staff_ratings === true,
     // Opposite default from the two toggles above — see TenantContext.jsx's matching
@@ -114,6 +124,11 @@ export const OrgProvider = ({ children }) => {
 
     // Industry default categories
     defaultCategories: industry?.default_categories || [],
+
+    // Products (migration-345): the page title ('Products' / 'Supplies'), starter categories, and whether items are sold by default
+    productLabel: industry?.product_label || 'Products',
+    defaultProductCategories: industry?.default_product_categories || [],
+    productsSoldByDefault: industry?.products_sold_by_default !== false,
   };
 
   return (

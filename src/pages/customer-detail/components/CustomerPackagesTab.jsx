@@ -2,17 +2,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import { fetchPackagesForCustomer } from '../../../services/api';
 
-function formatNPR(amount) {
-  return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
-}
+const formatShort = (d) => (d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '');
 
 function formatDate(d) {
   return d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 }
 
 const STATUS_CONFIG = {
-  unused:         { label: 'Not Started',  pill: 'bg-gray-100 text-gray-600' },
-  partially_used: { label: 'In Progress',  pill: 'bg-warning/10 text-warning' },
+  unused:         { label: 'Not started',  pill: 'bg-background text-text-secondary border border-border' },
+  partially_used: { label: 'In progress',  pill: 'bg-warning/10 text-warning' },
   fully_redeemed: { label: 'Completed',    pill: 'bg-success/10 text-success' },
   expired:        { label: 'Expired',      pill: 'bg-error/10 text-error' },
 };
@@ -54,35 +52,22 @@ const CustomerPackagesTab = ({ customerId }) => {
   }
 
   if (packages.length === 0) {
-    return (
-      <div className="text-center py-8">
-        <Icon name="Package" size={24} className="text-text-tertiary mx-auto mb-2" />
-        <p className="font-body text-sm text-text-tertiary">No packages yet</p>
-      </div>
-    );
+    return <p className="text-[13px] text-text-secondary">No packages for this customer.</p>;
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {packages.map((p) => {
         const cfg = STATUS_CONFIG[p.status] || STATUS_CONFIG.unused;
         return (
-          <div key={p.id} className="bg-background rounded-spa p-3">
-            <div className="flex items-center justify-between mb-1">
-              <span className="font-body font-body-medium text-sm text-text-primary">{p.packageTypeName}</span>
-              <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-medium ${cfg.pill}`}>{cfg.label}</span>
+          <div key={p.id} className="border border-border rounded-spa-lg p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <b className="text-sm font-semibold text-text-primary">{p.packageTypeName}</b>
+              <span className={`h-[22px] px-2.5 rounded-full text-xs inline-flex items-center ${cfg.pill}`}>{cfg.label}</span>
             </div>
-            <p className="font-caption text-xs text-text-secondary mb-2">
-              {p.serviceName} · {p.packageCode}
+            <p className="text-[13px] text-text-secondary">
+              {p.packageCode} · {p.sessionsRemaining} of {p.sessionsTotal} sessions left{p.issuedDate ? ` · bought ${formatShort(p.issuedDate)}` : ''}{p.expiryDate ? ` · until ${formatDate(p.expiryDate)}` : ''}
             </p>
-            <div className="flex items-center justify-between text-xs text-text-secondary">
-              <span>{p.sessionsRemaining} / {p.sessionsTotal} sessions remaining</span>
-              <span>Expires {formatDate(p.expiryDate)}</span>
-            </div>
-            <div className="flex items-center justify-between text-xs text-text-tertiary mt-1">
-              <span>Issued {formatDate(p.issuedDate)}</span>
-              <span className="font-data">{formatNPR(p.finalAmount ?? p.paidAmount)}</span>
-            </div>
           </div>
         );
       })}

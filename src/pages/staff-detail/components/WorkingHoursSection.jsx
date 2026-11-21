@@ -1,12 +1,13 @@
 import React from 'react';
 import Icon from '../../../components/AppIcon';
 import TimeBoxInput from '../../../components/ui/TimeBoxInput';
+import { dayWorkingMinutes, weekWorkingMinutes, formatMinutes } from '../../../utils/staffDay';
 
 // Display only. These hours and breaks are shown on the staff calendar as
 // per-column shading (see calendar/CalendarGrid's roster overlay, resolved via
 // services/rosterSchedule), but they are still NOT read by booking-slot
 // availability or conflict checks — a booking can be made outside them.
-const WorkingHoursSection = ({ rows, onChange }) => {
+const WorkingHoursSection = ({ rows, onChange, readOnly = false, changedDays = [] }) => {
   const updateRow = (dayOfWeek, patch) => {
     onChange(rows.map(r => r.dayOfWeek === dayOfWeek ? { ...r, ...patch } : r));
   };
@@ -48,14 +49,14 @@ const WorkingHoursSection = ({ rows, onChange }) => {
   };
 
   return (
-    <div>
+    <fieldset disabled={readOnly} className={readOnly ? 'opacity-80' : ''}>
       <div className="divide-y divide-border">
         {rows.map(row => {
           const working = !row.isDayOff;
           const breaks = row.breaks || [];
           return (
-            <div key={row.dayOfWeek} className="py-3 first:pt-0 last:pb-0">
-              <div className="flex items-center gap-3">
+            <div key={row.dayOfWeek} className={`py-3 first:pt-0 last:pb-0 ${changedDays.includes(row.dayOfWeek) ? 'border-l-2 border-warning pl-3 -ml-3' : ''}`}>
+              <div className="flex items-start gap-3">
                 <button
                   type="button"
                   onClick={() => toggleWorking(row)}
@@ -69,8 +70,8 @@ const WorkingHoursSection = ({ rows, onChange }) => {
                 <span className="w-24 flex-shrink-0 font-body font-body-medium text-sm text-text-primary">{row.dayLabel}</span>
 
                 {working ? (
-                  <div key={`${row.dayOfWeek}-on`} className="space-y-2 animate-settle-in origin-left">
-                    <div className="flex items-center gap-2">
+                  <div key={`${row.dayOfWeek}-on`} className="space-y-2 animate-settle-in origin-left min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
                       <TimeBoxInput
                         value={row.startTime}
                         onChange={(v) => updateRow(row.dayOfWeek, { startTime: v })}
@@ -91,7 +92,7 @@ const WorkingHoursSection = ({ rows, onChange }) => {
                     </div>
 
                     {breaks.map((brk, index) => (
-                      <div key={index} className="flex items-center gap-2 animate-settle-in origin-left">
+                      <div key={index} className="flex flex-wrap items-center gap-2 animate-settle-in origin-left">
                         <input
                           type="text"
                           placeholder="Break name"
@@ -124,12 +125,24 @@ const WorkingHoursSection = ({ rows, onChange }) => {
                     Not working on this day
                   </span>
                 )}
+                {working && (
+                  <span className="ml-auto flex-shrink-0 text-right font-data text-xs text-text-secondary pt-2" title="Working time with breaks taken off">
+                    {formatMinutes(dayWorkingMinutes(row))}
+                    {breaks.length > 0 && <span className="block text-text-tertiary">{breaks.length} break{breaks.length === 1 ? '' : 's'}</span>}
+                  </span>
+                )}
               </div>
             </div>
           );
         })}
       </div>
-    </div>
+      <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-border text-sm">
+        <span className="text-text-secondary">
+          Week · {rows.filter((r) => !r.isDayOff).length} working day{rows.filter((r) => !r.isDayOff).length === 1 ? '' : 's'}
+        </span>
+        <span className="font-data font-medium text-text-primary">{formatMinutes(weekWorkingMinutes(rows))}</span>
+      </div>
+    </fieldset>
   );
 };
 

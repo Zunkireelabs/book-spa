@@ -1,18 +1,17 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
-import StaffSidebar from '../../components/ui/StaffSidebar';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLock } from '../../contexts/LockContext';
 import { useBranch } from '../../contexts/BranchContext';
-import { useOrg } from '../../contexts/OrgContext';
-import BranchSwitcher from '../../components/ui/BranchSwitcher';
-import NotificationBell from '../../components/ui/NotificationBell';
+import AppShell from '../../components/ui/AppShell';
 import { fetchBookings, fetchTherapists, updateBookingStatus, fetchPendingDiscounts } from '../../services/api';
 import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
 import { supabase } from '../../lib/supabase';
-import { usePersistentNotifications } from '../../hooks/usePersistentNotifications';
+import { useNotifications } from '../../contexts/NotificationsContext';
+import { useOrg } from '../../contexts/OrgContext';
 
 // Import all components
 import MetricsCard from './components/MetricsCard';
@@ -23,18 +22,21 @@ import RevenueAnalyticsChart from './components/RevenueAnalyticsChart';
 import DailyOperationalReportPanel from './components/DailyOperationalReportPanel';
 import OperationalCalendar from './components/calendar';
 import RoomManagementPanel from './components/MasterData/RoomManagementPanel';
-import TherapistManagementPanel from './components/MasterData/TherapistManagementPanel';
+import TherapistsPage from './components/MasterData/TherapistsPage';
 import ServiceManagementPanel from './components/MasterData/ServiceManagementPanel';
 import CategoryManagementPanel from './components/MasterData/CategoryManagementPanel';
 import PaymentMethodsPanel from './components/MasterData/PaymentMethodsPanel';
 import BookingSettingsPanel from './components/MasterData/BookingSettingsPanel';
 import CalendarSettingsPanel from './components/MasterData/CalendarSettingsPanel';
-import RosterPanel from './components/MasterData/RosterPanel';
 import ClosedDatesPanel from './components/MasterData/ClosedDatesPanel';
+import AttendanceSettingsPanel from './components/MasterData/AttendanceSettingsPanel';
+import ProviderProfilePanel from './components/MasterData/ProviderProfilePanel';
 import OnlineBookingCapacityPanel from './components/MasterData/OnlineBookingCapacityPanel';
 import AdvanceBookingWindowPanel from './components/MasterData/AdvanceBookingWindowPanel';
-import ProviderProfilePanel from './components/MasterData/ProviderProfilePanel';
 import LocationsPanel from './components/MasterData/LocationsPanel';
+import BillingSettingsPanel from './components/MasterData/BillingSettingsPanel';
+import PriceTiersPanel from './components/MasterData/PriceTiersPanel';
+import NotificationSettingsContent from '../inbox/NotificationSettingsPanel';
 import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
 import BookingsViewPanel from './components/BookingsViewPanel';
@@ -52,9 +54,15 @@ import StatusLegend from '../../components/ui/StatusLegend';
 import PendingDiscountsPanel from './components/PendingDiscountsPanel';
 import DiscountsPanel from './components/DiscountsPanel';
 import AttendanceReportPanel from './components/AttendanceReportPanel';
+import BranchPending from './components/Area/BranchPending';
+import AreaTabs from './components/Area/AreaTabs';
+import { getAreaForView } from './components/Area/areaTabsRegistry';
+import SettingsLayout from './components/Settings/SettingsLayout';
+import { isSettingsView } from './components/Settings/settingsRegistry';
+import ReportsLayout from './components/Reports/ReportsLayout';
+import { isReportView } from './components/Reports/reportRegistry';
+import AttendanceCalendarPage from 'pages/attendance-calendar';
 import TransferReportPanel from './components/TransferReportPanel';
-import OutstandingReportPanel from './components/Outstanding/OutstandingReportPanel';
-import DueReportPanel from './components/Outstanding/DueReportPanel';
 import ReferralsReportPanel from './components/Referrals/ReferralsReportPanel';
 import CustomerReferralsReportPanel from './components/Referrals/CustomerReferralsReportPanel';
 import ReferralWalletPanel from './components/Referrals/ReferralWalletPanel';
@@ -62,79 +70,65 @@ import RewardCatalogPanel from './components/Referrals/RewardCatalogPanel';
 import ServiceRevenueReportPanel from './components/ServiceRevenueReportPanel';
 import CategoryRevenueReportPanel from './components/CategoryRevenueReportPanel';
 import PayrollPanel from './components/Payroll/PayrollPanel';
-import MembershipsPanel from './components/Memberships/MembershipsPanel';
+import MembershipsPage from './components/Memberships/MembershipsPage';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED, PRODUCTS_ENABLED, CAMPAIGNS_ENABLED } from '../../lib/featureFlags';
-import ProductsPanel from './components/Products/ProductsPanel';
+import ProductsPage from './components/Products/ProductsPage';
 import CampaignsPanel from './components/Campaigns/CampaignsPanel';
-import MembershipCollectionPanel from './components/Memberships/MembershipCollectionPanel';
-import WalletUsagePanel from './components/Memberships/WalletUsagePanel';
-import VoucherListPanel from './components/Vouchers/VoucherListPanel';
-import VoucherOverviewPanel from './components/Vouchers/VoucherOverviewPanel';
-import PackageListPanel from './components/Packages/PackageListPanel';
-import PackageOverviewPanel from './components/Packages/PackageOverviewPanel';
-import OutreachPanel from './components/Outreach/OutreachPanel';
-import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
+import VouchersPage from './components/Vouchers/VouchersPage';
+import PackagesPage from './components/Packages/PackagesPage';
+import RulesEditorPanel from './components/Outreach/RulesEditorPanel';
+import TemplateEditorPanel from './components/Outreach/TemplateEditorPanel';
+import ReviewQueuePanel from './components/Outreach/ReviewQueuePanel';
+import MessageLogPanel from './components/Outreach/MessageLogPanel';
+import ProviderSettingsPanel from './components/Outreach/ProviderSettingsPanel';
 import CheckBookingPanel from '../branch-staff-dashboard/components/CheckBookingPanel';
+import CollectPaymentPanel from '../branch-staff-dashboard/components/CollectPaymentPanel';
+import EnrollMemberPanel from './components/Memberships/EnrollMemberPanel';
+import NewVoucherPanel from './components/Vouchers/NewVoucherPanel';
+import DashboardHome from '../dashboard-home';
 import { AIAssistantPanel } from '../../components/ui/AIAssistant';
 import { useAIAssistant } from '../../contexts/AIAssistantContext';
+import { wordBranch, wordBranchCap } from '../../utils/industryTerms';
 
 // Views that render org-wide data and therefore hide the branch switcher —
 // see the comment at its render site for why each one qualifies.
 const ORG_WIDE_VIEWS = new Set(['customers', 'transfer-report']);
 
 const BranchManagerDashboard = () => {
-  const { profile, signOut, user } = useAuth();
-  const { branchId, branchName, isOverall } = useBranch();
-  // Gates the online-booking-limit panel: the cap only bites when customers DON'T pick a
-  // staff member (check_branch_online_capacity() exempts bookings with a therapist_id).
-  // orgLoading matters because settings are null until the org loads — rendering on that
-  // would briefly show the panel to orgs that have staff selection on.
+  const { profile, user } = useAuth();
+  // Gates the online-booking-limit panel: the cap only bites when customers DON'T pick a staff member (check_branch_online_capacity()
+  // exempts bookings with a therapist_id). orgLoading matters because settings are null until the org loads.
   const { showStaffSelection, loading: orgLoading, orgId } = useOrg();
-  const { items: persistentNotifs, markRead: markPersistentRead, markAllRead: markAllPersistentRead } = usePersistentNotifications(user?.id);
+  const { branchId, branchName, isOverall, loading: branchLoading } = useBranch();
+  const { items: persistentNotifs, openItem: openNotificationItem, markAllRead: markAllPersistentRead } = useNotifications();
   const { isOpen: isAssistantOpen, toggleAssistant } = useAIAssistant();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const profileDropdownRef = useRef(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [currentTime, setCurrentTime] = useState(new Date());
   const [period, setPeriodState] = useState(() => ({ key: 'daily', from: getTodayISO(), to: getTodayISO() }));
   const todayDateStr = getTodayISO();
   const setPeriod = setPeriodState;
   const viewMode = searchParams.get('view') || 'dashboard';
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newBookingNotification, setNewBookingNotification] = useState(null);
+  const [actionSuccess, setActionSuccess] = useState(null);
+  const showSuccess = (msg) => {
+    setActionSuccess(msg);
+    setTimeout(() => setActionSuccess(null), 3000);
+  };
   const [notifications, setNotifications] = useState([]);
   const [discountNotifs, setDiscountNotifs] = useState([]);
   const [readDiscountIds, setReadDiscountIds] = useState(() => new Set());
-  const [realtimeStatus, setRealtimeStatus] = useState('connecting'); // 'connecting' | 'connected' | 'disconnected'
-  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [realtimeStatus, setRealtimeStatus] = useState('connecting'); // 'connecting' | 'connected' | 'disconnected' | 'idle' (no subscription, e.g. Overall)
 
   const managerData = {
     name: profile?.full_name || 'Manager',
-    role: profile?.role === 'admin' ? 'Admin' : 'Branch Manager',
+    role: profile?.role === 'admin' ? 'Admin' : `${wordBranchCap()} Manager`,
     branch: branchName || profile?.branches?.name || '',
     avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150',
     email: profile?.email || ''
-  };
-
-  // Handle click outside profile dropdown
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target)) {
-        setShowProfileDropdown(false);
-      }
-    };
-    if (showProfileDropdown) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showProfileDropdown]);
-
-  const handleLogout = async () => {
-    setShowProfileDropdown(false);
-    await signOut();
   };
 
   // Load live data
@@ -182,8 +176,13 @@ const BranchManagerDashboard = () => {
 
   // Real-time subscription for booking changes
   useEffect(() => {
-    // Overall is a read-only org-wide aggregate — no single branch to subscribe to.
-    if (!branchId || isOverall) return;
+    // Overall is a read-only org-wide aggregate — no single branch to subscribe to. Nothing is
+    // subscribed there, so report 'idle' (the header shows no status) rather than a stale 'disconnected'
+    // left by the previous branch's channel closing.
+    if (isOverall) { setRealtimeStatus('idle'); return; }
+    if (!branchId) return;
+    let active = true;
+    setRealtimeStatus('connecting');
 
     const handleRealtimeUpdate = (payload) => {
       // Small delay to ensure DB triggers (booking_number generation, end_time calculation) complete
@@ -196,8 +195,9 @@ const BranchManagerDashboard = () => {
           const today = new Date().toISOString().split('T')[0];
           const isToday = newBooking.date === today;
 
-          // Add every new booking to the header notification feed (deduped by id)
-          setNotifications((prev) =>
+          // Add every new booking to the header notification feed (deduped by id). Online bookings (created_by IS NULL) already
+          // arrive as a persisted new_online_booking notification (migration-335), so they are not added a second time here.
+          if (newBooking.created_by != null) setNotifications((prev) =>
             prev.some((n) => n.id === newBooking.id)
               ? prev
               : [
@@ -213,7 +213,8 @@ const BranchManagerDashboard = () => {
                 ].slice(0, 30)
           );
 
-          if (!isToday && newBooking.date) {
+          // Online bookings (created_by IS NULL) get the NotificationsProvider pop-up card instead.
+          if (!isToday && newBooking.date && newBooking.created_by != null) {
             const bookingDate = new Date(newBooking.date);
             const formattedDate = bookingDate.toLocaleDateString('en-GB', {
               weekday: 'short',
@@ -243,6 +244,8 @@ const BranchManagerDashboard = () => {
         filter: `branch_id=eq.${branchId}`
       }, handleRealtimeUpdate)
       .subscribe((status) => {
+        // Ignore callbacks from a channel this effect has already torn down (its CLOSED must not read as offline).
+        if (!active) return;
         if (status === 'SUBSCRIBED') {
           setRealtimeStatus('connected');
         } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
@@ -250,8 +253,15 @@ const BranchManagerDashboard = () => {
         }
       });
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { active = false; supabase.removeChannel(channel); };
   }, [branchId, isOverall, loadData]);
+
+  // The old single Outreach page: its tabs are now URL tabs, so old links land on Rules.
+  useEffect(() => {
+    if (viewMode === 'outreach') navigate('?view=outreach-rules', { replace: true });
+    // V23: the old "All vouchers" overview is now the Vouchers tab.
+    if (viewMode === 'voucher-overview') navigate('?view=vouchers', { replace: true });
+  }, [viewMode, navigate]);
 
   // Overall is read-only: redirect away from booking-creation / per-branch write views.
   useEffect(() => {
@@ -343,9 +353,8 @@ const BranchManagerDashboard = () => {
       navigate(`?view=dashboard&highlight=${n.bookingId}`);
       return;
     }
-    if (n.type === 'discount_approved' || n.type === 'discount_declined') {
-      markPersistentRead(n.id);
-      navigate('?view=bookings');
+    if (n.type === 'new_online_booking' || n.type === 'discount_approved' || n.type === 'discount_declined') {
+      openNotificationItem(n); // marks read; opens the booking, or the Inbox when the booking is gone
       return;
     }
     setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
@@ -360,69 +369,9 @@ const BranchManagerDashboard = () => {
     }
   };
 
-  const renderDashboardView = () => (
-    <div className="space-y-3 sm:space-y-4 lg:space-y-6">
-      {/* Revenue Intelligence Cards */}
-      <RevenueCards branchId={branchId} period={period} />
-
-      {/* Today's Insights - sales by payment method, membership/voucher activity, staff utilization */}
-      <TodayInsightsPanel branchId={branchId} period={period} showProducts={PRODUCTS_ENABLED} />
-
-      {/* Utilization & Capacity Intelligence */}
-      <UtilizationPanel branchId={branchId} period={period} />
-
-      {/* Risk Indicators */}
-      <RiskIndicatorsPanel branchId={branchId} date={period.to} />
-
-      {/* Pending Discount Approvals */}
-      <PendingDiscountsPanel branchId={branchId} highlightBookingId={searchParams.get('highlight')} />
-
-      {/* Key Metrics Row - Responsive grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4">
-        {loading ? (
-          <div className="col-span-2 lg:col-span-4 text-center py-6 sm:py-8">
-            <div className="animate-spin w-6 h-6 sm:w-8 sm:h-8 border-2 border-blue-600 border-t-transparent rounded-full mx-auto mb-2 sm:mb-3" />
-            <p className="text-xs sm:text-sm text-gray-500">Loading metrics...</p>
-          </div>
-        ) : (
-          metricsData.map((metric, index) => (
-            <MetricsCard
-              key={index}
-              title={metric.title}
-              value={metric.value}
-              change={metric.change}
-              changeType={metric.changeType}
-              icon={metric.icon}
-              currency={metric.currency}
-            />
-          ))
-        )}
-      </div>
-
-      {/* Status Legend - Hide on mobile, show on sm+ */}
-      <div className="hidden sm:block bg-white border border-gray-200 rounded-lg px-3 sm:px-4 py-2 sm:py-2.5">
-        <StatusLegend showPayment />
-      </div>
-
-      {/* Tips — not revenue, kept visually separate, directly above Top Performers */}
-      <TipsSummaryCard branchId={branchId} userRole={profile?.role} />
-
-      {/* Main Dashboard Grid - Responsive: 1 col mobile, 2 cols tablet+ */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 lg:gap-6">
-        <TherapistUtilizationChart branchId={branchId} period={period} />
-        <BookingPipelineChart branchId={branchId} period={period} />
-        <TopPerformersCard branchId={branchId} period={period} />
-        <RealtimeBookingFeed
-          bookings={bookings}
-          branchId={branchId}
-          onQuickStatusUpdate={handleQuickStatusUpdate}
-        />
-      </div>
-
-      {/* Revenue Analytics */}
-      <RevenueAnalyticsChart branchId={branchId} period={period} />
-    </div>
-  );
+  // V36a: the old widget stack is retired; DashboardHome owns the dashboard (the widgets stay in the repo for Reports).
+  // V36c: the Branch view carries its own Needs action (incl. pending discounts + the ?highlight= deep link).
+  const renderDashboardView = () => <DashboardHome />;
 
   const renderCalendarView = () => (
     <OperationalCalendar branchId={branchId} />
@@ -432,199 +381,154 @@ const BranchManagerDashboard = () => {
     <DailyOperationalReportPanel branchId={branchId} />
   );
 
-  const renderInfrastructureView = () => (
-    <div className="space-y-8">
-      <RoomManagementPanel branchId={branchId} />
-      <TherapistManagementPanel branchId={branchId} />
-      {profile?.role === 'admin' && <ServiceManagementPanel />}
-    </div>
-  );
+  // The Reports area: the layout frames each report; the panels themselves are unchanged and keep their own guards.
+  const isReportsView = isReportView(viewMode);
+  const renderReportView = (view) => {
+    if (branchLoading) return <BranchPending />; // panels need the resolved branch
+    switch (view) {
+      case 'reports': return renderReportsView();
+      case 'service-revenue': return <ServiceRevenueReportPanel branchId={branchId} />;
+      case 'category-revenue': return <CategoryRevenueReportPanel branchId={branchId} />;
+      case 'discounts': return <DiscountsPanel branchId={branchId} />;
+      case 'performance': return <TherapistPerformancePanel branchId={branchId} />;
+      case 'attendance-report': return <AttendanceReportPanel branchId={branchId} />;
+      case 'attendance-calendar': return <AttendanceCalendarPage embedded />;
+      case 'transfer-report': return <TransferReportPanel />;
+      case 'referrals': return <ReferralsReportPanel branchId={branchId} />;
+      case 'customer-referrals': return CUSTOMER_REFERRALS_ENABLED ? <CustomerReferralsReportPanel branchId={branchId} /> : null;
+      case 'referral-wallet': return CUSTOMER_REFERRALS_ENABLED ? <ReferralWalletPanel branchId={branchId} /> : null;
+      default: return null;
+    }
+  };
+
+  // Tabbed areas (Bookings, Packages, plus flagged Memberships / Vouchers) and single pages (Therapists, Attendance, Payroll): each tab
+  // is an existing view; the panels keep their own role / Overall guards.
+  const areaForView = getAreaForView(viewMode);
+  const renderAreaView = (view) => {
+    if (branchLoading) return <BranchPending />; // panels need the resolved branch
+    const salesReadOnly = profile?.role === 'admin_viewer'; // #411 access is view-only
+    const salesViewer = ['manager', 'admin', 'admin_viewer'].includes(profile?.role); // #411: admin_viewer can open Packages / Memberships / Vouchers
+    const frontDesk = ['manager', 'admin'].includes(profile?.role);
+    // Panel is the second child so switching between the sell tabs doesn't remount (refetch + flash) the bookings list
+    const withBookingsList = (overlay) => (<><BookingsViewPanel key="bookings-list" branchId={branchId} />{overlay}</>);
+    const outreachAdmin = OUTREACH_ENABLED && profile?.role === 'admin';
+    switch (view) {
+      case 'bookings': return withBookingsList(null);
+      case 'new-booking': return !isOverall ? withBookingsList(null) : null; // the New booking panel opens over the list (BookingsViewPanel reads ?view=new-booking)
+      case 'check-booking': return !isOverall ? <CheckBookingPanel branchId={branchId} /> : null;
+      // Front-desk tools (ZNLY-149): manager and admin sell and collect too; admin_viewer stays read-only.
+      case 'collect-payment': return frontDesk && !isOverall ? <CollectPaymentPanel onSuccess={showSuccess} /> : null;
+      case 'new-membership':
+        return MEMBERSHIP_ENABLED && frontDesk && !isOverall ? withBookingsList(
+          <EnrollMemberPanel
+            onClose={() => setSearchParams({ view: 'bookings' })}
+            onEnrolled={(id, info) => {
+              setSearchParams({ view: 'bookings' });
+              showSuccess(info.message || 'Membership created.');
+            }}
+          />,
+        ) : null;
+      case 'new-voucher':
+        return VOUCHER_ENABLED && frontDesk && !isOverall ? withBookingsList(
+          <NewVoucherPanel
+            userRole={profile?.role}
+            onClose={() => setSearchParams({ view: 'bookings' })}
+            onIssued={() => {
+              setSearchParams({ view: 'bookings' });
+              showSuccess('Voucher issued.');
+            }}
+          />,
+        ) : null;
+      case 'therapists':
+      case 'therapists-inactive':
+      case 'therapists-positions':
+      case 'therapists-transfers':
+      case 'roster': return <TherapistsPage view={view} />;
+      case 'attendance': return !isOverall ? <AttendancePanel branchId={branchId} /> : null;
+      case 'payroll': return ['admin', 'admin_viewer'].includes(profile?.role) ? <PayrollPanel branchId={branchId} isOverall={isOverall} readOnly={profile?.role === 'admin_viewer'} /> : null;
+      case 'package-overview':
+      case 'packages': return salesViewer ? <PackagesPage view={view} branchId={branchId} readOnly={salesReadOnly} /> : null;
+      case 'memberships':
+      case 'membership-collection':
+      case 'wallet-usage': return MEMBERSHIP_ENABLED && salesViewer ? <MembershipsPage view={view} branchId={branchId} readOnly={salesReadOnly} /> : null;
+      case 'outreach-rules': return outreachAdmin ? <RulesEditorPanel /> : null;
+      case 'outreach-templates': return outreachAdmin ? <TemplateEditorPanel /> : null;
+      case 'outreach-review': return outreachAdmin ? <ReviewQueuePanel /> : null;
+      case 'outreach-log': return outreachAdmin ? <MessageLogPanel /> : null;
+      case 'outreach-settings': return outreachAdmin ? <ProviderSettingsPanel /> : null;
+      case 'vouchers':
+      case 'voucher-types':
+      case 'voucher-activity': return VOUCHER_ENABLED && salesViewer ? <VouchersPage view={view} branchId={branchId} readOnly={salesReadOnly} /> : null;
+      case 'products':
+      case 'stock-history':
+      case 'suppliers':
+      case 'product-categories': return PRODUCTS_ENABLED ? <ProductsPage view={view} readOnly={salesReadOnly} /> : null;
+      default: return null;
+    }
+  };
+
+  // The Settings area: same idea as Reports; the layout enforces role / Overall visibility.
+  const isSettingsViewActive = isSettingsView(viewMode);
+  const renderSettingView = (view) => {
+    if (branchLoading) return <BranchPending />; // panels need the resolved branch
+    switch (view) {
+      case 'rooms': return <RoomManagementPanel branchId={branchId} />;
+      case 'services': return <ServiceManagementPanel />;
+      case 'categories': return <CategoryManagementPanel />;
+      case 'payment-methods': return <PaymentMethodsPanel />;
+      case 'reward-catalog': return <RewardCatalogPanel />;
+      case 'booking-settings': return (
+        <div className="space-y-8">
+          <BookingSettingsPanel />
+          {!isOverall && !orgLoading ? (
+            <>
+              {!showStaffSelection && (
+                <div className="border-t border-border pt-8"><OnlineBookingCapacityPanel branchId={branchId} /></div>
+              )}
+              <div className="border-t border-border pt-8"><AdvanceBookingWindowPanel branchId={branchId} /></div>
+            </>
+          ) : (
+            <div className="border-t border-border pt-8 font-body text-sm text-text-secondary">
+              Select a specific {wordBranch()} to configure the online booking limit and advance booking window.
+            </div>
+          )}
+        </div>
+      );
+      case 'locations': return profile?.role === 'admin' ? <LocationsPanel orgId={orgId} /> : null;
+      case 'billing': return profile?.role === 'admin' ? <BillingSettingsPanel /> : null;
+      case 'price-tiers': return !isOverall && ['manager', 'admin', 'admin_viewer'].includes(profile?.role) ? <PriceTiersPanel readOnly={profile?.role === 'admin_viewer'} /> : null;
+      case 'calendar-settings': return profile?.role === 'admin' ? <CalendarSettingsPanel /> : null;
+      case 'attendance-settings': return !isOverall && ['admin', 'manager'].includes(profile?.role) ? <AttendanceSettingsPanel branchId={branchId} /> : null;
+      case 'closed-dates': return !isOverall && profile?.role === 'admin' ? <ClosedDatesPanel branchId={branchId} /> : null;
+      case 'provider-profile': return <ProviderProfilePanel />;
+      case 'notifications': return <NotificationSettingsContent />;
+      case 'audit': return <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />;
+      default: return null;
+    }
+  };
 
   return (
     <>
       <Helmet>
-        <title>Branch Manager Dashboard - Zennly</title>
-        <meta name="description" content="Comprehensive branch management dashboard for Zennly managers with analytics, staff oversight, and operational controls." />
+        <title>{`${wordBranchCap()} Manager Dashboard - Zennly`}</title>
+        <meta name="description" content={`Comprehensive ${wordBranch()} management dashboard for Zennly managers with analytics, staff oversight, and operational controls.`} />
       </Helmet>
 
-      <div className="min-h-screen bg-surface-sidebar">
-        <StaffSidebar
-          userRole="manager"
-          userName={managerData.name}
-          branchName={managerData.branch}
-          onCollapseChange={setSidebarCollapsed}
-          collapsed={sidebarCollapsed}
-        />
-
-        <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} transition-all duration-200 ${viewMode === 'calendar' ? 'h-screen overflow-hidden flex flex-col' : 'pb-20 lg:pb-0'}`}>
-          {/* Header */}
-          <header className="bg-surface-sidebar sticky top-0 z-header flex-shrink-0">
-            <div className="px-4 sm:px-6 lg:px-8 py-3">
-              <div className="flex items-center justify-between">
-                {/* Left: Branch name + date/time */}
-                <div className="flex items-center space-x-3 min-w-0">
-                  {/* Views whose data is org-wide by design, where the branch switcher
-                      would imply a filter that does not exist:
-                        customers       — getCustomerIntelligence is org-scoped (2bda696f),
-                                          so a customer who first visited another branch
-                                          isn't invisible; branchId only resolves the org.
-                        transfer-report — TransferReportPanel takes no branchId and makes
-                                          no branch reference at all.
-                      Everything else here genuinely filters by branch (including
-                      ProductsPanel, which reads it from BranchContext rather than a prop),
-                      so the control stays. Selection lives in BranchContext — hiding the
-                      control doesn't change it, and it reappears intact elsewhere. */}
-                  {!ORG_WIDE_VIEWS.has(viewMode) && <BranchSwitcher />}
-                  {viewMode === 'dashboard' && (
-                    <PeriodFilter value={period} onChange={setPeriod} />
-                  )}
-                  <div className="hidden sm:block h-5 w-px bg-border"></div>
-                  <p className="hidden sm:block font-caption font-caption-normal text-xs text-text-secondary">
-                    {currentTime.toLocaleDateString('en-GB', {
-                      weekday: 'short',
-                      day: 'numeric',
-                      month: 'short'
-                    })} {'\u00B7'} {currentTime.toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })}
-                  </p>
-                </div>
-
-                {/* Right: Real-time status + Role badge + New Booking + Profile */}
-                <div className="flex items-center space-x-3 flex-shrink-0 ml-3">
-                  {/* Real-time Status Indicator */}
-                  <div
-                    className="hidden sm:flex items-center space-x-1.5 px-2 py-1 rounded-full bg-background border border-border"
-                    title={`Real-time: ${realtimeStatus === 'connected' ? 'Live' : realtimeStatus === 'connecting' ? 'Connecting' : 'Offline'}`}
-                  >
-                    <span className="relative flex h-2 w-2">
-                      {realtimeStatus === 'connected' && (
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
-                      )}
-                      <span className={`relative inline-flex rounded-full h-2 w-2 ${
-                        realtimeStatus === 'connected' ? 'bg-success' :
-                        realtimeStatus === 'connecting' ? 'bg-warning' : 'bg-error'
-                      }`}></span>
-                    </span>
-                    <span className="text-xs font-caption font-caption-medium text-text-secondary">
-                      {realtimeStatus === 'connected' ? 'Live' : realtimeStatus === 'connecting' ? 'Connecting' : 'Offline'}
-                    </span>
-                  </div>
-
-                  <span className={`hidden sm:inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal capitalize ${
-                    profile?.role === 'admin'
-                      ? 'bg-pink-100 text-pink-700'
-                      : 'bg-accent/10 text-accent'
-                  }`}>
-                    {profile?.role === 'admin' ? 'Admin' : managerData.role}
-                  </span>
-
-                  {/* AI Assistant Button */}
-                  <button
-                    onClick={toggleAssistant}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-all ${
-                      isAssistantOpen
-                        ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-md'
-                        : 'hover:bg-gray-100 text-gray-700'
-                    }`}
-                  >
-                    <Icon name="Sparkles" size={16} className={isAssistantOpen ? 'text-white' : 'text-purple-500'} />
-                    <span className="text-sm font-medium hidden sm:inline">Assistant</span>
-                  </button>
-
-                  {/* Notifications */}
-                  <NotificationBell
-                    notifications={feedNotifications}
-                    unreadCount={unreadNotifications}
-                    onMarkAllRead={markAllNotificationsRead}
-                    onItemClick={handleNotificationClick}
-                  />
-
-                  {/* Profile Dropdown */}
-                  <div className="relative" ref={profileDropdownRef}>
-                    <button
-                      onClick={() => setShowProfileDropdown(!showProfileDropdown)}
-                      className="flex items-center space-x-2 px-2 py-1 rounded-spa hover:bg-background spa-transition-fast"
-                    >
-                      <div className="w-8 h-8 rounded-full overflow-hidden bg-primary/10 flex-shrink-0">
-                        <img
-                          src={managerData.avatar}
-                          alt={managerData.name}
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            e.target.src = '/assets/images/no_image.png';
-                          }}
-                        />
-                      </div>
-                      <div className="hidden md:flex flex-col">
-                        <span className="font-body font-body-medium text-sm text-text-primary leading-tight">
-                          {managerData.name}
-                        </span>
-                        <span className="font-caption font-caption-normal text-xs text-text-secondary capitalize leading-tight">
-                          {profile?.role || 'manager'}
-                        </span>
-                      </div>
-                      <Icon name="ChevronDown" size={16} className={`text-gray-400 transition-transform ${showProfileDropdown ? 'rotate-180' : ''}`} />
-                    </button>
-
-                    {/* Dropdown Menu */}
-                    {showProfileDropdown && (
-                      <div className="absolute right-0 top-full mt-3 w-64 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-dropdown">
-                        {/* User Info Section */}
-                        <div className="px-4 py-3 border-b border-gray-100">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full overflow-hidden bg-primary/10 flex-shrink-0">
-                              <img
-                                src={managerData.avatar}
-                                alt={managerData.name}
-                                className="w-full h-full object-cover"
-                                onError={(e) => {
-                                  e.target.src = '/assets/images/no_image.png';
-                                }}
-                              />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-semibold text-gray-900 truncate">{managerData.name}</p>
-                              {managerData.email && <p className="text-xs text-gray-500 truncate">{managerData.email}</p>}
-                              <span className={`inline-block mt-1 text-xs px-2 py-0.5 rounded-full font-medium capitalize ${
-                                profile?.role === 'admin'
-                                  ? 'bg-pink-100 text-pink-700'
-                                  : 'bg-blue-100 text-blue-700'
-                              }`}>
-                                {profile?.role || 'manager'}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Settings */}
-                        <button
-                          onClick={() => setShowProfileDropdown(false)}
-                          className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                        >
-                          <Icon name="Settings" size={16} className="text-gray-500" />
-                          <span>Settings</span>
-                        </button>
-
-                        {/* Logout */}
-                        <button
-                          onClick={handleLogout}
-                          className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
-                        >
-                          <Icon name="LogOut" size={16} />
-                          <span>Logout</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </header>
-
-          {/* Closed Day Banner */}
-          {viewMode === 'dashboard' && !loading && bookings.length > 0 && bookings.some(b => b.isLocked) && (
+      <AppShell
+        variant={viewMode === 'calendar' || isReportsView || isSettingsViewActive || areaForView ? 'fill' : 'page'}
+        sidebar={{ userRole: 'manager', userName: managerData.name, branchName: managerData.branch }}
+        header={{
+          realtimeStatus,
+          leftExtra: null, // the dashboard is always today, so no period picker
+          onToggleAssistant: toggleAssistant,
+          assistantOpen: isAssistantOpen,
+          notifications: feedNotifications,
+          unreadCount: unreadNotifications,
+          onMarkAllRead: markAllNotificationsRead,
+          onItemClick: handleNotificationClick,
+        }}
+        banner={
+          viewMode === 'dashboard' && !loading && bookings.length > 0 && bookings.some(b => b.isLocked) && (
             <div className="bg-amber-50 border-b border-amber-200 px-4 sm:px-6 lg:px-8 py-2">
               <div className="flex items-center space-x-2 text-amber-700">
                 <Icon name="Lock" size={16} />
@@ -633,11 +537,15 @@ const BranchManagerDashboard = () => {
                 </span>
               </div>
             </div>
-          )}
-
-          {/* New Booking Notification Toast - Responsive positioning */}
-          {newBookingNotification && (
-            <div className="fixed top-16 sm:top-20 left-4 right-4 sm:left-auto sm:right-6 z-toast bg-primary text-white px-4 sm:px-5 py-3 rounded-lg shadow-lg animate-fade-in sm:max-w-sm">
+          )
+        }
+        floating={
+          actionSuccess ? (
+            <div className="fixed toast-top left-4 right-4 sm:left-1/2 sm:right-auto sm:transform sm:-translate-x-1/2 z-toast bg-success text-white px-4 sm:px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in">
+              <span className="font-body font-body-medium text-sm">{actionSuccess}</span>
+            </div>
+          ) : newBookingNotification && (
+            <div className="fixed toast-top left-4 right-4 sm:left-auto sm:right-6 z-toast bg-primary text-white px-4 sm:px-5 py-3 rounded-lg shadow-lg animate-fade-in sm:max-w-sm">
               <div className="flex items-start space-x-3">
                 <div className="flex-shrink-0 mt-0.5">
                   <Icon name="CalendarPlus" size={20} />
@@ -667,82 +575,19 @@ const BranchManagerDashboard = () => {
                 </div>
               </div>
             </div>
-          )}
-
-          {/* Main Content Area with AI Assistant */}
-          <div className={`relative z-0 flex gap-2 sm:gap-3 ${viewMode === 'calendar' ? 'flex-1 min-h-0 overflow-hidden' : 'min-h-[calc(100vh-52px)]'}`}>
-            <main className={`flex-1 min-w-0 ${viewMode === 'calendar' ? 'px-0 py-0' : 'px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4'} bg-surface-dim`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
-              {viewMode === 'dashboard' && renderDashboardView()}
-              {viewMode === 'bookings' && <BookingsViewPanel branchId={branchId} />}
-              {viewMode === 'calendar' && renderCalendarView()}
-              {viewMode === 'reports' && renderReportsView()}
-              {viewMode === 'customers' && <CustomersPanel branchId={branchId} readOnly={isOverall} />}
-              {viewMode === 'attendance' && !isOverall && <AttendancePanel branchId={branchId} />}
-              {viewMode === 'performance' && <TherapistPerformancePanel branchId={branchId} />}
-              {viewMode === 'discounts' && <DiscountsPanel branchId={branchId} />}
-              {viewMode === 'attendance-report' && <AttendanceReportPanel branchId={branchId} />}
-              {viewMode === 'transfer-report' && <TransferReportPanel />}
-              {viewMode === 'outstanding' && <OutstandingReportPanel branchId={branchId} />}
-              {viewMode === 'due-report' && profile?.role === 'admin' && <DueReportPanel />}
-              {viewMode === 'referrals' && <ReferralsReportPanel branchId={branchId} />}
-              {viewMode === 'customer-referrals' && CUSTOMER_REFERRALS_ENABLED && <CustomerReferralsReportPanel branchId={branchId} />}
-              {viewMode === 'referral-wallet' && CUSTOMER_REFERRALS_ENABLED && <ReferralWalletPanel branchId={branchId} />}
-              {viewMode === 'reward-catalog' && CUSTOMER_REFERRALS_ENABLED && ['manager', 'admin'].includes(profile?.role) && <RewardCatalogPanel />}
-              {viewMode === 'service-revenue' && <ServiceRevenueReportPanel branchId={branchId} />}
-              {viewMode === 'category-revenue' && <CategoryRevenueReportPanel branchId={branchId} />}
-              {viewMode === 'payroll' && profile?.role === 'admin' && <PayrollPanel branchId={branchId} isOverall={isOverall} />}
-              {PRODUCTS_ENABLED && viewMode === 'products' && <ProductsPanel />}
-              {MEMBERSHIP_ENABLED && viewMode === 'memberships' && ['manager','admin','admin_viewer'].includes(profile?.role) && <MembershipsPanel branchId={branchId} />}
-              {MEMBERSHIP_ENABLED && viewMode === 'membership-collection' && ['manager','admin','admin_viewer'].includes(profile?.role) && <MembershipCollectionPanel />}
-              {MEMBERSHIP_ENABLED && viewMode === 'wallet-usage' && ['manager','admin','admin_viewer'].includes(profile?.role) && <WalletUsagePanel />}
-              {VOUCHER_ENABLED && viewMode === 'voucher-overview' && ['manager','admin','admin_viewer'].includes(profile?.role) && <VoucherOverviewPanel />}
-              {VOUCHER_ENABLED && viewMode === 'vouchers' && ['manager','admin','admin_viewer'].includes(profile?.role) && <VoucherListPanel />}
-              {viewMode === 'package-overview' && ['manager','admin','admin_viewer'].includes(profile?.role) && <PackageOverviewPanel />}
-              {viewMode === 'packages' && ['manager','admin','admin_viewer'].includes(profile?.role) && <PackageListPanel />}
-              {OUTREACH_ENABLED && viewMode === 'outreach' && profile?.role === 'admin' && <OutreachPanel />}
-              {CAMPAIGNS_ENABLED && viewMode === 'campaigns' && ['manager','admin'].includes(profile?.role) && <CampaignsPanel />}
-              {viewMode === 'infrastructure' && renderInfrastructureView()}
-              {viewMode === 'rooms' && !isOverall && <RoomManagementPanel branchId={branchId} />}
-              {viewMode === 'services' && !isOverall && <ServiceManagementPanel />}
-              {viewMode === 'categories' && !isOverall && <CategoryManagementPanel />}
-              {viewMode === 'payment-methods' && profile?.role === 'admin' && <PaymentMethodsPanel />}
-              {viewMode === 'booking-settings' && profile?.role === 'admin' && (
-                <div className="space-y-8">
-                  <BookingSettingsPanel />
-                  {!isOverall && !orgLoading ? (
-                    <>
-                      {!showStaffSelection && (
-                        <div className="border-t border-border pt-8">
-                          <OnlineBookingCapacityPanel branchId={branchId} />
-                        </div>
-                      )}
-                      <div className="border-t border-border pt-8">
-                        <AdvanceBookingWindowPanel branchId={branchId} />
-                      </div>
-                    </>
-                  ) : (
-                    <div className="border-t border-border pt-8 font-body text-sm text-text-secondary">
-                      Select a specific branch to configure the online booking limit and advance booking window.
-                    </div>
-                  )}
-                </div>
-              )}
-              {viewMode === 'calendar-settings' && profile?.role === 'admin' && <CalendarSettingsPanel />}
-              {viewMode === 'provider-profile' && profile?.role === 'admin' && <ProviderProfilePanel />}
-              {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />}
-              {viewMode === 'roster' && !isOverall && ['manager', 'admin'].includes(profile?.role) && <RosterPanel branchId={branchId} />}
-              {viewMode === 'closed-dates' && !isOverall && profile?.role === 'admin' && <ClosedDatesPanel branchId={branchId} />}
-              {viewMode === 'locations' && profile?.role === 'admin' && <LocationsPanel orgId={orgId} />}
-              {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
-              {viewMode === 'new-booking' && !isOverall && <StaffBookingForm onBookingCreated={loadData} />}
-              {viewMode === 'check-booking' && !isOverall && <CheckBookingPanel branchId={branchId} />}
-            </main>
-
-            {/* AI Assistant Panel */}
-            <AIAssistantPanel />
-          </div>
-        </div>
-      </div>
+          )
+        }
+        aside={<AIAssistantPanel />}
+        asideOpen={isAssistantOpen}
+      >
+          {viewMode === 'dashboard' && renderDashboardView()}
+          {viewMode === 'calendar' && renderCalendarView()}
+          {isReportsView && <ReportsLayout view={viewMode} renderReport={renderReportView} />}
+          {isSettingsViewActive && <SettingsLayout view={viewMode} renderSetting={renderSettingView} />}
+          {areaForView && <AreaTabs area={areaForView} view={viewMode}>{renderAreaView(viewMode)}</AreaTabs>}
+          {viewMode === 'customers' && (branchLoading ? <BranchPending /> : <CustomersPanel branchId={branchId} readOnly={isOverall} />)}
+          {CAMPAIGNS_ENABLED && viewMode === 'campaigns' && ['manager','admin'].includes(profile?.role) && <CampaignsPanel />}
+      </AppShell>
     </>
   );
 };

@@ -7,8 +7,54 @@ export function to12h(timeStr) {
   return `${h12}:${String(m).padStart(2, '0')} ${period}`;
 }
 
+// ZNLY-275: a booking for a later day (Nepal time) can't be Started, Completed or marked No Show (DB trigger, migration 403).
+// Returns the plain sentence staff see, or null when the booking is for today or earlier. `action`: 'start' | 'complete' | 'noshow'.
+export const nepalToday = (now = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kathmandu' }).format(now);
+export function futureBookingMessage(date, action = 'start', now = new Date()) {
+  const d = String(date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d <= nepalToday(now)) return null;
+  const label = new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).replace(',', '');
+  const verb = action === 'complete' ? 'complete it now' : action === 'noshow' ? 'mark it as no-show' : 'start it now';
+  return `This booking is for ${label}. Move it to today to ${verb}.`;
+}
+
 export function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
+}
+
+// price_type = 'calendar_only' (migration-323) is priced internally — staff see
+// the amount, a customer booking online never does, per the user's "hide it
+// completely". Null here means genuinely nothing to show, not zero: every
+// cart/summary/confirmation screen in the customer booking flow must call this
+// instead of reading service.price_npr/effective_price_npr directly, or a
+// price hidden on the service list reappears one step later in the cart.
+//
+// The ONE implementation of customer-facing price display — previously
+// ServicesSection.jsx (the service list) had its own correct version of this
+// (servicePriceLabel, handling tiered/free/no_default) while this function
+// didn't, so a tiered service showed its real range on the list and then the
+// Unassigned rate — a number the customer might not actually be charged — in
+// the cart one step later. ServicesSection now imports this instead of
+// keeping its own copy.
+//
+// Returns a STRING label (or null), never a bare number: a tiered service has
+// no single price until a specific therapist is known, so unresolved tiered
+// is a range ("NPR 1,200 - 8,600"), not a number. Callers that need an actual
+// amount to sum into a total must resolve the therapist-specific price first
+// (fetchServicePriceForTherapist / service_price_for_therapist) — see
+// src/hooks/useCustomerServicePricing.js, which wraps exactly that resolution
+// for the cart/confirmation screens that show a total.
+export function customerFacingServicePriceLabel(service) {
+  if (!service || service.price_type === 'calendar_only') return null;
+  if (service.price_type === 'free') return 'Free';
+  if (service.price_type === 'no_default') return null;
+  if (service.price_type === 'tiered') {
+    if (service.min_price == null || service.max_price == null) return null;
+    return Number(service.min_price) === Number(service.max_price)
+      ? formatNPR(service.min_price)
+      : `NPR ${Number(service.min_price).toLocaleString('en-IN')} - ${Number(service.max_price).toLocaleString('en-IN')}`;
+  }
+  return formatNPR(service.effective_price_npr ?? service.price_npr ?? service.price ?? 0);
 }
 
 // Normalize a person's name to Title Case (customers, therapists, due-holders).
@@ -95,6 +141,8 @@ export function transformBooking(dbBooking) {
         gender: bt.therapist.gender || null,
         roomId: bt.room_id || null,
         roomName: bt.room?.name || null,
+        startTime: bt.start_time || null,
+        endTime: bt.end_time || null,
       }));
   } else if (therapist) {
     therapists = [therapist];
@@ -129,6 +177,8 @@ export function transformBooking(dbBooking) {
     id: dbBooking.booking_number,
     bookingId: dbBooking.id,
     customerId: dbBooking.customer_id || null,
+    isWalkIn: !!dbBooking.is_walk_in, // ZNLY-327
+    walkInLabel: dbBooking.walk_in_label || null,
     customerName: dbBooking.customer_name,
     customerEmail: dbBooking.customer_email || null,
     customerPhone: dbBooking.customer_phone || null,
@@ -157,6 +207,13 @@ export function transformBooking(dbBooking) {
     branchId: dbBooking.branch_id || null,
     branchName: dbBooking.branch?.name || null,
     startTime: dbBooking.start_time || null,
+    endTime: dbBooking.end_time || null,
+    // created_by is NULL only for customer self-bookings from the public flow (migration-159), so it marks "Online" rows.
+    createdBy: dbBooking.created_by ?? null,
+    createdAt: dbBooking.created_at || null,
+    // Team-level "seen" (migration-335): NULL on an online booking = nobody has opened it yet.
+    acknowledgedAt: dbBooking.acknowledged_at || null,
+    acknowledgedBy: dbBooking.acknowledged_by || null,
     specialRequests: dbBooking.special_requests || null,
     genderPreference: dbBooking.gender_preference || null,
     referredBy: dbBooking.referred_by || null,

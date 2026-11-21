@@ -1,122 +1,21 @@
-import React, { useState, useRef, useEffect } from 'react';
-import Icon from '../../../../components/AppIcon';
-import Select from '../../../../components/ui/Select';
-import Input from '../../../../components/ui/Input';
-import Button from '../../../../components/ui/Button';
+import { friendlyError } from '../../../../utils/friendlyError';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useOrg } from '../../../../contexts/OrgContext';
 import { createBlock } from '../../../../services/api';
-import { to12h } from '../../../../services/bookingTransformers';
-
-// 'HH:MM' + minutes -> 'HH:MM', for the "ends at" preview next to the duration field.
-function addMinutesToTime(timeStr, minutes) {
-  const [h, m] = timeStr.split(':').map(Number);
-  const total = h * 60 + m + minutes;
-  const wrapped = ((total % 1440) + 1440) % 1440;
-  return `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`;
-}
-
-// Free-typed 12h time (e.g. "9", "9:30", "9:30am", "21:15") -> "HH:MM", or null while
-// the text is incomplete/invalid so the field can just keep showing what was typed.
-function parseTimeInput(raw) {
-  const match = (raw || '').trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
-  if (!match) return null;
-  let h = parseInt(match[1], 10);
-  const m = match[2] ? parseInt(match[2], 10) : 0;
-  const ampm = match[3]?.toLowerCase();
-  if (ampm) {
-    if (h < 1 || h > 12) return null;
-    if (ampm === 'pm' && h < 12) h += 12;
-    if (ampm === 'am' && h === 12) h = 0;
-  }
-  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
-
-const TIME_OPTIONS = Array.from({ length: 96 }, (_, i) => {
-  const h = Math.floor(i / 4);
-  const m = (i % 4) * 15;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-});
-
-// A 12-hour text+dropdown time field — native <input type="time"> renders its picker
-// (and typed value) in the OS/browser locale's format, which shows 24h regardless of
-// anything we set in HTML/CSS. This guarantees 12h display everywhere.
-const TimeField12h = ({ value, onChange }) => {
-  const [open, setOpen] = useState(false);
-  const [text, setText] = useState(value ? to12h(value).replace(' ', '') : '');
-  const ref = useRef(null);
-  const listRef = useRef(null);
-
-  useEffect(() => {
-    setText(value ? to12h(value).replace(' ', '') : '');
-  }, [value]);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const handleClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [open]);
-
-  useEffect(() => {
-    if (open && listRef.current) {
-      listRef.current.querySelector('[data-selected="true"]')?.scrollIntoView({ block: 'center' });
-    }
-  }, [open]);
-
-  return (
-    <div className="relative" ref={ref}>
-      <div className="relative">
-        <input
-          type="text"
-          value={text}
-          onChange={(e) => {
-            const raw = e.target.value;
-            setText(raw);
-            const parsed = parseTimeInput(raw);
-            if (parsed) onChange(parsed);
-          }}
-          onFocus={(e) => { e.target.select(); setOpen(true); }}
-          onBlur={() => setText(value ? to12h(value).replace(' ', '') : '')}
-          placeholder="--:--"
-          autoComplete="off"
-          className="w-full pl-2 pr-7 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-        />
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="absolute right-1.5 top-1/2 -translate-y-1/2 text-text-secondary hover:text-primary spa-transition-fast"
-        >
-          <Icon name="ChevronDown" size={14} />
-        </button>
-      </div>
-      {open && (
-        <div
-          ref={listRef}
-          className="absolute left-0 top-full mt-1 w-28 max-h-48 overflow-y-auto bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown"
-        >
-          {TIME_OPTIONS.map((t) => (
-            <button
-              key={t}
-              type="button"
-              data-selected={t === value}
-              onClick={() => { onChange(t); setOpen(false); }}
-              className={`w-full text-left px-3 py-1.5 text-sm font-body cursor-pointer hover:bg-primary/10 ${
-                t === value ? 'bg-primary/10 font-body-medium text-primary' : 'text-text-primary'
-              }`}
-            >
-              {to12h(t)}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
+import { useAvailabilityConflictGuard } from '../../../../hooks/useAvailabilityConflictGuard';
+import { blockChange } from '../../../../services/availabilityConflicts';
+import { countBookingsInRange, bookingsInRangeMessage } from '../../../../utils/bookingsInRange';
+import {
+  PanelShell, FormBody, Field, TextInput, NumberInput, SelectField, Segmented, TabBar, DateField, TimeField,
+  InlineError, InlineWarning, format12h, addMinutes, formatShortDate,
+} from '../../../../components/ui/PanelFormKit';
+import { staffWord } from '../../../../utils/industryTerms';
+import { useIndustry } from '../../../../hooks/useIndustry';
+import { teamMemberLower, teamMemberWord } from '../../../../utils/industryTerms';
 
 const TABS = [
-  { id: 'details', label: 'Details' },
-  { id: 'recurrence', label: 'Recurrence' },
+  { id: 'details', label: 'Details', icon: 'FileText' },
+  { id: 'recurrence', label: 'Recurrence', icon: 'Repeat' },
 ];
 
 const REPEAT_OPTIONS = [
@@ -132,20 +31,26 @@ const END_CONDITION_OPTIONS = [
   { value: 'count', label: 'After N occurrences' },
 ];
 
-// Two-tab modal for blocking time off on the Calendar — Details (who/when/why) and
-// Recurrence (Repeat + end condition), matching the Fresha-style reference the request was
-// scoped against. Tab-switcher visual pattern copied from ProductDetailDrawer.jsx.
-const AddBlockModal = ({ branchId, slotInfo, therapists, rooms, onClose, onSuccess }) => {
+const slotTime = (slot) => (slot?.hour != null ? `${String(slot.hour).padStart(2, '0')}:${String(slot.minute ?? 0).padStart(2, '0')}` : '');
+
+// "Add block" form — a docked SidePanel on the calendar (variant="panel"), or the classic centered modal.
+// Two tabs: Details (who/when/why) and Recurrence. While open it reports a live draft (`onDraftChange`) so the grid can
+// show the block in its final hatched style, and it accepts `retarget` (click an empty slot to move the start / column).
+const AddBlockModal = ({
+  variant = 'modal', branchId, slotInfo, therapists, rooms, bookings = [], branchHours, retarget, guardRef,
+  onClose, onSuccess, onRoomOnlyChange, onDraftChange,
+}) => {
   const { orgId } = useOrg();
+  const { enableRooms, locationLabel } = useIndustry();
+  const roomWord = locationLabel.toLowerCase();
+  const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
   const [activeTab, setActiveTab] = useState('details');
 
   const [assigneeType, setAssigneeType] = useState(slotInfo?.colType === 'therapist' ? 'therapist' : 'location');
   const [therapistId, setTherapistId] = useState(slotInfo?.colType === 'therapist' ? slotInfo.colId : '');
   const [roomId, setRoomId] = useState(slotInfo?.colType === 'room' ? slotInfo.colId : '');
   const [date, setDate] = useState(slotInfo?.day || '');
-  const [startTime, setStartTime] = useState(
-    slotInfo?.hour != null ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute ?? 0).padStart(2, '0')}` : ''
-  );
+  const [startTime, setStartTime] = useState(slotTime(slotInfo));
   const [durationMinutes, setDurationMinutes] = useState('30');
   const [description, setDescription] = useState('');
   const [preventOnlineBooking, setPreventOnlineBooking] = useState(true);
@@ -158,9 +63,53 @@ const AddBlockModal = ({ branchId, slotInfo, therapists, rooms, onClose, onSucce
 
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [moveConfirm, setMoveConfirm] = useState(null);
 
-  const isFormComplete = !!date && !!startTime && Number(durationMinutes) > 0
-    && (assigneeType !== 'therapist' || !!therapistId);
+  // Baseline for "did the user change something beyond the slot?" — the slot (date/time/column) is moved silently by retargeting.
+  const baselineRef = useRef({ therapist: slotInfo?.colType === 'therapist' ? slotInfo.colId : '', room: slotInfo?.colType === 'room' ? slotInfo.colId : '' });
+  const dirty = !!description.trim() || durationMinutes !== '30' || !preventOnlineBooking || !!repeat
+    || (assigneeType === 'therapist' ? therapistId : '') !== baselineRef.current.therapist || roomId !== baselineRef.current.room;
+
+  const isFormComplete = !!date && !!startTime && Number(durationMinutes) > 0 && (assigneeType !== 'therapist' || !!therapistId);
+
+  const dur = Number(durationMinutes) > 0 ? Number(durationMinutes) : 0;
+  const effTherapist = assigneeType === 'therapist' ? therapistId : '';
+  const bookingCount = useMemo(
+    () => countBookingsInRange(bookings, { date, startTime, durationMinutes: dur, therapistId: effTherapist, roomId }),
+    [bookings, date, startTime, dur, effTherapist, roomId]
+  );
+  const bookingWarning = bookingsInRangeMessage(bookingCount);
+
+  // Live preview on the grid.
+  useEffect(() => {
+    onDraftChange?.({
+      kind: 'block', date, startTime, durationMinutes: dur || 30,
+      therapistId: effTherapist || null, roomId: roomId || null, wholeBranch: !effTherapist && !roomId,
+      overlap: bookingCount > 0, label: description.trim(),
+    });
+  }, [date, startTime, dur, effTherapist, roomId, bookingCount, description]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onDraftChange?.(null), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Retarget: an empty-slot click on the grid moves the block's start / column.
+  const lastRetargetRef = useRef(retarget?.nonce ?? null); // ignore a retarget request left over from an earlier panel
+  const applyRetarget = (s) => {
+    setDate(s.day);
+    setStartTime(slotTime(s));
+    if (s.colType === 'therapist' && s.colId) { setAssigneeType('therapist'); setTherapistId(s.colId); }
+    if (s.colType === 'room' && s.colId) setRoomId(s.colId);
+    baselineRef.current = {
+      therapist: s.colType === 'therapist' && s.colId ? s.colId : baselineRef.current.therapist,
+      room: s.colType === 'room' && s.colId ? s.colId : baselineRef.current.room,
+    };
+  };
+  useEffect(() => {
+    if (!retarget || retarget.nonce === lastRetargetRef.current) return;
+    lastRetargetRef.current = retarget.nonce;
+    const s = retarget.slot;
+    const curCol = s.colType === 'room' ? roomId : s.colType === 'therapist' ? (assigneeType === 'therapist' ? therapistId : '') : '';
+    const changes = s.day !== date || ((s.colType === 'room' || s.colType === 'therapist') && (s.colId || '') !== curCol);
+    if (dirty && changes) setMoveConfirm(s); else applyRetarget(s);
+  }, [retarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSubmit = async () => {
     if (!date || !startTime) { setError('Select a date and start time.'); return; }
@@ -169,6 +118,18 @@ const AddBlockModal = ({ branchId, slotInfo, therapists, rooms, onClose, onSucce
 
     setSubmitting(true);
     setError(null);
+
+    // List the bookings this block lands on before saving (kept either way). A repeating block is checked on its first date.
+    if (assigneeType === 'therapist') {
+      const proceed = await confirmConflicts({
+        therapistId,
+        change: blockChange({ date, start: startTime, durationMinutes: Number(durationMinutes) }),
+        summary: `Block ${format12h(startTime)} for ${durationMinutes} min${description.trim() ? ` (${description.trim()})` : ''}.`,
+        titleFor: (n) => `${n} booking${n === 1 ? '' : 's'} ${n === 1 ? 'falls' : 'fall'} inside this block`,
+        saveLabel: 'Add block, keep bookings',
+      });
+      if (!proceed) { setSubmitting(false); return; }
+    }
 
     const result = await createBlock({
       orgId,
@@ -187,185 +148,148 @@ const AddBlockModal = ({ branchId, slotInfo, therapists, rooms, onClose, onSucce
     });
 
     if (result.error) {
-      setError(result.error.message || 'Failed to create block.');
+      setError(friendlyError(result.error, 'Failed to create block.'));
       setSubmitting(false);
       return;
     }
 
     setSubmitting(false);
+    onRoomOnlyChange?.(assigneeType !== 'therapist' && !!roomId);
     onSuccess?.();
   };
 
+  const reason = !date ? 'Pick a date' : !startTime ? 'Pick a start time'
+    : !(Number(durationMinutes) > 0) ? 'Enter a duration'
+    : assigneeType === 'therapist' && !therapistId ? `Select a ${teamMemberLower()}` : '';
+
+  const moveOverride = moveConfirm ? (
+    <div role="alertdialog" aria-label="Move block" className="flex items-center gap-3">
+      <p className="flex-1 min-w-0 text-[13px] text-text-primary">
+        Move this block to {[formatShortDate(moveConfirm.day), format12h(slotTime(moveConfirm))].filter(Boolean).join(' · ')}?
+      </p>
+      <button type="button" onClick={() => setMoveConfirm(null)} className="h-9 px-3 text-[13px] font-body font-body-medium border border-border rounded-spa hover:bg-background whitespace-nowrap">Keep here</button>
+      <button type="button" onClick={() => { applyRetarget(moveConfirm); setMoveConfirm(null); }} className="h-9 px-3 text-[13px] font-body font-body-medium bg-text-primary text-white rounded-spa hover:opacity-90 whitespace-nowrap">Move</button>
+    </div>
+  ) : null;
+
   return (
-    <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !submitting && onClose()}>
-      <div className="bg-surface rounded-spa-lg shadow-spa-modal max-w-xl w-full p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <h3 className="font-heading font-heading-medium text-lg text-text-primary">Add Block</h3>
-          <button onClick={() => !submitting && onClose()} className="p-1 rounded hover:bg-background">
-            <Icon name="X" size={18} className="text-text-secondary" />
-          </button>
-        </div>
-
-        <div className="flex gap-1 border-b border-border">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-3 py-2 text-sm font-body font-body-medium spa-transition-fast border-b-2 -mb-[1px] ${
-                activeTab === tab.id
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-text-secondary hover:text-text-primary'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {error && (
-          <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
-            <Icon name="AlertCircle" size={16} />
-            <span>{error}</span>
-          </div>
-        )}
+    <>
+    <PanelShell
+      variant={variant}
+      title="Add block"
+      onClose={onClose}
+      dirty={dirty}
+      guardRef={guardRef}
+      busy={submitting}
+      reason={reason}
+      footerOverride={moveOverride}
+      primary={{ label: submitting ? 'Adding…' : 'Add block', onClick: handleSubmit, disabled: !isFormComplete, loading: submitting }}
+    >
+      <TabBar tabs={TABS} value={activeTab} onChange={setActiveTab} />
+      <FormBody>
+        <InlineError message={error} />
+        <InlineWarning message={bookingWarning} icon="CalendarClock" />
 
         {activeTab === 'details' && (
-          <div className="space-y-3">
-            <div className="flex rounded-spa border border-border p-0.5 bg-background w-fit">
-              <button
-                type="button"
-                onClick={() => setAssigneeType('therapist')}
-                className={`px-3 py-1.5 rounded text-sm font-body font-body-medium transition-colors ${
-                  assigneeType === 'therapist' ? 'bg-primary text-white' : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                Staff member
-              </button>
-              <button
-                type="button"
-                onClick={() => setAssigneeType('location')}
-                className={`px-3 py-1.5 rounded text-sm font-body font-body-medium transition-colors ${
-                  assigneeType === 'location' ? 'bg-primary text-white' : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                Whole location
-              </button>
-            </div>
-
-            {assigneeType === 'therapist' && (
-              <Select
-                label="Staff member"
-                placeholder="Select staff..."
-                options={(therapists || []).map(t => ({ value: t.id, label: t.name }))}
-                value={therapistId}
-                onChange={setTherapistId}
-              />
-            )}
-
-            <Select
-              label="Room (optional)"
-              placeholder="No specific room..."
-              options={(rooms || []).map(r => ({ value: r.id, label: r.name }))}
-              value={roomId}
-              onChange={setRoomId}
+          <>
+            <Segmented
+              options={[['therapist', teamMemberWord()], ['location', 'Whole location']]}
+              value={assigneeType}
+              onChange={setAssigneeType}
             />
 
-            <div className="space-y-1">
-              <label className="block font-body font-body-medium text-sm text-text-primary">Date</label>
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+            {assigneeType === 'therapist' && (
+              <Field label={teamMemberWord()} required>
+                <SelectField
+                  placeholder={`Select ${teamMemberLower()}...`}
+                  options={(therapists || []).map((t) => ({ value: t.id, label: t.name }))}
+                  value={therapistId}
+                  onChange={setTherapistId}
+                />
+              </Field>
+            )}
+
+            {enableRooms && (
+            <Field
+              label={`${locationLabel} (optional)`}
+              hint={assigneeType === 'location' && roomId ? `Blocks this ${roomWord} for any ${staffWord()} (shown in ${locationLabel} view).` : undefined}
+            >
+              <SelectField
+                placeholder={`No specific ${roomWord}...`}
+                options={[{ value: '', label: `No specific ${roomWord}` }, ...(rooms || []).map((r) => ({ value: r.id, label: r.name }))]}
+                value={roomId}
+                onChange={setRoomId}
+              />
+            </Field>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <DateField label="Date" required value={date} onChange={setDate} />
+              <TimeField
+                label="Start time"
+                required
+                value={startTime}
+                onChange={setStartTime}
+                fromTime={(branchHours?.openTime || '06:00').slice(0, 5)}
+                toTime="23:50"
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="block font-body font-body-medium text-sm text-text-primary">Start Time</label>
-                <TimeField12h value={startTime} onChange={setStartTime} />
-              </div>
-              <div className="space-y-1">
-                <label className="block font-body font-body-medium text-sm text-text-primary">Duration (minutes)</label>
-                <Input
-                  type="number"
-                  min="5"
-                  step="5"
-                  value={durationMinutes}
-                  onChange={(e) => setDurationMinutes(e.target.value)}
-                />
-              </div>
-            </div>
-            {startTime && Number(durationMinutes) > 0 && (
-              <p className="text-xs text-text-secondary">
-                Opens back up at <span className="font-data font-data-medium text-text-primary">{to12h(addMinutesToTime(startTime, Number(durationMinutes)))}</span>
-              </p>
-            )}
+            <Field
+              label="Duration (minutes)"
+              required
+              hint={startTime && dur ? `Opens back up at ${format12h(addMinutes(startTime, dur))}` : undefined}
+            >
+              <NumberInput min="5" step="5" value={durationMinutes} onChange={(e) => setDurationMinutes(e.target.value)} />
+            </Field>
 
-            <div className="space-y-1">
-              <label className="block font-body font-body-medium text-sm text-text-primary">Description (optional)</label>
-              <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Lunch break, room maintenance..." />
-            </div>
+            <Field label="Description (optional)">
+              <TextInput value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Lunch break, room sterilisation..." />
+            </Field>
 
-            <label className="flex items-center gap-2 text-sm font-body text-text-primary cursor-pointer">
+            <label className="flex items-center gap-2 text-[13px] font-body text-text-primary cursor-pointer">
               <input
                 type="checkbox"
                 checked={preventOnlineBooking}
                 onChange={(e) => setPreventOnlineBooking(e.target.checked)}
-                className="rounded border-border"
+                className="w-4 h-4 rounded border-border text-primary focus:ring-primary/30"
               />
-              Prevent online bookings during this time?
+              Prevent online bookings during this time
             </label>
-          </div>
+          </>
         )}
 
         {activeTab === 'recurrence' && (
-          <div className="space-y-3">
-            <Select label="Repeat" options={REPEAT_OPTIONS} value={repeat} onChange={setRepeat} />
+          <>
+            <Field label="Repeat">
+              <SelectField options={REPEAT_OPTIONS} value={repeat} onChange={setRepeat} />
+            </Field>
 
             {repeat && (
               <>
-                <div className="space-y-1">
-                  <label className="block font-body font-body-medium text-sm text-text-primary">
-                    Every {recurrenceIntervalInput || 1} {repeat === 'daily' ? 'day(s)' : repeat === 'weekly' ? 'week(s)' : 'month(s)'}
-                  </label>
-                  <Input type="number" min="1" value={recurrenceIntervalInput} onChange={(e) => setRecurrenceIntervalInput(e.target.value)} />
-                </div>
+                <Field label={`Every ${recurrenceIntervalInput || 1} ${repeat === 'daily' ? 'day(s)' : repeat === 'weekly' ? 'week(s)' : 'month(s)'}`}>
+                  <NumberInput min="1" value={recurrenceIntervalInput} onChange={(e) => setRecurrenceIntervalInput(e.target.value)} />
+                </Field>
 
-                <Select label="Ends" options={END_CONDITION_OPTIONS} value={endCondition} onChange={setEndCondition} />
+                <Field label="Ends">
+                  <SelectField options={END_CONDITION_OPTIONS} value={endCondition} onChange={setEndCondition} />
+                </Field>
 
-                {endCondition === 'date' && (
-                  <div className="space-y-1">
-                    <label className="block font-body font-body-medium text-sm text-text-primary">End date</label>
-                    <input
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-                    />
-                  </div>
-                )}
+                {endCondition === 'date' && <DateField label="End date" value={endDate} onChange={setEndDate} min={date} />}
 
                 {endCondition === 'count' && (
-                  <div className="space-y-1">
-                    <label className="block font-body font-body-medium text-sm text-text-primary">Number of occurrences</label>
-                    <Input type="number" min="1" value={endCount} onChange={(e) => setEndCount(e.target.value)} />
-                  </div>
+                  <Field label="Number of occurrences">
+                    <NumberInput min="1" value={endCount} onChange={(e) => setEndCount(e.target.value)} />
+                  </Field>
                 )}
               </>
             )}
-          </div>
+          </>
         )}
-
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="ghost" size="sm" onClick={onClose} disabled={submitting}>Cancel</Button>
-          <Button variant="primary" size="sm" onClick={handleSubmit} loading={submitting} disabled={!isFormComplete}>
-            Add Block
-          </Button>
-        </div>
-      </div>
-    </div>
+      </FormBody>
+    </PanelShell>
+    {conflictModal}
+    </>
   );
 };
 

@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import Icon from '../../../components/AppIcon';
@@ -25,7 +26,7 @@ const RevenueAnalyticsChart = ({ branchId, period }) => {
     const result = await fetchBookings(branchId, { dateFrom: period?.from || today, dateTo: period?.to || today });
 
     if (result.error) {
-      setError(result.error.message || 'Failed to load revenue data.');
+      setError(friendlyError(result.error, 'Failed to load revenue data.'));
       setLoading(false);
       return;
     }

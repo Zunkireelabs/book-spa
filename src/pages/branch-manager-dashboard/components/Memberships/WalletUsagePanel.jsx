@@ -1,345 +1,209 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ScrollRow from '../../../../components/ui/ScrollRow';
+import { useSearchParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
-import { fetchMemberships, fetchMembershipLedgerReport } from '../../../../services/api';
-import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
+import { FilterChip } from '../../../../components/ui/ListToolbarKit';
+import { fetchMembershipActivity } from '../../../../services/api';
+import {
+  KINDS, RANGES, extensionNote, rangeFor, rangeLead, activityTotals, whenLabel, kindLabel, shortName, npr,
+} from '../../../../services/membershipsView';
+import { friendlyError } from '../../../../utils/friendlyError';
+import { useMinWidth, useSlashFocus, useStickyBlock, thClass, SearchBox, ClearableChip, csvDownload, EmptyBlock, ErrorBlock, leadNodes, RangeMenu, isDate } from '../Area/listKit';
+import { wordBranchCap } from '../../../../utils/industryTerms';
 
-function formatNPR(amount) {
-  return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
-}
+const detailOf = (r) => {
+  if (r.kind === 'deduction') return [r.service, r.bookingNumber].filter(Boolean).join(' · ') || r.notes || '';
+  if (r.kind === 'deposit') return [r.paymentMode, r.notes].filter(Boolean).join(' · ');
+  if (r.kind === 'extension') return extensionNote(r.notes);
+  return r.notes || '';
+};
 
-function formatDate(d) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-}
+// Wallet activity (V21): every wallet movement in a date range (This month by default): money added, spent, birthday gifts,
+// adjustments and extensions, with who did it. Filters: search, Type, Tier, Staff, and a member (from the panel's "See all").
+// Row click opens that member's panel.
+const WalletUsagePanel = ({ members, tiers, today, stickyTop, registerExport, onOpen, onLead }) => {
+  const [sp, setSp] = useSearchParams();
+  const isSm = useMinWidth(640);
+  const isMd = useMinWidth(768);
+  const isLg = useMinWidth(1024);
+  const spRef = useRef(sp);
+  spRef.current = sp;
+  const patch = useCallback((obj) => {
+    const next = new URLSearchParams(spRef.current);
+    Object.entries(obj).forEach(([k, v]) => { if (v == null || v === '') next.delete(k); else next.set(k, String(v)); });
+    spRef.current = next;
+    setSp(next, { replace: true });
+  }, [setSp]);
 
-// Wallet Usage: per-member view of "how much wallet value they had, how much
-// they've used, and how much is left" — plus, per member, the individual
-// service-usage transactions behind that number. "Wallet Amount" is the
-// CURRENT CYCLE deposit only (e.g. 100,000 for a Premium Club member, not
-// 200,000 after a renewal) — see fetchMembershipLedgerReport's cycleDeposited
-// in services/api.js for why total_deposited can't be used as-is here. Balance
-// still reuses the exact `balance` field the existing Memberships page shows,
-// so Remaining always reconciles with it. The per-transaction rows come from
-// the real `membership_transactions` ledger (kind='deduction') joined to the
-// booking that was paid for. No fabricated data.
-const WalletUsagePanel = () => {
-  const [memberships, setMemberships] = useState([]);
-  const [transactions, setTransactions] = useState([]);
-  const [cycleDeposited, setCycleDeposited] = useState(new Map());
-  const [loading, setLoading] = useState(true);
+  const rParam = sp.get('r');
+  const custom = rParam === 'custom' && isDate(sp.get('from')) && isDate(sp.get('to'));
+  const rangeId = custom ? 'custom' : (RANGES.some((r) => r.id === rParam) ? rParam : 'month');
+  const { from, to } = custom ? { from: sp.get('from'), to: sp.get('to') } : rangeFor(rangeId, today);
+  const query = sp.get('q') || '';
+  const filters = { kind: sp.get('kind') || '', tier: sp.get('tier') || '', staff: sp.get('by') || '', member: sp.get('member') || '' };
+
+  const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
-  const [search, setSearch] = useState('');
-  const [expanded, setExpanded] = useState(() => new Set());
-
-  // Only the very first load shows the full skeleton — background
-  // auto-refresh ticks (see useAutoRefresh below) swap data in silently so
-  // the panel doesn't flash back to a loading state while someone's viewing it.
-  const hasLoadedRef = useRef(false);
-  const loadData = useCallback(async () => {
-    if (!hasLoadedRef.current) setLoading(true);
+  const load = useCallback(async () => {
     setError(null);
-    const [membershipsRes, ledgerRes] = await Promise.all([
-      fetchMemberships(),
-      fetchMembershipLedgerReport(),
-    ]);
-    if (membershipsRes.error || ledgerRes.error) {
-      setError((membershipsRes.error || ledgerRes.error)?.message || 'Failed to load wallet usage.');
-      hasLoadedRef.current = true;
-      setLoading(false);
-      return;
-    }
-    setMemberships(membershipsRes.data || []);
-    setTransactions(ledgerRes.data?.usage || []);
-    setCycleDeposited(ledgerRes.data?.cycleDeposited || new Map());
-    hasLoadedRef.current = true;
-    setLoading(false);
-  }, []);
+    const { data, error: err } = await fetchMembershipActivity({ from, to });
+    if (err) { setError(friendlyError(err, 'Failed to load wallet activity.')); return; }
+    setRows(data || []);
+  }, [from, to]);
+  useEffect(() => { setRows(null); load(); }, [load]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  const [searchText, setSearchText] = useState(query);
+  const searchRef = useRef(null);
+  useEffect(() => {
+    const t = setTimeout(() => { if (searchText !== query) patch({ q: searchText }); }, 200);
+    return () => clearTimeout(t);
+  }, [searchText]); // eslint-disable-line react-hooks/exhaustive-deps
+  useSlashFocus(searchRef);
 
-  useAutoRefresh(loadData, { intervalMs: 90000 });
-
-  const totals = useMemo(() => {
-    const deposited = memberships.reduce((sum, m) => sum + (cycleDeposited.get(m.id) ?? Number(m.totalDeposited || 0)), 0);
-    const balance = memberships.reduce((sum, m) => sum + Number(m.balance || 0), 0);
-    return { deposited, balance, used: deposited - balance };
-  }, [memberships, cycleDeposited]);
-
-  // One row per member: their wallet totals, plus their own usage transactions nested underneath.
-  const memberRows = useMemo(() => {
-    const txByMembership = new Map();
-    transactions.forEach((t) => {
-      if (!txByMembership.has(t.membershipId)) txByMembership.set(t.membershipId, []);
-      txByMembership.get(t.membershipId).push(t);
-    });
-    return memberships
-      .map((m) => {
-        const deposited = cycleDeposited.get(m.id) ?? Number(m.totalDeposited || 0);
-        const balance = Number(m.balance || 0);
-        return {
-          membershipId: m.id,
-          memberName: m.customerName || '—',
-          memberPhone: m.customerPhone || '—',
-          cardNo: m.membershipNumber || '—',
-          tierName: m.tierName || '—',
-          deposited,
-          used: deposited - balance,
-          balance,
-          transactions: txByMembership.get(m.id) || [],
-        };
-      })
-      .sort((a, b) => a.memberName.localeCompare(b.memberName));
-  }, [memberships, transactions, cycleDeposited]);
-
+  const all = useMemo(() => rows || [], [rows]);
+  const options = useMemo(() => {
+    const staff = new Map();
+    all.forEach((r) => { if (r.performerId && !staff.has(r.performerId)) staff.set(r.performerId, r.performerName || '—'); });
+    return {
+      kind: Object.entries(KINDS).map(([id, k]) => ({ id, label: k.label })),
+      tier: (tiers || []).map((t) => ({ id: t.id, label: t.name })),
+      staff: [...staff].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label)),
+    };
+  }, [all, tiers]);
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return memberRows;
-    return memberRows.filter((r) =>
-      r.memberName.toLowerCase().includes(q) ||
-      r.memberPhone.toLowerCase().includes(q) ||
-      r.cardNo.toLowerCase().includes(q)
-    );
-  }, [memberRows, search]);
-
-  const serviceBreakdown = useMemo(() => {
-    const map = new Map();
-    transactions.forEach((t) => {
-      const key = t.service || 'Other';
-      map.set(key, (map.get(key) || 0) + Number(t.amountUsed || 0));
+    const q = query.trim().toLowerCase();
+    return all.filter((r) => {
+      if (filters.kind && r.kind !== filters.kind) return false;
+      if (filters.tier && r.tierId !== filters.tier) return false;
+      if (filters.staff && r.performerId !== filters.staff) return false;
+      if (filters.member && r.membershipId !== filters.member) return false;
+      return !q || `${r.memberName} ${r.cardNo || ''}`.toLowerCase().includes(q);
     });
-    const list = Array.from(map.entries())
-      .map(([service, amount]) => ({ service, amount }))
-      .sort((a, b) => b.amount - a.amount);
-    const total = list.reduce((sum, s) => sum + s.amount, 0);
-    return { list, total };
-  }, [transactions]);
+  }, [all, query, filters.kind, filters.tier, filters.staff, filters.member]);
+  const memberName = filters.member ? ((members || []).find((m) => m.id === filters.member)?.customerName || all.find((r) => r.membershipId === filters.member)?.memberName || 'One member') : '';
 
-  const toggleExpand = (membershipId) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      next.has(membershipId) ? next.delete(membershipId) : next.add(membershipId);
-      return next;
-    });
-  };
+  // Lead: "October so far: NPR X added to wallets · NPR Y spent from them" over what is listed.
+  useEffect(() => {
+    if (!rows) { onLead(' '); return; }
+    const t = activityTotals(filtered);
+    onLead(<>{rangeLead(rangeId, from, to)}{filters.member ? ` · ${memberName}` : ''}: {leadNodes([{ strong: npr(t.added) }, { text: ' added to wallets · ' }, { strong: npr(t.spent) }, { text: ' spent from them' }])}</>);
+  }, [rows, filtered, rangeId, from, to, filters.member, memberName, onLead]);
+  useEffect(() => () => onLead(' '), [onLead]);
 
+  const exportCsv = useCallback(() => {
+    csvDownload(`wallet-activity-${from}_to_${to}.csv`, ['When', 'Member', 'Card', 'Tier', 'Type', 'Detail', 'By', `${wordBranchCap()}`, 'Amount'],
+      filtered.map((r) => [new Date(r.createdAt).toLocaleString('en-GB', { timeZone: 'Asia/Kathmandu' }), r.memberName, r.cardNo, r.tierName, kindLabel(r.kind), detailOf(r), r.performerName, r.branchName, r.amount]));
+  }, [filtered, from, to]);
+  useEffect(() => { registerExport({ run: exportCsv, disabled: !rows || filtered.length === 0 }); }, [exportCsv, rows, filtered.length, registerExport]);
+  useEffect(() => () => registerExport(null), [registerExport]);
+
+  const { blockRef, blockH, sentinelRef, stuck } = useStickyBlock(stickyTop);
+  const loading = !rows && !error;
+  const chipValue = (k) => options[k].find((o) => o.id === filters[k])?.label;
+  const chips = (
+    <>
+      <FilterChip label="Type" value={filters.kind} options={options.kind} onChange={(v) => patch({ kind: v })} selectedLabel={chipValue('kind')} />
+      <FilterChip label="Tier" value={filters.tier} options={options.tier} onChange={(v) => patch({ tier: v })} selectedLabel={chipValue('tier')} />
+      <FilterChip label="Staff" value={filters.staff} options={options.staff} onChange={(v) => patch({ by: v })} selectedLabel={chipValue('staff')} />
+      {filters.member && <ClearableChip label={`Member: ${memberName}`} onClear={() => patch({ member: '' })} />}
+    </>
+  );
+  const rangeMenu = <RangeMenu id={rangeId} from={from} to={to} today={today} onPick={(id, f, t) => patch(id === 'custom' ? { r: 'custom', from: f, to: t } : { r: id === 'month' ? '' : id, from: '', to: '' })} />;
+  const searchBox = <SearchBox ref={searchRef} value={searchText} onChange={setSearchText} placeholder="Search member or card no." ariaLabel="Search wallet activity" className="w-full sm:w-[260px]" />;
+
+  const showBy = isLg;
+  const showWhen = isSm;
+  const colCount = (showWhen ? 1 : 0) + 1 + (isSm ? 1 : 0) + (showBy ? 1 : 0) + 1;
+  const th = thClass(stuck);
+  const thTop = { top: stickyTop + blockH };
+  const anyFilter = !!(query || filters.kind || filters.tier || filters.staff || filters.member);
+
+  let body = null;
   if (loading) {
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="bg-surface rounded-spa-lg border border-border p-4 animate-pulse">
-              <div className="h-3 bg-background rounded w-20 mb-2" />
-              <div className="h-6 bg-background rounded w-24" />
-            </div>
-          ))}
-        </div>
-        <div className="bg-surface rounded-spa-lg border border-border p-8 animate-pulse">
-          <div className="h-4 bg-background rounded w-48 mb-4" />
-          <div className="space-y-3">
-            {[0, 1, 2].map((i) => <div key={i} className="h-10 bg-background rounded" />)}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="bg-error/5 border border-error/20 rounded-spa p-4 flex items-center space-x-3">
-        <Icon name="AlertCircle" size={18} className="text-error flex-shrink-0" />
-        <p className="font-body text-sm text-error">{error}</p>
-        <button onClick={loadData} className="ml-auto font-body font-body-medium text-sm text-error underline">
-          Retry
-        </button>
-      </div>
-    );
+    body = Array.from({ length: 8 }).map((_, i) => (
+      <tr key={i}><td colSpan={colCount} className="h-[58px] border-b border-[#F1F1EF]"><div className="h-8 rounded bg-[#F1F1EF] animate-pulse" /></td></tr>
+    ));
+  } else if (!error) {
+    body = filtered.map((r) => {
+      const w = whenLabel(r.createdAt, today);
+      const k = KINDS[r.kind] || { label: 'Other', tag: 'bg-[#F3F4F6] text-[#4B5563]' };
+      const detail = detailOf(r);
+      return (
+        <tr key={r.id} data-activity-id={r.id} data-kind={r.kind} tabIndex={0} onClick={() => onOpen(r.membershipId)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(r.membershipId); }}
+          className="cursor-pointer hover:bg-[#FAFAF9] focus:outline-none focus-visible:bg-[#FAFAF9]">
+          {showWhen && (
+            <td className="h-[58px] border-b border-[#F1F1EF] pl-2 pr-3">
+              <div className="text-[13px] font-medium text-text-primary whitespace-nowrap">{w.day}</div>
+              <div className="text-[12.5px] text-[#8A8A90] mt-0.5 tabular-nums">{w.time}</div>
+            </td>
+          )}
+          <td className={`h-[58px] border-b border-[#F1F1EF] pr-3 ${showWhen ? '' : 'pl-2'}`}>
+            <div className="text-[13px] font-medium text-text-primary truncate">{r.memberName}</div>
+            <div className="text-[12.5px] text-[#8A8A90] mt-0.5 truncate">{showWhen ? <span className="font-data">{r.cardNo || '—'}</span> : `${w.day} ${w.time} · ${k.label}`}</div>
+          </td>
+          {isMd && (
+            <td className="h-[58px] border-b border-[#F1F1EF] pr-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={`h-[22px] px-1.5 rounded-md text-[11.5px] font-medium inline-flex items-center whitespace-nowrap flex-shrink-0 ${k.tag}`} data-kind-tag>{k.label}</span>
+                <span className="text-[13px] text-[#515152] truncate">{detail}</span>
+              </div>
+            </td>
+          )}
+          {!isMd && isSm && (
+            <td className="h-[58px] border-b border-[#F1F1EF] pr-3">
+              <span className={`h-[22px] px-1.5 rounded-md text-[11.5px] font-medium inline-flex items-center whitespace-nowrap ${k.tag}`}>{k.label}</span>
+            </td>
+          )}
+          {showBy && <td className="h-[58px] border-b border-[#F1F1EF] pr-3 text-[13px] text-[#515152] truncate">{r.performerName ? shortName(r.performerName) : '—'}</td>}
+          <td className="h-[58px] border-b border-[#F1F1EF] pr-2 text-right">
+            <span className={`text-[13px] font-semibold tabular-nums whitespace-nowrap ${r.amount > 0 ? 'text-[#2D7A32]' : r.amount < 0 ? 'text-text-primary' : 'text-[#B4B4BA]'}`} data-amount>
+              {r.amount === 0 ? '—' : `${r.amount > 0 ? '+' : '−'} ${npr(Math.abs(r.amount))}`}
+            </span>
+          </td>
+        </tr>
+      );
+    });
   }
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div>
-        <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Wallet Usage</h3>
-        <p className="font-body text-sm text-text-secondary">
-          {memberRows.length} member{memberRows.length !== 1 ? 's' : ''} · {transactions.length} service-usage transaction{transactions.length !== 1 ? 's' : ''}
-        </p>
-      </div>
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="bg-surface rounded-spa-lg border border-border p-4">
-          <div className="flex items-center space-x-2 mb-2">
-            <div className="w-6 h-6 rounded flex items-center justify-center bg-primary/10">
-              <Icon name="ArrowDownToLine" size={14} className="text-primary" />
-            </div>
-            <span className="font-caption font-caption-normal text-[11px] text-text-tertiary uppercase tracking-wide">Total Deposited</span>
-          </div>
-          <p className="font-heading font-heading-semibold text-xl text-text-primary">{formatNPR(totals.deposited)}</p>
-        </div>
-        <div className="bg-surface rounded-spa-lg border border-border p-4">
-          <div className="flex items-center space-x-2 mb-2">
-            <div className="w-6 h-6 rounded flex items-center justify-center bg-warning/10">
-              <Icon name="ArrowUpFromLine" size={14} className="text-warning" />
-            </div>
-            <span className="font-caption font-caption-normal text-[11px] text-text-tertiary uppercase tracking-wide">Total Used</span>
-          </div>
-          <p className="font-heading font-heading-semibold text-xl text-warning">{formatNPR(totals.used)}</p>
-        </div>
-        <div className="bg-primary/5 rounded-spa-lg border border-primary/20 p-4">
-          <div className="flex items-center space-x-2 mb-2">
-            <div className="w-6 h-6 rounded flex items-center justify-center bg-primary/15">
-              <Icon name="Wallet" size={14} className="text-primary" />
-            </div>
-            <span className="font-caption font-caption-normal text-[11px] text-primary uppercase tracking-wide">Remaining</span>
-          </div>
-          <p className="font-heading font-heading-semibold text-xl text-primary">{formatNPR(totals.balance)}</p>
+    <div>
+      <div ref={sentinelRef} aria-hidden="true" className="h-px" />
+      <div ref={blockRef} className="sticky z-sticky-filter bg-white" style={{ top: stickyTop }}>
+        <div className="flex items-center gap-2 pt-[18px] pb-2 flex-wrap">
+          {rangeMenu}
+          {searchBox}
+          {isSm && chips}
         </div>
       </div>
+      {!isSm && <ScrollRow className="pb-2" wrapperClassName="pb-0">{chips}</ScrollRow>}
 
-      {/* Search */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
-          <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
-          <input
-            type="text"
-            placeholder="Search by member or card no..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 bg-surface border border-border rounded-spa text-sm font-body text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-primary/30"
-          />
-        </div>
-        <span className="font-caption font-caption-normal text-xs text-text-tertiary">
-          {filtered.length} member{filtered.length !== 1 ? 's' : ''}
-        </span>
-      </div>
+      {error ? <ErrorBlock error={error} onRetry={load} /> : (
+        <table className="w-full border-collapse table-fixed">
+          <colgroup>
+            {showWhen && <col style={{ width: 112 }} />}
+            <col style={{ width: isMd ? '20%' : undefined }} />
+            {(isMd || isSm) && <col style={{ width: isMd ? undefined : 120 }} />}
+            {showBy && <col style={{ width: 120 }} />}
+            <col style={{ width: 130 }} />
+          </colgroup>
+          <thead>
+            <tr>
+              {showWhen && <th scope="col" className={`${th} text-left pl-2`} style={thTop}>When</th>}
+              <th scope="col" className={`${th} text-left ${showWhen ? '' : 'pl-2'}`} style={thTop}>Member</th>
+              {(isMd || isSm) && <th scope="col" className={`${th} text-left`} style={thTop}>What happened</th>}
+              {showBy && <th scope="col" className={`${th} text-left`} style={thTop}>By</th>}
+              <th scope="col" className={`${th} text-right pr-2`} style={thTop}>Wallet</th>
+            </tr>
+          </thead>
+          <tbody>{body}</tbody>
+        </table>
+      )}
 
-      {/* Per-member table — click a row to see the services behind the numbers */}
-      <div className="bg-surface rounded-spa-lg border border-border overflow-hidden">
-        {filtered.length === 0 ? (
-          <div className="text-center py-12">
-            <Icon name="Wallet" size={32} className="text-text-tertiary mx-auto mb-3" />
-            <p className="font-body font-body-medium text-sm text-text-secondary">
-              {memberRows.length === 0 ? 'No members yet' : 'No members match your search'}
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-background border-b border-border">
-                  <th className="w-8 px-2 py-2.5" />
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Member</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Card No.</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Phone</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Tier</th>
-                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Wallet Amount</th>
-                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Used</th>
-                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Remaining</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((m) => {
-                  const isOpen = expanded.has(m.membershipId);
-                  const hasUsage = m.transactions.length > 0;
-                  return (
-                    <React.Fragment key={m.membershipId}>
-                      <tr
-                        onClick={() => hasUsage && toggleExpand(m.membershipId)}
-                        className={`border-b border-border last:border-0 spa-transition-fast ${
-                          hasUsage ? 'cursor-pointer hover:bg-background/50' : ''
-                        }`}
-                      >
-                        <td className="px-2 py-3 text-text-tertiary">
-                          {hasUsage && <Icon name={isOpen ? 'ChevronUp' : 'ChevronDown'} size={16} />}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="font-body font-body-medium text-sm text-text-primary">{m.memberName}</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="font-data font-data-normal text-xs text-text-secondary tracking-wide">{m.cardNo}</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="font-caption font-caption-normal text-sm text-text-secondary">{m.memberPhone}</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="font-body font-body-normal text-sm text-text-secondary">{m.tierName}</span>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <span className="font-data font-data-normal text-sm text-text-secondary">{formatNPR(m.deposited)}</span>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <span className="font-data font-data-medium text-sm text-warning">{formatNPR(m.used)}</span>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <span className="font-data font-data-medium text-sm text-primary">{formatNPR(m.balance)}</span>
-                        </td>
-                      </tr>
-
-                      {isOpen && m.transactions.map((t) => (
-                        <tr key={t.id} className="border-b border-border last:border-0 bg-background/30">
-                          <td />
-                          <td colSpan={7} className="px-4 py-2.5">
-                            <div className="flex items-center justify-between gap-3 flex-wrap pl-4">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <Icon name="Sparkles" size={13} className="text-text-tertiary flex-shrink-0" />
-                                <span className="font-body font-body-medium text-sm text-text-primary">{t.service}</span>
-                                <span className="font-caption text-xs text-text-tertiary">{formatDate(t.date)}</span>
-                              </div>
-                              <div className="flex items-center gap-4 flex-shrink-0">
-                                <span className="font-data text-sm text-warning">-{formatNPR(t.amountUsed)}</span>
-                                <span className="font-data text-xs text-text-secondary w-28 text-right">
-                                  Balance after: {formatNPR(t.remainingBalance)}
-                                </span>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr className="bg-background border-t-2 border-border">
-                  <td />
-                  <td colSpan={4} className="px-4 py-3 font-body font-body-semibold text-sm text-text-primary">Total</td>
-                  <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-text-primary">{formatNPR(totals.deposited)}</td>
-                  <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-warning">{formatNPR(totals.used)}</td>
-                  <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-primary">{formatNPR(totals.balance)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Service-wise breakdown */}
-      {serviceBreakdown.list.length > 0 && (
-        <div className="bg-surface rounded-spa-lg border border-border overflow-hidden">
-          <div className="px-4 py-2.5 bg-background border-b border-border">
-            <span className="font-body font-body-medium text-xs text-text-secondary">Service-wise Usage Breakdown</span>
-          </div>
-          <table className="w-full">
-            <tbody>
-              {serviceBreakdown.list.map((s) => (
-                <tr key={s.service} className="border-b border-border last:border-0">
-                  <td className="px-4 py-2.5">
-                    <span className="font-body font-body-normal text-sm text-text-primary">{s.service}</span>
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <span className="font-data font-data-medium text-sm text-text-secondary">{formatNPR(s.amount)}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="bg-background border-t-2 border-border">
-                <td className="px-4 py-3 font-body font-body-semibold text-sm text-text-primary">Total</td>
-                <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-text-primary">{formatNPR(serviceBreakdown.total)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+      {!loading && !error && filtered.length === 0 && (all.length === 0
+        ? <EmptyBlock icon="Wallet" title="No wallet activity in this period" hint="Money added, spent and gifts given show up here." action={rangeId !== 'all' ? { label: 'Show all time', run: () => patch({ r: 'all', from: '', to: '' }) } : null} />
+        : <EmptyBlock icon="Wallet" title="Nothing matches" hint={anyFilter ? 'Try a different search or clear a filter.' : ''} action={{ label: 'Clear filters', run: () => { setSearchText(''); patch({ q: '', kind: '', tier: '', by: '', member: '' }); } }} />)}
+      {!loading && !error && filtered.length > 0 && (
+        <div className="flex items-center h-[52px] text-[12.5px] text-[#8A8A90] tabular-nums">{filtered.length} entr{filtered.length === 1 ? 'y' : 'ies'}</div>
       )}
     </div>
   );

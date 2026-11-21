@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useCallback, useEffect } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
@@ -18,6 +19,7 @@ const TABLE_OPTIONS = [
 const ACTION_BADGES = {
   INSERT: 'bg-green-100 text-green-700',
   UPDATE: 'bg-purple-100 text-purple-700',
+  AVAILABILITY_OVERRIDE: 'bg-amber-100 text-amber-700',
 };
 
 const PAGE_SIZE = 20;
@@ -103,8 +105,9 @@ function ExpandableRow({ log }) {
 }
 
 const AuditPanel = ({ branchId, initialRecordId = '' }) => {
-  const { staffLabelPlural } = useIndustry();
-  const tableOptions = TABLE_OPTIONS.map((o) => o.value === 'therapists' ? { ...o, label: staffLabelPlural } : o);
+  const { staffLabelPlural, enableRooms, locationLabelPlural } = useIndustry();
+  const tableOptions = TABLE_OPTIONS.filter((o) => enableRooms || o.value !== 'rooms')
+    .map((o) => o.value === 'therapists' ? { ...o, label: staffLabelPlural } : o.value === 'rooms' ? { ...o, label: locationLabelPlural } : o);
   const [logs, setLogs] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -137,7 +140,7 @@ const AuditPanel = ({ branchId, initialRecordId = '' }) => {
           offset: 0,
         });
         if (result.error) {
-          setError(result.error.message || 'Failed to load audit logs.');
+          setError(friendlyError(result.error, 'Failed to load audit logs.'));
           setLogs([]);
           setTotalCount(0);
         } else {
@@ -166,7 +169,7 @@ const AuditPanel = ({ branchId, initialRecordId = '' }) => {
     });
 
     if (result.error) {
-      setError(result.error.message || 'Failed to load audit logs.');
+      setError(friendlyError(result.error, 'Failed to load audit logs.'));
       setLogs([]);
       setTotalCount(0);
     } else {

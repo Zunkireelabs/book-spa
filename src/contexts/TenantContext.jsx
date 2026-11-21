@@ -65,7 +65,7 @@ export const TenantProvider = ({ children }) => {
     if (isCleaning) return 'Complete your cleaning service booking';
     if (isSalon) return 'Complete your salon booking';
     if (isBeauty) return 'Complete your beauty booking';
-    return 'Complete your spa booking journey';
+    return 'Complete your booking';
   };
 
   const value = {

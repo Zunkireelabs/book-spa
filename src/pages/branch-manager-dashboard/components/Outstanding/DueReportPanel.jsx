@@ -1,12 +1,15 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
 import FilterBar from '../../../../components/ui/FilterBar';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import PaymentModal from '../../../../components/ui/PaymentModal';
+import { submitCheckout } from '../../../../services/checkoutSubmit';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
 import { getDueReportByBranch, recordPayment, recordTip, getCustomerOutstandingBalance } from '../../../../services/api';
 import { useIndustry } from '../../../../hooks/useIndustry';
+import { wordBranchCap, wordBranches } from '../../../../utils/industryTerms';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -71,7 +74,7 @@ const DueReportPanel = () => {
     setError(null);
     const { data, error: err } = await getDueReportByBranch({ from: range.from, to: range.to });
     if (err) {
-      setError(err.message || 'Failed to load due report.');
+      setError(friendlyError(err, 'Failed to load due report.'));
     } else {
       setGroups(data || []);
     }
@@ -95,7 +98,7 @@ const DueReportPanel = () => {
   }, [groups]);
 
   const branchOptions = useMemo(() => [
-    { value: '', label: 'All branches' },
+    { value: '', label: `All ${wordBranches()}` },
     ...groups.map((g) => ({ value: g.branchId, label: g.branchName })),
   ], [groups]);
 
@@ -183,7 +186,9 @@ const DueReportPanel = () => {
     setOtherDueBookings(data?.bookings || []);
   };
 
-  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes, tipSplits }) => {
+  // ZNLY-233: every checkout goes through the one shared submit, so products on the bill are saved (never dropped); no products => the treatment-only path below.
+  const handleRecordPayment = (payload) => submitCheckout({ bookingId: payingRow?.bookingId, payload, treatment: recordTreatmentOnly, onSaved: () => load() });
+  const recordTreatmentOnly = async ({ tenders, additionalAllocations, dueHolderName, notes, tipSplits }) => {
     if (!payingRow) return { error: { message: 'No booking selected.' } };
     setPaymentSubmitting(true);
     const result = await recordPayment({ bookingId: payingRow.bookingId, tenders, dueHolderName, notes });
@@ -208,7 +213,7 @@ const DueReportPanel = () => {
   const handleExportCSV = () => {
     if (!filtered.length) return;
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Branch', 'Date', 'Booking #', 'Stage', 'Payment', 'Due', 'Customer', 'Phone', staffLabel, 'Created By'];
+    const header = [`${wordBranchCap()}`, 'Date', 'Booking #', 'Stage', 'Payment', 'Due', 'Customer', 'Phone', staffLabel, 'Created By'];
     let csv = header.join(',') + '\n';
     filtered.forEach((r) => {
       csv += [
@@ -311,7 +316,7 @@ const DueReportPanel = () => {
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
-          <span className="font-body text-sm text-text-secondary flex-shrink-0">Branch</span>
+          <span className="font-body text-sm text-text-secondary flex-shrink-0">{wordBranchCap()}</span>
           <CustomSelect value={branchFilter} onChange={setBranchFilter} options={branchOptions} size="sm" searchable className="w-48" />
         </div>
         <div className="flex items-center gap-2">
@@ -340,7 +345,7 @@ const DueReportPanel = () => {
                 <tr className="bg-background border-b border-border">
                   <th className="text-left px-4 py-2.5">
                     <button onClick={() => handleSort('branch')} className="inline-flex items-center gap-1 font-body font-body-medium text-xs text-text-secondary hover:text-text-primary spa-transition-fast">
-                      Branch <Icon name={sortIcon('branch')} size={13} />
+                      {wordBranchCap()} <Icon name={sortIcon('branch')} size={13} />
                     </button>
                   </th>
                   <th className="text-left px-4 py-2.5">
@@ -426,6 +431,7 @@ const DueReportPanel = () => {
           }}
           additionalBookings={otherDueBookings}
           onConfirm={handleRecordPayment}
+          savesProducts
           onClose={() => { setPayingRow(null); setOtherDueBookings([]); }}
           isSubmitting={paymentSubmitting}
         />

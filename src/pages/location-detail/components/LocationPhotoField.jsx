@@ -1,5 +1,6 @@
 import React from 'react';
 import Icon from '../../../components/AppIcon';
+import { wordBranchCap } from '../../../utils/industryTerms';
 
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
@@ -26,7 +27,7 @@ const LocationPhotoField = ({ preview, onFileSelected, onRemove, uploading }) =>
       {preview ? (
         <div className="flex items-start gap-3">
           <div className="relative w-32 h-20 rounded-spa overflow-hidden border border-border flex-shrink-0 bg-background">
-            <img src={preview} alt="Branch photo preview" className="w-full h-full object-cover" />
+            <img src={preview} alt={`${wordBranchCap()} photo preview`} className="w-full h-full object-cover" />
           </div>
           <div className="flex flex-col gap-2">
             <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-spa border border-border bg-background hover:bg-background/80 spa-transition-fast text-sm text-text-secondary">

@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import FilterBar from '../../../../components/ui/FilterBar';
@@ -44,7 +45,7 @@ const SettledDueHistoryPanel = ({ branchId }) => {
     setError(null);
     const { data, error: err } = await getSettledDueHistory({ branchId, from: range.from, to: range.to });
     if (err) {
-      setError(err.message || 'Failed to load settled history.');
+      setError(friendlyError(err, 'Failed to load settled history.'));
     } else {
       setRows(data || []);
     }

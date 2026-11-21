@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
+import { useMediaQuery } from '../../../components/ui/BottomSheet';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import BookingActionModal from '../../../components/ui/BookingActionModal';
 import StatusLegend from '../../../components/ui/StatusLegend';
 import { fetchBookingById } from '../../../services/api';
-import { transformBooking } from '../../../services/bookingTransformers';
+import { transformBooking, futureBookingMessage } from '../../../services/bookingTransformers';
 
 const DATE_RANGE_LABELS = {
   today: "Today's Appointments",
@@ -29,7 +30,8 @@ const STATUS_STYLES = {
   'no show': 'bg-gray-100 text-gray-500',
 };
 
-const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignTherapist, onRecordPayment, onGroupPaymentRecorded, onApplyDiscount, userRole = 'staff', onRefresh, dateRange = 'today' }) => {
+const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignTherapist, onRecordPayment, onGroupPaymentRecorded, onApplyDiscount, userRole = 'staff', canViewCustomerDetails = true, onRefresh, dateRange = 'today' }) => {
+  const isPhone = useMediaQuery('(max-width: 767px)');
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [showActionModal, setShowActionModal] = useState(false);
 
@@ -124,6 +126,8 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
             size={buttonSize}
             className={buttonClass}
             onClick={() => handleQuickStatusUpdate(booking, 'in-progress')}
+            disabled={!!futureBookingMessage(booking.date, 'start')}
+            title={futureBookingMessage(booking.date, 'start') || undefined}
           >
             Start
           </Button>
@@ -134,6 +138,8 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
             size={buttonSize}
             className={buttonClass}
             onClick={() => handleQuickStatusUpdate(booking, 'completed')}
+            disabled={!!futureBookingMessage(booking.date, 'complete')}
+            title={futureBookingMessage(booking.date, 'complete') || undefined}
           >
             Complete
           </Button>
@@ -403,6 +409,7 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
 
       {/* Booking Action Modal */}
       <BookingActionModal
+        variant={isPhone ? 'panel' : 'modal'} // phones share the calendar's bottom sheet; desktop keeps the centred modal
         isOpen={showActionModal}
         // Refresh on close, matching the two calendar call sites. Without this
         // an admin correction (or any other in-modal mutation) leaves this list
@@ -414,8 +421,13 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
         onUpdateStatus={onStatusUpdate}
         onRecordPayment={handleRecordPaymentWrapper}
         onGroupPaymentRecorded={handleGroupPaymentRecordedWrapper}
+        onRefreshBooking={async (id) => {
+          const refreshed = await fetchBookingById(id);
+          if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
+        }}
         onApplyDiscount={onApplyDiscount}
         userRole={userRole}
+        canViewCustomerDetails={canViewCustomerDetails}
         onViewBooking={handleViewBooking}
       />
     </>

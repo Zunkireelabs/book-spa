@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
@@ -54,7 +55,7 @@ const TemplateEditorPanel = () => {
       fetchOutreachLayouts(),
     ]);
     if (fetchError) {
-      setError(fetchError.message || 'Failed to load templates.');
+      setError(friendlyError(fetchError, 'Failed to load templates.'));
       setLoading(false);
       return;
     }
@@ -119,7 +120,7 @@ const TemplateEditorPanel = () => {
     setSaving(false);
 
     if (saveError) {
-      setFormError(saveError.message || 'Failed to save template.');
+      setFormError(friendlyError(saveError, 'Failed to save template.'));
       return;
     }
 
@@ -132,7 +133,7 @@ const TemplateEditorPanel = () => {
     const { error: deleteError } = await deleteOutreachTemplate(id);
     setDeletingId(null);
     if (deleteError) {
-      setError(deleteError.message || 'Failed to delete template.');
+      setError(friendlyError(deleteError, 'Failed to delete template.'));
       return;
     }
     if (form.id === id) setForm(EMPTY_FORM);
@@ -156,7 +157,7 @@ const TemplateEditorPanel = () => {
       html: newLayout.html,
     });
     setNewLayoutSubmitting(false);
-    if (createErr) { setNewLayoutError(createErr.message || 'Failed to create layout.'); return; }
+    if (createErr) { setNewLayoutError(friendlyError(createErr, 'Failed to create layout.')); return; }
 
     setNewLayout(EMPTY_NEW_LAYOUT);
     setShowNewLayout(false);
@@ -346,7 +347,7 @@ const TemplateEditorPanel = () => {
               type="text"
               value={form.subject}
               onChange={(e) => setForm((prev) => ({ ...prev, subject: e.target.value }))}
-              placeholder="We miss you at Nuad Thai Spa!"
+              placeholder={`We miss you at ${orgName || 'our business'}!`}
               className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
             />
           </div>

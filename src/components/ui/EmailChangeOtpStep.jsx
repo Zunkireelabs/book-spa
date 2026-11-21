@@ -1,3 +1,4 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect, useRef } from 'react';
 import { useCustomerAuth } from 'contexts/CustomerAuthContext';
 
@@ -42,7 +43,7 @@ const EmailChangeOtpStep = ({ newEmail, onVerified, onBack }) => {
       setError(
         err.message?.toLowerCase().includes('expired') || err.message?.toLowerCase().includes('invalid')
           ? 'Invalid or expired code. Please try again or resend.'
-          : err.message || 'Could not verify the code. Please try again.'
+          : friendlyError(err, 'Could not verify the code. Please try again.')
       );
     } finally {
       setIsVerifying(false);
@@ -57,7 +58,7 @@ const EmailChangeOtpStep = ({ newEmail, onVerified, onBack }) => {
       await requestEmailChange(newEmail);
       setCooldown(RESEND_COOLDOWN_SECONDS);
     } catch (err) {
-      setError(err.message || 'Could not resend the code. Please try again.');
+      setError(friendlyError(err, 'Could not resend the code. Please try again.'));
     } finally {
       setIsResending(false);
     }

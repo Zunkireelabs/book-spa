@@ -2,8 +2,26 @@
 // DateTimeSelection (full multi-day grid) and AvailableTodayPanel (same-day quick picks), so the
 // two stay consistent about what "available" means (room capacity + gender headcount).
 
+// Legacy online range, used only when a branch has no hours configured anywhere (ZNLY-222).
 export const START_HOUR = 10;
 export const END_HOUR = 18;
+
+// Online slot range for one calendar date, from the branch's own hours (ZNLY-222).
+// hours = { weekly: [{ day_of_week, start_time, end_time, is_day_off }], openTime, closeTime } | null
+// day_of_week follows branch_working_hours: Monday = 0 ... Sunday = 6.
+// Returns { startMin, endMin } (minutes from midnight), or null for a day off (no slots).
+// A weekday with no row falls back to branches.open_time/close_time; with nothing configured, the legacy 10:00-18:00.
+export function slotRangeForDate(dateStr, hours) {
+  const dow = (new Date(`${dateStr}T00:00:00`).getDay() + 6) % 7;
+  const toMin = (t) => timeToMinutes(String(t).slice(0, 5));
+  const row = (hours?.weekly || []).find((r) => r.day_of_week === dow);
+  if (row) {
+    if (row.is_day_off || !row.start_time || !row.end_time) return null;
+    return { startMin: toMin(row.start_time), endMin: toMin(row.end_time) };
+  }
+  if (hours?.openTime && hours?.closeTime) return { startMin: toMin(hours.openTime), endMin: toMin(hours.closeTime) };
+  return { startMin: START_HOUR * 60, endMin: END_HOUR * 60 };
+}
 
 export function getNepalNow() {
   const now = new Date();

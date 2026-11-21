@@ -1,7 +1,9 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { useOrg } from '../../../../contexts/OrgContext';
 import { updateOrgProfileSetting } from '../../../../services/api';
+import CustomSelect from '../../../../components/ui/CustomSelect';
 import { CANCEL_REASON_OPTIONS } from '../../../../components/ui/ConfirmDialog';
 
 const INTERVAL_OPTIONS = [15, 30, 60];
@@ -35,7 +37,7 @@ const CalendarSettingsPanel = () => {
     setError(null);
     const result = await updateOrgProfileSetting(key, value);
     if (result.error) {
-      setError(result.error.message || 'Failed to update setting.');
+      setError(friendlyError(result.error, 'Failed to update setting.'));
     } else {
       await refreshOrg();
     }
@@ -63,7 +65,6 @@ const CalendarSettingsPanel = () => {
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
-        <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Calendar Settings</h3>
         <p className="font-body text-sm text-text-secondary">Controls how the operational calendar displays and what cancellation reasons staff can pick from.</p>
       </div>
 
@@ -119,16 +120,12 @@ const CalendarSettingsPanel = () => {
 
           <div>
             <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Calendar interval</label>
-            <select
+            <CustomSelect
               value={intervalMinutes}
-              onChange={(e) => save('calendar_interval_minutes', Number(e.target.value))}
+              onChange={(v) => save('calendar_interval_minutes', Number(v))}
+              options={INTERVAL_OPTIONS.map((m) => ({ value: m, label: `${m} minutes` }))}
               disabled={saving === 'calendar_interval_minutes'}
-              className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:opacity-50"
-            >
-              {INTERVAL_OPTIONS.map((m) => (
-                <option key={m} value={m}>{m} minutes</option>
-              ))}
-            </select>
+            />
             <p className="font-caption text-[11px] text-text-tertiary mt-1">Grid-line spacing on the Day/Week hour grid.</p>
           </div>
         </div>

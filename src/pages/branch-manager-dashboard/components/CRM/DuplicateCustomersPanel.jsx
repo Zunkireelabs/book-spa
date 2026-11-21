@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { fetchDuplicateCandidates, mergeCustomers, dismissDuplicateCandidate } from '../../../../services/api';
@@ -43,7 +44,7 @@ const DuplicateCustomersPanel = ({ orgId }) => {
     setError(null);
     const { data, error } = await fetchDuplicateCandidates(orgId);
     if (error) {
-      setError(error.message || 'Failed to load potential duplicates.');
+      setError(friendlyError(error, 'Failed to load potential duplicates.'));
       setLoading(false);
       return;
     }
@@ -69,7 +70,7 @@ const DuplicateCustomersPanel = ({ orgId }) => {
     const { error } = await mergeCustomers(canonicalId, duplicateId);
     setBusyKey(null);
     if (error) {
-      window.alert(error.message || 'Merge failed.');
+      window.alert(friendlyError(error, 'Merge failed.'));
       return;
     }
     await load();
@@ -81,7 +82,7 @@ const DuplicateCustomersPanel = ({ orgId }) => {
     const { error } = await dismissDuplicateCandidate(orgId, c.customer_id_a, c.customer_id_b);
     setBusyKey(null);
     if (error) {
-      window.alert(error.message || 'Failed to dismiss.');
+      window.alert(friendlyError(error, 'Failed to dismiss.'));
       return;
     }
     await load();

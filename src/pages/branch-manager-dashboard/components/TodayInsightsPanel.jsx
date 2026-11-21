@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import { getTodayInsights } from '../../../services/api';
@@ -49,7 +50,7 @@ const TodayInsightsPanel = ({ branchId, period, showVouchers = true, showProduct
     const result = await getTodayInsights(branchId, period?.from, period?.to);
 
     if (result.error) {
-      setError(result.error.message || "Failed to load today's insights.");
+      setError(friendlyError(result.error, "Failed to load today's insights."));
       setLoading(false);
       return;
     }
@@ -208,6 +209,9 @@ const TodayInsightsPanel = ({ branchId, period, showVouchers = true, showProduct
               <span className="text-sm text-gray-700">Gift Vouchers</span>
               <span className="text-sm font-semibold text-gray-900">
                 {data.voucherDistributed.count} · {formatNPR(data.voucherDistributed.value)}
+                {data.voucherDistributed.freeCount > 0 && (
+                  <span className="font-normal text-gray-500"> ({data.voucherDistributed.freeCount} given free)</span>
+                )}
               </span>
             </div>
           )}

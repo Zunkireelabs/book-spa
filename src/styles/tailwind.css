@@ -28,39 +28,13 @@
   src: url('/fonts/Inter-Bold.ttf') format('truetype');
 }
 
-/* Playfair Display — serif display typeface */
-@font-face {
-  font-family: 'Playfair Display';
-  font-style: normal;
-  font-weight: 400;
-  font-display: fallback;
-  src: url('/fonts/PlayfairDisplay-Regular.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'Playfair Display';
-  font-style: normal;
-  font-weight: 500;
-  font-display: fallback;
-  src: url('/fonts/PlayfairDisplay-Medium.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'Playfair Display';
-  font-style: normal;
-  font-weight: 600;
-  font-display: fallback;
-  src: url('/fonts/PlayfairDisplay-SemiBold.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'Playfair Display';
-  font-style: normal;
-  font-weight: 700;
-  font-display: fallback;
-  src: url('/fonts/PlayfairDisplay-Bold.ttf') format('truetype');
-}
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Compact control height shared by header controls (ClinicMD compact chrome). */
+:root { --control-h: 32px; }
+@media (pointer: coarse) { :root { --control-h: 36px; } }
 
 @layer base {
   :root {
@@ -77,12 +51,13 @@
     --color-accent-foreground: #1A1A1A; /* near-black */
     
     /* Background Colors */
-    --color-background: #FAFAF9; /* soft off-white */
+    --color-background: #FAFAFB; /* brand grey */
     --color-surface: #FFFFFF; /* pure white */
     
     /* Text Colors */
-    --color-text-primary: #1A1A1A; /* near-black */
-    --color-text-secondary: #6B7280; /* medium gray */
+    --color-text-primary: #0E0D0C; /* brand ink */
+    --color-text-secondary: #515152; /* brand muted */
+    --color-text-tertiary: #8A8A90; /* brand soft */
     
     /* Status Colors */
     --color-success: #10B981; /* emerald green (distinct from primary) */
@@ -95,14 +70,14 @@
     --color-error-foreground: #FFFFFF; /* white */
     
     /* Border Colors */
-    --color-border: #E1E3E5; /* soft gray (Shopify-style) */
-    --color-border-muted: rgba(225, 227, 229, 0.5); /* soft gray with opacity */
+    --color-border: #E9E9EC; /* brand hairline */
+    --color-border-muted: rgba(233, 233, 236, 0.5); /* soft gray with opacity */
     
     /* Shadow Colors */
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-    --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
-    --shadow-lg: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.06);
-    --shadow-xl: 0 10px 15px rgba(0, 0, 0, 0.1), 0 4px 6px rgba(0, 0, 0, 0.05);
+    --shadow-sm: 0 1px 2px rgba(14, 13, 12, 0.04);
+    --shadow-md: 0 1px 2px rgba(14, 13, 12, 0.04);
+    --shadow-lg: 0 12px 32px rgba(14, 13, 12, 0.08), 0 0 0 1px #E9E9EC;
+    --shadow-xl: 0 20px 40px rgba(14, 13, 12, 0.12), 0 0 0 1px #E9E9EC;
     
     /* Animation Timing */
     --timing-fast: 150ms;
@@ -119,12 +94,31 @@
   html {
     @apply bg-background;
     overscroll-behavior-y: none;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    touch-action: manipulation; /* no double-tap zoom; pinch still works */
   }
 
   body {
     @apply bg-background text-text-primary font-body;
     font-feature-settings: "rlig" 1, "calt" 1;
     overscroll-behavior-y: none;
+    overscroll-behavior-x: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* iOS Safari/Chrome zoom the page into any focused text field whose font-size
+     is under 16px. Touch devices only (desktop unchanged). !important is needed
+     to beat Tailwind text-* utilities (text-sm, text-[13px]) on every field. */
+  @media (hover: none) and (pointer: coarse) {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+    textarea,
+    select,
+    [contenteditable]:not([contenteditable="false"]),
+    .field-text,
+    .field-text span {
+      font-size: 16px !important;
+    }
   }
 
   /* Smooth scrolling, opt-in: the customer booking flow adds `smooth-scroll` to <html>
@@ -161,11 +155,11 @@
   }
 
   .font-accent {
-    font-family: 'Playfair Display', serif;
+    font-family: 'Inter', sans-serif;
   }
 
   .font-data {
-    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: 'Inter', sans-serif;
   }
 }
 
@@ -181,7 +175,22 @@
   .spa-shadow-modal {
     box-shadow: var(--shadow-xl);
   }
+
+  /* Frosted modal backdrop: used by Checkout only (other dialogs keep the plain dim). */
+  .modal-backdrop-frost {
+    background: rgba(24, 22, 20, 0.18);
+    -webkit-backdrop-filter: blur(10px) saturate(0.9);
+    backdrop-filter: blur(10px) saturate(0.9);
+  }
   
+  /* Checkout: keyboard focus on buttons/links uses the app's green, not the browser's default blue ring. */
+  .checkout-dialog button:focus-visible,
+  .checkout-dialog a:focus-visible,
+  .checkout-dialog [role="checkbox"]:focus-visible {
+    outline: 2px solid rgba(45, 90, 39, 0.45);
+    outline-offset: 2px;
+  }
+
   .spa-transition-fast {
     transition-duration: var(--timing-fast);
     transition-timing-function: var(--easing-out);
@@ -244,175 +253,6 @@
   100% { opacity: 0; transform: translateY(-10px); }
 }
 
-/* ── FullCalendar Zenly Theme ─────────────────────────────── */
-.bookspa-calendar {
-  /* Reset FullCalendar chrome to match Zenly surface tokens */
-  --fc-border-color: var(--color-border);
-  --fc-button-bg-color: var(--color-background);
-  --fc-button-border-color: var(--color-border);
-  --fc-button-text-color: var(--color-text-primary);
-  --fc-button-hover-bg-color: var(--color-border);
-  --fc-button-hover-border-color: var(--color-border);
-  --fc-button-active-bg-color: var(--color-primary);
-  --fc-button-active-border-color: var(--color-primary);
-  --fc-page-bg-color: var(--color-surface);
-  --fc-neutral-bg-color: var(--color-background);
-  --fc-today-bg-color: rgba(45, 90, 39, 0.04);
-  --fc-now-indicator-color: var(--color-primary);
-  --fc-event-border-color: transparent;
-  --fc-non-business-color: rgba(0, 0, 0, 0.02);
-}
-
-/* Toolbar */
-.bookspa-calendar .fc .fc-toolbar {
-  padding: 0.75rem 1.5rem;
-  gap: 0.5rem;
-}
-
-.bookspa-calendar .fc .fc-toolbar-title {
-  font-family: 'Inter', sans-serif;
-  font-weight: 600;
-  font-size: 1rem;
-  color: var(--color-text-primary);
-}
-
-/* Buttons */
-.bookspa-calendar .fc .fc-button {
-  font-family: 'Inter', sans-serif;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  padding: 0.375rem 0.75rem;
-  border-radius: 6px;
-  box-shadow: none;
-  text-transform: none;
-  transition: all 150ms ease-out;
-}
-
-.bookspa-calendar .fc .fc-button:focus {
-  box-shadow: 0 0 0 2px rgba(45, 90, 39, 0.25);
-}
-
-.bookspa-calendar .fc .fc-button-active {
-  background-color: var(--color-primary) !important;
-  border-color: var(--color-primary) !important;
-  color: #fff !important;
-}
-
-/* Table / Grid */
-.bookspa-calendar .fc .fc-scrollgrid {
-  border-radius: 0 0 12px 12px;
-  overflow: hidden;
-}
-
-.bookspa-calendar .fc td,
-.bookspa-calendar .fc th {
-  border-color: var(--color-border);
-}
-
-.bookspa-calendar .fc .fc-col-header-cell {
-  background: var(--color-background);
-  padding: 0.5rem 0;
-}
-
-.bookspa-calendar .fc .fc-col-header-cell-cushion {
-  font-family: 'Inter', sans-serif;
-  font-size: 0.8125rem;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-/* Resource area */
-.bookspa-calendar .fc .fc-datagrid-cell-frame {
-  padding: 0.25rem 0.75rem;
-}
-
-.bookspa-calendar .fc .fc-resource-area .fc-datagrid-header .fc-datagrid-cell-frame {
-  background: var(--color-background);
-}
-
-.bookspa-calendar .fc .fc-resource-area .fc-datagrid-header .fc-datagrid-cell-cushion {
-  font-family: 'Inter', sans-serif;
-  font-size: 0.8125rem;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-weight: 600;
-}
-
-/* Slot labels */
-.bookspa-calendar .fc .fc-timeline-slot-label-cushion {
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8125rem;
-  color: var(--color-text-secondary);
-}
-
-/* Events */
-.bookspa-calendar .fc .fc-event {
-  border-radius: 4px;
-  border-width: 2px;
-  cursor: pointer;
-  transition: opacity 150ms ease-out, transform 150ms ease-out;
-  overflow: visible;
-}
-
-.bookspa-calendar .fc .fc-event-main {
-  overflow: visible;
-}
-
-.bookspa-calendar .fc .fc-timeline-lane,
-.bookspa-calendar .fc .fc-timeline-lane-frame {
-  overflow: visible;
-}
-
-.bookspa-calendar .fc .fc-event:hover {
-  opacity: 0.9;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
-}
-
-.bookspa-calendar .fc .fc-event-main {
-  padding: 1px 2px;
-}
-
-/* Now indicator line */
-.bookspa-calendar .fc .fc-timeline-now-indicator-line {
-  border-color: var(--color-primary);
-  border-width: 2px;
-}
-
-.bookspa-calendar .fc .fc-timeline-now-indicator-arrow {
-  border-color: var(--color-primary);
-}
-
-/* DayGrid month view */
-.bookspa-calendar .fc .fc-daygrid-day-number {
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8125rem;
-  color: var(--color-text-secondary);
-  padding: 0.25rem 0.5rem;
-}
-
-.bookspa-calendar .fc .fc-daygrid-event {
-  border-radius: 4px;
-  margin: 1px 2px;
-}
-
-/* Scrollbar styling */
-.bookspa-calendar .fc .fc-scroller::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.bookspa-calendar .fc .fc-scroller::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 3px;
-}
-
-.bookspa-calendar .fc .fc-scroller::-webkit-scrollbar-track {
-  background: transparent;
-}
-
 /* ── Fully hidden scrollbar (scroll still works, e.g. horizontal pill rows) ── */
 .scrollbar-hide {
   scrollbar-width: none;
@@ -423,29 +263,65 @@
   display: none;
 }
 
-/* ── Sidebar thin scrollbar ──────────────────────────────────── */
-.sidebar-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-border) transparent;
-}
-
+/* ── Sidebar scrollbar: thin rounded thumb, no track, shown only while the pointer is over the nav ──
+   Chrome/Safari use the ::-webkit-scrollbar rules (they ignore them once the standard scrollbar-* properties
+   are set, so those are only applied where ::-webkit-scrollbar is unsupported, i.e. Firefox). The 8px gutter
+   is always reserved so items don't shift when the thumb appears; the thumb is 4px, inset by a transparent border. */
 .sidebar-scroll::-webkit-scrollbar {
-  width: 4px;
-  height: 6px;
-}
-
-.sidebar-scroll::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 2px;
-}
-
-.sidebar-scroll::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-secondary);
+  width: 8px;
+  height: 8px;
 }
 
 .sidebar-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 9999px;
+}
+
+/* Chromium doesn't repaint the thumb on the scroller's own :hover, so key the reveal off an ancestor :has(). */
+aside:has(.sidebar-scroll:hover) .sidebar-scroll::-webkit-scrollbar-thumb,
+aside:has(.sidebar-scroll:focus-within) .sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(14, 13, 12, 0.18);
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(14, 13, 12, 0.32);
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .sidebar-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .sidebar-scroll:hover,
+  .sidebar-scroll:focus-within {
+    scrollbar-color: rgba(14, 13, 12, 0.18) transparent;
+  }
+}
+
+/* Floating panels (dropdowns, notification panel, palette...): ONE rule to fit the VISIBLE viewport. 100vh is the large viewport on
+   phones (browser bar not subtracted), so the panel's footer hid behind it; dvh follows the bar (the vh line is the fallback for
+   browsers without dvh). Set --panel-top (where the panel starts) and --panel-gap (space to leave at the bottom).
+   .panel-fit-nav also keeps the panel clear of the floating phone nav + safe area below lg. Desktop: vh == dvh, so unchanged. */
+.panel-fit {
+  max-height: calc(100vh - var(--panel-top, 0px) - var(--panel-gap, 1rem));
+  max-height: calc(100dvh - var(--panel-top, 0px) - var(--panel-gap, 1rem));
+}
+@media (max-width: 1023.98px) {
+  .panel-fit-nav {
+    max-height: calc(100vh - var(--panel-top, 0px) - max(var(--panel-gap, 1rem), 6rem + env(safe-area-inset-bottom)));
+    max-height: calc(100dvh - var(--panel-top, 0px) - max(var(--panel-gap, 1rem), 6rem + env(safe-area-inset-bottom)));
+  }
+}
+
+/* Calendar scroller: never chains scroll to the page. Phone column snapping is done in JS (CalendarGrid axis lock), not CSS snap. */
+.calendar-grid-scroll { overscroll-behavior: contain; }
 
 /* ── Calendar grid scroller — thicker horizontal bar, always visible ── */
 .calendar-grid-scroll {
@@ -476,3 +352,55 @@
   background: var(--color-background);
 }
 
+
+/* ── AppShell content scroller (desktop): thin neutral thumb, no track, always visible ── */
+.content-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.content-scroll::-webkit-scrollbar-track { background: transparent; }
+.content-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(14, 13, 12, 0.18);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 9999px;
+}
+.content-scroll::-webkit-scrollbar-thumb:hover { background-color: rgba(14, 13, 12, 0.32); }
+
+/* Standard properties only where ::-webkit-scrollbar is unsupported (Chrome ignores the webkit rules once they're set). */
+@supports not selector(::-webkit-scrollbar) {
+  .content-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(14, 13, 12, 0.18) transparent;
+  }
+}
+
+/* Toasts / snackbars / undo bars: ONE position rule. Bottom ones clear the floating phone nav (same clearance as .content-scroll),
+   and sit at --toast-lg (default 1.5rem) from lg up, where the nav is gone. Top ones clear the safe area. Always pair with z-toast. */
+.toast-bottom { bottom: calc(6rem + env(safe-area-inset-bottom)); }
+.toast-top { top: calc(4rem + env(safe-area-inset-top)); }
+@media (min-width: 640px) { .toast-top { top: 5rem; } }
+@media (min-width: 1024px) { .toast-bottom { bottom: var(--toast-lg, 1.5rem); } }
+
+/* Phone: the content surface runs to the screen's bottom edge behind the floating pill nav (no band), and every scroller
+   ends with clearance = pill + its offset + safe area (+ the FAB), so the last item scrolls fully clear of both. */
+@media (max-width: 1023.98px) {
+  .app-shell .content-scroll,
+  .app-shell .calendar-grid-scroll {
+    padding-bottom: calc(6rem + env(safe-area-inset-bottom));
+  }
+}
+
+/* While any overlay holds the scroll lock (BottomSheet.jsx lockScroll), the page scrollers inside the app shell freeze too: on phone
+   .content-scroll and the calendar grid scroll, not the body. overflow:hidden keeps scrollTop, so unlocking restores the position. */
+.scroll-locked .content-scroll,
+.scroll-locked .calendar-grid-scroll {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+}
+
+/* Print: let the frame grow to its content so long pages print in full. */
+@media print {
+  .app-shell, .app-shell-main, .app-shell-frame, .content-scroll {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}

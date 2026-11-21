@@ -1,9 +1,10 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useCustomerAuth } from 'contexts/CustomerAuthContext';
 import { useTenant } from 'contexts/TenantContext';
-import CountryCodeSelect from 'components/ui/CountryCodeSelect';
-import { toE164 } from 'utils/phone';
+import PhoneField from 'components/ui/PhoneField';
+import { toE164, phoneProblem } from 'utils/phone';
 import OtpCodeStep from 'pages/customer-login/components/OtpCodeStep';
 
 const CustomerSignupForm = () => {
@@ -44,6 +45,9 @@ const CustomerSignupForm = () => {
 
     if (!phone.trim()) {
       newErrors.phone = 'Phone is required';
+    } else {
+      const phoneIssue = phoneProblem(phoneCountryCode, phone, { walkInHint: false });
+      if (phoneIssue) newErrors.phone = phoneIssue;
     }
 
     setErrors(newErrors);
@@ -65,7 +69,7 @@ const CustomerSignupForm = () => {
       setStep('code');
     } catch (error) {
       setErrors({
-        submit: error.message || 'An unexpected error occurred. Please try again.'
+        submit: friendlyError(error, 'An unexpected error occurred. Please try again.')
       });
     } finally {
       setIsLoading(false);
@@ -135,29 +139,12 @@ const CustomerSignupForm = () => {
         </div>
 
         <div className="mb-4">
-          <div className="flex">
-            <CountryCodeSelect
-              value={phoneCountryCode}
-              onChange={setPhoneCountryCode}
-              disabled={isLoading}
-            />
-            <input
-              type="tel"
-              value={phone}
-              onChange={(e) => {
-                setPhone(e.target.value);
-                if (errors.phone) setErrors(prev => ({ ...prev, phone: '' }));
-              }}
-              placeholder="9841234567"
-              disabled={isLoading}
-              className={`flex-1 min-w-0 px-3.5 py-3 text-sm bg-surface border rounded-r-[10px] rounded-l-none text-text-primary placeholder:text-text-secondary outline-none transition-all duration-150 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-background disabled:cursor-not-allowed ${
-                errors.phone ? 'border-error' : 'border-border'
-              }`}
-            />
-          </div>
-          {errors.phone && (
-            <p className="mt-1.5 text-xs text-error">{errors.phone}</p>
-          )}
+          <PhoneField
+            id="signup-phone" placeholder="9841234567" error={errors.phone} disabled={isLoading}
+            dial={phoneCountryCode} national={phone}
+            onChange={({ dial, national }) => { setPhoneCountryCode(dial); setPhone(national); if (errors.phone) setErrors(prev => ({ ...prev, phone: '' })); }}
+            inputClassName={`flex-1 min-w-0 px-3.5 py-3 text-base sm:text-sm bg-surface border rounded-r-[10px] rounded-l-none text-text-primary placeholder:text-text-secondary outline-none transition-all duration-150 focus:border-primary ${errors.phone ? 'border-error' : 'border-border'}`}
+          />
         </div>
 
         <button

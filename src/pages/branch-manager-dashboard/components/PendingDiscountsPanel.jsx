@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
@@ -23,7 +24,7 @@ const PendingDiscountsPanel = ({ branchId, highlightBookingId }) => {
 
     const result = await fetchPendingDiscounts(branchId);
     if (result.error) {
-      setError(result.error.message || 'Failed to load pending discounts.');
+      setError(friendlyError(result.error, 'Failed to load pending discounts.'));
     } else {
       setDiscounts(result.data || []);
     }
@@ -71,21 +72,8 @@ const PendingDiscountsPanel = ({ branchId, highlightBookingId }) => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <div className="flex items-center space-x-3 mb-4">
-          <div className="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center">
-            <Icon name="Percent" size={16} className="text-amber-600" />
-          </div>
-          <h3 className="text-base font-semibold text-gray-900">Pending Discounts</h3>
-        </div>
-        <div className="flex justify-center py-6">
-          <div className="animate-spin w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full" />
-        </div>
-      </div>
-    );
-  }
+  // ZNLY-272b: a card that may turn out empty draws nothing until its data is in (no spinner card that vanishes, no layout jump).
+  if (loading) return null;
 
   if (discounts.length === 0) return null;
 

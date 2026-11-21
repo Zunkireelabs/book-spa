@@ -1,6 +1,9 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
+import { DateField } from '../../../../components/ui/PanelFormKit';
+import { htmlToText } from '../../../../utils/htmlToText';
 import { fetchOutreachMessages, fetchOutreachAnalytics } from '../../../../services/api';
 
 function formatDateTime(d) {
@@ -28,14 +31,14 @@ const CHANNEL_OPTIONS = [
 ];
 
 const STATUS_PILL = {
-  queued: 'bg-gray-100 text-gray-600',
+  queued: 'bg-black/[0.05] text-text-secondary',
   review: 'bg-warning/10 text-warning',
   approved: 'bg-primary/10 text-primary',
   sending: 'bg-primary/10 text-primary',
   sent: 'bg-success/10 text-success',
   delivered: 'bg-success/10 text-success',
   failed: 'bg-error/10 text-error',
-  cancelled: 'bg-gray-100 text-gray-600',
+  cancelled: 'bg-black/[0.05] text-text-secondary',
 };
 
 const SUMMARY_CARDS = [
@@ -46,8 +49,7 @@ const SUMMARY_CARDS = [
 ];
 
 // Filterable send log + a lightweight 30-day analytics summary from
-// fetchOutreachAnalytics(). Date range filters use plain <input type="date">
-// (not a CustomSelect — these are date pickers, not option lists).
+// fetchOutreachAnalytics(). The date range uses the app's DateField (mini-month popover).
 const MessageLogPanel = () => {
   const [messages, setMessages] = useState([]);
   const [analytics, setAnalytics] = useState(null);
@@ -72,7 +74,7 @@ const MessageLogPanel = () => {
       fetchOutreachAnalytics(),
     ]);
     if (messagesRes.error) {
-      setError(messagesRes.error.message || 'Failed to load the message log.');
+      setError(friendlyError(messagesRes.error, 'Failed to load the message log.'));
       setLoading(false);
       return;
     }
@@ -119,23 +121,11 @@ const MessageLogPanel = () => {
           <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Channel</label>
           <CustomSelect value={channel} onChange={setChannel} options={CHANNEL_OPTIONS} placeholder="All channels" />
         </div>
-        <div>
-          <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">From</label>
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            className="h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-          />
+        <div className="w-44">
+          <DateField label="From" value={dateFrom} onChange={setDateFrom} />
         </div>
-        <div>
-          <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">To</label>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            className="h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-          />
+        <div className="w-44">
+          <DateField label="To" value={dateTo} onChange={setDateTo} min={dateFrom || undefined} />
         </div>
         {(status || channel || dateFrom || dateTo) && (
           <button
@@ -198,15 +188,15 @@ const MessageLogPanel = () => {
                       </td>
                       <td className="px-2.5 py-1.5 max-w-xs">
                         <span className="font-body font-body-normal text-xs text-text-secondary truncate block">
-                          {m.subject || m.body}
+                          {m.subject || htmlToText(m.body)}
                         </span>
                         {m.error && <span className="font-caption text-[10px] text-error block mt-0.5">{m.error}</span>}
                       </td>
                       <td className="px-2.5 py-1.5 whitespace-nowrap">
-                        <span className="font-caption text-[11px] text-text-tertiary">{formatDateTime(m.sent_at || m.created_at)}</span>
+                        <span className="font-caption text-[11px] text-text-tertiary">{formatDateTime(m.sent_at)}</span>
                       </td>
                       <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
-                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-caption font-caption-medium capitalize ${STATUS_PILL[m.status] || 'bg-gray-100 text-gray-600'}`}>
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-caption font-caption-medium capitalize ${STATUS_PILL[m.status] || 'bg-black/[0.05] text-text-secondary'}`}>
                           {m.status}
                         </span>
                       </td>

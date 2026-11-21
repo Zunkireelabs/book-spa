@@ -55,7 +55,11 @@ if ! diff_out="$(git diff --name-only --diff-filter=AM "$BASE_REF"...HEAD -- 'su
   exit 1
 fi
 
-mapfile -t FILES < <(printf '%s' "$diff_out" | grep -v '^[[:space:]]*$' || true)
+# bash 3.2 (macOS) has no mapfile (ZNLY-201): fill the array with a read loop instead.
+FILES=()
+while IFS= read -r line; do
+  [ -n "$line" ] && FILES+=("$line")
+done < <(printf '%s' "$diff_out" | grep -v '^[[:space:]]*$' || true)
 
 if [ "${#FILES[@]}" -eq 0 ]; then
   echo "No migration files added or modified — nothing to check."

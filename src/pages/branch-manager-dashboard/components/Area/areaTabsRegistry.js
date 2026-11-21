@@ -1,0 +1,124 @@
+import { OWN_BOOKINGS_HEADER } from 'services/dataMasking';
+import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED, PRODUCTS_ENABLED } from 'lib/featureFlags';
+import { wordBranch, wordBranches } from '../../../../utils/industryTerms';
+
+// Small areas (2–4 pages) get tabs at the top of the page; each tab is an existing `?view=` URL, so every view URL keeps working.
+// Roles, flags and `overallHidden` mirror the sidebar entries these tabs replace.
+const ALL = ['staff', 'manager', 'admin', 'admin_viewer'];
+const STAFF_UP = ['manager', 'admin', 'admin_viewer'];
+const MGR_ADMIN_VIEWER = STAFF_UP; // Packages / Memberships / Vouchers tabs: admin_viewer is read-only (#411)
+
+const FRONT_DESK = ['staff', 'manager', 'admin']; // sell/collect tools; admin_viewer stays read-only (ZNLY-149)
+
+export const AREAS = [
+  {
+    id: 'bookings',
+    title: 'Bookings',
+    description: ({ branchName, isOverall, ownOnly }) => ownOnly ? OWN_BOOKINGS_HEADER : `Every booking at ${isOverall ? `all ${wordBranches()}` : (branchName || `this ${wordBranch()}`)}.`,
+    tabs: [
+      { view: 'bookings', label: 'All bookings', roles: ALL },
+      { view: 'check-booking', label: 'Check booking', roles: ALL, overallHidden: true },
+      { view: 'collect-payment', money: true, label: 'Collect payment', roles: FRONT_DESK, overallHidden: true },
+      ...(MEMBERSHIP_ENABLED ? [{ view: 'new-membership', money: true, label: 'New membership', roles: FRONT_DESK, overallHidden: true }] : []),
+      ...(VOUCHER_ENABLED ? [{ view: 'new-voucher', money: true, label: 'New voucher', roles: FRONT_DESK, overallHidden: true }] : []),
+    ],
+  },
+  // Single pages: one tab, so the header shows and there is no tab row.
+  {
+    id: 'therapists',
+    title: ({ staffLabelPlural }) => staffLabelPlural || 'Staff',
+    description: () => 'Everyone who serves customers, and their positions.',
+    selfHeader: true, // Therapists (V28) draws its own header (lead sentence + counted tabs), like Packages and Products
+    tabs: [
+      { view: 'therapists', label: 'Active', roles: STAFF_UP },
+      { view: 'therapists-inactive', label: 'Inactive', roles: STAFF_UP },
+      { view: 'therapists-positions', label: 'Positions', roles: ['manager', 'admin'], overallHidden: true },
+      { view: 'therapists-transfers', label: 'Transfer log', roles: STAFF_UP },
+      { view: 'roster', label: 'Roster', roles: ['manager', 'admin'], overallHidden: true }, // weekly roster + day overrides (opens from Calendar ⋮ too)
+    ],
+  },
+  {
+    id: 'attendance',
+    title: 'Attendance',
+    description: () => "Who's in today, check-ins and check-outs.",
+    tabs: [{ view: 'attendance', label: 'Attendance', roles: STAFF_UP, overallHidden: true }],
+  },
+  {
+    id: 'payroll',
+    title: 'Payroll',
+    description: () => 'Monthly pay runs for your team.',
+    selfHeader: true, // the panel draws its own header + the Pay rates / Pay runs tabs (V26)
+    tabs: [{ view: 'payroll', label: 'Payroll', roles: ['admin', 'admin_viewer'] }],
+  },
+  // Packages (V20) draws its own header (lead sentence + counted tabs), so `selfHeader` skips the shared one.
+  {
+    id: 'packages',
+    title: 'Packages',
+    description: () => 'Packages you sell and the ones customers hold.',
+    selfHeader: true,
+    tabs: [
+      { view: 'packages', label: 'Guest packages', roles: MGR_ADMIN_VIEWER },
+      { view: 'package-overview', label: 'Package types', roles: MGR_ADMIN_VIEWER },
+    ],
+  },
+  // Flagged areas: only present when the feature is on.
+  ...(MEMBERSHIP_ENABLED ? [{
+    id: 'memberships',
+    title: 'Memberships',
+    description: () => 'Prepaid memberships, what has been collected and how wallets are used.',
+    selfHeader: true, // Memberships (V21) draws its own header, like Packages
+    tabs: [
+      { view: 'memberships', label: 'Members', roles: MGR_ADMIN_VIEWER },
+      { view: 'membership-collection', label: 'Tiers', roles: MGR_ADMIN_VIEWER },
+      { view: 'wallet-usage', label: 'Wallet activity', roles: MGR_ADMIN_VIEWER },
+    ],
+  }] : []),
+  ...(VOUCHER_ENABLED ? [{
+    id: 'vouchers',
+    title: 'Vouchers',
+    description: () => 'Gift vouchers you sell or give away, and what they are still worth.',
+    selfHeader: true, // Vouchers (V23) draws its own header, like Packages and Memberships
+    tabs: [
+      { view: 'vouchers', label: 'Vouchers', roles: MGR_ADMIN_VIEWER },
+      { view: 'voucher-types', label: 'Voucher types', roles: MGR_ADMIN_VIEWER },
+      { view: 'voucher-activity', label: 'Activity', roles: MGR_ADMIN_VIEWER },
+    ],
+  }] : []),
+  // Products (V25) draws its own header (lead sentence + counted tabs). Staff see Products + Categories only (no cost, no ledger).
+  ...(PRODUCTS_ENABLED ? [{
+    id: 'products',
+    title: ({ productLabel }) => productLabel || 'Products',
+    description: () => 'What you stock and sell, how much is on the shelf, and every change to it.',
+    selfHeader: true,
+    tabs: [
+      { view: 'products', label: ({ productLabel }) => productLabel || 'Products', roles: ['staff', 'manager', 'admin', 'admin_viewer'] },
+      { view: 'stock-history', label: 'Stock history', roles: MGR_ADMIN_VIEWER },
+      { view: 'suppliers', label: 'Suppliers', roles: MGR_ADMIN_VIEWER },
+      { view: 'product-categories', label: 'Categories', roles: ['staff', 'manager', 'admin', 'admin_viewer'] },
+    ],
+  }] : []),
+  ...(OUTREACH_ENABLED ? [{
+    id: 'outreach',
+    title: 'Outreach',
+    description: () => 'Automated messages to your customers.',
+    tabs: [
+      { view: 'outreach-rules', label: 'Rules', roles: ['admin'] },
+      { view: 'outreach-templates', label: 'Templates', roles: ['admin'] },
+      { view: 'outreach-review', label: 'Review queue', roles: ['admin'] },
+      { view: 'outreach-log', label: 'Message log', roles: ['admin'] },
+      { view: 'outreach-settings', label: 'Settings', roles: ['admin'] },
+    ],
+  }] : []),
+];
+
+// Views that are not a tab but belong to an area: `?view=new-booking` is the Bookings list with the New booking panel open on top (ZNLY-301).
+export const AREA_VIEW_ALIASES = { 'new-booking': 'bookings' };
+export const resolveAreaView = (view) => AREA_VIEW_ALIASES[view] || view;
+
+export const getAreaForView = (view) => { const v = resolveAreaView(view); return AREAS.find((a) => a.tabs.some((t) => t.view === v)) || null; };
+
+// Tabs this role / branch can see, in order (labels resolved).
+export const getVisibleTabs = (area, { role, isOverall, hidePrices, ...labels }) =>
+  area.tabs
+    .filter((t) => t.roles.includes(role) && !(isOverall && t.overallHidden) && !(hidePrices && t.money)) // money tabs: a no-prices login never sees them (ZNLY-235)
+    .map((t) => ({ ...t, label: typeof t.label === 'function' ? t.label(labels) : t.label }));

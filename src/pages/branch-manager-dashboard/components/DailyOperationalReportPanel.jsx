@@ -1,12 +1,15 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
+import { dayMoneyView } from '../../../lib/dayMoney';
+import DayMoneyRows from '../../../components/ui/DayMoneyRows';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
+import ConfirmDialog from '../../../components/ui/ConfirmDialog';
 import { getDailyOperationalReport, exportDailyReportCSV, closeDay, fetchAttendance, fetchAttendanceSummary } from '../../../services/api';
 import { useIndustry } from '../../../hooks/useIndustry';
-
-function formatNPR(amount) {
-  return `NPR ${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+import { paymentStatusLabel } from '../../../utils/paymentStatusLabel';
+import { wordBranch } from '../../../utils/industryTerms';
+import { formatNPR } from '../../../services/bookingTransformers';
 
 function formatDate(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -47,7 +50,7 @@ const DailyOperationalReportPanel = ({ branchId }) => {
     ]);
 
     if (reportRes.error) {
-      setError(reportRes.error.message || 'Failed to load daily report.');
+      setError(friendlyError(reportRes.error, 'Failed to load daily report.'));
     } else {
       setReport(reportRes.data);
     }
@@ -68,7 +71,7 @@ const DailyOperationalReportPanel = ({ branchId }) => {
     const { error: closeError } = await closeDay(branchId, selectedDate);
 
     if (closeError) {
-      setError(closeError.message || 'Failed to close the day.');
+      setError(friendlyError(closeError, 'Failed to close the day.'));
     } else {
       setSuccessMsg('Day closed successfully. All bookings are now locked.');
       await loadReport();
@@ -129,10 +132,14 @@ const DailyOperationalReportPanel = ({ branchId }) => {
     URL.revokeObjectURL(url);
   };
 
+  // ZNLY-234: open day = one set of figures; closed day = at close / after close / now, never mixed
+  const view = dayMoneyView(report);
+  const headline = view.headline;
+
   if (!branchId) {
     return (
       <div className="bg-surface rounded-spa p-6 border border-border text-center">
-        <p className="text-sm text-text-secondary">No branch selected.</p>
+        <p className="text-sm text-text-secondary">No {wordBranch()} selected.</p>
       </div>
     );
   }
@@ -240,30 +247,30 @@ const DailyOperationalReportPanel = ({ branchId }) => {
             <div className="bg-surface rounded-spa p-5 border border-border">
               <div className="flex items-center gap-2 mb-2">
                 <Icon name="TrendingUp" size={16} className="text-text-secondary" />
-                <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">Gross Revenue</span>
+                <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">Money in</span>
               </div>
               <p className="text-xl font-semibold text-text-primary">
-                {formatNPR(report.totals.grossRevenue)}
+                {formatNPR(headline.moneyIn)}
               </p>
             </div>
 
             <div className="bg-surface rounded-spa p-5 border border-border">
               <div className="flex items-center gap-2 mb-2">
                 <Icon name="Percent" size={16} className="text-text-secondary" />
-                <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">Total Discounts</span>
+                <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">Refunds</span>
               </div>
               <p className="text-xl font-semibold text-error">
-                - {formatNPR(report.totals.totalDiscount)}
+                − {formatNPR(headline.refunds)}
               </p>
             </div>
 
             <div className="bg-surface rounded-spa p-5 border border-border border-l-4 border-l-success">
               <div className="flex items-center gap-2 mb-2">
                 <Icon name="IndianRupee" size={16} className="text-success" />
-                <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">Net Revenue</span>
+                <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">{view.closed ? 'Taken at close' : 'Taken today'}</span>
               </div>
               <p className="text-xl font-semibold text-success">
-                {formatNPR(report.totals.netRevenue)}
+                {formatNPR(headline.taken)}
               </p>
             </div>
           </div>
@@ -305,8 +312,16 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                   <span className="text-sm text-text-secondary">No Show</span>
                   <span className="text-sm font-semibold text-warning">{report.totals.noShowBookings}</span>
                 </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-text-secondary">Not finished (Pending / Confirmed / In-Progress)</span>
+                  <span className="text-sm font-semibold text-text-primary">{report.totals.notFinishedBookings}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-text-secondary">Discounts given (today's bookings)</span>
+                  <span className="text-sm font-semibold text-text-primary">− {formatNPR(report.totals.totalDiscount)}</span>
+                </div>
                 <div className="border-t border-border pt-2 flex items-center justify-between">
-                  <span className="text-sm text-text-secondary">Unpaid (Confirmed/Completed)</span>
+                  <span className="text-sm text-text-secondary">Not fully paid</span>
                   <span className={`text-sm font-semibold ${report.unpaidBookings.length > 0 ? 'text-warning' : 'text-success'}`}>
                     {report.unpaidBookings.length}
                   </span>
@@ -320,45 +335,8 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                 <Icon name="CreditCard" size={18} className="text-primary" />
                 <span>Payment Breakdown</span>
               </h3>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Icon name="Banknote" size={14} className="text-text-secondary" />
-                    <span className="text-sm text-text-secondary">Cash</span>
-                  </div>
-                  <span className="text-sm font-semibold text-text-primary">
-                    {formatNPR(report.paymentBreakdown.cash)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Icon name="CreditCard" size={14} className="text-text-secondary" />
-                    <span className="text-sm text-text-secondary">Card (Nabil / GlobalIME / NIC Asia)</span>
-                  </div>
-                  <span className="text-sm font-semibold text-text-primary">
-                    {formatNPR(report.paymentBreakdown.card)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Icon name="Smartphone" size={14} className="text-text-secondary" />
-                    <span className="text-sm text-text-secondary">Fonepay</span>
-                  </div>
-                  <span className="text-sm font-semibold text-text-primary">
-                    {formatNPR(report.paymentBreakdown.fonepay)}
-                  </span>
-                </div>
-                {report.voucherSalesTotal > 0 && (
-                  <div className="border-t border-border pt-2 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Icon name="Ticket" size={14} className="text-text-secondary" />
-                      <span className="text-sm text-text-secondary">of which: Voucher Sales</span>
-                    </div>
-                    <span className="text-sm font-semibold text-text-primary">
-                      {formatNPR(report.voucherSalesTotal)}
-                    </span>
-                  </div>
-                )}
+              <div>
+                <DayMoneyRows data={report} fmt={formatNPR} lab="text-sm text-text-secondary" val="text-sm font-semibold text-text-primary" />
               </div>
             </div>
           </div>
@@ -383,7 +361,7 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                       <th className="text-left px-4 py-3 font-medium text-text-secondary">Customer</th>
                       <th className="text-left px-4 py-3 font-medium text-text-secondary">Service</th>
                       <th className="text-left px-4 py-3 font-medium text-text-secondary">{staffLabel}</th>
-                      <th className="text-left px-4 py-3 font-medium text-text-secondary">Room</th>
+                      {report.bookings.some((b) => b.roomName) && <th className="text-left px-4 py-3 font-medium text-text-secondary">Room</th>}
                       <th className="text-right px-4 py-3 font-medium text-text-secondary">Amount</th>
                       <th className="text-center px-4 py-3 font-medium text-text-secondary">Payment</th>
                       <th className="text-center px-4 py-3 font-medium text-text-secondary">Status</th>
@@ -404,9 +382,11 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                         <td className="px-4 py-3 text-text-secondary">
                           {b.therapistName}
                         </td>
-                        <td className="px-4 py-3 text-text-secondary">
-                          {b.roomName}
-                        </td>
+                        {report.bookings.some((x) => x.roomName) && (
+                          <td className="px-4 py-3 text-text-secondary">
+                            {b.roomName}
+                          </td>
+                        )}
                         <td className="px-4 py-3 text-right whitespace-nowrap">
                           <div className="font-semibold text-text-primary">
                             {formatNPR(b.finalAmount)}
@@ -418,13 +398,15 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                           )}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                            b.paymentStatus === 'paid'
-                              ? 'bg-success/10 text-success'
-                              : 'bg-warning/10 text-warning'
-                          }`}>
-                            {b.paymentStatus === 'paid' ? b.paymentMode || 'Paid' : 'Unpaid'}
-                          </span>
+                          {(() => {
+                            const payState = paymentStatusLabel(b);
+                            const tone = { success: 'bg-success/10 text-success', warning: 'bg-warning/10 text-warning', neutral: 'bg-gray-100 text-text-secondary' }[payState.tone];
+                            return (
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${tone}`}>
+                                {b.paymentStatus === 'paid' ? b.paymentMode || 'Paid' : payState.label}
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className="px-4 py-3 text-center">
                           <StatusBadge status={b.status} />
@@ -672,49 +654,16 @@ const DailyOperationalReportPanel = ({ branchId }) => {
         </div>
       )}
 
-      {/* Unpaid Warning Confirmation Modal */}
       {showConfirmModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-modal-overlay flex items-center justify-center p-4">
-          <div className="bg-surface rounded-spa shadow-xl w-full max-w-md animate-fade-in">
-            <div className="p-6 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-warning/10 rounded-spa flex items-center justify-center">
-                  <Icon name="AlertTriangle" size={20} className="text-warning" />
-                </div>
-                <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
-                  Unpaid Bookings Warning
-                </h3>
-              </div>
-
-              <p className="text-sm text-text-secondary">
-                <strong className="text-warning">{report?.unpaidBookings?.length}</strong> booking{report?.unpaidBookings?.length !== 1 ? 's' : ''} still
-                {report?.unpaidBookings?.length !== 1 ? ' have' : ' has'} unpaid status. Closing the day will lock all bookings,
-                preventing further payment recording for these bookings.
-              </p>
-              <p className="text-sm text-text-secondary">
-                Do you still want to close the day?
-              </p>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 p-6 border-t border-border">
-              <Button
-                variant="outline"
-                onClick={() => setShowConfirmModal(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="warning"
-                iconName="Lock"
-                iconPosition="left"
-                onClick={handleCloseDay}
-                loading={closing}
-              >
-                Close Anyway
-              </Button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Unpaid bookings warning"
+          message={`${report?.unpaidBookings?.length} booking${report?.unpaidBookings?.length !== 1 ? 's' : ''} still ${report?.unpaidBookings?.length !== 1 ? 'have' : 'has'} unpaid status. Closing the day will lock all bookings, preventing further payment recording for these bookings. Do you still want to close the day?`}
+          confirmLabel="Close anyway"
+          requireReason={false}
+          isSubmitting={closing}
+          onConfirm={handleCloseDay}
+          onClose={() => setShowConfirmModal(false)}
+        />
       )}
     </div>
   );

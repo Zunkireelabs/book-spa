@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { nameForList } from '../../../../services/dataMasking';
 import { formatClockTime } from './timeFormat';
 
 const STATUS_DOT = {
@@ -58,8 +59,24 @@ const MonthGridView = ({ currentDate, bookings = [], branchHours, hideSensitive,
 
   const bookingsByDate = useMemo(() => {
     const map = {};
-    for (const b of bookings) {
-      if (!b.date) continue;
+    for (const raw of bookings) {
+      if (!raw.date) continue;
+      // calendarData.bookings are raw DB rows (snake_case); the grid maps them to this card shape, so the month chips (and the
+      // booking the panel opens) need the same camelCase fields.
+      const b = {
+        ...raw,
+        id: raw.id,
+        bookingId: raw.id,
+        bookingNumber: raw.booking_number,
+        customerName: raw.customer_name,
+        customerPhone: raw.customer_phone || null,
+        serviceName: raw.service?.name || 'Service',
+        paymentStatus: raw.payment_status,
+        startTime: (raw.start_time || '').slice(0, 8),
+        endTime: (raw.end_time || '').slice(0, 8),
+        roomId: raw.room_id,
+        therapistId: raw.therapist_id,
+      };
       (map[b.date] ||= []).push(b);
     }
     for (const list of Object.values(map)) {
@@ -112,7 +129,7 @@ const MonthGridView = ({ currentDate, bookings = [], branchHours, hideSensitive,
                       >
                         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_DOT[b.status] || 'bg-gray-400'}`} />
                         <span className="font-caption text-[10px] text-text-primary truncate">
-                          {formatClockTime(b.startTime, use24h)} {hideSensitive ? '•••••' : (b.customerName || b.serviceName)}
+                          {formatClockTime(b.startTime, use24h)} {hideSensitive ? '•••••' : (nameForList(b.customerName, b.customerPhone) || b.serviceName)}
                         </span>
                       </div>
                     ))}

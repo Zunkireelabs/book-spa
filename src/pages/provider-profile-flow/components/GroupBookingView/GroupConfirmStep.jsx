@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import Input from '../../../../components/ui/Input';
-import CountryCodeSelect from '../../../../components/ui/CountryCodeSelect';
+import PhoneField from '../../../../components/ui/PhoneField';
+import { isValidPhone } from '../../../../utils/phone';
 import CustomerForm from '../../../customer-booking-flow/components/CustomerForm';
-import { formatNPR } from '../../../../services/bookingTransformers';
+import { useResolvedServicePricing } from '../../../../hooks/useCustomerServicePricing';
 
 const GUEST_GENDER_OPTIONS = [
   { value: 'male', label: 'Male' },
@@ -19,7 +20,7 @@ const KNOWN_BOOKING_ERROR_CODES = [
   'COUPLE_SERVICE_NOT_ALLOWED_IN_GROUP', 'ROOMS_FULL', 'ROOM_FULL', 'INVALID_ROOM',
   'ROOM_INACTIVE', 'INVALID_THERAPIST', 'THERAPIST_INACTIVE', 'THERAPIST_ABSENT',
   'THERAPIST_CHECKED_OUT', 'THERAPIST_NOT_ELIGIBLE', 'BOOKING_GROUP_PARTIAL',
-  'NO_SERVICES', 'THERAPIST_CONFLICT', 'BRANCH_ONLINE_CAPACITY', 'BOOKING_CROSSES_MIDNIGHT',
+  'NO_SERVICES', 'THERAPIST_CONFLICT', 'BRANCH_ONLINE_CAPACITY', 'BRANCH_CLOSED', 'BOOKING_CROSSES_MIDNIGHT',
   'BOOKING_CONFIRMATION_UNAVAILABLE',
 ];
 
@@ -30,8 +31,6 @@ export const mapBookingError = (error) => {
     : 'Something went wrong while confirming your booking. Please try again.';
 };
 
-const priceOf = (service) => Number(service?.effective_price_npr ?? service?.price_npr ?? 0);
-
 // Mirrors BookingView/index.jsx's isCustomerInfoValid, plus a required-phone check:
 // createBooking() hard-rejects a missing phone ("Phone number is required", with no
 // `code`, so mapBookingError can't recognise it) and every guest row inherits this
@@ -40,10 +39,7 @@ export const isLeadContactValid = (leadContact) => {
   if (!leadContact.firstName.trim()) return false;
   if (leadContact.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(leadContact.email)) return false;
   if (!leadContact.phone.trim()) return false;
-  const isNepal = (leadContact.phoneCountryCode || '+977') === '+977';
-  const digits = leadContact.phone.replace(/\D/g, '');
-  const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
-  return phoneValid;
+  return isValidPhone(leadContact.phoneCountryCode || '+977', leadContact.phone); // the shared validator (ZNLY-331)
 };
 
 // A guest row with every field still blank is valid as-is — submitGroupBooking
@@ -62,14 +58,17 @@ export const isGuestContactValid = (person) => {
   if (!person.firstName?.trim()) return false;
   if (person.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(person.email)) return false;
   if (!person.phone?.trim()) return false;
-  const isNepal = (person.phoneCountryCode || '+977') === '+977';
-  const digits = person.phone.replace(/\D/g, '');
-  const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
-  return phoneValid;
+  return isValidPhone(person.phoneCountryCode || '+977', person.phone);
 };
 
 const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBranch, selectedDateTime, orgSlug, genderPreference, customerAccountId, onGuestFieldChange, onSubmit, submitting, submitError }) => {
-  const total = people.reduce((sum, p) => sum + priceOf(p.service), 0);
+  const pricingItems = people.map((p) => ({
+    key: p.id,
+    service: p.service,
+    therapistId: p.professional?.mode === 'specific' ? (p.professional.therapist?.id || null) : null,
+  }));
+  const { perItem, totalLabel } = useResolvedServicePricing(pricingItems);
+  const labelFor = (personId) => perItem.find((p) => p.key === personId)?.label ?? null;
 
   // Collapsed by default — a guest already carrying info (e.g. navigated back to
   // this step) starts expanded so their filled-in fields stay visible, not hidden
@@ -109,17 +108,21 @@ const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBr
                   </p>
                   <p className="text-xs text-[var(--zn-muted-foreground)] truncate">{person.service?.name}</p>
                 </div>
-                <span className="text-sm text-[var(--zn-foreground)] shrink-0 font-mono">
-                  {formatNPR(priceOf(person.service))}
-                </span>
+                {labelFor(person.id) != null && (
+                  <span className="text-sm text-[var(--zn-foreground)] shrink-0 font-mono">
+                    {labelFor(person.id)}
+                  </span>
+                )}
               </>
             ) : (
               <>
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs font-medium text-[var(--zn-muted-foreground)]">{person.label}</p>
-                  <span className="text-sm text-[var(--zn-foreground)] shrink-0 font-mono">
-                    {formatNPR(priceOf(person.service))}
-                  </span>
+                  {labelFor(person.id) != null && (
+                    <span className="text-sm text-[var(--zn-foreground)] shrink-0 font-mono">
+                      {labelFor(person.id)}
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-[var(--zn-muted-foreground)] truncate -mt-1.5">{person.service?.name}</p>
 
@@ -164,21 +167,11 @@ const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBr
                       onChange={(e) => onGuestFieldChange(person.id, 'email', e.target.value)}
                       className="text-sm"
                     />
-                    <div className="flex">
-                      <CountryCodeSelect
-                        value={person.phoneCountryCode || '+977'}
-                        onChange={(dial) => onGuestFieldChange(person.id, 'phoneCountryCode', dial)}
-                      />
-                      <div className="flex-1">
-                        <Input
-                          type="tel"
-                          value={person.phone || ''}
-                          placeholder="Phone number"
-                          onChange={(e) => onGuestFieldChange(person.id, 'phone', e.target.value)}
-                          className="w-full rounded-l-none text-sm"
-                        />
-                      </div>
-                    </div>
+                    <PhoneField
+                      id={`guest-${person.id}-phone`} placeholder="Phone number" dataPhMask
+                      dial={person.phoneCountryCode || '+977'} national={person.phone || ''}
+                      onChange={({ dial, national }) => onGuestFieldChange(person.id, dial !== (person.phoneCountryCode || '+977') ? 'phoneCountryCode' : 'phone', dial !== (person.phoneCountryCode || '+977') ? dial : national)}
+                    />
                     <div className="grid grid-cols-3 gap-2">
                       {GUEST_GENDER_OPTIONS.map((option) => (
                         <button
@@ -210,7 +203,7 @@ const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBr
 
         <div className="pt-3 border-t border-[var(--zn-border)] flex items-center justify-between">
           <span className="font-medium text-sm text-[var(--zn-foreground)]">Total</span>
-          <span className="font-semibold text-base text-[var(--zn-foreground)] font-mono">{formatNPR(total)}</span>
+          <span className="font-semibold text-base text-[var(--zn-foreground)] font-mono">{totalLabel}</span>
         </div>
       </div>
 
@@ -227,7 +220,7 @@ const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBr
         disabled={submitting || !isLeadContactValid(leadContact) || people.some((p) => !p.isLead && !isGuestContactValid(p))}
         className="w-full justify-center"
       >
-        {submitting ? 'Booking…' : `Confirm group booking — ${formatNPR(total)}`}
+        {submitting ? 'Booking…' : `Confirm group booking — ${totalLabel}`}
       </Button>
     </div>
   );

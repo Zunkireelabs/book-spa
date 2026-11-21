@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { createRetryingFetch } from './supabaseRetry';
 import { captureApiError } from './analytics';
+import { withRestrictedReads } from './restrictedReads';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -35,7 +36,7 @@ export const retryingFetch = createRetryingFetch({ onError: captureApiError });
 // land on these routes with tokens in the URL now.
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { detectSessionInUrl: false },
-  global: { fetch: retryingFetch },
+  global: { fetch: withRestrictedReads(retryingFetch) },  // ZNLY-235: restricted logins read the masked *_safe views
 });
 
 // Separate client for customer-facing auth (own storage key) so a customer
@@ -53,5 +54,31 @@ export const supabaseCustomer = createClient(supabaseUrl, supabaseAnonKey, {
 // excluded from the URL-token race for the same reason as `supabase` above.
 export const supabasePlatform = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { storageKey: 'zenly-platform-auth', detectSessionInUrl: false },
+  global: { fetch: retryingFetch },
+});
+
+// Throwaway client used ONLY to provision a staff login from the Staff access
+// screen (grantStaffAccess). public.users.id is a hard FK into auth.users, and
+// an auth.users row can only be created by the service-role key — which must
+// never reach the browser — or by signUp. signUp it is.
+//
+// The isolation matters more here than for the two clients above: signUp
+// RETURNS A SESSION for the account it just created. On the shared `supabase`
+// client that would silently replace the admin's own session mid-task, logging
+// them out and in as the staff member they were creating. Its own storageKey
+// plus persistSession:false keeps that session in memory and discards it.
+//
+// Depends on the project having public signup enabled (it is, and
+// mailer_autoconfirm is on, so the account is usable immediately with no email
+// round-trip). If signup is ever disabled for hardening, this stops working
+// and provisioning has to move to a service-role Edge Function — see the
+// comment on grantStaffAccess in services/api.js.
+export const supabaseProvision = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    storageKey: 'zenly-provision-auth',
+    detectSessionInUrl: false,
+    persistSession: false,
+    autoRefreshToken: false,
+  },
   global: { fetch: retryingFetch },
 });

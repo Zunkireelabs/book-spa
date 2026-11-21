@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useCallback, useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import {
@@ -6,11 +7,18 @@ import {
   cancelOutreachMessage,
   bulkApproveOutreach,
 } from '../../../../services/api';
+import { htmlToText } from '../../../../utils/htmlToText';
 
 function formatDateTime(d) {
   if (!d) return '—';
   return new Date(d).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
+
+// Edits made with "Done editing" are kept client-side (the API only takes edits as part of an approval:
+// approveOutreachMessage(id, { subject, body })), in sessionStorage so they survive switching tabs, and are sent with the approval.
+const DRAFTS_KEY = 'zennly.outreach.reviewDrafts';
+const readDrafts = () => { try { return JSON.parse(sessionStorage.getItem(DRAFTS_KEY)) || {}; } catch { return {}; } };
+const writeDrafts = (d) => { try { sessionStorage.setItem(DRAFTS_KEY, JSON.stringify(d)); } catch { /* storage unavailable */ } };
 
 const ReviewQueuePanel = () => {
   const [messages, setMessages] = useState([]);
@@ -19,6 +27,7 @@ const ReviewQueuePanel = () => {
   const [selectedIds, setSelectedIds] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [editDraft, setEditDraft] = useState({ subject: '', body: '' });
+  const [drafts, setDrafts] = useState(readDrafts);
   const [actionId, setActionId] = useState(null);
   const [bulkActing, setBulkActing] = useState(false);
   const [actionError, setActionError] = useState(null);
@@ -28,12 +37,19 @@ const ReviewQueuePanel = () => {
     setError(null);
     const { data, error: fetchError } = await fetchOutreachReviewQueue();
     if (fetchError) {
-      setError(fetchError.message || 'Failed to load the review queue.');
+      setError(friendlyError(fetchError, 'Failed to load the review queue.'));
       setLoading(false);
       return;
     }
     setMessages(data || []);
     setSelectedIds([]);
+    // Drop drafts for messages that have left the queue.
+    setDrafts((prev) => {
+      const ids = new Set((data || []).map((m) => m.id));
+      const next = Object.fromEntries(Object.entries(prev).filter(([id]) => ids.has(id)));
+      writeDrafts(next);
+      return next;
+    });
     setLoading(false);
   }, []);
 
@@ -47,9 +63,34 @@ const ReviewQueuePanel = () => {
     setSelectedIds((prev) => (prev.length === messages.length ? [] : messages.map((m) => m.id)));
   };
 
+  // What the row currently says: the saved draft if there is one, else the queued message.
+  const contentOf = (m) => drafts[m.id] || { subject: m.subject || '', body: m.body || '' };
+
   const startEdit = (message) => {
     setEditingId(message.id);
-    setEditDraft({ subject: message.subject || '', body: message.body || '' });
+    setEditDraft(contentOf(message));
+  };
+
+  // "Done editing": keep the edit as a draft (or drop it if it is back to the original).
+  const finishEdit = (message) => {
+    const changed = editDraft.subject !== (message.subject || '') || editDraft.body !== (message.body || '');
+    setDrafts((prev) => {
+      const next = { ...prev };
+      if (changed) next[message.id] = { subject: editDraft.subject, body: editDraft.body };
+      else delete next[message.id];
+      writeDrafts(next);
+      return next;
+    });
+    setEditingId(null);
+  };
+
+  const discardDraft = (id) => {
+    setDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      writeDrafts(next);
+      return next;
+    });
   };
 
   const handleApprove = async (id) => {
@@ -58,14 +99,15 @@ const ReviewQueuePanel = () => {
     // If this row is currently being edited, pass the draft subject/body
     // through so the edited content is what actually gets sent, not the
     // original queued content.
-    const overrides = editingId === id ? { subject: editDraft.subject, body: editDraft.body } : {};
+    const overrides = editingId === id ? { subject: editDraft.subject, body: editDraft.body } : (drafts[id] || {});
     const { error: approveError } = await approveOutreachMessage(id, overrides);
     setActionId(null);
     if (approveError) {
-      setActionError(approveError.message || 'Failed to approve message.');
+      setActionError(friendlyError(approveError, 'Failed to approve message.'));
       return;
     }
     if (editingId === id) setEditingId(null);
+    discardDraft(id);
     await loadData();
   };
 
@@ -75,10 +117,11 @@ const ReviewQueuePanel = () => {
     const { error: cancelError } = await cancelOutreachMessage(id);
     setActionId(null);
     if (cancelError) {
-      setActionError(cancelError.message || 'Failed to cancel message.');
+      setActionError(friendlyError(cancelError, 'Failed to cancel message.'));
       return;
     }
     if (editingId === id) setEditingId(null);
+    discardDraft(id);
     await loadData();
   };
 
@@ -86,10 +129,19 @@ const ReviewQueuePanel = () => {
     if (selectedIds.length === 0) return;
     setActionError(null);
     setBulkActing(true);
-    const { error: bulkError } = await bulkApproveOutreach(selectedIds);
+    // The bulk RPC takes no edits, so selected messages that have a saved draft are approved one by one with their edits.
+    const edited = selectedIds.filter((id) => drafts[id]);
+    const plain = selectedIds.filter((id) => !drafts[id]);
+    let bulkError = null;
+    for (const id of edited) {
+      const { error: e } = await approveOutreachMessage(id, drafts[id]);
+      if (e) { bulkError = e; break; }
+      discardDraft(id);
+    }
+    if (!bulkError && plain.length > 0) ({ error: bulkError } = await bulkApproveOutreach(plain));
     setBulkActing(false);
     if (bulkError) {
-      setActionError(bulkError.message || 'Failed to bulk-approve messages.');
+      setActionError(friendlyError(bulkError, 'Failed to bulk-approve messages.'));
       return;
     }
     await loadData();
@@ -186,9 +238,16 @@ const ReviewQueuePanel = () => {
                           {m.rule?.trigger_type || 'manual'} · {m.channel} · {formatDateTime(m.created_at)}
                         </p>
                       </div>
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-caption font-caption-medium bg-warning/10 text-warning">
-                        Review
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {drafts[m.id] && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-caption font-caption-medium bg-primary/10 text-primary">
+                            Edited
+                          </span>
+                        )}
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-caption font-caption-medium bg-warning/10 text-warning">
+                          Review
+                        </span>
+                      </div>
                     </div>
 
                     {isEditing ? (
@@ -212,20 +271,20 @@ const ReviewQueuePanel = () => {
                           onClick={() => setEditingId(null)}
                           className="font-caption text-xs text-text-tertiary hover:underline"
                         >
-                          Close edit view
+                          Close without saving changes
                         </button>
                       </div>
                     ) : (
                       <div className="mt-2 bg-background rounded-spa border border-border p-3">
-                        {m.subject && <p className="font-body font-body-medium text-sm text-text-primary mb-1">{m.subject}</p>}
-                        <p className="font-body text-sm text-text-secondary whitespace-pre-wrap">{m.body}</p>
+                        {contentOf(m).subject && <p className="font-body font-body-medium text-sm text-text-primary mb-1">{contentOf(m).subject}</p>}
+                        <p className="font-body text-sm text-text-secondary whitespace-pre-wrap">{htmlToText(contentOf(m).body)}</p>
                       </div>
                     )}
 
                     <div className="mt-3 flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => (isEditing ? setEditingId(null) : startEdit(m))}
+                        onClick={() => (isEditing ? finishEdit(m) : startEdit(m))}
                         className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-spa border border-border text-text-secondary text-xs font-body font-body-medium hover:bg-background spa-transition-fast"
                       >
                         <Icon name="Pencil" size={12} />

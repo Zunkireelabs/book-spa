@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import { getUtilizationIntelligence } from '../../../services/api';
@@ -57,7 +58,7 @@ const UtilizationPanel = ({ branchId, period }) => {
     const result = await getUtilizationIntelligence({ branchId, from: period?.from, to: period?.to });
 
     if (result.error) {
-      setError(result.error.message || 'Failed to load utilization data.');
+      setError(friendlyError(result.error, 'Failed to load utilization data.'));
       setLoading(false);
       return;
     }

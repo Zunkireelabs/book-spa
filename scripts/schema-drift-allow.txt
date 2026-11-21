@@ -1,0 +1,239 @@
+# Accepted schema differences between production and a migrations-only database (ZNLY-353), classified 2026-11-21/22
+# against prod dump + migrations 318-417. One line per difference:  <kind>|<key>[|<detail prefix>]  # reason
+# kinds: table column constraint index trigger function rls policy view enum extension  (and *-name notes, which never fail)
+# Copy the line exactly as the report prints it (after "migrations only:" / "target only:"); a shorter prefix allows more.
+# An entry that matches nothing is reported as a WARNING so this file cannot rot silently.
+#
+# --- accepted C items (behaviour differs, decided to keep) ---
+column|services.category|text NOT NULL default 'Spa'::text  # C8: prod services.category is nullable, schema.sql says NOT NULL default Spa; the app treats NULL as uncategorised
+column|services.category|text null default 'Spa'::text  # C8: prod services.category is nullable, schema.sql says NOT NULL default Spa; the app treats NULL as uncategorised
+function|create_public_booking(p_branch_id uuid, p_service_id uuid, p_bo|jsonb definer v plpgsql md5=f533b901e675e55c8e8c7e60bb8cd4c8  # C6: legacy public RPC kept on prod only; EXECUTE revoked from PUBLIC/anon/authenticated by migration 417 (drop in a later migration once no external caller is confirmed)
+policy|service_categories.Anonymous users can read service_categories|SELECT roles=anon permissive=PERMISSIVE using=true check=-  # C7: service_categories has no tracked migration; prod = admin-only write + own-org read, a migrations-built DB = manager+admin write + anon/authenticated read. Prod is live behaviour; codify in a later migration
+policy|service_categories.Anyone can read service_categories|SELECT roles=authenticated permissive=PERMISSIVE using=true check=-  # C7: service_categories has no tracked migration; prod = admin-only write + own-org read, a migrations-built DB = manager+admin write + anon/authenticated read. Prod is live behaviour; codify in a later migration
+policy|service_categories.Manager and admin can create service_categor|INSERT roles=authenticated permissive=PERMISSIVE using=- check=((org_id = ( SELECT get_user_org_id() AS get_user_org_id)) AND (( SELECT get_user_role() AS get_user_role) = ANY (ARRAY['manager'::user_role, 'admin'::user_role])))  # C7: service_categories has no tracked migration; prod = admin-only write + own-org read, a migrations-built DB = manager+admin write + anon/authenticated read. Prod is live behaviour; codify in a later migration
+policy|service_categories.Manager and admin can delete service_categor|DELETE roles=authenticated permissive=PERMISSIVE using=((org_id = ( SELECT get_user_org_id() AS get_user_org_id)) AND (( SELECT get_user_role() AS get_user_role) = ANY (ARRAY['manager'::user_role, 'admin'::user_role]))) check=-  # C7: service_categories has no tracked migration; prod = admin-only write + own-org read, a migrations-built DB = manager+admin write + anon/authenticated read. Prod is live behaviour; codify in a later migration
+policy|service_categories.Manager and admin can update service_categor|UPDATE roles=authenticated permissive=PERMISSIVE using=((org_id = ( SELECT get_user_org_id() AS get_user_org_id)) AND (( SELECT get_user_role() AS get_user_role) = ANY (ARRAY['manager'::user_role, 'admin'::user_role]))) check=((org_id = ( SELECT get_user_org_id() AS get_user_org_id)) AND (( SELECT get_user_role() AS get_user_role) = ANY (ARRAY['manager'::user_role, 'admin'::user_role])))  # C7: service_categories has no tracked migration; prod = admin-only write + own-org read, a migrations-built DB = manager+admin write + anon/authenticated read. Prod is live behaviour; codify in a later migration
+policy|service_categories.Admin can create org categories|INSERT roles=authenticated permissive=PERMISSIVE using=- check=((( SELECT get_user_role() AS get_user_role) = 'admin'::user_role) AND (org_id = ( SELECT get_user_org_id() AS get_user_org_id)))  # C7: service_categories has no tracked migration; prod = admin-only write + own-org read, a migrations-built DB = manager+admin write + anon/authenticated read. Prod is live behaviour; codify in a later migration
+policy|service_categories.Admin can delete org categories|DELETE roles=authenticated permissive=PERMISSIVE using=((( SELECT get_user_role() AS get_user_role) = 'admin'::user_role) AND (org_id = ( SELECT get_user_org_id() AS get_user_org_id))) check=-  # C7: service_categories has no tracked migration; prod = admin-only write + own-org read, a migrations-built DB = manager+admin write + anon/authenticated read. Prod is live behaviour; codify in a later migration
+policy|service_categories.Admin can update org categories|UPDATE roles=authenticated permissive=PERMISSIVE using=((( SELECT get_user_role() AS get_user_role) = 'admin'::user_role) AND (org_id = ( SELECT get_user_org_id() AS get_user_org_id))) check=((( SELECT get_user_role() AS get_user_role) = 'admin'::user_role) AND (org_id = ( SELECT get_user_org_id() AS get_user_org_id)))  # C7: service_categories has no tracked migration; prod = admin-only write + own-org read, a migrations-built DB = manager+admin write + anon/authenticated read. Prod is live behaviour; codify in a later migration
+policy|service_categories.Users can read own org categories|SELECT roles=authenticated permissive=PERMISSIVE using=(org_id = ( SELECT get_user_org_id() AS get_user_org_id)) check=-  # C7: service_categories has no tracked migration; prod = admin-only write + own-org read, a migrations-built DB = manager+admin write + anon/authenticated read. Prod is live behaviour; codify in a later migration
+#
+# --- A: harmless (name-only, backup tables, platform extension, same behaviour) ---
+column|backup_20260613_bookings.base_amount|numeric(10,2) null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.booking_group_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.booking_number|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.branch_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.client_request_id|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.created_at|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.created_by|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.customer_email|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.customer_gender|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.customer_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.customer_name|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.customer_phone|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.date|date null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.discount_amount|numeric(10,2) null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.discount_approved_by|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.discount_reason|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.discount_requested_by|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.discount_requested_to|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.discount_status|discount_status_enum null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.end_datetime|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.end_time|time without time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.final_amount|numeric(10,2) null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.is_locked|boolean null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.payment_status|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.referred_by|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.room_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.room_name_snapshot|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.service_duration_snapshot|integer null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.service_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.service_name_snapshot|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.service_price_snapshot|numeric(10,2) null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.special_requests|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.start_datetime|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.start_time|time without time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.status|booking_status null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.therapist_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.therapist_name_snapshot|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_bookings.updated_at|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_payments.amount|numeric(10,2) null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_payments.booking_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_payments.created_at|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_payments.id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_payments.notes|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_payments.payment_mode|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20260613_payments.recorded_by|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_attendance.branch_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_attendance.check_in_time|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_attendance.check_out_time|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_attendance.created_at|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_attendance.date|date null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_attendance.id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_attendance.marked_by|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_attendance.notes|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_attendance.status|attendance_status null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_attendance.therapist_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_attendance.updated_at|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_booking_therapists.assigned_at|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_booking_therapists.booking_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_booking_therapists.end_time|time without time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_booking_therapists.id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_booking_therapists.room_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_booking_therapists.start_time|time without time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_booking_therapists.therapist_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_bookings.booking_number|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_bookings.branch_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_bookings.date|date null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_bookings.id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_bookings.therapist_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_bookings.therapist_name_snapshot|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_service_therapists.created_at|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_service_therapists.service_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_service_therapists.therapist_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.address|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.bio|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.branch_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.city|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.created_at|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.display_order|integer null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.email|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.experience_years|integer null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.gender|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.is_active|boolean null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.is_service_staff|boolean null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.name|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.org_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.phone|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.photo_url|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.position|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.pronouns|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.rating|numeric(2,1) null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_therapists.specialties|text[] null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.applied|boolean null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.duration_unit|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.duration_value|integer null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.effective_date|date null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.from_branch_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.from_display_order|integer null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.is_permanent|boolean null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.is_return_leg|boolean null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.note|text null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.org_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.revert_at|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.reverted_at|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.reverted|boolean null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.start_time|time without time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.therapist_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.to_branch_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.transferred_at|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_transfers.transferred_by|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_working_hours.branch_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_working_hours.created_at|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_working_hours.day_of_week|smallint null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_working_hours.end_time|time without time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_working_hours.id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_working_hours.is_day_off|boolean null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_working_hours.start_time|time without time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_working_hours.therapist_id|uuid null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|backup_20261112_kamala_working_hours.updated_at|timestamp with time zone null default -  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+column|service_categories.updated_at|timestamp with time zone NOT NULL default now()  # extra updated_at column on prod, nothing depends on it being absent
+column|therapist_attendance.updated_at|timestamp with time zone NOT NULL default now()  # extra updated_at column on prod, nothing depends on it being absent
+constraint-name|service_categories.service_categories_org_id_fkey|f  # name-only difference, same definition
+constraint-name|service_categories.service_categories_org_id_name_key|u  # name-only difference, same definition
+constraint-name|service_categories.unique_category_name_per_org|u  # name-only difference, same definition
+constraint-name|therapist_attendance.uq_therapist_attendance|u  # name-only difference, same definition
+constraint-name|therapist_attendance.uq_therapist_date|u  # name-only difference, same definition
+constraint|bookings|f FOREIGN KEY (customer_id) REFERENCES customers(id)  # FK ON DELETE RESTRICT (prod) vs default NO ACTION: same refusal
+constraint|bookings|f FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE RESTRICT  # FK ON DELETE RESTRICT (prod) vs default NO ACTION: same refusal
+constraint|bookings|x EXCLUDE USING gist (therapist_id WITH =, tstzrange(start_datetime, end_datetime) WITH &&) WHERE (((therapist_id IS NOT NULL) AND (status <> ALL (ARRAY['Cancelled'::booking_status, 'No Show'::booking_status])) AND (start_datetime >= '2026-11-21 18:15:00+00'::timestamp with time zone)))  # by design (migration 414): prod guard starts at the 2026-11-22 cutoff, migrations-built DBs keep the unrestricted schema.sql one
+constraint|bookings|x EXCLUDE USING gist (therapist_id WITH =, tstzrange(start_datetime, end_datetime) WITH &&) WHERE (((therapist_id IS NOT NULL) AND (status <> ALL (ARRAY['Cancelled'::booking_status, 'No Show'::booking_status]))))  # by design (migration 414): prod guard starts at the 2026-11-22 cutoff, migrations-built DBs keep the unrestricted schema.sql one
+constraint|customers|f FOREIGN KEY (branch_id) REFERENCES branches(id)  # FK ON DELETE RESTRICT (prod) vs default NO ACTION: same refusal
+constraint|customers|f FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE RESTRICT  # FK ON DELETE RESTRICT (prod) vs default NO ACTION: same refusal
+constraint|service_categories|f FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE  # FK ON DELETE RESTRICT (prod) vs default NO ACTION: same refusal
+constraint|therapist_attendance|f FOREIGN KEY (branch_id) REFERENCES branches(id)  # FK ON DELETE RESTRICT (prod) vs default NO ACTION: same refusal
+constraint|therapist_attendance|f FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE RESTRICT  # FK ON DELETE RESTRICT (prod) vs default NO ACTION: same refusal
+constraint|therapist_attendance|f FOREIGN KEY (marked_by) REFERENCES users(id)  # FK ON DELETE RESTRICT (prod) vs default NO ACTION: same refusal
+constraint|therapist_attendance|f FOREIGN KEY (marked_by) REFERENCES users(id) ON DELETE RESTRICT  # FK ON DELETE RESTRICT (prod) vs default NO ACTION: same refusal
+constraint|therapist_attendance|f FOREIGN KEY (therapist_id) REFERENCES therapists(id)  # FK ON DELETE RESTRICT (prod) vs default NO ACTION: same refusal
+constraint|therapist_attendance|f FOREIGN KEY (therapist_id) REFERENCES therapists(id) ON DELETE RESTRICT  # FK ON DELETE RESTRICT (prod) vs default NO ACTION: same refusal
+extension|pg_net|  # pg_net: platform extension only prod has (Supabase-managed)
+function|generate_booking_number()|trigger definer v plpgsql md5=54a8278b368c3cbe35afff897b7b4a2a  # same logic: bodies differ only by whitespace/comments (diffed ignoring both)
+function|generate_booking_number()|trigger definer v plpgsql md5=81938c3ec883f3bb766d3dee237a0a82  # same logic: bodies differ only by whitespace/comments (diffed ignoring both)
+function|populate_booking_snapshots()|trigger invoker v plpgsql md5=b729474f7da5851f667c13e853c95915  # defined only by scripts/local-only-supplemental-triggers.sql (not a migration); every prod writer fills the snapshots itself (mig 415 header)
+function|reap_aborted_authenticator_backends()|integer invoker v plpgsql md5=ff8209b9f6348543c001391c6b460a4b  # same logic: bodies differ only by whitespace/comments (diffed ignoring both)
+function|reap_aborted_authenticator_backends()|integer invoker v sql md5=626dda975b6f3e8bf37600bc00ef3ded  # same logic: bodies differ only by whitespace/comments (diffed ignoring both)
+function|set_service_branches(p_service_id uuid, p_branch_ids uuid[])|integer definer v plpgsql md5=37edf1ebab88d74a1433e7a11a922dcf  # same logic: bodies differ only by whitespace/comments (diffed ignoring both)
+function|set_service_branches(p_service_id uuid, p_branch_ids uuid[])|integer definer v plpgsql md5=77467bd7f952df9b9489e467ee8a343d  # same logic: bodies differ only by whitespace/comments (diffed ignoring both)
+function|set_updated_at()|trigger invoker v plpgsql md5=301a884953d37769916294bb60562e05  # prod-only helper for extra audit/updated_at triggers
+function|update_org_payment_methods(p_methods jsonb)|jsonb definer v plpgsql md5=3623f35ee2b50bcb7318764ffd42c61c  # same logic: bodies differ only by whitespace/comments (diffed ignoring both)
+function|update_org_payment_methods(p_methods jsonb)|jsonb definer v plpgsql md5=6b3c4cf7cfe2148b8d9d67f55c57c4c8  # same logic: bodies differ only by whitespace/comments (diffed ignoring both)
+index-name|audit_logs.idx_audit_logs_branch_changed_at|  # name-only difference, same definition
+index-name|audit_logs.idx_audit_logs_branch|  # name-only difference, same definition
+index-name|audit_logs.idx_audit_logs_changed_at|  # name-only difference, same definition
+index-name|audit_logs.idx_audit_logs_record_id|  # name-only difference, same definition
+index-name|audit_logs.idx_audit_logs_table_name|  # name-only difference, same definition
+index-name|bookings.idx_bookings_customer_id|  # name-only difference, same definition
+index-name|customers.idx_customers_branch_id|  # name-only difference, same definition
+index-name|customers.idx_customers_branch|  # name-only difference, same definition
+index-name|daily_reports.idx_daily_reports_branch_date|  # name-only difference, same definition
+index-name|service_categories.idx_service_categories_active|  # name-only difference, same definition
+index-name|service_categories.idx_service_categories_org_id|  # name-only difference, same definition
+index-name|service_categories.service_categories_org_id_name_key|  # name-only difference, same definition
+index-name|service_categories.unique_category_name_per_org|  # name-only difference, same definition
+index-name|services.idx_services_category|  # name-only difference, same definition
+index-name|therapist_attendance.idx_attendance_branch_date|  # name-only difference, same definition
+index-name|therapist_attendance.idx_attendance_therapist_date|  # name-only difference, same definition
+index-name|therapist_attendance.idx_therapist_attendance_branch_date|  # name-only difference, same definition
+index-name|therapist_attendance.uq_therapist_attendance|  # name-only difference, same definition
+index-name|therapist_attendance.uq_therapist_date|  # name-only difference, same definition
+index|audit_logs|CREATE INDEX ON public.audit_logs USING btree (branch_id)  # prod-only/extra or differently shaped btree index: performance only
+index|audit_logs|CREATE INDEX ON public.audit_logs USING btree (branch_id, changed_at DESC)  # prod-only/extra or differently shaped btree index: performance only
+index|audit_logs|CREATE INDEX ON public.audit_logs USING btree (changed_at)  # prod-only/extra or differently shaped btree index: performance only
+index|audit_logs|CREATE INDEX ON public.audit_logs USING btree (record_id)  # prod-only/extra or differently shaped btree index: performance only
+index|audit_logs|CREATE INDEX ON public.audit_logs USING btree (table_name)  # prod-only/extra or differently shaped btree index: performance only
+index|bookings|CREATE INDEX ON public.bookings USING btree (customer_id)  # prod-only/extra or differently shaped btree index: performance only
+index|bookings|CREATE INDEX ON public.bookings USING gist (therapist_id, tstzrange(start_datetime, end_datetime)) WHERE ((therapist_id IS NOT NULL) AND (status <> ALL (ARRAY['Cancelled'::booking_status, 'No Show'::booking_status])) AND (start_datetime >= '2026-11-21 18:15:00+00'::timestamp with time zone))  # same GiST index backing the guard; differs only by 414 cutoff predicate
+index|bookings|CREATE INDEX ON public.bookings USING gist (therapist_id, tstzrange(start_datetime, end_datetime)) WHERE ((therapist_id IS NOT NULL) AND (status <> ALL (ARRAY['Cancelled'::booking_status, 'No Show'::booking_status])))  # same GiST index backing the guard; differs only by 414 cutoff predicate
+index|daily_reports|CREATE INDEX ON public.daily_reports USING btree (branch_id, report_date)  # prod-only/extra or differently shaped btree index: performance only
+index|service_categories|CREATE INDEX ON public.service_categories USING btree (is_active)  # prod-only/extra or differently shaped btree index: performance only
+index|service_categories|CREATE INDEX ON public.service_categories USING btree (org_id)  # prod-only/extra or differently shaped btree index: performance only
+index|services|CREATE INDEX ON public.services USING btree (category)  # prod-only/extra or differently shaped btree index: performance only
+index|therapist_attendance|CREATE INDEX ON public.therapist_attendance USING btree (therapist_id, date)  # prod-only/extra or differently shaped btree index: performance only
+policy|branches.Public can read active branches|SELECT roles=anon permissive=PERMISSIVE using=(is_active = true) check=-  # authenticated read widened to active rows (org OR is_active) vs own-org: anon already reads the same active rows on both sides, no extra data
+policy|branches.Users can read branches|SELECT roles=authenticated permissive=PERMISSIVE using=((org_id = ( SELECT get_user_org_id() AS get_user_org_id)) OR (is_active = true)) check=-  # authenticated read widened to active rows (org OR is_active) vs own-org: anon already reads the same active rows on both sides, no extra data
+policy|branches.Users can read own org branches|SELECT roles=authenticated permissive=PERMISSIVE using=(org_id = ( SELECT get_user_org_id() AS get_user_org_id)) check=-  # authenticated read widened to active rows (org OR is_active) vs own-org: anon already reads the same active rows on both sides, no extra data
+policy|industries.Public can read industries|SELECT roles=anon,authenticated permissive=PERMISSIVE using=true check=-  # duplicate public read of the industries lookup
+policy|organizations.Public can read active organizations|SELECT roles=anon,authenticated permissive=PERMISSIVE using=(is_active = true) check=-  # authenticated read widened to active rows (org OR is_active) vs own-org: anon already reads the same active rows on both sides, no extra data
+policy|organizations.Users can read organizations|SELECT roles=authenticated permissive=PERMISSIVE using=((id = ( SELECT get_user_org_id() AS get_user_org_id)) OR (is_active = true)) check=-  # authenticated read widened to active rows (org OR is_active) vs own-org: anon already reads the same active rows on both sides, no extra data
+policy|organizations.Users can read own organization|SELECT roles=authenticated permissive=PERMISSIVE using=(id = ( SELECT get_user_org_id() AS get_user_org_id)) check=-  # authenticated read widened to active rows (org OR is_active) vs own-org: anon already reads the same active rows on both sides, no extra data
+policy|services.Public can read active services|SELECT roles=anon permissive=PERMISSIVE using=(is_active = true) check=-  # authenticated read widened to active rows (org OR is_active) vs own-org: anon already reads the same active rows on both sides, no extra data
+policy|services.Users can read services|SELECT roles=authenticated permissive=PERMISSIVE using=((org_id = ( SELECT get_user_org_id() AS get_user_org_id)) OR (is_active = true)) check=-  # authenticated read widened to active rows (org OR is_active) vs own-org: anon already reads the same active rows on both sides, no extra data
+rls|backup_20260613_bookings|enabled  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+rls|backup_20260613_payments|enabled  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+rls|backup_20261112_kamala_attendance|enabled  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+rls|backup_20261112_kamala_booking_therapists|enabled  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+rls|backup_20261112_kamala_bookings|enabled  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+rls|backup_20261112_kamala_service_therapists|enabled  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+rls|backup_20261112_kamala_therapists|enabled  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+rls|backup_20261112_kamala_transfers|enabled  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+rls|backup_20261112_kamala_working_hours|enabled  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+table|backup_20260613_bookings|r  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+table|backup_20260613_payments|r  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+table|backup_20261112_kamala_attendance|r  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+table|backup_20261112_kamala_booking_therapists|r  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+table|backup_20261112_kamala_bookings|r  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+table|backup_20261112_kamala_service_therapists|r  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+table|backup_20261112_kamala_therapists|r  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+table|backup_20261112_kamala_transfers|r  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+table|backup_20261112_kamala_working_hours|r  # one-off backup_* table/column/policy on prod (2026-06 / 2026-11 data fixes), no code reads it
+trigger|bookings.trg_booking_snapshots|BEFORE INSERT OR UPDATE OF service_id, therapist_id, room_id ON public.bookings FOR EACH ROW EXECUTE FUNCTION populate_booking_snapshots()  # local-only supplement trigger, see populate_booking_snapshots
+trigger|daily_reports.trg_audit_daily_reports|AFTER INSERT ON public.daily_reports FOR EACH ROW EXECUTE FUNCTION fn_insert_audit_log()  # prod-only extra audit / updated_at trigger: writes extra audit rows or a timestamp, blocks nothing
+trigger|payments.trg_audit_payments|AFTER INSERT ON public.payments FOR EACH ROW EXECUTE FUNCTION fn_insert_audit_log()  # prod-only extra audit / updated_at trigger: writes extra audit rows or a timestamp, blocks nothing
+trigger|rooms.trg_audit_rooms|AFTER UPDATE ON public.rooms FOR EACH ROW EXECUTE FUNCTION fn_insert_audit_log()  # prod-only extra audit / updated_at trigger: writes extra audit rows or a timestamp, blocks nothing
+trigger|service_categories.set_service_categories_updated_at|BEFORE UPDATE ON public.service_categories FOR EACH ROW EXECUTE FUNCTION set_updated_at()  # prod-only extra audit / updated_at trigger: writes extra audit rows or a timestamp, blocks nothing
+trigger|services.trg_audit_services|AFTER UPDATE ON public.services FOR EACH ROW EXECUTE FUNCTION fn_insert_audit_log()  # prod-only extra audit / updated_at trigger: writes extra audit rows or a timestamp, blocks nothing
+trigger|therapist_attendance.trg_updated_at|BEFORE UPDATE ON public.therapist_attendance FOR EACH ROW EXECUTE FUNCTION update_updated_at()  # prod-only extra audit / updated_at trigger: writes extra audit rows or a timestamp, blocks nothing

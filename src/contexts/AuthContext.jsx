@@ -2,6 +2,9 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { supabase, retryingFetch } from '../lib/supabase';
 import { identify, reset, setGroup } from '../lib/analytics';
 import { isTransientStatus, ServiceUnavailableError } from '../lib/supabaseRetry';
+import { isLoginAllowed, LOGIN_OFF_MESSAGE, isLoginOffHookError, LOGIN_OFF_HOOK_MESSAGE } from '../services/loginAccess';
+import { setRestrictedReads } from '../lib/restrictedReads';
+import { isRestricted } from '../services/dataMasking';
 
 // Ceiling on how long the profile fetch may run before we give up and treat it
 // as "service unavailable" rather than leaving the app on a spinner forever.
@@ -45,6 +48,25 @@ export const getDashboardPath = (role, orgSlug) => {
 };
 
 /**
+ * Where to send a freshly authenticated user: the page they originally asked for, but only if it is a plain in-app path
+ * inside their OWN org (`/<their-org>/...`). Anything else (another org, an absolute URL, protocol-relative `//host`,
+ * the login page itself) is ignored and the caller falls back to the default dashboard.
+ * @param {{pathname?: string, search?: string, hash?: string}|string|undefined} from - `location.state.from`
+ * @param {string} orgSlug - the authenticated user's org slug
+ * @returns {string|null}
+ */
+export const getSafeRedirect = (from, orgSlug) => {
+  if (!from || !orgSlug) return null;
+  const pathname = typeof from === 'string' ? from.split(/[?#]/)[0] : from.pathname;
+  if (typeof pathname !== 'string' || !pathname.startsWith(`/${orgSlug}/`)) return null;
+  const rest = typeof from === 'string' ? from.slice(pathname.length) : `${from.search || ''}${from.hash || ''}`;
+  if (/[\\]|:\/\//.test(pathname + rest)) return null;
+  if (/(^|\/)\.\.?(\/|$)/.test(pathname)) return null; // no dot-segments
+  if (pathname === `/${orgSlug}/login`) return null;
+  return `${pathname}${rest}`;
+};
+
+/**
  * Fetch a user's staff profile from public.users with branch name.
  *
  * When called with an explicit accessToken (e.g. right after signIn),
@@ -54,11 +76,19 @@ export const getDashboardPath = (role, orgSlug) => {
  * When called without a token (page refresh), the supabase client reads
  * the stored session from localStorage automatically — this path works fine.
  */
+// ZNLY-216: an explicit column list, never '*': users.pin is not readable by the app (migration-384), so '*' would be refused.
+// ZNLY-235: the restricted-read flag is set HERE, before the profile reaches React, so no child query can fire first.
 async function fetchProfile(userId, accessToken) {
+  const p = await fetchProfileRaw(userId, accessToken);
+  setRestrictedReads(isRestricted(p));
+  return p;
+}
+
+async function fetchProfileRaw(userId, accessToken) {
   try {
     if (accessToken) {
       const url = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/users`
-        + `?select=*,branches!users_branch_id_fkey(name),organizations(id,name,code,slug,industry_type,industries(id,name,staff_label,staff_label_plural,location_label,location_label_plural,enable_rooms,enable_staff_gender))&id=eq.${userId}`;
+        + `?select=id,email,full_name,role,branch_id,is_active,created_at,org_id,login_access,calendar_visibility,can_view_customer_details,can_view_prices,branches!users_branch_id_fkey(name),organizations(id,name,code,slug,industry_type,industries(id,name,staff_label,staff_label_plural,location_label,location_label_plural,enable_rooms,enable_staff_gender))&id=eq.${userId}`;
       // Routed through the shared retryingFetch (not a raw fetch) so this PostgREST
       // call gets the same 25P02/40001/40P01 retry + telemetry as every request
       // issued through the supabase-js clients — this is the same poisoned-pool
@@ -100,7 +130,7 @@ async function fetchProfile(userId, accessToken) {
     // Fallback: use supabase client (session from localStorage)
     const { data, error } = await supabase
       .from('users')
-      .select('*, branches!users_branch_id_fkey(name), organizations(id, name, code, slug, industry_type, industries(id, name, staff_label, staff_label_plural, location_label, location_label_plural, enable_rooms, enable_staff_gender))')
+      .select('id, email, full_name, role, branch_id, is_active, created_at, org_id, login_access, calendar_visibility, can_view_customer_details, can_view_prices, branches!users_branch_id_fkey(name), organizations(id, name, code, slug, industry_type, industries(id, name, staff_label, staff_label_plural, location_label, location_label_plural, enable_rooms, enable_staff_gender))')
       .eq('id', userId)
       .single();
 
@@ -129,6 +159,8 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  // True once supabase has reported the stored session (INITIAL_SESSION), so "no user yet" can be told apart from "no session".
+  const [sessionResolved, setSessionResolved] = useState(false);
   // True when we have an authenticated session but the profile could not be
   // loaded because the database was unreachable (503 / timeout), NOT because the
   // profile is missing. Lets the UI show "reconnecting, retry" instead of
@@ -148,12 +180,18 @@ export const AuthProvider = ({ children }) => {
         password,
       });
 
-      if (error) throw error;
+      if (error) throw isLoginOffHookError(error) ? new Error(LOGIN_OFF_HOOK_MESSAGE) : error;
 
       const userProfile = await fetchProfile(
         data.user.id,
         data.session.access_token
       );
+
+      // Login off (Staff access) blocks sign-in: drop the session that was just created and say why.
+      if (!isLoginAllowed(userProfile)) {
+        await supabase.auth.signOut();
+        throw new Error(LOGIN_OFF_MESSAGE);
+      }
 
       setUser(data.user);
       setProfile(userProfile);
@@ -183,6 +221,7 @@ export const AuthProvider = ({ children }) => {
 
   const signOut = async () => {
     reset();
+    setRestrictedReads(false);
     setProfile(null);
     setUser(null);
     const { error } = await supabase.auth.signOut();
@@ -199,11 +238,13 @@ export const AuthProvider = ({ children }) => {
         // Only update state from the listener when signIn is NOT active.
         if (signInActiveRef.current) return;
 
+        setSessionResolved(true);
         if (session?.user) {
           setUser(session.user);
         } else {
           setUser(null);
           setProfile(null);
+          setRestrictedReads(false);
         }
 
         if (event === 'INITIAL_SESSION' && !session?.user) {
@@ -224,6 +265,13 @@ export const AuthProvider = ({ children }) => {
     setLoading(true);
     try {
       const p = await fetchProfile(userId);
+      // A session that is still open when an admin turns the login off ends here (page refresh / return visit).
+      if (p && !isLoginAllowed(p)) {
+        await supabase.auth.signOut();
+        setProfile(null);
+        setUser(null);
+        return null;
+      }
       setProfile(p);
       setAuthUnavailable(false);
       return p;
@@ -251,7 +299,9 @@ export const AuthProvider = ({ children }) => {
     let cancelled = false;
 
     if (!user) {
-      setLoading(false);
+      // Until the stored session has been reported there is simply no user *yet*; staying in `loading` stops ProtectedRoute
+      // from bouncing a signed-in user (hard reload / deep link) through /login before their session has been restored.
+      if (sessionResolved) setLoading(false);
       return;
     }
 
@@ -270,7 +320,7 @@ export const AuthProvider = ({ children }) => {
     loadProfile(user.id).catch(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
-  }, [user?.id, loadProfile]);
+  }, [user?.id, loadProfile, sessionResolved]);
 
   return (
     <AuthContext.Provider value={{ user, profile, loading, authUnavailable, retryProfile, signIn, signOut }}>

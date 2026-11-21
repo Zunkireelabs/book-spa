@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useBodyScrollLock } from '../BottomSheet';
 import Icon from '../../AppIcon';
 import { useAIAssistant } from 'contexts/AIAssistantContext';
 import ChatMessage from './ChatMessage';
@@ -11,7 +12,7 @@ const getMockResponse = (message) => {
 
   // Greetings
   if (['hello', 'hi', 'hey'].some(g => lowerMessage.includes(g))) {
-    return "Hi! I'm your AI assistant. I can help you with:\n\n• Finding and managing bookings\n• Understanding your revenue\n• Checking therapist availability\n• Answering questions about Zennly\n\nHow can I help you today?";
+    return "Hi! I'm your AI assistant. I can help you with:\n\n• Finding and managing bookings\n• Understanding your revenue\n• Checking team availability\n• Answering questions about Zennly\n\nHow can I help you today?";
   }
 
   // Bookings
@@ -26,7 +27,7 @@ const getMockResponse = (message) => {
 
   // Therapists / Staff
   if (['therapist', 'staff', 'employee', 'team'].some(k => lowerMessage.includes(k))) {
-    return "For therapist and staff management, I can help with:\n\n• Checking therapist availability\n• Viewing utilization rates\n• Seeing who's assigned to upcoming bookings\n• Finding available slots for a specific therapist\n\nWhat do you need to know about your team?";
+    return "For team management, I can help with:\n\n• Checking team availability\n• Viewing utilization rates\n• Seeing who's assigned to upcoming bookings\n• Finding available slots for a specific therapist\n\nWhat do you need to know about your team?";
   }
 
   // Schedule / Calendar
@@ -41,11 +42,11 @@ const getMockResponse = (message) => {
 
   // Thank you
   if (['thank', 'thanks', 'thx'].some(k => lowerMessage.includes(k))) {
-    return "You're welcome! Feel free to ask if you need anything else. I'm always here to help you manage your spa efficiently.";
+    return "You're welcome! Feel free to ask if you need anything else. I'm always here to help you manage your business efficiently.";
   }
 
   // Default
-  return "I understand you're asking about your spa operations. I can help with bookings, revenue, therapist schedules, and more.\n\nCould you be more specific about what you'd like to know? For example:\n• \"Show me today's bookings\"\n• \"How is revenue this week?\"\n• \"Which therapists are available?\"";
+  return "I understand you're asking about your business operations. I can help with bookings, revenue, team schedules, and more.\n\nCould you be more specific about what you'd like to know? For example:\n• \"Show me today's bookings\"\n• \"How is revenue this week?\"\n• \"Which therapists are available?\"";
 };
 
 const AIAssistantPanel = () => {
@@ -54,7 +55,7 @@ const AIAssistantPanel = () => {
     {
       id: 'welcome',
       role: 'assistant',
-      content: "Hi! I'm your AI assistant. I can help you with:\n\n• Finding and managing bookings\n• Understanding your revenue\n• Answering questions about your spa\n\nHow can I help you today?",
+      content: "Hi! I'm your AI assistant. I can help you with:\n\n• Finding and managing bookings\n• Understanding your revenue\n• Answering questions about your business\n\nHow can I help you today?",
       timestamp: new Date(),
     },
   ]);
@@ -62,6 +63,7 @@ const AIAssistantPanel = () => {
   const [isExpanded, setIsExpanded] = useState(false);
   const messagesEndRef = useRef(null);
 
+  useBodyScrollLock(isOpen);
   const panelWidth = isExpanded ? 600 : 420;
 
   // Scroll to bottom when messages change
@@ -143,7 +145,7 @@ const AIAssistantPanel = () => {
         </div>
 
         {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto py-4 space-y-4">
+        <div className="flex-1 overflow-y-auto overscroll-contain py-4 space-y-4">
           {messages.map(message => (
             <ChatMessage key={message.id} message={message} />
           ))}

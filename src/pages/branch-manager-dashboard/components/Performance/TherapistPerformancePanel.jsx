@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import FilterBar from '../../../../components/ui/FilterBar';
@@ -66,7 +67,7 @@ const TherapistPerformancePanel = ({ branchId }) => {
     const result = await getTherapistPerformance({ branchId, ...range });
 
     if (result.error) {
-      setError(result.error.message || 'Failed to load performance data.');
+      setError(friendlyError(result.error, 'Failed to load performance data.'));
       setLoading(false);
       return;
     }
@@ -132,6 +133,7 @@ const TherapistPerformancePanel = ({ branchId }) => {
         therapistName={selectedTherapist.name}
         branchId={branchId}
         onBack={() => setSelectedTherapist(null)}
+        backLabel="Back to Performance"
       />
     );
   }

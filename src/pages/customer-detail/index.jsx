@@ -1,71 +1,37 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
-import Button from '../../components/ui/Button';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
-import StaffSidebar from '../../components/ui/StaffSidebar';
-import CustomerSummaryTab from './components/CustomerSummaryTab';
-import CustomerVisitHistoryTab from './components/CustomerVisitHistoryTab';
-import CustomerAppointmentsTab from './components/CustomerAppointmentsTab';
-import CustomerSalesTab from './components/CustomerSalesTab';
-import CustomerNotesTab from './components/CustomerNotesTab';
-import CustomerPackagesTab from './components/CustomerPackagesTab';
-import CustomerMembershipTab from './components/CustomerMembershipTab';
-import CustomerPhotosTab from './components/CustomerPhotosTab';
-import CustomerDocumentsTab from './components/CustomerDocumentsTab';
-import CustomerVouchersTab from './components/CustomerVouchersTab';
-import CustomerLogTab from './components/CustomerLogTab';
+import AppShell from '../../components/ui/AppShell';
+import CustomerHeader from './components/CustomerHeader';
+import CustomerTiles from './components/CustomerTiles';
+import CustomerOverviewTab from './components/CustomerOverviewTab';
+import CustomerVisitsTab from './components/CustomerVisitsTab';
+import CustomerPaymentsTab from './components/CustomerPaymentsTab';
+import CustomerPlansTab from './components/CustomerPlansTab';
+import CustomerFilesTab from './components/CustomerFilesTab';
+import CustomerNotesHistoryTab from './components/CustomerNotesHistoryTab';
+import CollectPanel, { collectableAmount } from '../../components/ui/CollectPanel';
+import InboxBookingPanel from '../inbox/InboxBookingPanel';
+import { useBranch } from '../../contexts/BranchContext';
+import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED } from '../../lib/featureFlags';
 import CustomerEditModal from './components/CustomerEditModal';
 import CustomerMessagesModal from './components/CustomerMessagesModal';
 import CustomerMergeModal from './components/CustomerMergeModal';
 import { useAuth } from '../../contexts/AuthContext';
-import { fetchCustomerProfile, setCustomerActive, deleteCustomer } from '../../services/api';
-
-// Small outside-click-aware dropdown, local to this page's header actions.
-const HeaderDropdown = ({ trigger, children, align = 'right' }) => {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handleClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [open]);
-
-  return (
-    <div ref={ref} className="relative">
-      <div onClick={() => setOpen(o => !o)}>{trigger}</div>
-      {open && (
-        <div
-          className={`absolute top-full mt-1 ${align === 'right' ? 'right-0' : 'left-0'} min-w-[180px] bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown py-1`}
-          onClick={() => setOpen(false)}
-        >
-          {children}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const DropdownItem = ({ onClick, danger, children }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className={`w-full text-left px-3 py-2 font-body text-sm spa-transition-fast hover:bg-background ${danger ? 'text-error' : 'text-text-primary'}`}
-  >
-    {children}
-  </button>
-);
+import { fetchCustomerProfile, getCustomerPanelDetail, setCustomerActive, deleteCustomer } from '../../services/api';
 
 const CustomerDetailPage = () => {
   const navigate = useNavigate();
   const { orgSlug, customerId } = useParams();
   const { profile } = useAuth();
+  const { isOverall } = useBranch();
   const userRole = profile?.role || 'staff';
+  const canViewCustomerDetails = userRole === 'manager' || userRole === 'admin' || profile?.can_view_customer_details !== false;
+  // Same rule as the Customers list: the Overall view and admin_viewer can look, not book or collect.
+  const readOnly = isOverall || userRole === 'admin_viewer';
 
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState('summary');
+  const [activeTab, setActiveTab] = useState('overview');
   const [showEditModal, setShowEditModal] = useState(false);
   const [showMessagesModal, setShowMessagesModal] = useState(false);
   const [showMergeModal, setShowMergeModal] = useState(false);
@@ -73,31 +39,40 @@ const CustomerDetailPage = () => {
   const [actionSubmitting, setActionSubmitting] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [data, setData] = useState(null);
+  const [detail, setDetail] = useState(null); // the same per-customer detail the Customers panel uses (owed visits, upcoming, plans)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [openBookingId, setOpenBookingId] = useState(null);
+  const [collecting, setCollecting] = useState(false);
+  const [notice, setNotice] = useState('');
 
   const loadProfile = useCallback(async () => {
     if (!customerId) return;
     setLoading(true);
     setError(null);
-
-    const result = await fetchCustomerProfile(customerId);
-
+    const [result, panel] = await Promise.all([fetchCustomerProfile(customerId), getCustomerPanelDetail({ customerId })]);
     if (result.error) {
       setError(result.error.message || 'Failed to load customer profile.');
       setLoading(false);
       return;
     }
-
     setData(result.data);
+    setDetail(panel.data || null);
     setLoading(false);
   }, [customerId]);
 
   useEffect(() => { loadProfile(); }, [loadProfile]);
+  useEffect(() => {
+    if (!notice) return undefined;
+    const t = setTimeout(() => setNotice(''), 6000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const goBack = () => navigate(`/${orgSlug}/dashboard?view=customers`);
+  // Same hand-off the Customers list's "New booking" uses: the dashboard's booking form, this customer filled in.
+  const newBooking = () => { const c = data.customer; navigate(`/${orgSlug}/dashboard?view=new-booking`, { state: { prefill: { fullName: c.fullName, phone: c.phone, email: c.email, gender: c.gender } } }); };
 
-  const handleConfirmAction = async (reason) => {
+  const handleConfirmAction = async () => {
     setActionSubmitting(true);
     setActionError(null);
 
@@ -116,110 +91,80 @@ const CustomerDetailPage = () => {
     }
   };
 
-  const TABS = data ? [
-    { key: 'summary', label: 'Summary' },
-    { key: 'visitHistory', label: 'Visit History' },
-    { key: 'appointments', label: `Appointments (${data.history.length})` },
-    { key: 'sales', label: `Sales (${data.history.filter(b => b.paymentStatus === 'paid').length})` },
-    { key: 'notes', label: `Notes (${data.customer.notes ? 1 : 0})` },
-    { key: 'packages', label: 'Packages' },
-    { key: 'membership', label: 'Membership' },
-    { key: 'photos', label: 'Photos' },
-    { key: 'documents', label: 'Documents' },
-    { key: 'vouchers', label: 'Gift Vouchers' },
-    { key: 'log', label: 'Log' },
-  ] : [];
+  const planCount = (MEMBERSHIP_ENABLED && detail?.membership ? 1 : 0) + (detail?.packages?.length || 0) + (VOUCHER_ENABLED ? (detail?.vouchers?.length || 0) : 0);
+  const TABS = [
+    { key: 'overview', label: 'Overview' },
+    { key: 'visits', label: 'Visits' },
+    { key: 'payments', label: 'Payments' },
+    { key: 'plans', label: 'Plans', count: planCount },
+    { key: 'files', label: 'Files' },
+    { key: 'notes', label: 'Notes & history' },
+  ];
+  const collectable = collectableAmount(data?.stats?.amountOwing);
 
   return (
-    <div className="min-h-screen bg-surface">
-      <StaffSidebar userRole={userRole} onCollapseChange={setSidebarCollapsed} />
+    <AppShell variant="flush" sidebar={{ userRole }} header={{ realtimeStatus: 'connected' }}>
+      <div className="bg-background min-h-full">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-44 sm:pb-6 space-y-5">
+          <CustomerHeader
+            loading={loading} data={data} readOnly={readOnly} isAdmin={userRole === 'admin'} showMessages={OUTREACH_ENABLED}
+            onBack={goBack} onNewBooking={newBooking} onEdit={() => setShowEditModal(true)}
+            onSendMessage={() => setShowMessagesModal(true)} onSentMessages={() => navigate(`/${orgSlug}/customers/${customerId}/messages`)}
+            onMerge={() => setShowMergeModal(true)}
+            onBlock={() => { setActionError(null); setConfirmAction(data?.customer?.isActive === false ? 'unblock' : 'block'); }}
+            onDelete={() => { setActionError(null); setConfirmAction('delete'); }}
+          />
 
-      <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:mb-0 mb-16 spa-transition-slow`}>
-        <div className="sticky top-0 z-header bg-surface border-b border-border px-6 py-3 flex items-center justify-between">
-          <button onClick={goBack} className="font-body text-sm text-text-secondary hover:text-primary spa-transition-fast">
-            ← Back to Customers
-          </button>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setShowEditModal(true)} disabled={!data}>Edit</Button>
+          {notice && <p role="status" className="flex items-start gap-2 border border-success/30 bg-success/5 rounded-spa px-3 py-2 text-[13px] text-success"><Icon name="CheckCircle2" size={14} className="mt-0.5 flex-shrink-0" /><span>{notice}</span></p>}
 
-            <HeaderDropdown
-              trigger={
-                <Button variant="outline" size="sm" disabled={!data}>
-                  Messages <Icon name="ChevronDown" size={14} className="ml-1 inline" />
-                </Button>
-              }
-            >
-              <DropdownItem onClick={() => setShowMessagesModal(true)}>Send a message</DropdownItem>
-              <DropdownItem onClick={() => navigate(`/${orgSlug}/customers/${customerId}/messages`)}>View sent messages</DropdownItem>
-            </HeaderDropdown>
-
-            <HeaderDropdown
-              trigger={
-                <button
-                  type="button"
-                  disabled={!data}
-                  className="w-9 h-9 flex items-center justify-center rounded-spa border border-border hover:bg-background spa-transition-fast disabled:opacity-50"
-                >
-                  <Icon name="MoreVertical" size={16} className="text-text-secondary" />
-                </button>
-              }
-            >
-              <DropdownItem onClick={() => setShowMergeModal(true)}>Merge</DropdownItem>
-              <DropdownItem onClick={() => { setActionError(null); setConfirmAction(data?.customer?.isActive === false ? 'unblock' : 'block'); }}>
-                {data?.customer?.isActive === false ? 'Unblock' : 'Block'}
-              </DropdownItem>
-              <DropdownItem danger onClick={() => { setActionError(null); setConfirmAction('delete'); }}>Delete</DropdownItem>
-            </HeaderDropdown>
-          </div>
-        </div>
-
-        <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
-          {loading ? (
-            <div className="text-center py-20">
-              <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
-              <p className="font-body text-sm text-text-secondary">Loading profile...</p>
+          {loading && !data ? (
+            <div className="space-y-5 animate-pulse" aria-busy="true" aria-label="Loading customer">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{[0, 1, 2, 3].map((i) => <div key={i} className="h-[104px] rounded-spa-lg bg-border/60" />)}</div>
+              <div className="h-10 border-b border-border" />
+              <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-5"><div className="h-64 rounded-spa-lg bg-border/60" /><div className="h-64 rounded-spa-lg bg-border/60" /></div>
             </div>
           ) : error ? (
-            <div className="flex items-center gap-2 p-4 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
-              <Icon name="AlertCircle" size={16} />
-              <span>{error}</span>
-              <button onClick={loadProfile} className="ml-auto underline">Retry</button>
+            <div role="alert" className="text-center py-16">
+              <p className="text-sm font-medium text-text-primary">Couldn't load this customer.</p>
+              <p className="text-[13px] text-text-secondary mt-1">Check the connection and try again.</p>
+              <button type="button" onClick={loadProfile} className="mt-4 h-9 px-3.5 rounded-md border border-border bg-surface text-[13px] font-medium hover:bg-background">Try again</button>
             </div>
-          ) : (
+          ) : data && (
             <>
-              <h1 className="font-accent text-5xl text-text-primary">{data.customer.fullName}</h1>
+              <CustomerTiles stats={data.stats} today={detail?.today} canCollect={!readOnly} collectable={collectable} onCollect={() => setCollecting(true)} />
 
-              <div className="flex items-center gap-1 border-b border-border overflow-x-auto scrollbar-hide">
-                {TABS.map(tab => (
+              <div className="flex items-center gap-6 border-b border-border overflow-x-auto scrollbar-hide">
+                {TABS.map((tab) => (
                   <button
                     key={tab.key}
                     onClick={() => setActiveTab(tab.key)}
-                    className={`px-4 py-3 font-body text-base whitespace-nowrap spa-transition-fast border-b-2 -mb-px ${
-                      activeTab === tab.key
-                        ? 'border-primary text-primary font-body-medium'
-                        : 'border-transparent text-text-primary hover:text-primary'
-                    }`}
+                    className={`h-10 inline-flex items-center gap-1.5 whitespace-nowrap text-[13.5px] border-b-2 -mb-px ${activeTab === tab.key ? 'border-primary text-text-primary font-semibold' : 'border-transparent text-text-secondary hover:text-text-primary'}`}
                   >
-                    {tab.label}
+                    {tab.label}{tab.count > 0 && <span className="text-[11.5px] text-text-secondary bg-background border border-border rounded-full px-[7px]">{tab.count}</span>}
                   </button>
                 ))}
               </div>
 
-              {activeTab === 'summary' && <CustomerSummaryTab data={data} onNavigateTab={setActiveTab} />}
-              {activeTab === 'visitHistory' && <CustomerVisitHistoryTab data={data} />}
-              {activeTab === 'appointments' && <CustomerAppointmentsTab data={data} />}
-              {activeTab === 'sales' && <CustomerSalesTab data={data} />}
-              {activeTab === 'notes' && <CustomerNotesTab customer={data.customer} onSaved={loadProfile} />}
-              {activeTab === 'packages' && <CustomerPackagesTab customerId={data.customer.id} />}
-              {activeTab === 'membership' && <CustomerMembershipTab membership={data.membership} />}
-              {activeTab === 'photos' && <CustomerPhotosTab customerId={data.customer.id} branchId={data.customer.branchId} />}
-              {activeTab === 'documents' && <CustomerDocumentsTab customerId={data.customer.id} branchId={data.customer.branchId} />}
-              {activeTab === 'vouchers' && <CustomerVouchersTab customerId={data.customer.id} />}
-              {activeTab === 'log' && <CustomerLogTab customerId={data.customer.id} />}
+              {activeTab === 'overview' && <CustomerOverviewTab data={data} detail={detail} onOpenBooking={setOpenBookingId} onNavigateTab={setActiveTab} onEdit={() => setShowEditModal(true)} onNewBooking={newBooking} readOnly={readOnly} />}
+              {activeTab === 'visits' && <CustomerVisitsTab data={data} detail={detail} onOpenBooking={setOpenBookingId} />}
+              {activeTab === 'payments' && <CustomerPaymentsTab data={data} detail={detail} canViewCustomerDetails={canViewCustomerDetails} onOpenBooking={setOpenBookingId} />}
+              {activeTab === 'plans' && <CustomerPlansTab data={data} />}
+              {activeTab === 'files' && <CustomerFilesTab customer={data.customer} />}
+              {activeTab === 'notes' && <CustomerNotesHistoryTab customer={data.customer} onSaved={loadProfile} onSentMessages={OUTREACH_ENABLED ? () => navigate(`/${orgSlug}/customers/${customerId}/messages`) : null} />}
             </>
           )}
         </div>
       </div>
+
+      {collecting && data && detail && (
+        <CollectPanel
+          customer={data.customer} owed={detail.owed} branchId={data.customer.branchId}
+          onClose={() => setCollecting(false)} onBack={() => setCollecting(false)}
+          onNotice={setNotice} onChanged={loadProfile}
+        />
+      )}
+
+      {openBookingId && <InboxBookingPanel bookingId={openBookingId} onClose={() => setOpenBookingId(null)} onChanged={loadProfile} />}
 
       {showEditModal && data && (
         <CustomerEditModal
@@ -266,12 +211,12 @@ const CustomerDetailPage = () => {
       )}
 
       {actionError && confirmAction && (
-        <div className="fixed bottom-4 right-4 z-notification flex items-center gap-2 px-4 py-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm shadow-spa-elevated">
+        <div className="fixed toast-bottom [--toast-lg:1rem] right-4 z-notification flex items-center gap-2 px-4 py-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm shadow-spa-elevated">
           <Icon name="AlertCircle" size={16} />
           <span>{actionError}</span>
         </div>
       )}
-    </div>
+    </AppShell>
   );
 };
 

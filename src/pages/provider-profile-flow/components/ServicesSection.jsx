@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import { useScrollSpy } from '../utils/useScrollSpy';
-import { formatNPR } from '../../../services/bookingTransformers';
+import { customerFacingServicePriceLabel as servicePriceLabel } from '../../../services/bookingTransformers';
 
 const PREVIEW_COUNT = 5;
 
@@ -31,7 +31,7 @@ const ServiceCard = ({ service, isSelected, onClick }) => (
       )}
     </div>
     <span className="font-['Space_Mono'] tabular-nums text-sm text-[var(--zn-foreground)] shrink-0">
-      {formatNPR(service.effective_price_npr ?? service.price_npr)}
+      {servicePriceLabel(service)}
     </span>
   </div>
 );

@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
-import StaffSidebar from '../../components/ui/StaffSidebar';
+import AppShell from '../../components/ui/AppShell';
+import { Field, TextInput, NumberInput } from '../../components/ui/PanelFormKit';
+import { categoryOptions, isCategoryMissing, categoryForSave } from '../../utils/serviceCategory';
 import CustomSelect from '../../components/ui/CustomSelect';
-import SettingsRow from '../staff-detail/components/SettingsRow';
 import { useAuth } from '../../contexts/AuthContext';
-import { useBranch } from '../../contexts/BranchContext';
+import { useBranch, OVERALL_BRANCH_ID } from '../../contexts/BranchContext';
+import { friendlyError } from '../../utils/friendlyError';
 import { useOrg } from '../../contexts/OrgContext';
 import { useIndustry } from '../../hooks/useIndustry';
 import {
@@ -26,15 +28,40 @@ import {
   fetchBranchesForManagement,
   fetchServiceBranches,
   setServiceBranches,
+  fetchPriceTiers,
+  fetchTherapistsForTierAssignment,
+  fetchServiceTierPrices,
+  setServiceTierPrices,
+  deleteService,
 } from '../../services/api';
+import { wordBranch } from '../../utils/industryTerms';
 
 const EMPTY_FORM = {
-  name: '', priceNpr: '', durationMinutes: '', description: '', imageUrl: '', category: 'Spa',
+  name: '', priceNpr: '', priceType: 'fixed', durationMinutes: '', description: '', imageUrl: '', category: '',
   isCouple: false, isCombo: false, offerEnabled: false, offerType: 'percent', offerValue: '',
   requiresTherapist: true,
   bookableOnline: true, isAddon: false,
   paddingEnabled: false, paddingBeforeMinutes: '0', paddingAfterMinutes: '0', paddingAfterType: 'padding',
 };
+
+const PRICE_TYPE_OPTIONS = [
+  { value: 'fixed', label: 'Fixed — one price for everyone' },
+  { value: 'free', label: 'Free — no charge' },
+  { value: 'calendar_only', label: 'Calendar only — hidden from online booking' },
+  { value: 'no_default', label: 'No default — whoever books it enters a price' },
+  { value: 'tiered', label: 'Tiered: depends on who does it' },
+];
+
+// One form-kit card per section: title, one-line description, body (replaces the old two-column SettingsRow).
+const SettingsRow = ({ id, title, description, children }) => (
+  <section id={id} className="bg-surface border border-border rounded-spa-lg p-5 space-y-4">
+    <div>
+      <h3 className="text-[11.5px] font-medium uppercase tracking-[0.05em] text-text-tertiary">{title}</h3>
+      {description && <p className="mt-1 text-[12.5px] text-text-secondary leading-relaxed">{description}</p>}
+    </div>
+    {children}
+  </section>
+);
 
 const formatNPR = (amount) => `NPR ${Number(amount).toLocaleString('en-IN')}`;
 
@@ -46,12 +73,15 @@ const ServiceDetailPage = () => {
   const { orgSlug, serviceId } = useParams();
   const { profile } = useAuth();
   const { branchId } = useBranch();
+  // The staff allow-list is stored per location (uuid). Under "All locations" ('__overall__') or before any
+  // location exists (null) there is no single location to write it to, so staff scope is left untouched there.
+  const staffScopeBranchId = branchId && branchId !== OVERALL_BRANCH_ID ? branchId : null;
+  const savingRef = useRef(false);
   const { orgId } = useOrg();
-  const { isBeauty } = useIndustry();
+  const { isBeauty, staffLabel, staffLabelPlural, locationLabel, enableRooms, examples, branchWord, branchWordPlural } = useIndustry();
   const userRole = profile?.role || 'staff';
   const isEdit = !!serviceId;
 
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [pageLoading, setPageLoading] = useState(isEdit);
   const [loadError, setLoadError] = useState(null);
 
@@ -74,7 +104,12 @@ const ServiceDetailPage = () => {
   const [serviceAddonIds, setServiceAddonIds] = useState([]);
   const [addonSearchQuery, setAddonSearchQuery] = useState('');
 
+  const [priceTiers, setPriceTiers] = useState([]);
+  // { [tierId]: '160' } — a tier left out means "the standard price", never 0.
+  const [tierPrices, setTierPrices] = useState({});
+
   const [formData, setFormData] = useState(EMPTY_FORM);
+  const [originalCategory, setOriginalCategory] = useState(''); // the stored category when the editor opened (so an untouched one is never rewritten)
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -87,14 +122,14 @@ const ServiceDetailPage = () => {
   }, []);
 
   const loadTherapists = useCallback(async () => {
-    if (!branchId) return;
-    const result = await fetchTherapistsForManagement(branchId);
+    if (!staffScopeBranchId) return;
+    const result = await fetchTherapistsForManagement(staffScopeBranchId);
     // Eligible Staff only makes sense for staff who actually perform services —
     // fetchTherapistsForManagement returns every staff row (service staff and
     // front-desk/admin alike) for the broader staff-management pages that share
     // it; filter to service staff here, scoped to this one picker.
     if (!result.error) setAllTherapists((result.data || []).filter(t => t.is_service_staff !== false));
-  }, [branchId]);
+  }, [staffScopeBranchId]);
 
   const loadAllServices = useCallback(async () => {
     const result = await fetchServicesForManagement();
@@ -107,10 +142,20 @@ const ServiceDetailPage = () => {
     if (!result.error) setAllBranches(result.data || []);
   }, [orgId]);
 
+  const [tierStaffCounts, setTierStaffCounts] = useState({});
+  const loadPriceTiers = useCallback(async () => {
+    const [result, staff] = await Promise.all([fetchPriceTiers(), fetchTherapistsForTierAssignment()]);
+    if (!result.error) setPriceTiers(result.data || []);
+    const counts = {};
+    (staff.data || []).forEach((t) => { if (t.price_tier_id) counts[t.price_tier_id] = (counts[t.price_tier_id] || 0) + 1; });
+    setTierStaffCounts(counts);
+  }, []);
+
   useEffect(() => { loadCategories(); }, [loadCategories]);
   useEffect(() => { loadTherapists(); }, [loadTherapists]);
   useEffect(() => { loadAllServices(); }, [loadAllServices]);
   useEffect(() => { loadBranches(); }, [loadBranches]);
+  useEffect(() => { loadPriceTiers(); }, [loadPriceTiers]);
 
   const loadService = useCallback(async () => {
     if (!isEdit) return;
@@ -119,16 +164,17 @@ const ServiceDetailPage = () => {
 
     // No fetchServiceById endpoint — fetchServicesForManagement() is the same org-wide
     // list the Service Management page already loads, so reusing it here needs no new API.
-    const [servicesResult, eligibleResult, comboResult, addonsResult, branchScopeResult] = await Promise.all([
+    const [servicesResult, eligibleResult, comboResult, addonsResult, branchScopeResult, tierPricesResult] = await Promise.all([
       fetchServicesForManagement(),
-      fetchServiceTherapists(serviceId, branchId),
+      staffScopeBranchId ? fetchServiceTherapists(serviceId, staffScopeBranchId) : Promise.resolve({ data: [], error: null }),
       fetchServiceComboComponents(serviceId),
       fetchServiceAddons(serviceId),
       fetchServiceBranches(serviceId),
+      fetchServiceTierPrices(serviceId),
     ]);
 
     if (servicesResult.error) {
-      setLoadError(servicesResult.error.message || 'Failed to load service.');
+      setLoadError(friendlyError(servicesResult.error, 'Failed to load service.'));
       setPageLoading(false);
       return;
     }
@@ -140,13 +186,15 @@ const ServiceDetailPage = () => {
       return;
     }
 
+    setOriginalCategory(service.category ?? '');
     setFormData({
       name: service.name,
       priceNpr: String(service.price_npr),
+      priceType: service.price_type || 'fixed',
       durationMinutes: String(service.duration_minutes),
       description: service.description || '',
       imageUrl: service.image_url || '',
-      category: service.category || 'Spa',
+      category: service.category || '',
       isCouple: !!service.is_couple,
       isCombo: !!service.is_combo,
       offerEnabled: !!service.offer_enabled,
@@ -162,6 +210,10 @@ const ServiceDetailPage = () => {
     });
     setImagePreview(service.image_url || null);
     setServiceAddonIds(addonsResult.data || []);
+
+    const tierPriceMap = {};
+    (tierPricesResult.data || []).forEach((row) => { tierPriceMap[row.price_tier_id] = String(row.price_npr); });
+    setTierPrices(tierPriceMap);
 
     // branchId filters server-side (migration-257/258 made the allow-list per-branch,
     // but storage is still org-wide) — a service restricted only at a different branch
@@ -180,9 +232,10 @@ const ServiceDetailPage = () => {
     setRestrictBranches(branchIds.length > 0);
 
     setPageLoading(false);
-  }, [isEdit, serviceId, branchId]);
+  }, [isEdit, serviceId, staffScopeBranchId]);
 
   useEffect(() => { loadService(); }, [loadService]);
+  useEffect(() => { window.scrollTo(0, 0); document.querySelectorAll('main, [data-scroll-root]').forEach((el) => { el.scrollTop = 0; }); }, [serviceId]);
 
   // Category defaults to the first available one once categories load, for the create path.
   useEffect(() => {
@@ -217,13 +270,34 @@ const ServiceDetailPage = () => {
 
   const goBack = () => navigate(`/${orgSlug}/dashboard?view=services`);
 
+  const priceNeedsAmount = ['fixed', 'calendar_only', 'tiered'].includes(formData.priceType);
+  const goManageTiers = () => navigate(`/${orgSlug}/dashboard?view=price-tiers`);
+  // "NPR 1,500 – 2,800": the standard price and every tier price (a blank tier charges the standard price), as customers see it online.
+  const onlineRange = (() => {
+    const std = Number(formData.priceNpr);
+    if (formData.priceType !== 'tiered' || !std || std <= 0 || priceTiers.length === 0) return null;
+    const all = [std, ...priceTiers.map((t) => { const v = Number(tierPrices[t.id]); return tierPrices[t.id] !== undefined && tierPrices[t.id] !== '' && v >= 0 ? v : std; })];
+    const lo = Math.min(...all); const hi = Math.max(...all);
+    return lo === hi ? formatNPR(lo) : `${formatNPR(lo)} \u2013 ${Number(hi).toLocaleString('en-IN')}`;
+  })();
+
   const handleSave = async () => {
-    const price = Number(formData.priceNpr);
+    if (savingRef.current) return;
+    savingRef.current = true;
+    try { await doSave(); } finally { savingRef.current = false; }
+  };
+
+  const doSave = async () => {
+    const price = priceNeedsAmount ? Number(formData.priceNpr) : 0;
     const duration = Number(formData.durationMinutes);
 
     if (!formData.name.trim()) { setFormError('Service name is required.'); return; }
-    if (!price || price <= 0) { setFormError('Price must be a positive number.'); return; }
+    if (priceNeedsAmount && (!price || price <= 0)) {
+      setFormError(formData.priceType === 'tiered' ? 'The standard price must be a positive number.' : 'Price must be a positive number.');
+      return;
+    }
     if (!duration || duration <= 0 || !Number.isInteger(duration)) { setFormError('Duration must be a positive whole number.'); return; }
+    if (restrictStaff && formData.requiresTherapist && !staffScopeBranchId) { setFormError('Pick a single location in the switcher at the top to choose which staff can do this service.'); return; }
     if (formData.isCombo && comboComponents.length === 0) { setFormError('Select at least one component service for this combo.'); return; }
 
     let offerValueNum = null;
@@ -243,7 +317,7 @@ const ServiceDetailPage = () => {
       const uploadResult = await uploadServiceImage(imageFile);
       setUploadingImage(false);
       if (uploadResult.error) {
-        setFormError(uploadResult.error.message || 'Failed to upload image.');
+        setFormError(friendlyError(uploadResult.error, 'Failed to upload image.'));
         setSaving(false);
         return;
       }
@@ -253,10 +327,11 @@ const ServiceDetailPage = () => {
     const payload = {
       name: formData.name.trim(),
       priceNpr: price,
+      priceType: formData.priceType,
       durationMinutes: duration,
       description: formData.description.trim() || null,
       imageUrl: finalImageUrl,
-      category: formData.category,
+      category: categoryForSave({ isEdit, current: formData.category, original: originalCategory }),
       isCouple: formData.isCouple,
       isCombo: formData.isCombo,
       offerEnabled: formData.offerEnabled,
@@ -275,7 +350,7 @@ const ServiceDetailPage = () => {
       : await createService(payload);
 
     if (result.error) {
-      setFormError(result.error.message || 'Save failed.');
+      setFormError(friendlyError(result.error, 'Save failed.'));
       setSaving(false);
       return;
     }
@@ -287,35 +362,47 @@ const ServiceDetailPage = () => {
       return;
     }
 
-    const staffResult = await setServiceTherapists(targetId, restrictStaff ? eligibleTherapistIds : [], branchId);
-    if (staffResult.error) {
-      setFormError(staffResult.error.message || 'Service saved, but failed to save eligible staff.');
+    // Anything after the service row exists must not leave a half-saved service behind. On create the new row
+    // (children cascade) is removed so a retry cannot duplicate it; on edit the row already existed, so say what failed.
+    const failStep = async (err, what) => {
+      if (!isEdit) {
+        const rollback = await deleteService({ serviceId: targetId });
+        const why = friendlyError(err, `Could not save ${what}.`).replace(/[.!?]?$/, '.');
+        setFormError(`${why}${rollback.error ? ' A partly saved service may remain in Services - check before retrying.' : ' Nothing was saved.'}`);
+      } else {
+        setFormError(`Saved, but ${what} failed: ${friendlyError(err, 'please try again.')}`);
+      }
       setSaving(false);
-      return;
+    };
+
+    // Staff allow-list: nothing to write for a brand-new unrestricted service, and no single location to write it
+    // to under "All locations" - an existing per-location list is left as it is there.
+    if (staffScopeBranchId && (isEdit || restrictStaff)) {
+      const staffResult = await setServiceTherapists(targetId, restrictStaff ? eligibleTherapistIds : [], staffScopeBranchId);
+      if (staffResult.error) return failStep(staffResult.error, 'eligible staff');
     }
 
     // Always write the combo bundle (even an empty list when isCombo was turned off) —
     // otherwise toggling combo off after having set components would leave stale rows.
     const comboResult = await setServiceComboComponents(targetId, formData.isCombo ? comboComponents : []);
-    if (comboResult.error) {
-      setFormError(comboResult.error.message || 'Service saved, but failed to save the combo bundle.');
-      setSaving(false);
-      return;
-    }
+    if (comboResult.error) return failStep(comboResult.error, 'the combo bundle');
 
     const addonsResult = await setServiceAddons(targetId, serviceAddonIds);
-    if (addonsResult.error) {
-      setFormError(addonsResult.error.message || 'Service saved, but failed to save its add-ons.');
-      setSaving(false);
-      return;
-    }
+    if (addonsResult.error) return failStep(addonsResult.error, 'its add-ons');
+
+    // Always write the tier price set (even empty when price type isn't tiered
+    // anymore) — otherwise switching away from Tiered would leave stale rows
+    // that resurface if the service is switched back.
+    const tierPriceEntries = formData.priceType === 'tiered'
+      ? priceTiers
+          .filter((t) => tierPrices[t.id] !== undefined && tierPrices[t.id] !== '')
+          .map((t) => ({ priceTierId: t.id, priceNpr: tierPrices[t.id] }))
+      : [];
+    const tierPriceResult = await setServiceTierPrices(targetId, tierPriceEntries);
+    if (tierPriceResult.error) return failStep(tierPriceResult.error, 'its tier prices');
 
     const branchScopeResult = await setServiceBranches(targetId, restrictBranches ? eligibleBranchIds : []);
-    if (branchScopeResult.error) {
-      setFormError(branchScopeResult.error.message || 'Service saved, but failed to save its branch scope.');
-      setSaving(false);
-      return;
-    }
+    if (branchScopeResult.error) return failStep(branchScopeResult.error, `its ${wordBranch()} scope`);
 
     setSaving(false);
     goBack();
@@ -324,25 +411,22 @@ const ServiceDetailPage = () => {
   const selectedCategory = categories.find((c) => c.name === formData.category);
 
   return (
-    <div className="min-h-screen bg-surface">
-      <StaffSidebar userRole={userRole} onCollapseChange={setSidebarCollapsed} />
-
-      <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:mb-0 mb-16 spa-transition-slow`}>
-        <div className="sticky top-0 z-header bg-surface border-b border-border px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3 font-accent text-2xl">
-            <button onClick={goBack} className="text-primary hover:underline">Services</button>
-            <Icon name="ChevronRight" size={20} className="text-text-tertiary" />
-            <span className="text-text-primary">{isEdit ? 'Edit Service' : 'Add Service'}</span>
-          </div>
+    <AppShell variant="page" sidebar={{ userRole }} header={{ realtimeStatus: 'connected' }}>
+      <div className="max-w-3xl mx-auto space-y-4 pb-24">
+        <nav className="flex items-center gap-1.5 text-sm text-text-secondary" aria-label="Breadcrumb">
+          <button type="button" onClick={goBack} className="inline-flex items-center gap-1 hover:text-text-primary"><Icon name="ChevronLeft" size={14} />Services</button>
+          <span>/</span>
+          <span className="text-text-primary truncate">{isEdit ? (formData.name || 'Edit service') : 'New service'}</span>
+        </nav>
+        <header className="flex flex-wrap items-center gap-3">
+          <h1 className="flex-1 min-w-[200px] font-heading font-heading-semibold text-2xl text-text-primary truncate">{isEdit ? (formData.name || 'Edit service') : 'New service'}</h1>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={goBack} disabled={saving}>Cancel</Button>
-            <Button variant="primary" size="sm" onClick={handleSave} loading={saving}>
-              {isEdit ? 'Save Changes' : 'Create Service'}
-            </Button>
+            <Button variant="primary" size="sm" onClick={handleSave} loading={saving} disabled={saving}>{isEdit ? 'Save service' : 'Create service'}</Button>
           </div>
-        </div>
+        </header>
 
-        <div className="max-w-7xl mx-auto px-6 py-6 space-y-4">
+        <div className="space-y-4">
           {pageLoading ? (
             <div className="text-center py-20">
               <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
@@ -366,226 +450,487 @@ const ServiceDetailPage = () => {
                 <p className="font-caption text-xs text-accent flex items-center gap-1.5">
                   <Icon name="Info" size={14} />
                   {isEdit
-                    ? 'Price and duration changes only affect future bookings. Historical bookings are protected by snapshot fields.'
-                    : 'New services will be immediately available for booking across all branches.'}
+                    ? `Changes apply to new appointments. Booked ones keep their price unless their ${staffLabel.toLowerCase()} or time changes before payment.`
+                    : `New services will be immediately available for booking across all ${branchWordPlural}.`}
                 </p>
               </div>
 
-              <div>
-                <SettingsRow title="Basics" description="Name, category, price, and duration shown to customers when booking.">
-                  <div className="space-y-3 max-w-xl">
-                    <div className="space-y-1">
-                      <label className="block font-body font-body-medium text-sm text-text-primary">Service Name</label>
-                      <Input
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        placeholder="e.g. Deep Tissue Massage"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="block font-body font-body-medium text-sm text-text-primary">Category</label>
-                      <CustomSelect
-                        value={formData.category}
-                        onChange={(val) => setFormData({ ...formData, category: val })}
-                        options={categories.map((cat) => ({ value: cat.name, label: cat.name }))}
-                        size="md"
-                      />
-                    </div>
-
+              <div className="space-y-4">
+                <SettingsRow title="Basics" description="Name, category and duration shown to customers when booking.">
+                  <div className="space-y-4 max-w-xl">
+                    <Field label="Name" id="svc-name">
+                      <TextInput id="svc-name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder={`e.g. ${examples.service}`} />
+                    </Field>
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="block font-body font-body-medium text-sm text-text-primary">Price (NPR)</label>
-                        <Input
-                          type="number"
-                          value={formData.priceNpr}
-                          onChange={(e) => setFormData({ ...formData, priceNpr: e.target.value })}
-                          placeholder="2000"
-                          min="1"
+                      <Field label="Category">
+                        <CustomSelect
+                          value={formData.category}
+                          onChange={(val) => setFormData({ ...formData, category: val })}
+                          options={categoryOptions(categories, formData.category)}
+                          size="md"
                         />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="block font-body font-body-medium text-sm text-text-primary">Duration (min)</label>
-                        <Input
-                          type="number"
-                          value={formData.durationMinutes}
-                          onChange={(e) => setFormData({ ...formData, durationMinutes: e.target.value })}
-                          placeholder="60"
-                          min="1"
-                        />
-                      </div>
+                        {isEdit && isCategoryMissing(categories, formData.category) && (
+                          <p className="mt-1 text-xs text-text-secondary">
+                            Not in your Categories list · <Link to={`/${orgSlug}/dashboard?view=categories`} className="text-primary hover:underline">Add it</Link>
+                          </p>
+                        )}
+                      </Field>
+                      <Field label="Duration (min)" id="svc-duration">
+                        <NumberInput id="svc-duration" value={formData.durationMinutes} onChange={(e) => setFormData({ ...formData, durationMinutes: e.target.value })} placeholder="60" min="1" />
+                      </Field>
                     </div>
-
-                    <div className="space-y-1">
-                      <label className="block font-body font-body-medium text-sm text-text-primary">Description</label>
+                    <Field label="Description" id="svc-description">
                       <textarea
+                        id="svc-description"
                         value={formData.description}
                         onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                         placeholder="Service description..."
                         rows={3}
-                        className="w-full rounded-spa border border-border bg-background px-3 py-2 font-body text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast resize-none"
+                        className="w-full rounded-spa border border-border bg-surface px-3 py-2 font-body text-[13px] text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                       />
-                    </div>
-
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={formData.requiresTherapist}
-                        onChange={(e) => setFormData({ ...formData, requiresTherapist: e.target.checked })}
-                        className="text-primary focus:ring-primary w-4 h-4 rounded"
-                      />
-                      <span className="font-body font-body-medium text-sm text-text-primary">
-                        Requires a service staff
-                      </span>
-                    </label>
-                    <p className="font-caption font-caption-normal text-xs text-text-secondary">
-                      Uncheck for self-service amenities (sauna, steam room, locker access) — staff can book these
-                      with just a room, no therapist assignment needed, and they show in the calendar's
-                      Unassigned column with a self-service badge instead of flagging as unstaffed.
-                    </p>
-
+                    </Field>
                     {!isBeauty && (
-                      <>
+                      <div>
                         <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={formData.isCouple}
-                            onChange={(e) => setFormData({ ...formData, isCouple: e.target.checked })}
-                            className="text-primary focus:ring-primary w-4 h-4 rounded"
-                          />
-                          <span className="font-body font-body-medium text-sm text-text-primary">
-                            Couple service (priced for two)
-                          </span>
+                          <input type="checkbox" checked={formData.isCouple} onChange={(e) => setFormData({ ...formData, isCouple: e.target.checked })} className="accent-primary w-4 h-4 rounded" />
+                          <span className="font-body font-body-medium text-sm text-text-primary">Couple service (priced for two)</span>
                         </label>
-                        <p className="font-caption font-caption-normal text-xs text-text-secondary">
-                          Shows the companion room/name/phone option when staff assign 2 therapists, and is
-                          excluded from the calendar's Group-booking service pickers (double-charges there).
+                        <p className="mt-1 text-xs text-text-secondary">
+                          For two people at once, with two {staffLabelPlural.toLowerCase()}. Not offered in group bookings, where it would charge twice.
                         </p>
-                      </>
+                      </div>
                     )}
-
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={formData.isCombo}
-                        onChange={(e) => setFormData({ ...formData, isCombo: e.target.checked })}
-                        className="text-primary focus:ring-primary w-4 h-4 rounded"
-                      />
-                      <span className="font-body font-body-medium text-sm text-text-primary">
-                        Combo service (bundle of other services)
-                      </span>
-                    </label>
-                    <p className="font-caption font-caption-normal text-xs text-text-secondary">
-                      Pick which services make up the bundle below. This service's own price/duration
-                      still apply at booking — the components only drive which staff get assigned and when.
-                    </p>
+                    <div>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={formData.isCombo} onChange={(e) => setFormData({ ...formData, isCombo: e.target.checked })} className="accent-primary w-4 h-4 rounded" />
+                        <span className="font-body font-body-medium text-sm text-text-primary">Combo service (bundle of other services)</span>
+                      </label>
+                      <p className="mt-1 text-xs text-text-secondary">
+                        Pick which services make up the bundle below. This service's own price/duration
+                        still apply at booking; the components only drive who is assigned and when.
+                      </p>
+                    </div>
                   </div>
                 </SettingsRow>
 
-                <SettingsRow title="Padding & Processing Time" description="Block extra time before or after this service for setup, cleanup, or processing (e.g. color developing) — on top of its core duration above.">
-                  {!formData.paddingEnabled ? (
-                    <button
-                      type="button"
-                      onClick={() => setFormData((f) => ({ ...f, paddingEnabled: true }))}
-                      className="inline-flex items-center gap-1.5 font-body font-body-medium text-sm text-primary hover:underline"
-                    >
-                      <Icon name="Plus" size={14} />
-                      Add padding and processing times
-                    </button>
-                  ) : (
-                    <div className="max-w-xl rounded-spa-lg border border-border bg-surface shadow-spa-resting overflow-hidden">
-                      <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 bg-primary/5 border-b border-border">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                            <Icon name="Timer" size={13} className="text-primary" />
+                <SettingsRow title="Pricing" description="What this service costs, and whether it depends on who does it.">
+                  <div className="space-y-4 max-w-xl" data-pricing-section>
+                    <Field label="Price type" hint="Fixed · Free · Tiered · Calendar only (not offered online) · No default (price entered when booked).">
+                      <CustomSelect
+                        value={formData.priceType}
+                        onChange={(val) => setFormData({ ...formData, priceType: val })}
+                        options={PRICE_TYPE_OPTIONS}
+                        size="md"
+                      />
+                    </Field>
+
+                    {priceNeedsAmount && (
+                      <Field
+                        label={formData.priceType === 'tiered' ? 'Standard price (NPR)' : 'Price (NPR)'}
+                        id="svc-price"
+                        hint={formData.priceType === 'tiered' ? `Charged when a ${staffLabel.toLowerCase()} has no tier, or when nobody is assigned yet.` : undefined}
+                      >
+                        <NumberInput id="svc-price" value={formData.priceNpr} onChange={(e) => setFormData({ ...formData, priceNpr: e.target.value })} placeholder="2000" min="1" />
+                      </Field>
+                    )}
+
+                    {formData.priceType === 'free' && <p className="text-xs text-text-secondary">No charge for this service.</p>}
+                    {formData.priceType === 'calendar_only' && <p className="text-xs text-text-secondary">Staff see this price on the calendar. Customers booking online never see it.</p>}
+                    {formData.priceType === 'no_default' && <p className="text-xs text-text-secondary">No price is set. Whoever takes the booking enters one.</p>}
+
+                    {formData.priceType === 'tiered' && (
+                      <div className="space-y-1.5">
+                        <span className="block font-body font-body-medium text-[13px] text-text-primary">Price by tier</span>
+                        {priceTiers.length === 0 ? (
+                          <p className="text-xs text-text-secondary italic">
+                            No price tiers yet. <button type="button" onClick={goManageTiers} className="underline not-italic text-primary">Manage tiers</button>, then come back here.
+                          </p>
+                        ) : (
+                          <>
+                            <div className="border border-border rounded-spa-lg overflow-hidden">
+                              <div className="flex items-center justify-between gap-3 px-3 py-2 bg-background border-b border-[#F0F0EE] text-[13px]">
+                                <span>Standard (no tier)</span>
+                                <b className="font-semibold">{formData.priceNpr ? formatNPR(formData.priceNpr) : 'NPR 0'}</b>
+                              </div>
+                              {priceTiers.map((tier) => {
+                                const n = tierStaffCounts[tier.id] || 0;
+                                return (
+                                  <div key={tier.id} className="flex items-center justify-between gap-3 px-3 py-2 border-b border-[#F0F0EE] last:border-b-0 text-[13px]" data-tier-price-row>
+                                    <span>{tier.name}<span className="text-text-tertiary text-xs"> · {n} {n === 1 ? staffLabel.toLowerCase() : staffLabelPlural.toLowerCase()}</span></span>
+                                    <NumberInput
+                                      aria-label={`${tier.name} price`}
+                                      value={tierPrices[tier.id] ?? ''}
+                                      onChange={(e) => setTierPrices((prev) => ({ ...prev, [tier.id]: e.target.value }))}
+                                      placeholder={formData.priceNpr || '0'}
+                                      min="0"
+                                      className="!w-[130px] text-right"
+                                    />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <p className="text-xs text-text-secondary">A tier left blank charges the standard price. It is never free. <button type="button" onClick={goManageTiers} className="underline text-primary">Manage tiers</button></p>
+                          </>
+                        )}
+                        {onlineRange && (
+                          <div className="rounded-spa-lg bg-[#F1F6F0] text-primary px-3 py-2.5 text-[12.5px] leading-relaxed" data-online-range>
+                            <b>What clients see online:</b> {onlineRange}. At booking they are charged the price of the {staffLabel.toLowerCase()} who does it.
                           </div>
-                          <span className="font-body font-body-medium text-sm text-text-primary">Padding & processing time</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </SettingsRow>
+
+                <SettingsRow title={branchWordPlural.charAt(0).toUpperCase() + branchWordPlural.slice(1)} description={`Make this service available everywhere, or restrict it to specific ${branchWordPlural}.`}>
+                  <div className="space-y-2 p-3 bg-background rounded-spa border border-border max-w-xl">
+                    <div className="flex items-center justify-between">
+                      <span className="font-body font-body-medium text-sm text-text-primary">Restrict to specific {branchWordPlural}?</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = !restrictBranches;
+                          setRestrictBranches(next);
+                          if (!next) {
+                            setEligibleBranchIds([]);
+                            setBranchSearchQuery('');
+                          }
+                        }}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
+                          restrictBranches ? 'bg-success' : 'bg-border'
+                        }`}
+                      >
+                        <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+                          restrictBranches ? 'translate-x-6' : 'translate-x-1'
+                        }`} />
+                      </button>
+                    </div>
+
+                    {restrictBranches && (
+                      <div className="space-y-2">
+                        <Input
+                          value={branchSearchQuery}
+                          onChange={(e) => setBranchSearchQuery(e.target.value)}
+                          placeholder={`Search ${branchWordPlural}...`}
+                        />
+                        <div className="border border-border rounded-spa bg-surface max-h-[220px] overflow-y-auto p-2 space-y-1">
+                          {(() => {
+                            const query = branchSearchQuery.toLowerCase();
+                            const filtered = query
+                              ? allBranches.filter((b) => b.name.toLowerCase().includes(query))
+                              : allBranches;
+                            if (allBranches.length === 0) {
+                              return <p className="text-xs text-text-secondary px-2 py-1">No {branchWordPlural} found.</p>;
+                            }
+                            if (filtered.length === 0) {
+                              return <p className="text-xs text-text-secondary px-2 py-1">No {branchWordPlural} match "{branchSearchQuery}".</p>;
+                            }
+                            return filtered.map((b) => (
+                              <label key={b.id} className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-primary/5 ${eligibleBranchIds.includes(b.id) ? 'bg-primary/5' : ''}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={eligibleBranchIds.includes(b.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setEligibleBranchIds((ids) => [...ids, b.id]);
+                                    } else {
+                                      setEligibleBranchIds((ids) => ids.filter((id) => id !== b.id));
+                                    }
+                                  }}
+                                  className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
+                                />
+                                <span className="font-body text-sm text-text-primary">{b.name}</span>
+                              </label>
+                            ));
+                          })()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </SettingsRow>
+
+                <SettingsRow title="Who can do it" description={`Restrict this service to specific ${staffLabelPlural.toLowerCase()}, or leave open to everyone.`}>
+                  <div className="space-y-3 max-w-xl">
+                    <label className="flex items-start gap-2.5 cursor-pointer">
+                      <input type="checkbox" checked={formData.requiresTherapist} onChange={(e) => setFormData({ ...formData, requiresTherapist: e.target.checked })} className="accent-primary w-4 h-4 rounded mt-0.5" />
+                      <span className="font-body font-body-medium text-sm text-text-primary">Needs a {staffLabel.toLowerCase()}
+                        <span className="block text-xs font-normal text-text-secondary mt-0.5">Turn off for self-service items{enableRooms ? ` (a ${locationLabel.toLowerCase()} only)` : ''}. They show in the calendar's unassigned column.</span>
+                      </span>
+                    </label>
+                    {formData.requiresTherapist && !staffScopeBranchId && (
+                      <p className="p-3 bg-background rounded-spa border border-border max-w-xl font-caption text-xs text-text-secondary">
+                        {isEdit
+                          ? `${staffLabelPlural} limits are set per location. Pick a location in the switcher at the top to see or change them; saving here leaves them as they are.`
+                          : `Pick a location in the switcher at the top to choose which ${staffLabelPlural.toLowerCase()} can do this service. Until then it stays open to everyone.`}
+                      </p>
+                    )}
+                    {formData.requiresTherapist && !!staffScopeBranchId && (
+                      <>
+                  <div className="space-y-2 p-3 bg-background rounded-spa border border-border max-w-xl">
+                    <div className="flex items-center justify-between">
+                      <span className="font-body font-body-medium text-sm text-text-primary">Restrict to specific {staffLabelPlural.toLowerCase()}?</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = !restrictStaff;
+                          setRestrictStaff(next);
+                          if (!next) {
+                            setEligibleTherapistIds([]);
+                            setStaffSearchQuery('');
+                          }
+                        }}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
+                          restrictStaff ? 'bg-success' : 'bg-border'
+                        }`}
+                      >
+                        <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+                          restrictStaff ? 'translate-x-6' : 'translate-x-1'
+                        }`} />
+                      </button>
+                    </div>
+
+                    {restrictStaff && (
+                      <div className="space-y-2">
+                        <p className="font-caption text-xs text-text-secondary">
+                          Checked staff can perform this service. Unchecked staff cannot.
+                        </p>
+                        <Input
+                          value={staffSearchQuery}
+                          onChange={(e) => setStaffSearchQuery(e.target.value)}
+                          placeholder="Search staff..."
+                        />
+                        <div className="border border-border rounded-spa bg-surface max-h-[220px] overflow-y-auto p-2 space-y-1">
+                          {(() => {
+                            const query = staffSearchQuery.toLowerCase();
+                            const filtered = query
+                              ? allTherapists.filter((t) => t.name.toLowerCase().includes(query))
+                              : allTherapists;
+                            if (allTherapists.length === 0) {
+                              return <p className="text-xs text-text-secondary px-2 py-1">No staff found.</p>;
+                            }
+                            if (filtered.length === 0) {
+                              return <p className="text-xs text-text-secondary px-2 py-1">No staff match "{staffSearchQuery}".</p>;
+                            }
+                            return filtered.map((t) => (
+                              <label key={t.id} className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-primary/5 ${eligibleTherapistIds.includes(t.id) ? 'bg-primary/5' : ''}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={eligibleTherapistIds.includes(t.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setEligibleTherapistIds((ids) => [...ids, t.id]);
+                                    } else {
+                                      setEligibleTherapistIds((ids) => ids.filter((id) => id !== t.id));
+                                    }
+                                  }}
+                                  className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
+                                />
+                                <span className="font-body text-sm text-text-primary">{t.name}</span>
+                              </label>
+                            ));
+                          })()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                
+                      </>
+                    )}
+                  </div>
+                </SettingsRow>
+
+                <SettingsRow title="Offer" description="A discount applied to this service, shown struck-through on the booking page.">
+                  <div className="space-y-2 p-3 bg-background rounded-spa border border-border max-w-xl">
+                    <div className="flex items-center justify-between">
+                      <span className="font-body font-body-medium text-sm text-text-primary">Enable offer</span>
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, offerEnabled: !formData.offerEnabled })}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
+                          formData.offerEnabled ? 'bg-success' : 'bg-border'
+                        }`}
+                      >
+                        <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+                          formData.offerEnabled ? 'translate-x-6' : 'translate-x-1'
+                        }`} />
+                      </button>
+                    </div>
+
+                    {formData.offerEnabled ? (
+                      <div className="space-y-2">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setFormData({ ...formData, offerType: 'percent' })}
+                            className={`flex-1 px-3 py-1.5 rounded-spa border text-sm font-body spa-transition-fast ${
+                              formData.offerType === 'percent'
+                                ? 'border-primary bg-primary/5 text-primary'
+                                : 'border-border text-text-secondary'
+                            }`}
+                          >
+                            Percentage off
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFormData({ ...formData, offerType: 'fixed' })}
+                            className={`flex-1 px-3 py-1.5 rounded-spa border text-sm font-body spa-transition-fast ${
+                              formData.offerType === 'fixed'
+                                ? 'border-primary bg-primary/5 text-primary'
+                                : 'border-border text-text-secondary'
+                            }`}
+                          >
+                            Flat price
+                          </button>
+                        </div>
+                        <Input
+                          type="number"
+                          value={formData.offerValue}
+                          onChange={(e) => setFormData({ ...formData, offerValue: e.target.value })}
+                          placeholder={formData.offerType === 'percent' ? 'e.g. 30' : 'e.g. 4500'}
+                          min="1"
+                        />
+                        {formData.priceNpr && formData.offerValue && Number(formData.offerValue) > 0 && (
+                          formData.offerType === 'fixed' && Number(formData.offerValue) >= Number(formData.priceNpr) ? (
+                            <p className="font-caption text-xs text-error">
+                              Flat price must be less than the regular price ({formatNPR(formData.priceNpr)}).
+                            </p>
+                          ) : (
+                            <p className="font-caption text-xs text-text-secondary">
+                              Customers will see:{' '}
+                              <span className="line-through text-text-tertiary">{formatNPR(formData.priceNpr)}</span>{' '}
+                              {formatNPR(
+                                formData.offerType === 'percent'
+                                  ? Number(formData.priceNpr) * (1 - Number(formData.offerValue) / 100)
+                                  : Number(formData.offerValue)
+                              )}
+                            </p>
+                          )
+                        )}
+                      </div>
+                    ) : (
+                      selectedCategory?.offer_enabled ? (
+                        <p className="font-caption text-xs text-text-secondary">
+                          This service inherits the "{selectedCategory.name}" category offer
+                          ({selectedCategory.offer_percent}% off) unless you enable its own offer above.
+                        </p>
+                      ) : null
+                    )}
+                  </div>
+                </SettingsRow>
+
+                <SettingsRow title="Online Booking" description="Control whether customers can book this service themselves on the public booking page, and what add-ons to offer alongside it.">
+                  <div className="max-w-2xl rounded-spa-lg border border-border bg-surface shadow-spa-resting overflow-hidden">
+                    <div className="divide-y divide-border">
+                      <div className="flex items-center justify-between gap-3 px-4 py-3.5">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                            <Icon name="Globe" size={15} className="text-primary" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-body font-body-medium text-sm text-text-primary">Clients can book this service online</p>
+                            <p className="font-caption text-xs text-text-secondary mt-0.5">Shown on the public booking page. Turn off to keep it staff/walk-in only.</p>
+                          </div>
                         </div>
                         <button
                           type="button"
-                          onClick={() => setFormData((f) => ({ ...f, paddingEnabled: false, paddingBeforeMinutes: '0', paddingAfterMinutes: '0', paddingAfterType: 'padding' }))}
-                          className="font-caption font-caption-medium text-xs text-error hover:underline flex-shrink-0"
+                          onClick={() => setFormData((f) => ({ ...f, bookableOnline: !f.bookableOnline }))}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast flex-shrink-0 ${
+                            formData.bookableOnline ? 'bg-success' : 'bg-border'
+                          }`}
                         >
-                          Remove
+                          <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+                            formData.bookableOnline ? 'translate-x-6' : 'translate-x-1'
+                          }`} />
                         </button>
                       </div>
 
-                      <div className="px-3.5 py-3.5 space-y-3.5">
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1">
-                            <label className="block font-body font-body-medium text-sm text-text-primary">Padding before</label>
-                            <div className="relative">
-                              <Icon name="Clock" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
-                              <Input
-                                type="number"
-                                min="0"
-                                value={formData.paddingBeforeMinutes}
-                                onChange={(e) => setFormData({ ...formData, paddingBeforeMinutes: e.target.value })}
-                                onFocus={(e) => e.target.select()}
-                                placeholder="0"
-                                className="pl-9"
-                              />
-                            </div>
-                            <p className="font-caption text-[11px] text-text-tertiary">minutes, setup before staff starts</p>
+                      <div className="flex items-center justify-between gap-3 px-4 py-3.5">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0">
+                            <Icon name="PlusCircle" size={15} className="text-accent" />
                           </div>
-                          <div className="space-y-1">
-                            <label className="block font-body font-body-medium text-sm text-text-primary">
-                              {formData.paddingAfterType === 'processing' ? 'Processing time' : 'Padding after'}
-                            </label>
-                            <div className="relative">
-                              <Icon name="Clock" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
-                              <Input
-                                type="number"
-                                min="0"
-                                value={formData.paddingAfterMinutes}
-                                onChange={(e) => setFormData({ ...formData, paddingAfterMinutes: e.target.value })}
-                                onFocus={(e) => e.target.select()}
-                                placeholder="0"
-                                className="pl-9"
-                              />
-                            </div>
-                            <p className="font-caption text-[11px] text-text-tertiary">minutes, after the service itself</p>
+                          <div className="min-w-0">
+                            <p className="font-body font-body-medium text-sm text-text-primary">Can be booked as a service add-on</p>
+                            <p className="font-caption text-xs text-text-secondary mt-0.5">Makes this service selectable as an add-on when booking other services.</p>
                           </div>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => setFormData((f) => ({ ...f, isAddon: !f.isAddon }))}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast flex-shrink-0 ${
+                            formData.isAddon ? 'bg-success' : 'bg-border'
+                          }`}
+                        >
+                          <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+                            formData.isAddon ? 'translate-x-6' : 'translate-x-1'
+                          }`} />
+                        </button>
+                      </div>
 
-                        <div className="flex items-center gap-2">
-                          <span className="font-caption font-caption-medium text-[11px] text-text-tertiary uppercase tracking-wide">Type</span>
-                          <div className="inline-flex rounded-spa border border-border p-0.5 bg-background">
-                            {[['padding', 'Padding after'], ['processing', 'Processing time']].map(([val, label]) => (
-                              <button
-                                key={val}
-                                type="button"
-                                onClick={() => setFormData((f) => ({ ...f, paddingAfterType: val }))}
-                                className={`px-2.5 py-1 rounded text-xs font-body font-body-medium spa-transition-fast ${
-                                  formData.paddingAfterType === val ? 'bg-primary text-white' : 'text-text-secondary hover:text-text-primary'
-                                }`}
-                              >
-                                {label}
-                              </button>
-                            ))}
-                          </div>
+                      <div className="px-4 py-3.5 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <p className="font-body font-body-medium text-sm text-text-primary">Service Add-ons</p>
+                          {serviceAddonIds.length > 0 && (
+                            <span className="font-caption font-caption-medium text-[11px] text-text-secondary bg-background border border-border rounded-full px-2 py-0.5">
+                              {serviceAddonIds.length} selected
+                            </span>
+                          )}
                         </div>
-
-                        <p className="font-caption text-[11px] text-text-tertiary leading-relaxed">
-                          <span className="font-caption-medium text-text-secondary">Padding</span> blocks staff's calendar for
-                          setup/cleanup. <span className="font-caption-medium text-text-secondary">Processing time</span> is the
-                          client's own wait (e.g. color developing) — it extends the appointment slot without requiring the
-                          assigned staff to stay occupied the whole time.
+                        <p className="font-caption text-xs text-text-secondary -mt-1">
+                          Once a customer selects this service online, these will be offered as paid extras they can add to their booking.
                         </p>
-
-                        <div className="flex items-center justify-between pt-3 border-t border-border">
-                          <span className="font-caption font-caption-normal text-xs text-text-secondary">Total appointment block</span>
-                          <span className="font-data font-data-medium text-sm text-text-primary">
-                            {(Number(formData.paddingBeforeMinutes) || 0) + (Number(formData.durationMinutes) || 0) + (Number(formData.paddingAfterMinutes) || 0)}min
-                          </span>
+                        <Input
+                          value={addonSearchQuery}
+                          onChange={(e) => setAddonSearchQuery(e.target.value)}
+                          placeholder="Search add-on services..."
+                        />
+                        <div className="border border-border rounded-spa bg-background max-h-[220px] overflow-y-auto">
+                          {(() => {
+                            const query = addonSearchQuery.toLowerCase();
+                            const candidates = allServices.filter((s) =>
+                              s.id !== serviceId && s.is_addon && (!query || s.name.toLowerCase().includes(query))
+                            );
+                            if (candidates.length === 0) {
+                              return (
+                                <p className="text-xs text-text-secondary px-3 py-3">
+                                  {allServices.some((s) => s.id !== serviceId && s.is_addon)
+                                    ? 'No add-on services match your search.'
+                                    : 'No services are flagged "Can be booked as a service add-on" yet.'}
+                                </p>
+                              );
+                            }
+                            return candidates.map((s) => {
+                              const checked = serviceAddonIds.includes(s.id);
+                              return (
+                                <label key={s.id} className={`flex items-center justify-between gap-2 px-3 py-2 cursor-pointer hover:bg-primary/5 border-b border-border/60 last:border-b-0 ${checked ? 'bg-primary/5' : ''}`}>
+                                  <span className="flex items-center gap-2.5 min-w-0">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setServiceAddonIds((prev) => [...prev, s.id]);
+                                        } else {
+                                          setServiceAddonIds((prev) => prev.filter((id) => id !== s.id));
+                                        }
+                                      }}
+                                      className="text-primary focus:ring-primary w-3.5 h-3.5 rounded flex-shrink-0"
+                                    />
+                                    <span className="font-body text-sm text-text-primary truncate">{s.name}</span>
+                                  </span>
+                                  <span className="font-data text-xs text-text-tertiary flex-shrink-0">{formatNPR(s.price_npr)}</span>
+                                </label>
+                              );
+                            });
+                          })()}
                         </div>
                       </div>
                     </div>
-                  )}
+                  </div>
                 </SettingsRow>
 
                 {formData.isCombo && (
-                  <SettingsRow title="Combo Components" description="Which services make up this combo, how long each one takes, and whether each one needs its own staff member, room, and time slot.">
+                  <SettingsRow title="Combo Components" description={`Which services make up this combo, how long each one takes, and whether each one needs its own staff member${enableRooms ? `, ${locationLabel.toLowerCase()},` : ''} and time slot.`}>
                     <div className="space-y-3">
                       {comboComponents.length > 0 && (() => {
                         // Walk components in the order they were added, computing each one's
@@ -716,7 +1061,8 @@ const ServiceDetailPage = () => {
                                         ))}
                                       </div>
                                     </div>
-                                    <div className="flex items-center gap-1.5">
+                                    {enableRooms && (
+                                      <div className="flex items-center gap-1.5">
                                       <span className="font-caption text-[11px] text-text-tertiary">Room:</span>
                                       <div className="inline-flex rounded-spa border border-border p-0.5 bg-surface">
                                         {[[true, 'Same room'], [false, 'Different room']].map(([val, label]) => (
@@ -733,6 +1079,7 @@ const ServiceDetailPage = () => {
                                         ))}
                                       </div>
                                     </div>
+                                      )}
                                   </div>
                                 )}
                               </div>
@@ -751,333 +1098,106 @@ const ServiceDetailPage = () => {
                   </SettingsRow>
                 )}
 
-                <SettingsRow title="Online Booking" description="Control whether customers can book this service themselves on the public booking page, and what add-ons to offer alongside it.">
-                  <div className="max-w-2xl rounded-spa-lg border border-border bg-surface shadow-spa-resting overflow-hidden">
-                    <div className="divide-y divide-border">
-                      <div className="flex items-center justify-between gap-3 px-4 py-3.5">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                            <Icon name="Globe" size={15} className="text-primary" />
+                <SettingsRow title="Padding & Processing Time" description="Block extra time before or after this service for setup, cleanup, or processing (e.g. color developing) — on top of its core duration above.">
+                  {!formData.paddingEnabled ? (
+                    <button
+                      type="button"
+                      onClick={() => setFormData((f) => ({ ...f, paddingEnabled: true }))}
+                      className="inline-flex items-center gap-1.5 font-body font-body-medium text-sm text-primary hover:underline"
+                    >
+                      <Icon name="Plus" size={14} />
+                      Add padding and processing times
+                    </button>
+                  ) : (
+                    <div className="max-w-xl rounded-spa-lg border border-border bg-surface shadow-spa-resting overflow-hidden">
+                      <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 bg-primary/5 border-b border-border">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                            <Icon name="Timer" size={13} className="text-primary" />
                           </div>
-                          <div className="min-w-0">
-                            <p className="font-body font-body-medium text-sm text-text-primary">Clients can book this service online</p>
-                            <p className="font-caption text-xs text-text-secondary mt-0.5">Shown on the public booking page. Turn off to keep it staff/walk-in only.</p>
-                          </div>
+                          <span className="font-body font-body-medium text-sm text-text-primary">Padding & processing time</span>
                         </div>
                         <button
                           type="button"
-                          onClick={() => setFormData((f) => ({ ...f, bookableOnline: !f.bookableOnline }))}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast flex-shrink-0 ${
-                            formData.bookableOnline ? 'bg-success' : 'bg-border'
-                          }`}
+                          onClick={() => setFormData((f) => ({ ...f, paddingEnabled: false, paddingBeforeMinutes: '0', paddingAfterMinutes: '0', paddingAfterType: 'padding' }))}
+                          className="font-caption font-caption-medium text-xs text-error hover:underline flex-shrink-0"
                         >
-                          <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
-                            formData.bookableOnline ? 'translate-x-6' : 'translate-x-1'
-                          }`} />
+                          Remove
                         </button>
                       </div>
 
-                      <div className="flex items-center justify-between gap-3 px-4 py-3.5">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0">
-                            <Icon name="PlusCircle" size={15} className="text-accent" />
+                      <div className="px-3.5 py-3.5 space-y-3.5">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="block font-body font-body-medium text-sm text-text-primary">Padding before</label>
+                            <div className="relative">
+                              <Icon name="Clock" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
+                              <Input
+                                type="number"
+                                min="0"
+                                value={formData.paddingBeforeMinutes}
+                                onChange={(e) => setFormData({ ...formData, paddingBeforeMinutes: e.target.value })}
+                                onFocus={(e) => e.target.select()}
+                                placeholder="0"
+                                className="pl-9"
+                              />
+                            </div>
+                            <p className="font-caption text-[11px] text-text-tertiary">minutes, setup before staff starts</p>
                           </div>
-                          <div className="min-w-0">
-                            <p className="font-body font-body-medium text-sm text-text-primary">Can be booked as a service add-on</p>
-                            <p className="font-caption text-xs text-text-secondary mt-0.5">Makes this service selectable as an add-on when booking other services.</p>
+                          <div className="space-y-1">
+                            <label className="block font-body font-body-medium text-sm text-text-primary">
+                              {formData.paddingAfterType === 'processing' ? 'Processing time' : 'Padding after'}
+                            </label>
+                            <div className="relative">
+                              <Icon name="Clock" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
+                              <Input
+                                type="number"
+                                min="0"
+                                value={formData.paddingAfterMinutes}
+                                onChange={(e) => setFormData({ ...formData, paddingAfterMinutes: e.target.value })}
+                                onFocus={(e) => e.target.select()}
+                                placeholder="0"
+                                className="pl-9"
+                              />
+                            </div>
+                            <p className="font-caption text-[11px] text-text-tertiary">minutes, after the service itself</p>
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setFormData((f) => ({ ...f, isAddon: !f.isAddon }))}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast flex-shrink-0 ${
-                            formData.isAddon ? 'bg-success' : 'bg-border'
-                          }`}
-                        >
-                          <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
-                            formData.isAddon ? 'translate-x-6' : 'translate-x-1'
-                          }`} />
-                        </button>
-                      </div>
 
-                      <div className="px-4 py-3.5 space-y-2.5">
-                        <div className="flex items-center justify-between">
-                          <p className="font-body font-body-medium text-sm text-text-primary">Service Add-ons</p>
-                          {serviceAddonIds.length > 0 && (
-                            <span className="font-caption font-caption-medium text-[11px] text-text-secondary bg-background border border-border rounded-full px-2 py-0.5">
-                              {serviceAddonIds.length} selected
-                            </span>
-                          )}
+                        <div className="flex items-center gap-2">
+                          <span className="font-caption font-caption-medium text-[11px] text-text-tertiary uppercase tracking-wide">Type</span>
+                          <div className="inline-flex rounded-spa border border-border p-0.5 bg-background">
+                            {[['padding', 'Padding after'], ['processing', 'Processing time']].map(([val, label]) => (
+                              <button
+                                key={val}
+                                type="button"
+                                onClick={() => setFormData((f) => ({ ...f, paddingAfterType: val }))}
+                                className={`px-2.5 py-1 rounded text-xs font-body font-body-medium spa-transition-fast ${
+                                  formData.paddingAfterType === val ? 'bg-primary text-white' : 'text-text-secondary hover:text-text-primary'
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                        <p className="font-caption text-xs text-text-secondary -mt-1">
-                          Once a customer selects this service online, these will be offered as paid extras they can add to their booking.
+
+                        <p className="font-caption text-[11px] text-text-tertiary leading-relaxed">
+                          <span className="font-caption-medium text-text-secondary">Padding</span> blocks staff's calendar for
+                          setup/cleanup. <span className="font-caption-medium text-text-secondary">Processing time</span> is the
+                          client's own wait (e.g. color developing) — it extends the appointment slot without requiring the
+                          assigned staff to stay occupied the whole time.
                         </p>
-                        <Input
-                          value={addonSearchQuery}
-                          onChange={(e) => setAddonSearchQuery(e.target.value)}
-                          placeholder="Search add-on services..."
-                        />
-                        <div className="border border-border rounded-spa bg-background max-h-[220px] overflow-y-auto">
-                          {(() => {
-                            const query = addonSearchQuery.toLowerCase();
-                            const candidates = allServices.filter((s) =>
-                              s.id !== serviceId && s.is_addon && (!query || s.name.toLowerCase().includes(query))
-                            );
-                            if (candidates.length === 0) {
-                              return (
-                                <p className="text-xs text-text-secondary px-3 py-3">
-                                  {allServices.some((s) => s.id !== serviceId && s.is_addon)
-                                    ? 'No add-on services match your search.'
-                                    : 'No services are flagged "Can be booked as a service add-on" yet.'}
-                                </p>
-                              );
-                            }
-                            return candidates.map((s) => {
-                              const checked = serviceAddonIds.includes(s.id);
-                              return (
-                                <label key={s.id} className={`flex items-center justify-between gap-2 px-3 py-2 cursor-pointer hover:bg-primary/5 border-b border-border/60 last:border-b-0 ${checked ? 'bg-primary/5' : ''}`}>
-                                  <span className="flex items-center gap-2.5 min-w-0">
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      onChange={(e) => {
-                                        if (e.target.checked) {
-                                          setServiceAddonIds((prev) => [...prev, s.id]);
-                                        } else {
-                                          setServiceAddonIds((prev) => prev.filter((id) => id !== s.id));
-                                        }
-                                      }}
-                                      className="text-primary focus:ring-primary w-3.5 h-3.5 rounded flex-shrink-0"
-                                    />
-                                    <span className="font-body text-sm text-text-primary truncate">{s.name}</span>
-                                  </span>
-                                  <span className="font-data text-xs text-text-tertiary flex-shrink-0">{formatNPR(s.price_npr)}</span>
-                                </label>
-                              );
-                            });
-                          })()}
+
+                        <div className="flex items-center justify-between pt-3 border-t border-border">
+                          <span className="font-caption font-caption-normal text-xs text-text-secondary">Total appointment block</span>
+                          <span className="font-data font-data-medium text-sm text-text-primary">
+                            {(Number(formData.paddingBeforeMinutes) || 0) + (Number(formData.durationMinutes) || 0) + (Number(formData.paddingAfterMinutes) || 0)}min
+                          </span>
                         </div>
                       </div>
                     </div>
-                  </div>
-                </SettingsRow>
-
-                <SettingsRow title="Offer" description="A discount applied to this service, shown struck-through on the booking page.">
-                  <div className="space-y-2 p-3 bg-background rounded-spa border border-border max-w-xl">
-                    <div className="flex items-center justify-between">
-                      <span className="font-body font-body-medium text-sm text-text-primary">Enable offer</span>
-                      <button
-                        type="button"
-                        onClick={() => setFormData({ ...formData, offerEnabled: !formData.offerEnabled })}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
-                          formData.offerEnabled ? 'bg-success' : 'bg-border'
-                        }`}
-                      >
-                        <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
-                          formData.offerEnabled ? 'translate-x-6' : 'translate-x-1'
-                        }`} />
-                      </button>
-                    </div>
-
-                    {formData.offerEnabled ? (
-                      <div className="space-y-2">
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setFormData({ ...formData, offerType: 'percent' })}
-                            className={`flex-1 px-3 py-1.5 rounded-spa border text-sm font-body spa-transition-fast ${
-                              formData.offerType === 'percent'
-                                ? 'border-primary bg-primary/5 text-primary'
-                                : 'border-border text-text-secondary'
-                            }`}
-                          >
-                            Percentage off
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setFormData({ ...formData, offerType: 'fixed' })}
-                            className={`flex-1 px-3 py-1.5 rounded-spa border text-sm font-body spa-transition-fast ${
-                              formData.offerType === 'fixed'
-                                ? 'border-primary bg-primary/5 text-primary'
-                                : 'border-border text-text-secondary'
-                            }`}
-                          >
-                            Flat price
-                          </button>
-                        </div>
-                        <Input
-                          type="number"
-                          value={formData.offerValue}
-                          onChange={(e) => setFormData({ ...formData, offerValue: e.target.value })}
-                          placeholder={formData.offerType === 'percent' ? 'e.g. 30' : 'e.g. 4500'}
-                          min="1"
-                        />
-                        {formData.priceNpr && formData.offerValue && Number(formData.offerValue) > 0 && (
-                          formData.offerType === 'fixed' && Number(formData.offerValue) >= Number(formData.priceNpr) ? (
-                            <p className="font-caption text-xs text-error">
-                              Flat price must be less than the regular price ({formatNPR(formData.priceNpr)}).
-                            </p>
-                          ) : (
-                            <p className="font-caption text-xs text-text-secondary">
-                              Customers will see:{' '}
-                              <span className="line-through text-text-tertiary">{formatNPR(formData.priceNpr)}</span>{' '}
-                              {formatNPR(
-                                formData.offerType === 'percent'
-                                  ? Number(formData.priceNpr) * (1 - Number(formData.offerValue) / 100)
-                                  : Number(formData.offerValue)
-                              )}
-                            </p>
-                          )
-                        )}
-                      </div>
-                    ) : (
-                      selectedCategory?.offer_enabled ? (
-                        <p className="font-caption text-xs text-text-secondary">
-                          This service inherits the "{selectedCategory.name}" category offer
-                          ({selectedCategory.offer_percent}% off) unless you enable its own offer above.
-                        </p>
-                      ) : null
-                    )}
-                  </div>
-                </SettingsRow>
-
-                {formData.requiresTherapist && (
-                <SettingsRow title="Eligible Staff" description="Restrict this service to specific staff, or leave open to everyone.">
-                  <div className="space-y-2 p-3 bg-background rounded-spa border border-border max-w-xl">
-                    <div className="flex items-center justify-between">
-                      <span className="font-body font-body-medium text-sm text-text-primary">Restrict to specific staff?</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = !restrictStaff;
-                          setRestrictStaff(next);
-                          if (!next) {
-                            setEligibleTherapistIds([]);
-                            setStaffSearchQuery('');
-                          }
-                        }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
-                          restrictStaff ? 'bg-success' : 'bg-border'
-                        }`}
-                      >
-                        <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
-                          restrictStaff ? 'translate-x-6' : 'translate-x-1'
-                        }`} />
-                      </button>
-                    </div>
-
-                    {restrictStaff && (
-                      <div className="space-y-2">
-                        <p className="font-caption text-xs text-text-secondary">
-                          Checked staff can perform this service. Unchecked staff cannot.
-                        </p>
-                        <Input
-                          value={staffSearchQuery}
-                          onChange={(e) => setStaffSearchQuery(e.target.value)}
-                          placeholder="Search staff..."
-                        />
-                        <div className="border border-border rounded-spa bg-surface max-h-[220px] overflow-y-auto p-2 space-y-1">
-                          {(() => {
-                            const query = staffSearchQuery.toLowerCase();
-                            const filtered = query
-                              ? allTherapists.filter((t) => t.name.toLowerCase().includes(query))
-                              : allTherapists;
-                            if (allTherapists.length === 0) {
-                              return <p className="text-xs text-text-secondary px-2 py-1">No staff found.</p>;
-                            }
-                            if (filtered.length === 0) {
-                              return <p className="text-xs text-text-secondary px-2 py-1">No staff match "{staffSearchQuery}".</p>;
-                            }
-                            return filtered.map((t) => (
-                              <label key={t.id} className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-primary/5 ${eligibleTherapistIds.includes(t.id) ? 'bg-primary/5' : ''}`}>
-                                <input
-                                  type="checkbox"
-                                  checked={eligibleTherapistIds.includes(t.id)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setEligibleTherapistIds((ids) => [...ids, t.id]);
-                                    } else {
-                                      setEligibleTherapistIds((ids) => ids.filter((id) => id !== t.id));
-                                    }
-                                  }}
-                                  className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
-                                />
-                                <span className="font-body text-sm text-text-primary">{t.name}</span>
-                              </label>
-                            ));
-                          })()}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </SettingsRow>
-                )}
-
-                <SettingsRow title="Branch Scope" description="Make this service available everywhere, or restrict it to specific branches.">
-                  <div className="space-y-2 p-3 bg-background rounded-spa border border-border max-w-xl">
-                    <div className="flex items-center justify-between">
-                      <span className="font-body font-body-medium text-sm text-text-primary">Restrict to specific branches?</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = !restrictBranches;
-                          setRestrictBranches(next);
-                          if (!next) {
-                            setEligibleBranchIds([]);
-                            setBranchSearchQuery('');
-                          }
-                        }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
-                          restrictBranches ? 'bg-success' : 'bg-border'
-                        }`}
-                      >
-                        <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
-                          restrictBranches ? 'translate-x-6' : 'translate-x-1'
-                        }`} />
-                      </button>
-                    </div>
-
-                    {restrictBranches && (
-                      <div className="space-y-2">
-                        <Input
-                          value={branchSearchQuery}
-                          onChange={(e) => setBranchSearchQuery(e.target.value)}
-                          placeholder="Search branches..."
-                        />
-                        <div className="border border-border rounded-spa bg-surface max-h-[220px] overflow-y-auto p-2 space-y-1">
-                          {(() => {
-                            const query = branchSearchQuery.toLowerCase();
-                            const filtered = query
-                              ? allBranches.filter((b) => b.name.toLowerCase().includes(query))
-                              : allBranches;
-                            if (allBranches.length === 0) {
-                              return <p className="text-xs text-text-secondary px-2 py-1">No branches found.</p>;
-                            }
-                            if (filtered.length === 0) {
-                              return <p className="text-xs text-text-secondary px-2 py-1">No branches match "{branchSearchQuery}".</p>;
-                            }
-                            return filtered.map((b) => (
-                              <label key={b.id} className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-primary/5 ${eligibleBranchIds.includes(b.id) ? 'bg-primary/5' : ''}`}>
-                                <input
-                                  type="checkbox"
-                                  checked={eligibleBranchIds.includes(b.id)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setEligibleBranchIds((ids) => [...ids, b.id]);
-                                    } else {
-                                      setEligibleBranchIds((ids) => ids.filter((id) => id !== b.id));
-                                    }
-                                  }}
-                                  className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
-                                />
-                                <span className="font-body text-sm text-text-primary">{b.name}</span>
-                              </label>
-                            ));
-                          })()}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  )}
                 </SettingsRow>
 
                 <SettingsRow title="Service Image" description="Shown on the customer booking portal.">
@@ -1124,12 +1244,13 @@ const ServiceDetailPage = () => {
                     )}
                   </div>
                 </SettingsRow>
+
               </div>
             </>
           )}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 };
 

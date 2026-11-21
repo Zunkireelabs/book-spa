@@ -1,7 +1,9 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect } from 'react';
 import Icon from '../AppIcon';
 import PaymentMethodSelector from './PaymentMethodSelector';
 import { correctPaymentMode, correctPaymentAmount } from '../../services/api';
+import { humanizePaymentMethod } from '../../services/paymentMethods';
 
 const REASON_MIN = 10;
 
@@ -52,7 +54,7 @@ const PaymentModeCorrectionModal = ({ payment, paymentMethods, onClose, onSucces
       });
       if (rpcError) {
         setSubmitting(false);
-        setError(rpcError.message || 'Failed to correct payment method.');
+        setError(friendlyError(rpcError, 'Failed to correct payment method.'));
         return;
       }
     }
@@ -69,7 +71,7 @@ const PaymentModeCorrectionModal = ({ payment, paymentMethods, onClose, onSucces
         setError(
           (modeChanged ? 'Payment method corrected, but the ' : 'The ')
           + 'amount correction failed: '
-          + (rpcError.message || 'please try again.')
+          + (friendlyError(rpcError, 'please try again.'))
         );
         return;
       }
@@ -113,7 +115,7 @@ const PaymentModeCorrectionModal = ({ payment, paymentMethods, onClose, onSucces
 
             <div className="bg-background border border-border rounded-spa px-3 py-2">
               <p className="font-caption text-[10px] uppercase tracking-wide text-text-tertiary">Current method</p>
-              <p className="font-data font-data-medium text-base text-text-primary">{payment?.paymentMode}</p>
+              <p className="font-data font-data-medium text-base text-text-primary">{humanizePaymentMethod(payment?.paymentMode)}</p>
               <p className="font-caption text-[11px] text-text-tertiary mt-0.5">
                 NPR {Number(payment?.amount || 0).toLocaleString('en-IN')}
               </p>

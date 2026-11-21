@@ -1,9 +1,10 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import BookingSearch from '../../booking-management-portal/components/BookingSearch';
 import BookingCard from '../../booking-management-portal/components/BookingCard';
 import BookingHistory from '../../booking-management-portal/components/BookingHistory';
-import RescheduleModal from '../../booking-management-portal/components/RescheduleModal';
+import StaffReschedulePanel from './StaffReschedulePanel';
 import ConfirmDialog from '../../../components/ui/ConfirmDialog';
 import { searchBookings, updateBookingStatus, rescheduleBooking } from '../../../services/api';
 import { transformBookings, toDbStatus } from '../../../services/bookingTransformers';
@@ -61,7 +62,7 @@ const CheckBookingPanel = ({ branchId }) => {
     const result = await updateBookingStatus({ bookingId: booking.bookingId, newStatus: dbStatus, reason });
 
     if (result.error) {
-      showNotification(result.error.message || 'Failed to cancel booking.', 'error');
+      showNotification(friendlyError(result.error, 'Failed to cancel booking.'), 'error');
     } else {
       showNotification('Booking cancelled successfully.', 'success');
       setCurrentBooking(prev => prev ? { ...prev, status: 'cancelled' } : null);
@@ -73,7 +74,7 @@ const CheckBookingPanel = ({ branchId }) => {
     const result = await rescheduleBooking({ bookingId, newDate, newStartTime });
 
     if (result.error) {
-      return result; // RescheduleModal displays error
+      return result; // StaffReschedulePanel displays the error
     }
 
     if (result.data) {
@@ -168,13 +169,14 @@ const CheckBookingPanel = ({ branchId }) => {
         </div>
       )}
 
-      <RescheduleModal
-        isOpen={showRescheduleModal}
-        onClose={() => setShowRescheduleModal(false)}
-        booking={selectedBooking}
-        onConfirm={handleRescheduleConfirm}
-        staffLabel={staffLabel}
-      />
+      {showRescheduleModal && selectedBooking && (
+        <StaffReschedulePanel
+          booking={selectedBooking}
+          staffLabel={staffLabel}
+          onClose={() => setShowRescheduleModal(false)}
+          onConfirm={handleRescheduleConfirm}
+        />
+      )}
 
       {pendingCancel && (
         <ConfirmDialog

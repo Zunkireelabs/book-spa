@@ -1,8 +1,9 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
-import { useAuth, getDashboardPath } from '../../../contexts/AuthContext';
-import { supabase } from '../../../lib/supabase';
+import { useAuth, getDashboardPath, getSafeRedirect } from '../../../contexts/AuthContext';
+import { loginWithPin } from '../../../services/pinAuth';
 
 // Helper: get saved emails for an org from localStorage
 function getSavedEmails(orgSlug) {
@@ -25,6 +26,7 @@ function saveEmail(orgSlug, email) {
 
 const LoginForm = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { orgSlug: urlOrgSlug } = useParams();
   const { signIn, user, profile } = useAuth();
   const [email, setEmail] = useState('');
@@ -33,7 +35,7 @@ const LoginForm = () => {
   const [rememberMe, setRememberMe] = useState(false);
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
-  const [oauthLoading, setOauthLoading] = useState(null);
+  const [mode, setMode] = useState('password'); // presentational only: submit still auto-detects a 4-digit PIN
   const [savedEmails, setSavedEmails] = useState([]);
   const [showSavedEmails, setShowSavedEmails] = useState(false);
 
@@ -46,27 +48,9 @@ const LoginForm = () => {
   useEffect(() => {
     if (user && profile) {
       const userOrgSlug = profile?.organizations?.slug;
-      navigate(getDashboardPath(profile.role, userOrgSlug), { replace: true });
+      navigate(getSafeRedirect(location.state?.from, userOrgSlug) || getDashboardPath(profile.role, userOrgSlug), { replace: true });
     }
-  }, [user, profile, navigate]);
-
-  const handleOAuth = async (provider) => {
-    setOauthLoading(provider);
-    setErrors({});
-
-    try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider,
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-        },
-      });
-      if (error) throw error;
-    } catch (err) {
-      setErrors({ submit: err.message || 'OAuth failed' });
-      setOauthLoading(null);
-    }
-  };
+  }, [user, profile, navigate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const validateForm = () => {
     const newErrors = {};
@@ -87,59 +71,6 @@ const LoginForm = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  // Request a fresh OTP from the pin-login Edge Function.
-  // (service role key stays server-side, never exposed to browser)
-  const requestPinOtp = async (userEmail, pin) => {
-    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/pin-login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // Edge Function has verify_jwt enabled — the public anon key is a valid JWT.
-        'apikey': anonKey,
-        'Authorization': `Bearer ${anonKey}`,
-      },
-      body: JSON.stringify({ email: userEmail, pin, org_slug: urlOrgSlug || null }),
-    });
-
-    const pinData = await res.json();
-    // The Edge Function has shipped under two response shapes across
-    // deployments (`otp` and `email_otp`); accept either so login works
-    // regardless of which version a given environment is running.
-    const otp = pinData.email_otp || pinData.otp;
-    if (!pinData.success || !otp) {
-      return { otp: null, error: pinData.error || 'PIN login failed.' };
-    }
-    return { otp, error: null };
-  };
-
-  const handlePinLogin = async (userEmail, pin) => {
-    // The recovery OTP is single-use and is rotated on every pin-login call,
-    // so a transient verify failure (network blip, races) can leave a stale
-    // token. Retry once with a fresh OTP before surfacing the error.
-    let lastError = null;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const { otp, error: otpReqError } = await requestPinOtp(userEmail, pin);
-      if (!otp) {
-        // A bad PIN won't succeed on retry — fail fast.
-        return { success: false, error: otpReqError };
-      }
-
-      const { data: otpData, error: otpError } = await supabase.auth.verifyOtp({
-        email: userEmail,
-        token: otp,
-        type: 'email',
-      });
-
-      if (!otpError && otpData?.session) {
-        return { success: true, session: otpData.session, user: otpData.user };
-      }
-      lastError = otpError?.message || 'Session creation failed.';
-    }
-
-    return { success: false, error: lastError };
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -154,7 +85,7 @@ const LoginForm = () => {
 
       if (isPin) {
         // PIN login flow
-        const pinResult = await handlePinLogin(email, inputValue);
+        const pinResult = await loginWithPin(email, inputValue, urlOrgSlug);
         if (!pinResult.success) {
           setErrors({ submit: pinResult.error });
           setIsLoading(false);
@@ -166,7 +97,7 @@ const LoginForm = () => {
         // Reload to let AuthContext pick up the session. urlOrgSlug should always be
         // present here (this form only renders on the org-scoped /:orgSlug/login route)
         // — if it's ever missing, don't guess an org; send back to the org finder.
-        window.location.href = urlOrgSlug ? getDashboardPath(null, urlOrgSlug) : '/login';
+        window.location.href = urlOrgSlug ? (getSafeRedirect(location.state?.from, urlOrgSlug) || getDashboardPath(null, urlOrgSlug)) : '/login';
         return;
       }
 
@@ -183,7 +114,7 @@ const LoginForm = () => {
           return;
         }
 
-        navigate(getDashboardPath(result.profile.role, userOrgSlug), { replace: true });
+        navigate(getSafeRedirect(location.state?.from, userOrgSlug) || getDashboardPath(result.profile.role, userOrgSlug), { replace: true });
         return;
       }
       setErrors({
@@ -205,7 +136,7 @@ const LoginForm = () => {
           ? "We're having trouble reaching the server right now. Please wait a moment and try again."
           : error.message === 'Invalid login credentials'
           ? 'Invalid email or password/PIN. Please try again.'
-          : error.message || 'An unexpected error occurred. Please try again.'
+          : friendlyError(error, 'An unexpected error occurred. Please try again.')
       });
     } finally {
       setIsLoading(false);
@@ -227,21 +158,23 @@ const LoginForm = () => {
     setSavedEmails(updated);
   };
 
-  const isDisabled = isLoading || oauthLoading;
+  const isDisabled = isLoading;
+  const inputBase = 'block h-12 w-full rounded-[10px] border bg-white px-3.5 text-[15px] text-[#111] outline-none placeholder:text-[#888] focus:border-[#111] disabled:cursor-not-allowed disabled:bg-[#F1F1F1]';
+  const isPinMode = mode === 'pin';
 
   return (
     <div className="w-full">
-      {/* Org Confirmation Badge */}
+      {/* Org Confirmation Chip */}
       {urlOrgSlug && (
-        <div className="mb-5 flex items-center justify-between p-3 bg-success/10 border border-success/20 rounded-[10px]">
+        <div className="mb-3 flex items-center justify-between rounded-[10px] border border-[#dcdcdc] bg-[#F7F7F7] px-3.5 py-3 text-sm">
           <div className="flex items-center gap-2">
-            <Icon name="CheckCircle" size={18} className="text-success" />
-            <span className="text-sm font-medium text-text-primary">{urlOrgSlug}</span>
+            <Icon name="CheckCircle" size={16} className="text-[#111]" />
+            <span className="font-medium">{urlOrgSlug}</span>
           </div>
           <button
             type="button"
             onClick={() => navigate('/login')}
-            className="text-sm text-text-secondary hover:text-primary transition-colors underline underline-offset-2"
+            className="text-[13px] text-[#555] underline underline-offset-2 hover:text-[#111]"
           >
             Change
           </button>
@@ -250,62 +183,30 @@ const LoginForm = () => {
 
       {/* Error Message */}
       {errors.submit && (
-        <div className="mb-4 p-3 bg-error/10 text-error rounded-[10px] text-sm font-medium">
+        <div role="alert" className="mb-3.5 rounded-[10px] bg-[#FDECEC] px-3.5 py-3 text-sm leading-snug text-[#B42318]">
           {errors.submit}
         </div>
       )}
 
-      {/* OAuth Buttons */}
-      <button
-        type="button"
-        onClick={() => handleOAuth('google')}
-        disabled={isDisabled}
-        className="w-full flex items-center justify-center gap-3 px-5 py-3 bg-surface border border-border rounded-[10px] text-sm font-medium text-text-primary hover:bg-background transition-all duration-150 mb-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        <svg viewBox="0 0 24 24" width="18" height="18">
-          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-        </svg>
-        {oauthLoading === 'google' ? 'Connecting...' : 'Continue with Google'}
-      </button>
-
-      <button
-        type="button"
-        onClick={() => handleOAuth('azure')}
-        disabled={isDisabled}
-        className="w-full flex items-center justify-center gap-3 px-5 py-3 bg-surface border border-border rounded-[10px] text-sm font-medium text-text-primary hover:bg-background transition-all duration-150 mb-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        <svg viewBox="0 0 23 23" width="18" height="18">
-          <path fill="#f35325" d="M1 1h10v10H1z"/>
-          <path fill="#81bc06" d="M12 1h10v10H12z"/>
-          <path fill="#05a6f0" d="M1 12h10v10H1z"/>
-          <path fill="#ffba08" d="M12 12h10v10H12z"/>
-        </svg>
-        {oauthLoading === 'azure' ? 'Connecting...' : 'Continue with Microsoft'}
-      </button>
-
-      <button
-        type="button"
-        onClick={() => handleOAuth('apple')}
-        disabled={isDisabled}
-        className="w-full flex items-center justify-center gap-3 px-5 py-3 bg-surface border border-border rounded-[10px] text-sm font-medium text-text-primary hover:bg-background transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        <svg viewBox="0 0 24 24" width="18" height="18" className="fill-text-primary">
-          <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
-        </svg>
-        {oauthLoading === 'apple' ? 'Connecting...' : 'Continue with Apple'}
-      </button>
-
-      {/* Divider */}
-      <div className="flex items-center my-5">
-        <div className="flex-1 h-px bg-border" />
-        <span className="px-4 text-[13px] text-text-secondary font-medium">Or</span>
-        <div className="flex-1 h-px bg-border" />
+      {/* Password / PIN toggle (label + keypad only; login logic unchanged) */}
+      <div className="mb-3 inline-flex rounded-[10px] bg-[#F1F1F1] p-[3px]" role="tablist">
+        {[['password', 'Password'], ['pin', 'PIN']].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={mode === key}
+            onClick={() => setMode(key)}
+            disabled={isDisabled}
+            className={`rounded-lg px-4 py-1.5 text-[13px] transition-colors ${
+              mode === key ? 'bg-white font-medium text-[#111] shadow-[0_1px_2px_rgba(0,0,0,0.13)]' : 'text-[#555]'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      {/* Email/Password Form */}
       <form onSubmit={handleSubmit} autoComplete="off">
         <div className="mb-3">
           <div className="relative">
@@ -333,111 +234,117 @@ const LoginForm = () => {
               }}
               placeholder="Enter your email address"
               disabled={isDisabled}
-              className={`w-full px-3.5 py-3 text-sm bg-surface border rounded-[10px] text-text-primary placeholder:text-text-secondary outline-none transition-all duration-150 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-background disabled:cursor-not-allowed ${
-                errors.email ? 'border-error' : 'border-border'
-              }`}
+              className={`${inputBase} ${errors.email ? 'border-error' : 'border-[#dcdcdc]'}`}
             />
             {/* Autocomplete dropdown for saved emails */}
             {showSavedEmails && savedEmails.filter(se => (!email || se.toLowerCase().includes(email.toLowerCase())) && se !== email).length > 0 && (
-              <div className="absolute z-10 mt-1 w-full bg-surface border border-border rounded-[10px] shadow-spa-elevated overflow-hidden">
+              <div className="absolute z-dropdown mt-1 w-full overflow-hidden rounded-[10px] border border-[#dcdcdc] bg-white shadow-spa-elevated">
                 {savedEmails.filter(se => (!email || se.toLowerCase().includes(email.toLowerCase())) && se !== email).map((savedEmail) => (
                   <button
                     key={savedEmail}
                     type="button"
                     onMouseDown={() => handleSelectSavedEmail(savedEmail)}
-                    className="w-full text-left px-3.5 py-2.5 text-sm text-text-primary hover:bg-background transition-colors flex items-center gap-2"
+                    className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-sm hover:bg-[#F1F1F1]"
                   >
-                    <Icon name="User" size={14} className="text-text-secondary" />
+                    <Icon name="User" size={14} className="text-[#777]" />
                     {savedEmail}
                   </button>
                 ))}
               </div>
             )}
           </div>
-          {errors.email && (
-            <p className="mt-1.5 text-xs text-error">{errors.email}</p>
-          )}
+          {errors.email && <p className="mt-1.5 text-xs text-error">{errors.email}</p>}
         </div>
 
-        <div className="mb-4">
+        <div className="mb-3">
           <div className="relative">
             <input
               id="password-field"
               type={showPassword ? 'text' : 'password'}
+              inputMode={isPinMode ? 'numeric' : undefined}
               value={password}
               onChange={(e) => {
                 setPassword(e.target.value);
                 if (errors.password) setErrors(prev => ({ ...prev, password: '' }));
               }}
-              placeholder="Enter your password/PIN"
+              placeholder={isPinMode ? 'Enter your PIN' : 'Enter your password'}
               disabled={isDisabled}
-              className={`w-full px-3.5 py-3 pr-11 text-sm bg-surface border rounded-[10px] text-text-primary placeholder:text-text-secondary outline-none transition-all duration-150 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-background disabled:cursor-not-allowed ${
-                errors.password ? 'border-error' : 'border-border'
-              }`}
+              className={`${inputBase} pr-16 ${errors.password ? 'border-error' : 'border-[#dcdcdc]'}`}
             />
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
               disabled={isDisabled}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[13px] text-[#777] hover:text-[#111] disabled:opacity-50"
               aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
-              <Icon name={showPassword ? 'EyeOff' : 'Eye'} size={18} />
+              {showPassword ? 'Hide' : 'Show'}
             </button>
           </div>
-          {errors.password && (
-            <p className="mt-1.5 text-xs text-error">{errors.password}</p>
-          )}
+          {errors.password && <p className="mt-1.5 text-xs text-error">{errors.password}</p>}
         </div>
 
         {/* Remember Me & Forgot Password */}
-        <div className="flex items-center justify-between mb-4">
-          <label className="flex items-center gap-2 cursor-pointer">
+        <div className="mb-4 mt-0.5 flex items-center justify-between text-[13px] text-[#555]">
+          <label className="flex cursor-pointer items-center gap-2">
             <input
               type="checkbox"
               checked={rememberMe}
               onChange={(e) => setRememberMe(e.target.checked)}
-              className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20"
+              className="h-4 w-4 rounded border-[#dcdcdc] text-[#111] focus:ring-[#111]/20"
             />
-            <span className="text-sm text-text-secondary">Remember me</span>
+            Remember me
           </label>
-          <button
-            type="button"
-            className="text-sm text-text-primary font-medium hover:opacity-80 transition-opacity underline underline-offset-2"
-          >
+          <button type="button" className="font-medium text-[#111] underline underline-offset-2">
             Forgot password?
           </button>
         </div>
 
-        {/* Submit Button */}
         <button
           type="submit"
           disabled={isDisabled}
-          className="w-full py-3 px-5 bg-primary text-primary-foreground rounded-[10px] text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+          className="h-12 w-full rounded-[10px] bg-[#111] text-[15px] font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {isLoading ? 'Signing in...' : 'Sign In'}
+          {isLoading ? 'Signing in...' : 'Login'}
         </button>
       </form>
 
-      {/* Auth Toggle */}
-      <p className="mt-5 text-center text-sm text-text-secondary">
-        Don't have an account?{' '}
-        <button
-          type="button"
-          className="text-text-primary font-medium underline underline-offset-2 hover:opacity-80 transition-opacity"
-        >
-          Contact admin
-        </button>
-      </p>
+      {/* Social sign-in: disabled for now (no handlers) */}
+      <div className="my-5 flex items-center gap-3.5 text-[13px] text-[#666]">
+        <span className="h-px flex-1 bg-[#e3e3e3]" />
+        Or continue with
+        <span className="h-px flex-1 bg-[#e3e3e3]" />
+      </div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        {[
+          ['Apple', <svg key="a" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>],
+          ['Google', <b key="g" className="text-[#4285F4]">G</b>],
+          ['Microsoft', <svg key="m" width="16" height="16" viewBox="0 0 16 16"><path fill="#F25022" d="M0 0h7.5v7.5H0z"/><path fill="#7FBA00" d="M8.5 0H16v7.5H8.5z"/><path fill="#00A4EF" d="M0 8.5h7.5V16H0z"/><path fill="#FFB900" d="M8.5 8.5H16V16H8.5z"/></svg>],
+        ].map(([name, icon]) => (
+          <div
+            key={name}
+            tabIndex={0}
+            role="button"
+            aria-disabled="true"
+            aria-label={`${name} sign-in — coming soon`}
+            className="group relative flex h-12 cursor-not-allowed select-none items-center justify-center gap-2 rounded-[10px] bg-[#F1F1F1] text-sm font-medium opacity-55 outline-none"
+          >
+            {icon} {name}
+            <span className="pointer-events-none absolute bottom-[calc(100%+6px)] left-1/2 z-dropdown hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-[#111] px-2 py-1 text-xs text-white group-hover:block group-focus:block">
+              Coming soon
+            </span>
+          </div>
+        ))}
+      </div>
 
       {/* Demo Credentials - Dev Only */}
       {import.meta.env.DEV && (
-        <div className="mt-6 p-4 bg-accent/5 border border-accent/20 rounded-[10px]">
-          <div className="flex items-center gap-2 mb-3">
-            <Icon name="Info" size={16} className="text-accent" />
-            <span className="text-sm font-medium text-text-primary">Demo Credentials</span>
+        <div className="mt-6 rounded-[10px] border border-[#dcdcdc] bg-[#F7F7F7] p-4">
+          <div className="mb-2 flex items-center gap-2">
+            <Icon name="Info" size={16} className="text-[#777]" />
+            <span className="text-sm font-medium">Demo Credentials</span>
           </div>
-          <div className="space-y-1.5 text-xs text-text-secondary font-mono">
+          <div className="space-y-1 font-mono text-xs text-[#555]">
             <div><strong>Staff:</strong> staff@zenly.app / Zennly@Staff123</div>
             <div><strong>Manager:</strong> manager@zenly.app / Zennly@Manager123</div>
             <div><strong>Admin:</strong> admin@zenly.app / Zennly@Admin123</div>
