@@ -5,6 +5,10 @@ ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
 ARG VITE_POSTHOG_KEY
 ARG VITE_POSTHOG_HOST
+# Serves the app under a path prefix instead of the root — see vite.config.mjs's own comment.
+# Staging only, for the marketplace's /book/ proxy; production (app.zennly.io) never sets this.
+ARG VITE_BASE_PATH
+ENV VITE_BASE_PATH=$VITE_BASE_PATH
 # Feature flags are NOT passed as individual build-args/ARGs (that required
 # a matching edit in both this file and every deploy workflow per flag —
 # forgotten twice already, see .env.staging/.env.production's own header).

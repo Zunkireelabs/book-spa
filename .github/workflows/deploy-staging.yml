@@ -69,6 +69,9 @@ jobs:
             VITE_POSTHOG_KEY=${{ secrets.VITE_POSTHOG_KEY }}
             VITE_POSTHOG_HOST=${{ secrets.VITE_POSTHOG_HOST }}
             BUILD_MODE=staging
+            # Staging only, for the marketplace's /book/ proxy — production's deploy.yml must
+            # never set this, or app.zennly.io stops serving at its own root.
+            VITE_BASE_PATH=/book/
 
   migrate:
     name: Apply Migrations

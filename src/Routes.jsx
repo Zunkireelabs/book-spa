@@ -338,8 +338,14 @@ const LegacyBookingRedirect = () => {
   return <Navigate to={`/${orgSlug}/bookings/${bookingId}`} replace />;
 };
 
+// Matches `base` in vite.config.mjs, which reads the same variable. Defaults to the root — how
+// this app has always been served at app.zennly.io. When the marketplace proxies the booking flow
+// under its own origin (e.g. "/book/"), the router needs the same prefix or every org-scoped route
+// 404s. React Router wants no trailing slash, while Vite's `base` wants one.
+const BASENAME = (import.meta.env.VITE_BASE_PATH || "/").replace(/\/+$/, "");
+
 const Routes = () => (
-  <BrowserRouter>
+  <BrowserRouter basename={BASENAME}>
     <DirtyGuardProvider>
       <NotificationsProvider>
         <AppRoutes />
