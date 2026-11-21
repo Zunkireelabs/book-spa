@@ -35,7 +35,10 @@ import { useNavigate } from 'react-router-dom';
 import AvailabilityNoteLine from './AvailabilityNoteLine';
 import { AlertsBlock } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
 import { getBookingStatusColors } from '../../utils/bookingStatusColors';
-import { formatPhoneGrouped } from '../../utils/phone';
+import { editFormChanged } from '../../utils/editDetails';
+import { formatPhoneGrouped, phoneToSave } from '../../utils/phone';
+import CountryCodeSelect, { parsePhone } from './CountryCodeSelect';
+import DateTimeRow from './DateTimeRow';
 import { useBlockOverlap } from '../../hooks/useBlockOverlap';
 import { Segmented } from './PanelFormKit';
 import { memberDiscountFor } from '../../services/memberDiscount';
@@ -795,9 +798,14 @@ const BookingActionModal = ({
   };
 
   const startEditing = () => {
+    const { dial: phoneDial, national: phoneNational } = parsePhone(booking.customerPhone || '');
     setEditForm({
       customerName: booking.customerName || '',
       customerPhone: booking.customerPhone || '',
+      phoneDial,
+      phoneNational,
+      phoneDialInitial: phoneDial,
+      phoneNationalInitial: phoneNational,
       serviceId: booking.serviceId || '',
       date: booking.date || '',
       startTime: booking.startTime ? booking.startTime.slice(0, 5) : booking.time || '',
@@ -823,11 +831,14 @@ const BookingActionModal = ({
     }
     if (editBlockMsg) return;
 
+    // Same stored format as New booking (dial + digits); an untouched number is sent back exactly as stored.
+    const savedPhone = phoneToSave({ dial: editForm.phoneDial, national: editForm.phoneNational, initialDial: editForm.phoneDialInitial, initialNational: editForm.phoneNationalInitial, original: editForm.customerPhone });
+
     setIsLoading(true);
     try {
       const result = await onEditBooking(booking.bookingId, {
         customerName: editForm.customerName.trim(),
-        customerPhone: editForm.customerPhone.trim() || null,
+        customerPhone: savedPhone,
         serviceId: editForm.serviceId || undefined,
         date: editForm.date || undefined,
         startTime: editForm.startTime ? editForm.startTime + ':00' : undefined,
@@ -1351,6 +1362,12 @@ const BookingActionModal = ({
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
   }, [moreOpen]);
+  // Leaving Edit details for another tab: unsaved edits go through the same discard confirm as closing; a clean form switches at once.
+  const goTab = (id) => {
+    const go = () => { setActiveTab(id); setActionError(null); if (id !== 'details') setIsEditing(false); };
+    if (isEditing && id !== 'details' && editFormChanged(editForm, booking)) setPanelConfirm({ type: 'switch', action: go });
+    else go();
+  };
   const requestPanelClose = () => {
     if (isDirty) setPanelConfirm({ type: 'close' });
     else onClose?.();
@@ -1884,7 +1901,7 @@ const BookingActionModal = ({
             type="button"
             role="tab"
             aria-selected={activeTab === tab.id}
-            onClick={() => { setActiveTab(tab.id); setActionError(null); if (tab.id !== 'details') setIsEditing(false); }}
+            onClick={() => goTab(tab.id)}
             className={`h-11 flex items-center justify-center gap-1.5 text-[13px] font-body font-body-medium border-b-2 -mb-px spa-transition-fast whitespace-nowrap ${
               activeTab === tab.id ? 'border-primary text-primary' : 'border-transparent text-text-secondary hover:text-text-primary'
             }`}
@@ -1905,11 +1922,7 @@ const BookingActionModal = ({
               {tabs.map((tab, index) => (
                 <button
                   key={tab.id}
-                  onClick={() => {
-                    setActiveTab(tab.id);
-                    setActionError(null);
-                    if (tab.id !== 'details') setIsEditing(false);
-                  }}
+                  onClick={() => goTab(tab.id)}
                   className={`flex items-center gap-1.5 sm:gap-2 py-3 sm:py-4 px-3 sm:px-1 border-b-2 spa-transition-fast whitespace-nowrap flex-shrink-0 min-h-[44px] ${
                     index === tabs.length - 1 ? 'mr-4 sm:mr-6' : ''
                   } ${
@@ -2172,6 +2185,62 @@ const BookingActionModal = ({
                 {!(isPanel && !isEditing) && (
                 <>
                 {/* Customer & Service Information - Responsive grid */}
+                {isEditing && !showAdminCorrection ? (
+                  <div className="space-y-4">
+                    {/* Edit details (ZNLY-324): one column at every width, same controls as New booking. */}
+                    <h3 className="font-body font-medium text-xs uppercase tracking-wider text-text-tertiary">Booking</h3>
+                    <div>
+                      <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Date &amp; time <span className="text-error">*</span></label>
+                      <DateTimeRow
+                        date={editForm.date}
+                        time={editForm.startTime}
+                        onDateChange={(d) => setEditForm(f => ({ ...f, date: d }))}
+                        onTimeChange={(t) => setEditForm(f => ({ ...f, startTime: t }))}
+                        branchHours={branchHours}
+                      />
+                      {editForm.startTime && !isWithinBranchHours(editForm.startTime) && (
+                        <p className="font-caption text-[11px] text-warning mt-1.5">
+                          Outside branch hours ({format12h(branchHours?.openTime?.slice(0, 5) || '09:00')} – {format12h(branchHours?.closeTime?.slice(0, 5) || '21:00')})
+                        </p>
+                      )}
+                      <BlockOverlapWarning message={editBlockMsg} className="mt-2" />
+                    </div>
+                    <div>
+                      <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Service <span className="text-error">*</span></label>
+                      {services?.length > 0 ? (
+                        <ServicePickRow required services={services} value={editForm.serviceId} onChange={(val) => setEditForm(f => ({ ...f, serviceId: val }))} branchId={booking?.branchId || branchId} canViewPrices={canViewPrices} title="Service for this booking" sub={booking.customerName || ''} ariaLabel="Service" />
+                      ) : (
+                        <p className="font-body font-body-normal text-sm text-text-primary">{booking.service}</p>
+                      )}
+                    </div>
+                    {canViewPrices && (
+                      <div className="flex items-center justify-between gap-3 rounded-spa bg-background px-3 py-2 text-[13px]">
+                        <span className="text-text-secondary">Payment <span className={`font-body-medium ${payTone(booking)}`}>{paymentStatusLabel(booking, { partialText: 'Partial' }).label}</span></span>
+                        <button type="button" onClick={() => goTab('payment')} className="text-primary font-body-medium hover:underline whitespace-nowrap">Payment tab ›</button>
+                      </div>
+                    )}
+                    <h3 className="font-body font-medium text-xs uppercase tracking-wider text-text-tertiary pt-1">Customer</h3>
+                    <div>
+                      <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Name <span className="text-error">*</span></label>
+                      <input type="text" value={editForm.customerName} onChange={(e) => setEditForm(f => ({ ...f, customerName: e.target.value }))} className={inputClasses} />
+                    </div>
+                    <div>
+                      <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Phone</label>
+                      <div className="flex">
+                        <CountryCodeSelect value={editForm.phoneDial} onChange={(dial) => setEditForm(f => ({ ...f, phoneDial: dial }))} />
+                        <input
+                          type="tel"
+                          inputMode="numeric"
+                          value={editForm.phoneNational}
+                          onChange={(e) => setEditForm(f => ({ ...f, phoneNational: e.target.value.replace(/\D/g, '') }))}
+                          placeholder="Phone number"
+                          aria-label="Phone number"
+                          className="flex-1 min-w-0 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : (
                 <div className={isPanel ? `grid gap-6 ${wideBody ? 'grid-cols-2' : 'grid-cols-1'}` : 'grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6'}>
                   <div className="space-y-3 sm:space-y-4">
                     <div className="flex items-center justify-between">
@@ -2366,6 +2435,7 @@ const BookingActionModal = ({
                     </div>
                   </div>
                 </div>
+                )}
 
                 {/* Therapist(s) */}
                 {(booking.therapists?.length > 0 || booking.therapist) && !isEditing && (
@@ -2394,7 +2464,11 @@ const BookingActionModal = ({
 
                 {/* Special Requests */}
                 <div className="space-y-1.5 sm:space-y-2">
-                  <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Special Requests</label>
+                  {isEditing && !showAdminCorrection ? (
+                    <label className="block font-body font-body-medium text-[13px] text-text-primary">Special requests</label>
+                  ) : (
+                    <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Special Requests</label>
+                  )}
                   {isEditing ? (
                     <textarea
                       value={editForm.specialRequests}
@@ -2414,7 +2488,14 @@ const BookingActionModal = ({
 
                 {/* Referred by — type freely or pick an existing therapist */}
                 <div className="space-y-1.5 sm:space-y-2">
-                  <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Referred by</label>
+                  {isEditing && !showAdminCorrection ? (
+                    <div className="flex items-baseline justify-between">
+                      <label className="font-body font-body-medium text-[13px] text-text-primary">Referred by</label>
+                      <span className="text-[12px] text-text-tertiary">optional</span>
+                    </div>
+                  ) : (
+                    <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Referred by</label>
+                  )}
                   {isEditing ? (
                     <div className="relative">
                       <input

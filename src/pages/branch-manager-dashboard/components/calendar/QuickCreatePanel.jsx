@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../../../../contexts/AuthContext';
 import { viewerAccess } from '../../../../services/dataMasking';
 import Icon from '../../../../components/AppIcon';
-import MiniMonthCalendar from './MiniMonthCalendar';
+import DateTimeRow from '../../../../components/ui/DateTimeRow';
+import { format12h } from '../../../../utils/timeInput';
 import SidePanel, { PANEL_WIDTH_BOOKING } from '../../../../components/ui/SidePanel';
 import BlockOverlapWarning from '../../../../components/ui/BlockOverlapWarning';
 import AvailabilityNotice from '../../../../components/ui/AvailabilityNotice';
@@ -17,7 +18,6 @@ import { findBlockOverlap, describeBlockOverlap } from '../../../../utils/blockO
 import { getCustomerOutstandingBalance, fetchServiceComboComponents, fetchServices, fetchServiceEligibility } from '../../../../services/api';
 import { homeServiceNameSet, servicesBookableHere } from '../../../../utils/visitorServices';
 import { CUSTOMER_REFERRALS_ENABLED } from '../../../../lib/featureFlags';
-import { todayStr } from './calendarDates';
 import StaffPicker, { useServiceEligibility } from '../../../../components/ui/StaffPicker';
 import { Segmented } from '../../../../components/ui/PanelFormKit';
 import { ExistingCustomerTag, EarlierBalanceNotice } from '../../../../components/ui/ExistingCustomerNotes';
@@ -74,19 +74,15 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [groupServiceId, setGroupServiceId] = useState('');     // shared service when 'same'
   const [groupRoomId, setGroupRoomId] = useState('');           // shared room (couple)
   const [people, setPeople] = useState([]);                     // per-person rows
-  const [timeText, setTimeText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const submitInFlightRef = useRef(false);
   const [error, setError] = useState(null);
   const [errorCode, setErrorCode] = useState(null);
   const [errorKey, setErrorKey] = useState(null); // snapshot of the form when the rejection came back: the reason stands until something relevant changes
-  const [timeDropdownOpen, setTimeDropdownOpen] = useState(false);
   const nameRef = useRef(null);
   const initialDraftRef = useRef({ date: '', time: '', therapist: '', room: '' });
   // Inline confirm in the footer: { type: 'discard' } or { type: 'move', slot }. Replaces window.confirm.
   const [confirm, setConfirm] = useState(null);
-  const timeDropdownRef = useRef(null);
-  const timeListRef = useRef(null);
 
   // Previous-due reminder — set when the selected/typed phone matches an existing
   // outstanding balance from an earlier visit. Non-blocking: booking creation isn't
@@ -189,7 +185,6 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`
       : '';
     setBookingTime(slotTime);
-    setTimeText(slotTime ? format12h(slotTime) : '');
     setDragMinutes(slotInfo?.dragMinutes || 0);
     setBookingMode('individual');
     setGroupType('couple');
@@ -496,25 +491,6 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     return n + (s[(v - 20) % 10] || s[v] || s[0]);
   };
 
-  const timeOptions = useMemo(() => {
-    const [openH] = (branchHours?.openTime || '09:00:00').split(':').map(Number);
-    const [closeH, closeM] = (branchHours?.closeTime || '21:00:00').split(':').map(Number);
-    const opts = [];
-    for (let h = openH; h <= closeH; h++) {
-      for (let m = 0; m < 60; m += 15) {
-        if (h === closeH && m > closeM) break;
-        const val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-        opts.push(val);
-      }
-    }
-    // Include current bookingTime if it doesn't match a 15-min slot
-    if (bookingTime && !opts.includes(bookingTime)) {
-      opts.push(bookingTime);
-      opts.sort();
-    }
-    return opts;
-  }, [branchHours, bookingTime]);
-
   // Load the selected combo's component list (Individual mode only: group/couple services can't be combos).
   useEffect(() => {
     if (!isComboService || !serviceId || bookingMode !== 'individual') { setComboComponents([]); return undefined; }
@@ -529,42 +505,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     return () => { cancelled = true; };
   }, [isComboService, serviceId, bookingMode]);
 
-  const format12h = (time24) => {
-    const [h, m] = time24.split(':').map(Number);
-    const suffix = h >= 12 ? 'pm' : 'am';
-    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-    return `${h12}:${String(m).padStart(2, '0')}${suffix}`;
-  };
   const svcSubLine = [bookingDate ? new Date(`${bookingDate}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '', bookingTime ? format12h(bookingTime) : ''].filter(Boolean).join(' · ');
-
-  // Parse free-typed time (e.g. "9", "9:30", "9:30am", "21:15") into "HH:MM".
-  // Returns null while the text is incomplete/invalid so the field can keep it.
-  const parseTimeInput = (raw) => {
-    const match = raw.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
-    if (!match) return null;
-    let h = parseInt(match[1], 10);
-    const m = match[2] ? parseInt(match[2], 10) : 0;
-    const ampm = match[3]?.toLowerCase();
-    if (ampm) {
-      if (h < 1 || h > 12) return null;
-      if (ampm === 'pm' && h < 12) h += 12;
-      if (ampm === 'am' && h === 12) h = 0;
-    }
-    if (h < 0 || h > 23 || m < 0 || m > 59) return null;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-  };
-
-  // Close time dropdown on outside click
-  useEffect(() => {
-    if (!timeDropdownOpen) return;
-    const handleClick = (e) => {
-      if (timeDropdownRef.current && !timeDropdownRef.current.contains(e.target)) {
-        setTimeDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [timeDropdownOpen]);
 
   // Close the people-count dropdown on outside click
   useEffect(() => {
@@ -584,14 +525,6 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setSeparateCount(clamped);
     setCountText(String(clamped));
   };
-
-  // Auto-scroll to selected time when dropdown opens
-  useEffect(() => {
-    if (timeDropdownOpen && timeListRef.current) {
-      const selected = timeListRef.current.querySelector('[data-selected="true"]');
-      if (selected) selected.scrollIntoView({ block: 'center' });
-    }
-  }, [timeDropdownOpen]);
 
   // Same mode → one shared service; Different mode → every person must pick one.
   const groupServiceValid = serviceMode === 'same'
@@ -760,7 +693,6 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setBookingDate(s.day);
     const t = `${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}`;
     setBookingTime(t);
-    setTimeText(format12h(t));
     setDragMinutes(s.dragMinutes || 0);
     if (s.colType === 'therapist' && s.colId) setSelectedTherapistIds([s.colId]);
     if (s.colType === 'room' && s.colId) { setRoomId(s.colId); setGroupRoomId(s.colId); }
@@ -874,79 +806,16 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   );
 
   // Neutral summary row: date + time (the therapist is chosen in the checklist below).
-  const [dateOpen, setDateOpen] = useState(false);
-  const dateRef = useRef(null);
-  useEffect(() => {
-    if (!dateOpen) return undefined;
-    const onDown = (e) => { if (dateRef.current && !dateRef.current.contains(e.target)) setDateOpen(false); };
-    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); setDateOpen(false); } };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
-  }, [dateOpen]);
-  const dateLabel = bookingDate
-    ? new Date(`${bookingDate}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '')
-    : 'Pick a date';
   const summaryRow = (
-    <div className="grid grid-cols-2 gap-2">
-      <div className="relative" ref={dateRef}>
-        <button
-          type="button"
-          onClick={() => setDateOpen((v) => !v)}
-          aria-haspopup="dialog"
-          aria-expanded={dateOpen}
-          className="field-text w-full h-9 pl-8 pr-2 flex items-center text-[13px] font-body text-text-primary bg-surface border border-border rounded-spa hover:bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 text-left"
-        >
-          <Icon name="Calendar" size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
-          <span className="truncate">{dateLabel}</span>
-        </button>
-        {dateOpen && (
-          <div className="absolute left-0 top-full mt-1 bg-surface border border-border rounded-spa-lg shadow-spa-elevated z-dropdown p-3">
-            <MiniMonthCalendar
-              selectedDate={bookingDate || todayStr()}
-              onDateSelect={(d) => { setBookingDate(d); setDateOpen(false); }}
-            />
-          </div>
-        )}
-      </div>
-      <div className={`relative ${fieldRing('time')}`} data-qc-field="time" ref={timeDropdownRef}>
-        <Icon name="Clock" size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
-        <input
-          type="text"
-          aria-label="Time"
-          value={timeText}
-          onChange={(e) => {
-            // Let the field reflect whatever is typed; commit to bookingTime only once it parses to a valid time.
-            const raw = e.target.value;
-            setTimeText(raw);
-            setBookingTime(parseTimeInput(raw) ?? '');
-          }}
-          onFocus={(e) => { e.target.select(); setTimeDropdownOpen(true); }}
-          onBlur={() => { setTimeText(bookingTime ? format12h(bookingTime) : ''); }}
-          placeholder="--:--"
-          autoComplete="off"
-          className="w-full h-9 pl-8 pr-2 text-[13px] font-body text-text-primary bg-surface border border-border rounded-spa focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-        />
-        {timeDropdownOpen && (
-          <div
-            ref={timeListRef}
-            className="absolute top-full left-0 mt-1 w-28 max-h-48 overflow-y-auto bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown"
-          >
-            {timeOptions.map((t) => (
-              <button
-                key={t}
-                type="button"
-                data-selected={t === bookingTime}
-                onClick={() => { setBookingTime(t); setTimeText(format12h(t)); setTimeDropdownOpen(false); }}
-                className={`w-full text-left px-3 py-1.5 text-[13px] font-body cursor-pointer hover:bg-background ${t === bookingTime ? 'bg-background font-body-medium text-text-primary' : 'text-text-primary'}`}
-              >
-                {format12h(t)}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+    <DateTimeRow
+      date={bookingDate}
+      time={bookingTime}
+      onDateChange={setBookingDate}
+      onTimeChange={setBookingTime}
+      branchHours={branchHours}
+      timeRingClass={fieldRing('time')}
+      timeFieldAttr="time"
+    />
   );
 
   return (
@@ -958,7 +827,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         <AvailabilityNotice
           precheck={precheck}
           staffLabel={staffLabel?.toLowerCase()}
-          onPickTime={(t) => { setBookingTime(t); setTimeText(format12h(t)); }}
+          onPickTime={(t) => setBookingTime(t)}
           onPickTherapist={(id) => setSelectedTherapistIds([id])}
         />
 

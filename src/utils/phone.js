@@ -112,3 +112,13 @@ export function formatPhoneGrouped(value, fallbackDial = DEFAULT_DIAL) {
   if (dial === '+977' && /^\d{10}$/.test(national)) return `${dial} ${national.slice(0, 3)}-${national.slice(3, 6)}-${national.slice(6)}`;
   return national ? `${dial} ${national}` : dial;
 }
+
+/**
+ * Phone value to save from an edit form that shows `dial` + `national` (ZNLY-324). Saved the way New booking saves
+ * (`dial` + digits); a number the user did not touch is returned exactly as it was stored, so it round-trips unchanged.
+ */
+export function phoneToSave({ dial, national, initialDial, initialNational, original }) {
+  if (dial === initialDial && national === initialNational) return String(original || '').trim() || null;
+  const digits = String(national || '').replace(/\D/g, '');
+  return digits ? `${dial}${digits}` : null;
+}

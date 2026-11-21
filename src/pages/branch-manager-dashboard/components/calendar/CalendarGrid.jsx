@@ -1686,7 +1686,7 @@ const CalendarGrid = ({
         <div
           key={`shade-${seg.kind}-${seg.startMin}-${i}`}
           data-shade={seg.kind}
-          title={tip}
+          title={selectedBookingId || draftGhost ? undefined : tip}
           onClick={seg.kind === 'branch' && onEditTransfer && (col.transferredOut || col.transferredIn || col.scheduledTransfer)
             ? (e) => { e.stopPropagation(); onEditTransfer(col); }
             : undefined}
