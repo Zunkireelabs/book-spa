@@ -1,0 +1,5 @@
+# Accepted schema differences between production and a migrations-only database (ZNLY-353).
+# One line per difference:  <kind>|<key>[|<detail prefix>]  # reason
+# kinds: table column constraint index trigger function rls policy view enum extension  (and *-name notes, which never fail)
+# Copy the line exactly as the report prints it (after "migrations only:" / "target only:"); a shorter prefix allows more.
+# An entry that matches nothing is reported as a WARNING so this file cannot rot silently.

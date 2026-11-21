@@ -124,6 +124,33 @@ SELECT o.slug, br.name AS branch, d.report_date, d.card_total, d.fonepay_total,
 Zero rows = the bug never affected a production closed day. Any rows = report them to the owner; the new classification only applies to days closed
 after the release.
 
+## Pre-release schema-drift check (ZNLY-353): run before every prod release
+
+`scripts/schema-drift.sh` compares the **public schema of production** with a **reference database built from migrations only**
+(`scripts/local-db-bootstrap.sh`, or the local Supabase after `supabase db reset` + bootstrap). It is read-only on both sides
+(`default_transaction_read_only=on`, catalog SELECTs only: `scripts/schema-drift.sql`) and exits **1** if anything differs that is not
+on the allow-list. This is the check that would have caught the 2026-06 "table missing on prod" and "NOT NULL column no code fills" classes.
+
+```bash
+scripts/schema-drift.sh --target "$PROD_CONNINFO" --reference "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+# or TARGET_URL=... REFERENCE_URL=... scripts/schema-drift.sh     (--keep DIR keeps the two snapshots; --allow FILE overrides the allow-list)
+```
+
+How to read it. Facts are grouped by kind: `table column constraint index trigger function rls policy view enum extension`.
+`migrations only:` = the migrations say it should exist but the target lacks it (a migration was never applied or never written down);
+`target only:` = the target has something no migration creates (a hand-applied change, an old name, a backup table). A changed column or
+function shows as one line on each side. `constraint-name` / `index-name` lines are **notes** (a rename with the same definition) and never fail.
+Function bodies are compared by md5, so any edited-by-hand function shows as drift.
+
+What to do with a `DRIFT` line: (1) real drift that matters for the release → fix it with a migration file first; (2) a known, accepted
+difference (e.g. a one-off `backup_*` table, an extension only prod has) → add one line to `scripts/schema-drift-allow.txt`:
+`<kind>|<key>[|<detail prefix>]  # reason`, copied from the report. A stale allow entry prints a WARNING. Never allow a difference you
+have not understood. The release goes ahead only with 0 unexplained differences.
+
+Known limits: it compares the `public` schema only (not `auth`/`storage` policies, grants, or data); the reference must itself be a clean
+migrations-only build, and a migrations-only build currently needs `bookings.client_request_id` added by hand because no migration creates it
+(that is itself a drift finding: production has it).
+
 ## Credentials / seed data (separate from migrations)
 
 Credential and seed syncs are **data**, not schema — they are **not** recorded in
