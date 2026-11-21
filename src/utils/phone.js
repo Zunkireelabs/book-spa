@@ -14,6 +14,8 @@
 // sides through `toE164()` so a legacy bare-national straggler still matches a
 // freshly-normalised value.
 
+import { DIAL_CODES } from './countries';
+
 const DEFAULT_DIAL = '+977'; // Nepal — the app's home country
 
 // Bare national numbers up to this length are assumed to be missing their
@@ -71,16 +73,6 @@ export function samePhone(a, b, fallbackDial = DEFAULT_DIAL) {
   const db = toE164(b, fallbackDial);
   return da != null && da === db;
 }
-
-// Country dial codes we recognise, longest first — so `+1` doesn't shadow
-// `+977` style matches. Kept in sync with CountryCodeSelect's COUNTRIES list.
-const DIAL_CODES = [
-  '+977', '+975', '+974', '+973', '+972', '+971', '+968', '+966', '+965', '+960', '+880', '+852', '+353',
-  '+91', '+44', '+61', '+86', '+81', '+82', '+65', '+60', '+66', '+92', '+94', '+95', '+62', '+63', '+84',
-  '+64', '+49', '+33', '+39', '+34', '+31', '+41', '+46', '+47', '+45', '+90', '+27', '+20', '+55', '+52',
-  '+98', '+93',
-  '+7', '+1',
-].sort((a, b) => b.length - a.length);
 
 /**
  * Split a canonical E.164 value into `{ dial, national }` for display or for

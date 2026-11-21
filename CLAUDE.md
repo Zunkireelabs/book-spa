@@ -316,6 +316,7 @@ Thin PostHog wrapper — every export (`init / identify / reset / capture / setG
 | `z-toast` | 1150 | Toast notifications (above panels, sheets and modals; position with `.toast-bottom` / `.toast-top`) |
 | `z-modal` | 1000 | Modal dialogs |
 | `z-modal-overlay` | 1100 | Modal backdrop |
+| `z-popover` | 1125 | Portalled dropdown lists opened from inside a panel or modal (above z-modal-overlay, below z-toast) |
 | `z-notification` | 1200 | Top-level notifications |
 
 ### Shadows & Radii
