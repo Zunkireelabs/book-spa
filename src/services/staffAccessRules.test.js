@@ -118,3 +118,12 @@ describe('calendar picker (ZNLY-284): view-only is no longer offered', () => {
     expect(m.calendarOptionsFor('all').length).toBe(2); // after choosing All the view-only option is gone
   });
 });
+
+import { friendlyError as _fe } from '../utils/friendlyError';
+describe('a refused PIN save reaches the Access screen as plain text', () => {
+  it('saveErrorCopy leaves it to friendlyError, which says it plainly (AccessEditPanel: saveErrorCopy(...) || friendlyError(...))', () => {
+    const err = { message: 'set_user_pin: not allowed' };
+    expect(saveErrorCopy(err)).toBeNull();
+    expect(saveErrorCopy(err) || _fe(err, "Couldn't save. Try again.")).toBe("You can't set this person's PIN. Ask an admin.");
+  });
+});

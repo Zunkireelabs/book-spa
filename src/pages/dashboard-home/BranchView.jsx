@@ -9,6 +9,8 @@ import SetupChecklist from './SetupChecklist';
 import { DashPanels } from './DashboardPanels';
 import { fetchNeeds, updateBookingStatus } from '../../services/api';
 import { supabase } from '../../lib/supabase';
+import { confirmPendingBooking } from '../../lib/confirmBooking';
+import { useToast } from '../branch-manager-dashboard/components/Area/listKit';
 import { dayProgress, dayProgressText } from '../../lib/dayProgress';
 import { bookingSplit, splitLine, fmtClock, fmtDuration, fmtRange, fmtFreeTotal, freeNow, freeTime } from '../../lib/dashboardFloor';
 import DeskButtons from './DeskButtons';
@@ -54,6 +56,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
   const [needs, setNeeds] = useState(null); // null = still loading (never shown as 0 / "nothing left") // every booking that needs someone, tagged with its kind (lib/dashboardNeeds)
   const [needsError, setNeedsError] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  const { notify, toastNode } = useToast();
   const [closing, setClosing] = useState(false);
   const [closed, setClosed] = useState(null);
   const canAct = role === 'manager' || role === 'admin';
@@ -85,7 +88,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
   const bookNow = () => { const m = gapStart(nowMin ?? 9 * 60, 24 * 60); openCreate({ hour: Math.floor(m / 60), minute: m % 60 }); };
   const confirm = async (id) => {
     setBusyId(id);
-    await updateBookingStatus({ bookingId: id, newStatus: 'Confirmed' });
+    await confirmPendingBooking(id, { update: updateBookingStatus, notify });   // a refusal is a toast; the booking stays Pending
     setBusyId(null);
     refresh();
   };
@@ -267,6 +270,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
     <div className="space-y-3 sm:space-y-4">
       {myDay}{frontDesk}{newTenant && setup && <SetupChecklist steps={setup} onGo={go} />}{body}
       <DashPanels panel={panel} branchId={branchId} onClose={closePanel} onChanged={refresh} />
+      {toastNode}
     </div>
   );
 };

@@ -1,6 +1,26 @@
 import { describe, it, expect } from 'vitest';
 import { friendlyError, GENERIC_SAVE_ERROR_COPY, isNetworkError, NETWORK_ERROR_COPY, NETWORK_CHECK_CALENDAR_COPY } from './friendlyError';
 
+describe('friendlyError: booking refusals (ZNLY-266)', () => {
+  it('ROOM_AT_CAPACITY → plain sentence', () => {
+    expect(friendlyError({ message: 'ROOM_AT_CAPACITY: Room is fully booked for this time range.' })).toBe('That room is fully booked at this time. Choose another time or room.');
+  });
+  it('23P01 (therapist overlap guard) → plain conflict sentence, whatever the raw text', () => {
+    const e = { code: '23P01', message: 'conflicting key value violates exclusion constraint "excl_therapist_overlap"' };
+    expect(friendlyError(e)).toMatch(/already has a booking at that time/);
+    expect(friendlyError(e)).not.toMatch(/excl_|constraint/);
+  });
+});
+
+describe('friendlyError: PIN save refusals (set_user_pin, migration-416)', () => {
+  it('maps not-allowed and bad-shape to plain sentences, no function name on screen', () => {
+    expect(friendlyError({ message: "set_user_pin: not allowed" })).toBe("You can't set this person's PIN. Ask an admin.");
+    expect(friendlyError({ message: 'set_user_pin: no such user' })).toBe("You can't set this person's PIN. Ask an admin.");
+    expect(friendlyError({ message: 'PIN must be exactly 4 digits' })).toBe('PIN must be 4 digits.');
+    expect(friendlyError({ message: 'A PIN can only be set with set_user_pin()' })).not.toMatch(/set_user_pin/);
+  });
+});
+
 describe('friendlyError', () => {
   it('strips the SQL function prefix and capitalises', () => {
     expect(friendlyError({ message: 'reschedule_booking: slot no longer available' })).toBe('Slot no longer available');
@@ -86,7 +106,6 @@ describe('friendlyError', () => {
     const cases = {
       'DAY_LOCKED: This day has been closed. No further modifications allowed.': 'This day has been closed. No further modifications allowed.',
       'BOOKING_IMMUTABLE: Completed bookings cannot be modified.': 'Completed bookings cannot be modified.',
-      'ROOM_AT_CAPACITY: Room is fully booked for this time range.': 'Room is fully booked for this time range.',
       'OVERPAYMENT: Payment exceeds the remaining balance.': 'Payment exceeds the remaining balance.',
       'BOOKING_PAID: This booking is already paid — cancel and refund it explicitly, or collect the difference, before rescheduling.': 'This booking is already paid — cancel and refund it explicitly, or collect the difference, before rescheduling.',
       'THERAPIST_ABSENT: Asha is marked as on_leave on this date.': 'Asha is marked as on_leave on this date.',

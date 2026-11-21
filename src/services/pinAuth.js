@@ -39,6 +39,8 @@ async function requestPinOtp(userEmail, pin, orgSlug) {
   if (!pinData.success || !otp) {
     // success:false below 5xx is treated as a wrong PIN. The Edge Function (not in this repo) sends only { success:false, error:'<text>' } and
     // no code, so a wrong PIN cannot be told from other refusals (401/404/misconfig) here. If it ever sends a code, narrow this.
+    // Locked after too many wrong PINs (migration-416): say so, and do not count it as one more wrong PIN on the lock screen.
+    if (/^too many attempts/i.test(pinData.error || '')) return { otp: null, error: pinData.error, kind: 'locked' };
     return { otp: null, error: pinData.error || 'PIN login failed.', kind: 'wrong_pin' };
   }
   return { otp, error: null };

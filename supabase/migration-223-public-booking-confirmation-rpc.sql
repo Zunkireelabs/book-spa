@@ -34,6 +34,9 @@
 -- cast is lossless) instead of loosening the function's param type, since
 -- `uuid` is the correct type for a randomly-generated request id and staging
 -- already has it right.
+-- ZNLY-352: prod has this column but no migration created it, so a DB built from the migrations lacked it.
+ALTER TABLE public.bookings ADD COLUMN IF NOT EXISTS client_request_id uuid;
+
 DO $$
 BEGIN
   IF EXISTS (
@@ -49,7 +52,7 @@ END $$;
 -- Partial index: client_request_id is only ever set on the anon/online-booking path,
 -- so most rows have it NULL — without this the RPC's WHERE clause is a full seq scan
 -- over the whole (multi-tenant, ever-growing) bookings table on every confirmation.
-CREATE INDEX IF NOT EXISTS idx_bookings_client_request_id
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bookings_client_request_id   -- UNIQUE as on prod (ZNLY-352): one booking per request id
   ON public.bookings (client_request_id)
   WHERE client_request_id IS NOT NULL;
 

@@ -132,3 +132,7 @@ Noting the gap repeatedly is not the same as closing it.
 ## 2026-11-21: PR to stage failed CI three ways that local checks hid
 - **Pattern:** local `npm test` + `npm run build` passed; CI failed on (1) `npm ci` because the lockfile was regenerated with npm 11 while CI uses node 22 / npm 10, (2) ESLint parse error on a duplicate import that Vitest tolerates, (3) a test that relied on a flag from the untracked local `.env` (CI only has the tracked `.env.local`).
 - **Rule:** before opening any PR, run the CI sequence from clean: `rm -rf node_modules && npm ci && npm run lint && npm test && npm run build`, with any untracked `.env*` moved aside. Regenerate lockfiles with `npx npm@10` when adding a dependency. Tests that depend on feature flags must mock `lib/featureFlags`.
+
+## 2026-11-21: review every line of a new runtime file, not just a grep
+- ZNLY-332: I reviewed the edge functions by grepping for secret/auth lines. A block pasted twice (lines 67–89 of marketplace-create-booking/index.ts) slipped through, and the function failed to BOOT on staging. Its tests only covered the _shared helpers, so nothing parsed index.ts.
+- Rule: every new runtime entry file (edge function, route, migration) gets a full read in review, and a parse/compile check in the test suite. A harness that never loads the entry file doesn't prove the entry file works.

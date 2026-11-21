@@ -20,6 +20,16 @@ import { leafMethods, qrMethodDiff, validateQrFile } from '../utils/paymentQr';
 import { parseAvailabilityError, createEnforcementCache } from './availability';
 import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrphanTransferWindow } from './therapistBranchWindow';
 
+// ZNLY-266/268: the ONE place a raw database error becomes screen text. A write's catch block returns plainError(error): the same
+// { code, message } the callers already read, with a plain-language message (friendlyError). rawMessage / details / hint stay
+// for code that parses them; they are never shown. Idempotent: an already-plain error is returned as it is.
+export function plainError(error, fallback) {
+  if (!error) return error;
+  if (typeof error !== 'object') return { code: undefined, message: friendlyError(error, fallback), plain: true };
+  if (error.plain === true) return error;
+  return { code: error.code, message: friendlyError(error, fallback), rawMessage: error.message, details: error.details, hint: error.hint, plain: true };
+}
+
 // Staff-availability rule (ZNLY-100, migration-353): the guard raises OFF_SHIFT / ON_BREAK / ON_LEAVE / BLOCKED /
 // OTHER_BRANCH / OVERLAP / OVERRIDE_NOT_ALLOWED. Every booking writer maps it to { code, message, overridable, detail }
 // through here, and takes an optional `overrideReason` (manager/admin only; the DB re-checks the role).
@@ -813,7 +823,7 @@ export async function setEnforceStaffAvailability({ enabled }) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] setEnforceStaffAvailability error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -1073,7 +1083,7 @@ export async function acknowledgeBooking(bookingId) {
     return { data, error: null };
   } catch (error) {
     console.warn('[API] acknowledgeBooking:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -1282,7 +1292,7 @@ export async function updateOrgPaymentMethods(methods) {
 
   const { data, error } = await supabase.rpc('update_org_payment_methods', { p_methods: cleaned });
   if (error) {
-    return { data: null, error: { code: error.code || 'UPDATE_FAILED', message: error.message || 'Failed to update payment methods.' } };
+    return { data: null, error: { code: error.code || 'UPDATE_FAILED', message: friendlyError(error, 'Failed to update payment methods.') } };
   }
   return { data, error: null };
 }
@@ -1410,7 +1420,7 @@ export async function syncPaymentMethodQrs(oldMethods, newMethods, renames = {})
 export async function updateOrgBookingSetting(key, enabled) {
   const { data, error } = await supabase.rpc('update_org_booking_settings', { p_key: key, p_value: !!enabled });
   if (error) {
-    return { data: null, error: { code: error.code || 'UPDATE_FAILED', message: error.message || 'Failed to update booking setting.' } };
+    return { data: null, error: { code: error.code || 'UPDATE_FAILED', message: friendlyError(error, 'Failed to update booking setting.') } };
   }
   return { data, error: null };
 }
@@ -1422,7 +1432,7 @@ export async function updateOrgBookingSetting(key, enabled) {
 export async function updateOrgProfileSetting(key, value) {
   const { data, error } = await supabase.rpc('update_org_profile_settings', { p_key: key, p_value: value });
   if (error) {
-    return { data: null, error: { code: error.code || 'UPDATE_FAILED', message: error.message || 'Failed to update profile setting.' } };
+    return { data: null, error: { code: error.code || 'UPDATE_FAILED', message: friendlyError(error, 'Failed to update profile setting.') } };
   }
   return { data, error: null };
 }
@@ -1807,7 +1817,7 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
     };
   } catch (error) {
     console.error('[API] recordPayment error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -1855,7 +1865,7 @@ export async function recordTip({ bookingId, amount, notes, receivedBy }) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] recordTip error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -1950,7 +1960,7 @@ export async function markTipsDistributed(branchId) {
     return { data: { count: data }, error: null };
   } catch (error) {
     console.error('[API] markTipsDistributed error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -2004,7 +2014,7 @@ export async function recordGroupPayment(payments) {
     };
   } catch (error) {
     console.error('[API] recordGroupPayment error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -2105,7 +2115,7 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
 // walks Pending → Confirmed → In-Progress → Completed one valid step at a time.
 export async function closePastBooking({ bookingId, outcome, reason }) {
   const { data: b, error } = await supabase.from('bookings').select('id, status').eq('id', bookingId).single();
-  if (error) return { data: null, error };
+  if (error) return { data: null, error: plainError(error) };
   const steps = planClose(b.status, outcome, reason);
   if (!steps) return { data: null, error: { code: 'NOT_OPEN', message: `This booking is already ${b.status}.` } };
   // A later step can be refused (e.g. a closed day), leaving the booking mid-way: runCloseSteps then says where it stopped.
@@ -3143,7 +3153,7 @@ export async function updateBookingStatus({ bookingId, newStatus, reason }) {
     return { data: { success: true, bookingId, status: updated.status }, error: null };
   } catch (error) {
     console.error('[API] updateBookingStatus error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -3415,7 +3425,7 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
     return { data: { success: true, bookingId, therapistIds: ids, roomId: updated.room_id }, error: null };
   } catch (error) {
     console.error('[API] assignTherapist error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -3514,7 +3524,7 @@ export async function updateTherapistTime({ bookingId, therapistId, startTime, e
     return { data: { success: true }, error: null };
   } catch (error) {
     console.error('[API] updateTherapistTime error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -3568,7 +3578,7 @@ export async function resizeSharedBookingTime({ bookingId, startTime, endTime, o
     return { data: { success: true }, error: null };
   } catch (error) {
     console.error('[API] resizeSharedBookingTime error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -3866,7 +3876,7 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
     return { data: { success: true, bookingId }, error: null };
   } catch (error) {
     console.error('[API] updateBookingDetails error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -4020,7 +4030,7 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
     };
   } catch (error) {
     console.error('[API] applyDiscount error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -4235,7 +4245,7 @@ export async function approveDiscount(bookingId) {
     return { data: { success: true, bookingId, discountStatus: 'approved' }, error: null };
   } catch (error) {
     console.error('[API] approveDiscount error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -4304,7 +4314,7 @@ export async function rejectDiscount(bookingId) {
     return { data: { success: true, bookingId, discountStatus: 'none' }, error: null };
   } catch (error) {
     console.error('[API] rejectDiscount error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -4552,7 +4562,7 @@ export async function saveNotificationSettings(patch) {
     return { data: { success: true }, error: null };
   } catch (error) {
     console.error('[API] saveNotificationSettings error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -4830,7 +4840,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
     };
   } catch (error) {
     console.error('[API] rescheduleBooking error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -5465,7 +5475,7 @@ export async function closeDay(branchId, date) {
     };
   } catch (error) {
     console.error('[API] closeDay error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -7633,7 +7643,7 @@ export async function createBooking({
       if (insertError.code === 'P0006') {
         for (const code of ['THERAPIST_NOT_ELIGIBLE', 'THERAPIST_ABSENT', 'THERAPIST_CHECKED_OUT']) {
           if (insertError.message?.includes(code)) {
-            return { data: null, error: { code, message: insertError.message.split(`${code}:`)[1]?.trim() || insertError.message } };
+            return { data: null, error: { code, message: insertError.message.split(`${code}:`)[1]?.trim() || friendlyError(insertError, "Couldn't save the booking. Please try again.") } };
           }
         }
       }
@@ -7749,7 +7759,7 @@ export async function createBooking({
     return { data: booking, error: null };
   } catch (error) {
     console.error('[API] createBooking error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -8050,7 +8060,7 @@ export async function rescheduleBookingAsNewBooking({ bookingId, date, startTime
     return { data: { id: data?.id, bookingNumber: data?.booking_number }, error: null };
   } catch (error) {
     console.error('[API] rescheduleBooking error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -8869,7 +8879,7 @@ export async function createTherapist({ name, gender, specialties, position, isS
     return { data, error: null };
   } catch (error) {
     console.error('[API] createTherapist error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -8943,7 +8953,7 @@ export async function updateTherapist({ therapistId, name, gender, specialties, 
     return { data, error: null };
   } catch (error) {
     console.error('[API] updateTherapist error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -9170,7 +9180,7 @@ export async function upsertTherapistWorkingHours(therapistId, rows) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] upsertTherapistWorkingHours error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -9385,7 +9395,7 @@ export async function toggleTherapistActive({ therapistId, isActive }) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] toggleTherapistActive error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -9509,7 +9519,7 @@ export async function transferTherapist({
     };
   } catch (error) {
     console.error('[API] transferTherapist error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -12686,7 +12696,7 @@ export async function markVisitorAttendance({ therapistId, branchId, checkInTime
     return { data: { success: true }, error: null };
   } catch (error) {
     console.error('[API] markVisitorAttendance error:', error.message);
-    return { data: null, error: { code: 'UNKNOWN_ERROR', message: error.message } };
+    return { data: null, error: { code: 'UNKNOWN_ERROR', message: friendlyError(error, 'Could not save attendance. Please try again.') } };
   }
 }
 
@@ -12888,7 +12898,7 @@ export async function setAttendanceSettings({ branchId, lateGraceMinutes, openCh
     if (error) throw error;
     return { data: { success: true }, error: null };
   } catch (error) {
-    return { data: null, error: { code: error.code, message: error.message } };
+    return { data: null, error: { code: error.code, message: friendlyError(error, 'Could not save the attendance settings. Please try again.') } };
   }
 }
 
@@ -13788,7 +13798,7 @@ export async function updateBranchAdvanceBookingWindow(branchId, days) {
     return { data: { days }, error: null };
   } catch (error) {
     console.error('[API] updateBranchAdvanceBookingWindow error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -15057,7 +15067,10 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
       return { data: { customerId: existing.id, isNew: false }, error: null };
     }
 
-    // 2. Create a fresh customer.
+    // 2. Create a fresh customer. A customer profile needs a phone number (customers.phone is required).
+    if (!normalizedPhone) {
+      return { data: null, error: { code: 'PHONE_REQUIRED', message: 'A phone number is required to add a customer.' } };
+    }
     const { data: created, error: insertErr } = await supabase
       .from('customers')
       .insert({
@@ -18361,7 +18374,7 @@ export async function checkoutWithProducts({ bookingId, tenders, products, dueHo
     };
   } catch (error) {
     console.error('[API] checkoutWithProducts error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -18848,7 +18861,7 @@ export async function refundProductSale({ saleId, reason }) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] refundProductSale error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -19191,7 +19204,7 @@ export async function adminCorrectBooking({ bookingId, changes, reason }) {
     return { data: { bookingId: data }, error: null };
   } catch (error) {
     console.error('[API] adminCorrectBooking error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -19225,7 +19238,7 @@ export async function correctPaymentMode({ paymentId, newMode, reason }) {
     return { data: { auditLogId: data }, error: null };
   } catch (error) {
     console.error('[API] correctPaymentMode error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -19259,7 +19272,7 @@ export async function correctPaymentAmount({ paymentId, newAmount, reason }) {
     return { data: { auditLogId: data }, error: null };
   } catch (error) {
     console.error('[API] correctPaymentAmount error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -19305,7 +19318,7 @@ export async function adminDeleteBooking({ bookingId, reason }) {
     return { data: { bookingId: data }, error: null };
   } catch (error) {
     console.error('[API] adminDeleteBooking error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -19693,7 +19706,7 @@ async function provisionStaffLogin({ email, fullName, orgId, branchId, role, log
       is_active: true,
       login_access: loginAccess,
       calendar_visibility: calendarVisibility || 'all',
-      pin: pin || null,
+      // No pin here: a PIN is only ever stored hashed, through set_user_pin() (migration-416). grantStaffAccess sets it right after.
     })
     .select('id, org_id')
     .single();
@@ -19817,7 +19830,7 @@ export async function grantStaffAccess({ therapistId, email, loginAccess, role, 
     // Only touch the PIN when one was actually given — an empty value here
     // must mean "leave it alone", never "clear it", especially on the
     // existing-account path where provisionStaffLogin never ran.
-    if (pin) settingsUpdate.pin = pin;
+    // (the PIN itself is saved below through set_user_pin(), which hashes it: migration-416)
     const { error: settingsErr } = await supabase
       .from('users')
       .update(settingsUpdate)
@@ -19827,6 +19840,13 @@ export async function grantStaffAccess({ therapistId, email, loginAccess, role, 
       // account whose settings never landed.
       await supabase.from('therapists').update({ user_id: null }).eq('id', therapistId);
       throw settingsErr;
+    }
+    if (pin) {
+      const { error: pinErr } = await supabase.rpc('set_user_pin', { p_user_id: account.id, p_pin: pin });
+      if (pinErr) {
+        await supabase.from('therapists').update({ user_id: null }).eq('id', therapistId);
+        throw pinErr;
+      }
     }
 
     // Branch access is ticked manually — write exactly what was given, no
@@ -19843,7 +19863,7 @@ export async function grantStaffAccess({ therapistId, email, loginAccess, role, 
     return { data: linkedTherapist, error: null };
   } catch (error) {
     console.error('[API] grantStaffAccess error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -19894,7 +19914,7 @@ export async function linkStaffToAccount({ therapistId, userId }) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] linkStaffToAccount error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -19921,7 +19941,7 @@ export async function unlinkStaffAccess({ therapistId }) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] unlinkStaffAccess error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -19981,7 +20001,7 @@ export async function updateStaffAccess({ userId, role, loginAccess, calendarVis
 
     // A blank PIN here means "leave it alone", never "clear it" — same as
     // grantStaffAccess.
-    if (pin) updatePayload.pin = pin;
+    // The PIN itself is saved below through set_user_pin(), which hashes it (migration-416).
 
     if (Object.keys(updatePayload).length > 0) {
       const { error: updateErr } = await supabase
@@ -19989,6 +20009,11 @@ export async function updateStaffAccess({ userId, role, loginAccess, calendarVis
         .update(updatePayload)
         .eq('id', userId);
       if (updateErr) throw updateErr;
+    }
+
+    if (pin) {
+      const { error: pinErr } = await supabase.rpc('set_user_pin', { p_user_id: userId, p_pin: pin });
+      if (pinErr) throw pinErr;
     }
 
     if (branchIds !== undefined) {
@@ -20017,7 +20042,7 @@ export async function updateStaffAccess({ userId, role, loginAccess, calendarVis
     return { data, error: null };
   } catch (error) {
     console.error('[API] updateStaffAccess error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -20270,7 +20295,7 @@ export async function assignTherapistTier({ therapistId, tierId }) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] assignTherapistTier error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -20530,7 +20555,7 @@ export async function addToWaitlist({ branchId, customerId, customerName, custom
     return { data, error: null };
   } catch (error) {
     console.error('[API] addToWaitlist error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -20584,7 +20609,7 @@ export async function updateWaitlistEntry({ id, customerId, customerName, custom
     return { data, error: null };
   } catch (error) {
     console.error('[API] updateWaitlistEntry error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 
@@ -20611,7 +20636,7 @@ export async function removeFromWaitlist(id) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] removeFromWaitlist error:', error.message);
-    return { data: null, error };
+    return { data: null, error: plainError(error) };
   }
 }
 

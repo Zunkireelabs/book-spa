@@ -137,8 +137,9 @@ DECLARE
   t       text;
   was_on  text[] := ARRAY[]::text[];
 BEGIN
+  -- trg_audit_bookings is production's name for the bookings audit trigger (fn_insert_audit_log, ZNLY-355): without it this backfill wrote ~9.4k fake "updated" history rows on prod.
   FOREACH t IN ARRAY ARRAY['trg_updated_at', 'trg_enforce_booking_immutability', 'trg_enforce_therapist_required',
-                           'trg_handle_booking_cancellation_refund', 'trg_audit_booking_changes']
+                           'trg_handle_booking_cancellation_refund', 'trg_audit_booking_changes', 'trg_audit_bookings']
   LOOP
     IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.bookings'::regclass AND tgname = t AND tgenabled <> 'D') THEN
       EXECUTE format('ALTER TABLE public.bookings DISABLE TRIGGER %I', t);

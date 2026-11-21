@@ -32,6 +32,11 @@ const KNOWN = [
   [/P0275|FUTURE_BOOKING/, (raw) => String(raw).replace(/^[\s\S]*?(This booking is for [^.]+\. Move it to today to [^.]+\.)[\s\S]*$/, '$1')],
   [/excl_therapist_overlap|conflicting key value violates exclusion constraint/i,
     () => localizeTerms('This therapist already has a booking at that time. Pick another time or person.')],
+  // ZNLY-266: a staff Confirm / Start / Complete refused because the room is full (the DB guard's CODE: text).
+  [/ROOM_AT_CAPACITY/, () => 'That room is fully booked at this time. Choose another time or room.'],
+  // set_user_pin (migration-416): a refused PIN save, in plain words.
+  [/set_user_pin: (?:not allowed|no such user)/i, () => "You can't set this person's PIN. Ask an admin."],
+  [/PIN must be exactly 4 digits/i, () => 'PIN must be 4 digits.'],
   [/customers_org_nphone_uniq|duplicate key[\s\S]*phone|phone[\s\S]*duplicate key/i,
     () => 'A customer with this phone number already exists.'],
 ];
@@ -41,6 +46,8 @@ export const looksTechnical = (msg) => TECHNICAL.test(msg || '');
 export const friendlyError = (err, fallback = GENERIC_SAVE_ERROR_COPY) => {
   const raw = (typeof err === 'string' ? err : err?.message) || '';
   if (!raw.trim()) return fallback;
+  // 23P01 = exclusion_violation: the therapist-overlap guard (migration-414), whatever text it carries.
+  if (err?.code === '23P01') return localizeTerms('This therapist already has a booking at that time. Pick another time or person.');
   for (const [re, say] of KNOWN) if (re.test(raw)) return say(raw);
   if (NETWORK.test(raw)) return NETWORK_ERROR_COPY;
   if (err?.name === 'TypeError') return fallback;
