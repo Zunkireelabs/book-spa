@@ -23,6 +23,10 @@ WHERE n.nspname = 'public' AND p.proname = 'public_create_booking';
 \echo '== 2. Orgs'
 SELECT o.slug,
        COALESCE(to_jsonb(o)->>'marketplace_booking_enabled', 'column missing') AS marketplace_enabled,
+       COALESCE(to_jsonb(o)->>'marketplace_lookup_enabled', 'column missing (apply 410)') AS lookup_flag,
+       CASE WHEN COALESCE(to_jsonb(o)->>'marketplace_booking_enabled','') = 'true'
+             AND COALESCE(to_jsonb(o)->>'marketplace_lookup_enabled','false') <> 'true'
+            THEN 'lookup via booking flag' ELSE '' END AS lookup_note,
        COALESCE(i.enable_rooms, true) AS rooms_tenant,
        (SELECT count(*) FROM branches b WHERE b.org_id = o.id AND b.is_active) AS active_branches,
        (SELECT count(*) FROM services s WHERE s.org_id = o.id AND s.is_active
@@ -77,6 +81,8 @@ SELECT o.slug AS org,
          CASE WHEN fn.n = 0 THEN 'function public_create_booking missing (apply 409)' WHEN NOT fn.grants_ok THEN 'function grants wrong or overloaded' END,
          CASE WHEN to_jsonb(o)->>'marketplace_booking_enabled' IS NULL THEN 'marketplace_booking_enabled column missing (apply 409)'
               WHEN to_jsonb(o)->>'marketplace_booking_enabled' <> 'true' THEN 'marketplace_booking_enabled is off (owner opt-in)' END,
+         CASE WHEN to_jsonb(o)->>'marketplace_booking_enabled' = 'true' AND to_regprocedure('public.marketplace_lookup_customer(text,text,text)') IS NULL
+              THEN 'booking on but customer lookup function missing (apply 410): Appointments page would be empty' END,
          CASE WHEN NOT EXISTS (SELECT 1 FROM br WHERE br.org_id = o.id) THEN 'no active branch' END,
          (SELECT 'NO HOURS at: ' || string_agg(br.name, ', ') FROM br WHERE br.org_id = o.id AND br.weekly = 0 AND br.no_fallback),
          (SELECT 'ALL 7 DAYS OFF at: ' || string_agg(br.name, ', ') FROM br WHERE br.org_id = o.id AND br.weekly = 7 AND br.off_days = 7),

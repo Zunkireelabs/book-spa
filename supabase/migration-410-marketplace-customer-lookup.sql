@@ -29,9 +29,13 @@
 -- is coming. Only 'email' is implemented; any other kind is a clear error now rather than
 -- a silent non-match later when phone support lands.
 --
--- Org opt-in: organizations.marketplace_lookup_enabled, default false, deliberately
--- separate from migration-335's marketplace_booking_enabled -- read and write are different
--- risk profiles, and an org should be able to opt into one without the other.
+-- Org gate: lookup is allowed when organizations.marketplace_lookup_enabled (default false)
+-- OR migration-335's marketplace_booking_enabled is on (org active). RULE: a customer must
+-- always be able to see the bookings they made -- an org that takes marketplace bookings can
+-- never have an empty Appointments page. marketplace_lookup_enabled stays for lookup-only
+-- studios that opt into read without taking bookings. If a studio is switched off AFTER a
+-- customer booked through the marketplace, that customer still sees those bookings
+-- (bookings.booking_source = 'marketplace', migration 412); everyone else is refused.
 --
 -- Response additions beyond the original 3-field design (bookings/membership/packages):
 -- total_visits and referral_earnings are cheap aggregates (a count and a sum, each off an
@@ -79,6 +83,7 @@ SET search_path = public
 AS $$
 DECLARE
   v_org_id uuid;
+  v_org_enabled boolean;
   v_customer_id uuid;
   v_bookings jsonb;
   v_membership jsonb;
@@ -97,11 +102,11 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
-  SELECT id INTO v_org_id
+  SELECT id, (marketplace_lookup_enabled = true OR marketplace_booking_enabled = true)
+  INTO v_org_id, v_org_enabled
   FROM public.organizations
   WHERE slug = p_org_slug
-    AND is_active = true
-    AND marketplace_lookup_enabled = true;
+    AND is_active = true;
 
   IF v_org_id IS NULL THEN
     RAISE EXCEPTION 'org not found or not marketplace-enabled: %', p_org_slug
@@ -113,6 +118,19 @@ BEGIN
   WHERE c.org_id = v_org_id
     AND lower(c.email) = lower(p_identifier_value)
   LIMIT 1;
+
+  -- Studio switched off after the customer booked: they still see what they booked (booking_source
+  -- from migration 412, read at call time so apply order does not matter). Anyone else is refused
+  -- exactly as before, including "no such customer", so a disabled org leaks nothing.
+  IF NOT v_org_enabled AND (
+       v_customer_id IS NULL
+       OR NOT EXISTS (SELECT 1 FROM public.bookings bk
+                      WHERE bk.customer_id = v_customer_id AND bk.booking_source = 'marketplace'
+                        AND bk.branch_id IN (SELECT id FROM public.branches WHERE org_id = v_org_id))
+     ) THEN
+    RAISE EXCEPTION 'org not found or not marketplace-enabled: %', p_org_slug
+      USING ERRCODE = 'BSNF1';
+  END IF;
 
   IF v_customer_id IS NULL THEN
     RETURN jsonb_build_object(

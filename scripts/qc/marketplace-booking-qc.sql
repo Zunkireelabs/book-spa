@@ -224,6 +224,36 @@ BEGIN
   PERFORM pg_temp.rec('org not enabled', 'ORG_NOT_ENABLED', pg_temp.code(r));
   UPDATE organizations SET marketplace_booking_enabled = true WHERE id = v_org;
 
+  -- lookup gate: a customer must always see bookings they made (booking on, lookup off -> found)
+  UPDATE organizations SET marketplace_lookup_enabled = false, marketplace_booking_enabled = true WHERE id = v_org;
+  r := public_create_booking(v_slug, v_branch, v_svc, v_sat, '11:00', 'QC Lookup', 'qc-lookup-332@example.com', '+9779800332099', NULL, NULL, 'no-preference', NULL, NULL, NULL, NULL);
+  PERFORM pg_temp.rec('lookup gate: booking made', 'ok', pg_temp.code(r));
+  r2 := public.marketplace_lookup_customer(v_slug, 'email', 'qc-lookup-332@example.com');
+  PERFORM pg_temp.rec('lookup gate: booking on + lookup off -> found', 'true', r2->>'found');
+  PERFORM pg_temp.rec('lookup gate: the booking is listed', '1', jsonb_array_length(r2->'bookings')::text);
+  UPDATE organizations SET marketplace_lookup_enabled = false, marketplace_booking_enabled = false WHERE id = v_org;
+  PERFORM pg_temp.rec('lookup gate: the booking carries source marketplace', 'marketplace', (SELECT booking_source FROM bookings WHERE branch_id = v_branch AND customer_id = (SELECT id FROM customers WHERE org_id = v_org AND lower(email) = 'qc-lookup-332@example.com' LIMIT 1) LIMIT 1));
+  -- both off, but the customer booked through the marketplace: still sees it
+  r2 := public.marketplace_lookup_customer(v_slug, 'email', 'qc-lookup-332@example.com');
+  PERFORM pg_temp.rec('lookup gate: studio off, customer has a marketplace booking -> still found', 'true', r2->>'found');
+  BEGIN
+    PERFORM public.marketplace_lookup_customer(v_slug, 'email', 'nobody-qc-332@example.com');
+    txt := 'no error';
+  EXCEPTION WHEN OTHERS THEN txt := SQLSTATE;
+  END;
+  PERFORM pg_temp.rec('lookup gate: studio off, unknown customer -> refused (nothing leaks)', 'BSNF1', txt);
+  UPDATE bookings SET booking_source = NULL WHERE branch_id IN (SELECT id FROM branches WHERE org_id = v_org) AND booking_source = 'marketplace' AND customer_id = (SELECT id FROM customers WHERE org_id = v_org AND lower(email) = 'qc-lookup-332@example.com' LIMIT 1);
+  BEGIN
+    PERFORM public.marketplace_lookup_customer(v_slug, 'email', 'qc-lookup-332@example.com');
+    txt := 'no error';
+  EXCEPTION WHEN OTHERS THEN txt := SQLSTATE;
+  END;
+  PERFORM pg_temp.rec('lookup gate: studio off, customer without marketplace source -> refused', 'BSNF1', txt);
+  UPDATE organizations SET marketplace_lookup_enabled = true WHERE id = v_org;
+  r2 := public.marketplace_lookup_customer(v_slug, 'email', 'qc-lookup-332@example.com');
+  PERFORM pg_temp.rec('lookup gate: lookup-only studio (booking off) -> found', 'true', r2->>'found');
+  UPDATE organizations SET marketplace_lookup_enabled = false, marketplace_booking_enabled = true WHERE id = v_org;
+
   UPDATE services SET is_active = false WHERE id = v_svc;
   r := public_create_booking(v_slug, v_branch, v_svc, v_sat, '11:00', 'QC X', NULL, '+9779800332003', NULL, NULL, 'no-preference', NULL, NULL, NULL, NULL);
   PERFORM pg_temp.rec('inactive service', 'INVALID_SERVICE', pg_temp.code(r));
