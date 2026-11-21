@@ -7,7 +7,7 @@ Last synced: **2026-11-21** by Project Manager · 289 open tickets (epics exclud
 ---
 
 ## Flags from the last sync
-- **Open PRs without `ZNLY-` in the title:** #425, #415, #30 (5 open PRs).
+- **Open PRs without `ZNLY-` in the title:** #425, #415, #30 (3 open PRs).
 - **Urgent/high with no owner:** ZNLY-258, ZNLY-256, ZNLY-220, ZNLY-218, ZNLY-216, ZNLY-213, ZNLY-210, ZNLY-209, ZNLY-208, ZNLY-207, ZNLY-206, ZNLY-199, ZNLY-197, ZNLY-196, ZNLY-183, ZNLY-179, ZNLY-26, ZNLY-18, ZNLY-15, ZNLY-14, ZNLY-13, ZNLY-12.
 
 ## In progress
@@ -72,8 +72,8 @@ Last synced: **2026-11-21** by Project Manager · 289 open tickets (epics exclud
 | ZNLY-234 | Sadin | urgent | QC Accepted | Day close traps money and unfinished bookings: balances can't be collected after close, unfinished bookings get frozen, card payments are filed as Fonepay |
 | ZNLY-235 | Sadin | urgent | QC Accepted | Restricted staff access not enforced: names, phones and prices show on most screens and through the API (customers, payments) |
 | ZNLY-261 | Sadin | urgent | On Stage | Stage deploy blocked: 4 RLS policies call helpers unwrapped (attendance_changes, attendance_punches, insight_feedback x2) — migration 400 |
-| ZNLY-287 | Sadin | urgent | In Review | QC: Bookings (phone) — page is wider than the screen, left side cut off |
-| ZNLY-294 | Sadin | urgent | In Review | QC: All inputs (phone) — page zooms in when you tap a text box, search or time field |
+| ZNLY-287 | Sadin | urgent | On Stage | QC: Bookings (phone) — page is wider than the screen, left side cut off |
+| ZNLY-294 | Sadin | urgent | On Stage | QC: All inputs (phone) — page zooms in when you tap a text box, search or time field |
 | ZNLY-14 | — | high | In Review | PR #30: move PIN login service-role usage to Edge Function |
 | ZNLY-34 | Anish | high | In Review | PR #413: Combo-service bookings, calendar full-day view, service/staff admin upgrades |
 | ZNLY-41 | Anish | high | On Stage | Promote stage → main: customer/staff detail rebuild + migrations 275-281 |
@@ -116,31 +116,31 @@ Last synced: **2026-11-21** by Project Manager · 289 open tickets (epics exclud
 | ZNLY-244 | Sadin | high | QC Accepted | Transfer form: timed transfer preview calls computeRevertPreview, which is never imported (ReferenceError) |
 | ZNLY-248 | Sadin | high | QC Accepted | Payment mode spelling: Business Health report (mig 371) and other readers match 'Cash' exactly, so 'cash' payments count as "other" |
 | ZNLY-250 | Sadin | high | QC Accepted | Customer detail page numbers use old rules: Amount owing counts upcoming/cancelled bookings; Last Visit can be a future booking (disagrees with Customers list + panel) |
-| ZNLY-263 | Sadin | high | In Review | Login pages redesign (/login org finder and /:org/login): split layout, our current stack |
-| ZNLY-288 | Sadin | high | In Review | QC: Dashboard Live floor (phone) — pinned names column lets bookings and the now-line show through, rows uneven |
-| ZNLY-289 | Sadin | high | In Review | QC: Phone shell bottom — grey band behind the nav on some screens, last content cropped or hidden under the nav |
-| ZNLY-290 | Sadin | high | In Review | QC: Notification panel (phone) — scrolling inside it scrolls the page behind |
-| ZNLY-291 | Sadin | high | In Review | QC: Notification settings (phone) — Sound row squeezes its description into a one-word column |
-| ZNLY-292 | Sadin | high | In Review | QC: Bookings sort/filters (phone) — Sort opens a plain list behind the nav; should use the Calendar-views bottom sheet pattern |
-| ZNLY-295 | Sadin | high | In Review | QC: Settings (phone) — only the first page (Services) is reachable, and profile-menu Settings opens a different page |
-| ZNLY-296 | Sadin | high | In Review | QC: Notification panel (phone) — bottom line ("2 of 2 unread shown · Open Inbox") cut off behind the browser bar |
-| ZNLY-297 | Sadin | high | In Review | QC: Bookings list (phone) — rows cramped: status chip touches the next row, "Late · 4h 48m" wraps |
-| ZNLY-298 | Sadin | high | In Review | QC: Phone nav — current page not highlighted; More never lights up for pages inside it |
-| ZNLY-299 | Sadin | high | In Review | QC: Calendar day view (phone) — ~4.5 squeezed staff columns and tiny chips ("1:15", "Dee…"), hard to read; should be 3 readable columns like Fresha |
-| ZNLY-300 | Sadin | high | In Review | QC: Staff picker — New booking and the booking panel use two different lists, and "Assigned" means opposite things; one shared Staff picker everywhere |
-| ZNLY-301 | Sadin | high | In Review | QC: Two different New booking forms — Bookings tab opens a 4-step wizard with no staff choice; Calendar/Dashboard open the panel; one New booking everywhere |
-| ZNLY-302 | Sadin | high | In Review | QC: Calendar (phone + desktop) — the grid pans diagonally; should lock to one direction per swipe (sideways OR up/down), like Fresha and Google Calendar |
-| ZNLY-304 | Sadin | high | In Review | QC: New booking — a blocked save shows its reason far down the form while Create booking stays green, so tapping it seems to do nothing |
-| ZNLY-305 | Sadin | high | In Review | QC: Toasts (phone) — bottom messages sit behind the floating bottom nav |
-| ZNLY-306 | Sadin | high | In Review | QC: Services settings (phone) — the services table squeezes each service name onto about 5 lines |
-| ZNLY-308 | Sadin | high | In Review | Edit service: category shows "Select…" when the service's category isn't in the business's category list (saving may wipe it) |
-| ZNLY-318 | Sadin | high | In Review | One staff control everywhere: a closed staff row that opens the list (dropdown on desktop, sheet on phone) in New booking Individual, the booking panel Staff tab and Assign |
-| ZNLY-320 | Sadin | high | In Review | One service control everywhere: a closed service row that opens the list (dropdown on desktop/tablet, sheet on phone), with clean rows, category headers and "Most booked" |
-| ZNLY-322 | Sadin | high | In Review | New booking → Group: the required service row gets lost (no own label, looks optional, "Fill free staff" box shows before a service) |
-| ZNLY-323 | Sadin | high | In Review | Phone country picker: every country (Nepal default) with search, in the shared CountryCodeSelect |
-| ZNLY-324 | Sadin | high | In Review | Booking panel → Edit details: redesign to match New booking (no layout gap, shared phone field, shared date/time controls) |
-| ZNLY-327 | Sadin | high | In Review | Walk-in customers: book without name/phone ("Walk-in" in the customer field), keep the record, add the client later; stop fake walk-in names and numbers |
-| ZNLY-331 | Sadin | high | In Review | One phone field everywhere: move the remaining plain phone boxes onto the shared country-code field + validity check (Collect payment, customer edit, vouchers, memberships, packages, Waitlist, staff profile, online booking, sign-up, Group guests) |
+| ZNLY-263 | Sadin | high | On Stage | Login pages redesign (/login org finder and /:org/login): split layout, our current stack |
+| ZNLY-288 | Sadin | high | On Stage | QC: Dashboard Live floor (phone) — pinned names column lets bookings and the now-line show through, rows uneven |
+| ZNLY-289 | Sadin | high | On Stage | QC: Phone shell bottom — grey band behind the nav on some screens, last content cropped or hidden under the nav |
+| ZNLY-290 | Sadin | high | On Stage | QC: Notification panel (phone) — scrolling inside it scrolls the page behind |
+| ZNLY-291 | Sadin | high | On Stage | QC: Notification settings (phone) — Sound row squeezes its description into a one-word column |
+| ZNLY-292 | Sadin | high | On Stage | QC: Bookings sort/filters (phone) — Sort opens a plain list behind the nav; should use the Calendar-views bottom sheet pattern |
+| ZNLY-295 | Sadin | high | On Stage | QC: Settings (phone) — only the first page (Services) is reachable, and profile-menu Settings opens a different page |
+| ZNLY-296 | Sadin | high | On Stage | QC: Notification panel (phone) — bottom line ("2 of 2 unread shown · Open Inbox") cut off behind the browser bar |
+| ZNLY-297 | Sadin | high | On Stage | QC: Bookings list (phone) — rows cramped: status chip touches the next row, "Late · 4h 48m" wraps |
+| ZNLY-298 | Sadin | high | On Stage | QC: Phone nav — current page not highlighted; More never lights up for pages inside it |
+| ZNLY-299 | Sadin | high | On Stage | QC: Calendar day view (phone) — ~4.5 squeezed staff columns and tiny chips ("1:15", "Dee…"), hard to read; should be 3 readable columns like Fresha |
+| ZNLY-300 | Sadin | high | On Stage | QC: Staff picker — New booking and the booking panel use two different lists, and "Assigned" means opposite things; one shared Staff picker everywhere |
+| ZNLY-301 | Sadin | high | On Stage | QC: Two different New booking forms — Bookings tab opens a 4-step wizard with no staff choice; Calendar/Dashboard open the panel; one New booking everywhere |
+| ZNLY-302 | Sadin | high | On Stage | QC: Calendar (phone + desktop) — the grid pans diagonally; should lock to one direction per swipe (sideways OR up/down), like Fresha and Google Calendar |
+| ZNLY-304 | Sadin | high | On Stage | QC: New booking — a blocked save shows its reason far down the form while Create booking stays green, so tapping it seems to do nothing |
+| ZNLY-305 | Sadin | high | On Stage | QC: Toasts (phone) — bottom messages sit behind the floating bottom nav |
+| ZNLY-306 | Sadin | high | On Stage | QC: Services settings (phone) — the services table squeezes each service name onto about 5 lines |
+| ZNLY-308 | Sadin | high | On Stage | Edit service: category shows "Select…" when the service's category isn't in the business's category list (saving may wipe it) |
+| ZNLY-318 | Sadin | high | On Stage | One staff control everywhere: a closed staff row that opens the list (dropdown on desktop, sheet on phone) in New booking Individual, the booking panel Staff tab and Assign |
+| ZNLY-320 | Sadin | high | On Stage | One service control everywhere: a closed service row that opens the list (dropdown on desktop/tablet, sheet on phone), with clean rows, category headers and "Most booked" |
+| ZNLY-322 | Sadin | high | On Stage | New booking → Group: the required service row gets lost (no own label, looks optional, "Fill free staff" box shows before a service) |
+| ZNLY-323 | Sadin | high | On Stage | Phone country picker: every country (Nepal default) with search, in the shared CountryCodeSelect |
+| ZNLY-324 | Sadin | high | On Stage | Booking panel → Edit details: redesign to match New booking (no layout gap, shared phone field, shared date/time controls) |
+| ZNLY-327 | Sadin | high | On Stage | Walk-in customers: book without name/phone ("Walk-in" in the customer field), keep the record, add the client later; stop fake walk-in names and numbers |
+| ZNLY-331 | Sadin | high | On Stage | One phone field everywhere: move the remaining plain phone boxes onto the shared country-code field + validity check (Collect payment, customer edit, vouchers, memberships, packages, Waitlist, staff profile, online booking, sign-up, Group guests) |
 | ZNLY-67 | Sadin | medium | In Review | UI-1: Calendar exact-match port + app shell from ClinicMD (pre-V5) |
 | ZNLY-68 | Sadin | medium | In Review | UI-2 (V5–V9): Panel unification — forms, details, settings, campaigns → right-hand panels |
 | ZNLY-69 | Sadin | medium | In Review | UI-3 (V11–V13): Customers redesign — list, lifecycle strip, panel, collect, Spotlight, one-scroll header |
@@ -163,22 +163,22 @@ Last synced: **2026-11-21** by Project Manager · 289 open tickets (epics exclud
 | ZNLY-249 | Sadin | medium | QC Accepted | Calendar transfer shading label shows the wrong end time ("At QC Second Studio 10:00am–12:00pm" for a 2-day transfer) |
 | ZNLY-251 | Sadin | medium | QC Accepted | Prod spa industry plural label is "All Staffs": sidebar, list headers and search show "All Staffs" / "Search all staffs..." |
 | ZNLY-262 | Sadin | medium | On Stage | Blocked login (login off) shows a raw hook error; show "Your login is turned off, contact your admin" |
-| ZNLY-293 | Sadin | medium | In Review | QC: Bookings list (phone) — row chevron is cut off when the action button is "Confirm" (wider than "Start") |
-| ZNLY-303 | Sadin | medium | In Review | Staff picker in Group mode: per-guest pick with the shared StaffPicker (follow-up to ZNLY-300) |
-| ZNLY-307 | Sadin | medium | In Review | QC: Booking settings — the "Advance booking window" heading is oversized compared with the other settings headings |
-| ZNLY-309 | Sadin | medium | In Review | One width for every booking side panel: New booking (420px today) and Assign list (fixed 560) use the booking panel's width rule |
-| ZNLY-310 | Sadin | medium | In Review | Consistency: three remaining single-staff pickers still use a plain dropdown instead of the shared StaffPicker / StaffPickRow |
-| ZNLY-312 | Sadin | medium | In Review | Consistency: booking Staff tab opened from Bookings or Inbox shows no Free / Busy / Off (only the calendar day view passes that day's bookings) |
-| ZNLY-317 | Sadin | medium | In Review | Phone staff list sheet: empty title bar with only an ✕ above the "Staff for …" header (mockup has the header right under the grab handle) |
-| ZNLY-319 | Sadin | medium | In Review | QC: New booking → Group (phone): the guest card heading "Person 2" wraps onto two lines, squeezed by the "optional · blank uses the contact's details" hint |
-| ZNLY-325 | Sadin | medium | In Review | Portalled popovers may render behind side panels/modals (z-dropdown 300 < z-modal 1000): BookingHoverCard, PaymentModal, BookingActionModal |
-| ZNLY-329 | Sadin | medium | In Review | Dashboard Live floor: right after a side panel closes, timeline rows render wider than the card (bars spill past its left edge and over Needs action) |
-| ZNLY-330 | Sadin | medium | In Review | Booking History misses detail changes: Edit details (name, phone, service, date/time) and "Client added" on a walk-in leave no history row |
+| ZNLY-293 | Sadin | medium | On Stage | QC: Bookings list (phone) — row chevron is cut off when the action button is "Confirm" (wider than "Start") |
+| ZNLY-303 | Sadin | medium | On Stage | Staff picker in Group mode: per-guest pick with the shared StaffPicker (follow-up to ZNLY-300) |
+| ZNLY-307 | Sadin | medium | On Stage | QC: Booking settings — the "Advance booking window" heading is oversized compared with the other settings headings |
+| ZNLY-309 | Sadin | medium | On Stage | One width for every booking side panel: New booking (420px today) and Assign list (fixed 560) use the booking panel's width rule |
+| ZNLY-310 | Sadin | medium | On Stage | Consistency: three remaining single-staff pickers still use a plain dropdown instead of the shared StaffPicker / StaffPickRow |
+| ZNLY-312 | Sadin | medium | On Stage | Consistency: booking Staff tab opened from Bookings or Inbox shows no Free / Busy / Off (only the calendar day view passes that day's bookings) |
+| ZNLY-317 | Sadin | medium | On Stage | Phone staff list sheet: empty title bar with only an ✕ above the "Staff for …" header (mockup has the header right under the grab handle) |
+| ZNLY-319 | Sadin | medium | On Stage | QC: New booking → Group (phone): the guest card heading "Person 2" wraps onto two lines, squeezed by the "optional · blank uses the contact's details" hint |
+| ZNLY-325 | Sadin | medium | On Stage | Portalled popovers may render behind side panels/modals (z-dropdown 300 < z-modal 1000): BookingHoverCard, PaymentModal, BookingActionModal |
+| ZNLY-329 | Sadin | medium | On Stage | Dashboard Live floor: right after a side panel closes, timeline rows render wider than the card (bars spill past its left edge and over Needs action) |
+| ZNLY-330 | Sadin | medium | On Stage | Booking History misses detail changes: Edit details (name, phone, service, date/time) and "Client added" on a walk-in leave no history row |
 | ZNLY-40 | Sadin | low | On Stage | Retire stale docs now superseded by Plane |
 | ZNLY-119 | Sadin | low | In Review | Profile: Transfer is hidden behind Profile → Edit; add it to the header ⋯ menu and show Branch in the read view |
 | ZNLY-120 | Sadin | low | In Review | Therapists list shows nothing for a transfer scheduled later today (e.g. "To Sanepa at 4:20 pm") |
 | ZNLY-243 | Sadin | low | QC Accepted | Calendar settings "Calendar interval" uses a native <select> (breaks CLAUDE.md rule 8) |
-| ZNLY-326 | Sadin | low | In Review | Booking panel (phone): collapsing the sheet asks "Discard unsaved changes?" even when Edit details was not changed |
+| ZNLY-326 | Sadin | low | On Stage | Booking panel (phone): collapsing the sheet asks "Discard unsaved changes?" even when Edit details was not changed |
 
 ## Todo
 | Ticket | Owner | Priority | What |
