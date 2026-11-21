@@ -36,7 +36,7 @@ import { useNavigate } from 'react-router-dom';
 import AvailabilityNoteLine from './AvailabilityNoteLine';
 import { AlertsBlock } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
 import { getBookingStatusColors } from '../../utils/bookingStatusColors';
-import { editFormChanged } from '../../utils/editDetails';
+import { editFormChanged, editFormSeed, newBookingFormChanged } from '../../utils/editDetails';
 import { formatPhoneGrouped } from '../../utils/phone';
 import { parsePhone } from './CountryCodeSelect';
 import PhoneField, { usePhoneState, phoneFieldProblem, phoneFieldValue } from './PhoneField';
@@ -803,18 +803,7 @@ const BookingActionModal = ({
   };
 
   const startEditing = () => {
-    const { dial: phoneDial, national: phoneNational } = parsePhone(booking.customerPhone || '');
-    setEditForm({
-      customerName: booking.customerName || '',
-      customerPhone: booking.customerPhone || '',
-      phoneDial,
-      phoneNational,
-      serviceId: booking.serviceId || '',
-      date: booking.date || '',
-      startTime: booking.startTime ? booking.startTime.slice(0, 5) : booking.time || '',
-      specialRequests: booking.specialRequests || '',
-      referredBy: booking.referredBy || '',
-    });
+    setEditForm(editFormSeed(booking));
     setEditError(null);
     setIsEditing(true);
   };
@@ -1352,8 +1341,14 @@ const BookingActionModal = ({
   const bookingTherapistIdsStr = booking
     ? (booking.therapists?.length > 0 ? booking.therapists.map(t => t.id) : (booking.therapist?.id ? [booking.therapist.id] : [])).slice().sort().join(',')
     : '';
+  // Open forms count as unsaved only when a value really differs from where it started (ZNLY-326). The extend panel holds no
+  // value (picking an option applies at once), so opening it alone is never dirty.
+  const formDirty = !!booking && (
+    (isEditing && editFormChanged(editForm, booking))
+    || (!!newBookingMode && newBookingFormChanged(newBookingForm, newBookingMode, booking, new Date().toISOString().slice(0, 10)))
+  );
   const isDirty = !!booking && (
-    isEditing || !!newBookingMode || showExtendPanel
+    formDirty
     || !!String(discountValue || '').trim() || !!String(discountReason || '').trim()
     || (selectedTherapists.slice().sort().join(',') !== bookingTherapistIdsStr)
     || ((selectedRoom || '') !== (booking.roomId || ''))
@@ -1393,7 +1388,7 @@ const BookingActionModal = ({
   const changeDetent = (next) => {
     if (next !== 'half') { setDetent(next); return; }
     const collapse = () => { if (isEditing) cancelEditing(); setShowExtendPanel(false); setNewBookingMode(null); setDetent('half'); };
-    if (isEditing && isDirty) setPanelConfirm({ type: 'switch', action: collapse });
+    if (formDirty) setPanelConfirm({ type: 'switch', action: collapse });
     else collapse();
   };
 
