@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-21** by Project Manager · 277 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-21** by Project Manager · 279 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -54,6 +54,7 @@ Last synced: **2026-11-21** by Project Manager · 277 open tickets (epics exclud
 | ZNLY-306 | Sadin | high | QC: Services settings (phone) — the services table squeezes each service name onto about 5 lines |
 | ZNLY-308 | Sadin | high | Edit service: category shows "Select…" when the service's category isn't in the business's category list (saving may wipe it) |
 | ZNLY-318 | Sadin | high | One staff control everywhere: a closed staff row that opens the list (dropdown on desktop, sheet on phone) in New booking Individual, the booking panel Staff tab and Assign |
+| ZNLY-320 | Sadin | high | One service control everywhere: a closed service row that opens the list (dropdown on desktop/tablet, sheet on phone), with clean rows, category headers and "Most booked" |
 | ZNLY-136 | Anish | medium | Group booking (Fresha-style): book multiple people, one shared slot, one checkout |
 | ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
 | ZNLY-175 | Sadin | medium | Therapist inner page: outcomes bar total counts upcoming bookings that sit in no bucket |
@@ -306,3 +307,4 @@ Last synced: **2026-11-21** by Project Manager · 277 open tickets (epics exclud
 | ZNLY-254 | Sadin | low | Insight: flag a paid amount that doesn't match the price after discount (voucher NTL327 paid 8,400 for a 20%-off 6,720 voucher) |
 | ZNLY-264 | Sadin | low | Evaluate Astryx design system (Meta, beta): React 18 to 19 upgrade + StyleX vs our Tailwind stack. After go-live |
 | ZNLY-316 | — | low | Tech debt: AssignFlow's useDayContext duplicates the new useDayAvailability hook; use one |
+| ZNLY-321 | Sadin | low | Idea: "Booked last time" in the service list for a returning customer (where the customer is known before the service) |
