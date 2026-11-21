@@ -136,3 +136,8 @@ Noting the gap repeatedly is not the same as closing it.
 ## 2026-11-21: review every line of a new runtime file, not just a grep
 - ZNLY-332: I reviewed the edge functions by grepping for secret/auth lines. A block pasted twice (lines 67–89 of marketplace-create-booking/index.ts) slipped through, and the function failed to BOOT on staging. Its tests only covered the _shared helpers, so nothing parsed index.ts.
 - Rule: every new runtime entry file (edge function, route, migration) gets a full read in review, and a parse/compile check in the test suite. A harness that never loads the entry file doesn't prove the entry file works.
+
+## 2026-11-21: run every CI migration check locally before a PR, not only the ones I remember
+- ZNLY-358: PR #469 passed build/test/check-migrations, but the staging deploy failed at `scripts/check-rls-initplan.sh` (migration 411 policy called `auth.uid()` unwrapped). The frontend did not deploy.
+- Rule: before committing any migration, run every check the deploy workflow runs against a DB (`grep -n "scripts/" .github/workflows/deploy*.yml`), including check-rls-initplan.sh, against the local DB with the migration applied.
+- macOS bash 3.2 can't run `migrate-apply.sh` (`declare -A`). Run it in a container: `docker run --rm -v "$PWD":/w:ro -w /w -e PGHOST=host.docker.internal -e PGPORT=56422 -e PGUSER=postgres -e PGPASSWORD=postgres -e PGDATABASE=postgres -e PGSSLMODE=disable postgres:16 bash scripts/migrate-apply.sh local --dry-run`.
