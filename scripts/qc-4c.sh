@@ -155,6 +155,11 @@ psql "$DB" -v ON_ERROR_STOP=1 -f supabase/tests/znly-236.sql >/tmp/qc-4c-236.log
 grep -E "NOTICE|ERROR|DETAIL" /tmp/qc-4c-236.log | sed 's#psql:[^ ]* ##'
 grep -q "236 PASSED" /tmp/qc-4c-236.log || fail "ZNLY-236 SQL test"
 
+echo "== ZNLY-274 SQL test (supabase/tests/znly-274.sql): anon creates the customer for an online booking"
+psql "$DB" -v ON_ERROR_STOP=1 -f supabase/tests/znly-274.sql >/tmp/qc-4c-274.log 2>&1
+grep -E "NOTICE|ERROR|DETAIL" /tmp/qc-4c-274.log | sed 's#psql:[^ ]* ##'
+grep -q "ZNLY-274 PASSED" /tmp/qc-4c-274.log || fail "ZNLY-274 SQL test"
+
 echo "== ZNLY-219: anon/authenticated cannot execute the PIN functions"
 pinleak=$(psql "$DB" -qAt -c "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('verify_pin','login_with_pin') and (has_function_privilege('anon',p.oid,'EXECUTE') or has_function_privilege('authenticated',p.oid,'EXECUTE'))")
 [ "$pinleak" = "0" ] || fail "ZNLY-219: $pinleak PIN function(s) executable by anon/authenticated"

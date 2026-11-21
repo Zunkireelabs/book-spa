@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { useOrg } from '../../../../contexts/OrgContext';
@@ -44,7 +45,7 @@ const ClosedDatesPanel = ({ branchId }) => {
     setLoading(true);
     setError(null);
     const { data, error: fetchErr } = await fetchClosedDateRanges(branchId);
-    if (fetchErr) setError(fetchErr.message || 'Failed to load closed dates.');
+    if (fetchErr) setError(friendlyError(fetchErr, 'Failed to load closed dates.'));
     else setRanges(data || []);
     setLoading(false);
   }, [branchId]);
@@ -85,14 +86,14 @@ const ClosedDatesPanel = ({ branchId }) => {
     // comment for why).
     if (editingId) {
       const { error: delErr } = await deleteClosedDateRange(editingId);
-      if (delErr) { setFormError(delErr.message || 'Failed to update closed date.'); setSaving(false); return; }
+      if (delErr) { setFormError(friendlyError(delErr, 'Failed to update closed date.')); setSaving(false); return; }
     }
 
     const { error: createErr } = await createClosedDateRange({
       orgId, branchId, startDate, endDate, description: description.trim(),
     });
     if (createErr) {
-      setFormError(createErr.message || 'Failed to save closed date.');
+      setFormError(friendlyError(createErr, 'Failed to save closed date.'));
       setSaving(false);
       return;
     }
@@ -109,7 +110,7 @@ const ClosedDatesPanel = ({ branchId }) => {
     setTimeout(async () => {
       const { error: delErr } = await deleteClosedDateRange(range.blockId);
       if (delErr) {
-        setError(delErr.message || 'Failed to remove closed date.');
+        setError(friendlyError(delErr, 'Failed to remove closed date.'));
         setRemovingId(null);
         return;
       }
@@ -122,8 +123,8 @@ const ClosedDatesPanel = ({ branchId }) => {
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h3 className="font-accent text-3xl text-text-primary leading-tight">Closed dates</h3>
-          <p className="font-body text-sm text-text-secondary mt-1 max-w-xl">
+          {/* No heading: the AreaPage title is already "Closed Dates". */}
+          <p className="font-body text-sm text-text-secondary max-w-xl">
             List the dates your business is closed for public holidays, maintenance, or any other reason.
             Customers won't be able to place online bookings during these dates.
           </p>

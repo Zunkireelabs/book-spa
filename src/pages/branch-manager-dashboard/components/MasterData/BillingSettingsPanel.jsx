@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
@@ -43,7 +44,7 @@ const BillingSettingsPanel = ({ readOnly = false }) => {
     setError(null);
     const result = await fetchBillingSettings();
     if (result.error) {
-      setError(result.error.message || 'Failed to load billing settings.');
+      setError(friendlyError(result.error, 'Failed to load billing settings.'));
     } else {
       setForm(result.data);
       setOriginal(result.data);

@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
@@ -203,7 +204,7 @@ const AttendancePanel = ({ branchId }) => {
     setDayClosed(!!day.data?.isClosed);
     if (set.data) setSettings(set.data);
     setGaps(gp.data || []);
-    if (att.error) { setError(att.error.message || 'Failed to load attendance.'); setLoading(false); hasLoadedRef.current = true; return; }
+    if (att.error) { setError(friendlyError(att.error, 'Failed to load attendance.')); setLoading(false); hasLoadedRef.current = true; return; }
     setTherapists(att.data || []);
     const elsewhere = Object.keys(byP).filter((id) => byP[id].some((q) => q.branchId !== branchId));
     if (elsewhere.length) {
@@ -385,7 +386,7 @@ const AttendancePanel = ({ branchId }) => {
   const handleWriteError = (r, err, preset) => {
     if (err.code === 'ATTENDANCE_DAY_LOCKED') { setDayClosed(true); showToast("This day is closed. Attendance can't be changed.", 'error'); return; }
     if (err.code === 'ATTENDANCE_REASON_REQUIRED') { openPanel(r, { mode: preset || null, focus: 'reason', forceReason: true }); return; }
-    showToast(err.message || 'Could not save attendance.', 'error');
+    showToast(friendlyError(err, 'Could not save attendance.'), 'error');
   };
 
   // One quick DAY action (⋯ menu: Absent / Day off) for one person.
@@ -440,7 +441,7 @@ const AttendancePanel = ({ branchId }) => {
       ? await punchIn({ therapistId: v.therapistId, branchId, at: nowIso(), source: 'visitor' })
       : await punchOut({ punchId: v.openHere?.id, therapistId: v.therapistId, branchId, at: nowIso(), source: 'visitor' });
     setBusyIds((b) => ({ ...b, [v.id]: false }));
-    if (err) { showToast(err.message || 'Could not save attendance.', 'error'); return; }
+    if (err) { showToast(friendlyError(err, 'Could not save attendance.'), 'error'); return; }
     await loadVisitors(); await loadData();
     showToast(`${v.name} ${which === 'in' ? 'checked in' : 'checked out'} at ${fmt(clock.hm)}`, 'success',
       which === 'in' ? { items: [{ type: 'punchIn', punchId: data.id, therapistId: v.therapistId, date: selectedDate, dayCreated: false }] } : null);
@@ -707,7 +708,7 @@ const AttendancePanel = ({ branchId }) => {
       item('Open profile', () => navigate(`/${orgSlug}/staff/${r.id}`)),
     ];
     return (
-      <Menu trigger={(open, toggle) => (
+      <Menu title={`Actions for ${r.name}`} trigger={(open, toggle) => (
         <button type="button" aria-label={`More for ${r.name}`} aria-expanded={open} onClick={toggle} className="w-7 h-7 rounded-md text-text-secondary hover:bg-[#F1F1EF] flex items-center justify-center"><Icon name="MoreHorizontal" size={16} /></button>
       )}>
         {(close) => items.map((it, i) => (it.divider ? <div key={i} className="my-1 border-t border-border" /> : (
@@ -988,7 +989,7 @@ const AttendancePanel = ({ branchId }) => {
         />
       )}
       {toast && (
-        <div role="status" className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-toast px-4 py-2.5 rounded-lg shadow-lg text-[13px] font-medium flex items-center gap-3 ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-text-primary text-white'}`}>
+        <div role="status" className={`fixed toast-bottom left-1/2 -translate-x-1/2 z-toast px-4 py-2.5 rounded-lg shadow-lg text-[13px] font-medium flex items-center gap-3 ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-text-primary text-white'}`}>
           <span>{toast.msg}</span>
           {toast.undo && <button type="button" onClick={() => undo(toast.undo)} className="underline text-white/90 hover:text-white">Undo</button>}
         </div>

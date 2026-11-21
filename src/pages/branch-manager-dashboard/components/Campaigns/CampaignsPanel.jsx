@@ -49,7 +49,7 @@ const CampaignsPanel = () => {
       fetchCategoriesForManagement(),
     ]);
     if (campaignsResult.error) {
-      setError(campaignsResult.error.message || 'Failed to load campaigns.');
+      setError(friendlyError(campaignsResult.error, 'Failed to load campaigns.'));
     } else {
       setCampaigns(campaignsResult.data || []);
     }

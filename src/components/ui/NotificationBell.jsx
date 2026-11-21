@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import { useBodyScrollLock } from './BottomSheet';
 import { Link } from 'react-router-dom';
 import Icon from '../AppIcon';
 import { useIndustry } from '../../hooks/useIndustry';
@@ -124,6 +125,7 @@ const NotificationBell = ({
     setCoords({ top: r.bottom + 12, left: Math.max(8, Math.min(r.right - 440, rightEdge - 320)), right: window.innerWidth - rightEdge });
   }, []);
 
+  useBodyScrollLock(open);
   const toggle = () => {
     if (!open) updateCoords();
     setOpen((o) => !o);
@@ -206,8 +208,8 @@ const NotificationBell = ({
       {open && createPortal(
         <div
           ref={panelRef}
-          style={{ position: 'fixed', top: coords.top, left: coords.left, right: coords.right, maxHeight: `calc(100vh - ${coords.top}px - 64px)` }}
-          className="flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 z-notification overflow-hidden"
+          style={{ position: 'fixed', top: coords.top, left: coords.left, right: coords.right, '--panel-top': `${coords.top}px`, '--panel-gap': '64px' }}
+          className="panel-fit panel-fit-nav flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 z-notification overflow-hidden overscroll-contain"
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <h3 className="text-sm font-semibold text-gray-900">Notifications</h3>
@@ -240,7 +242,7 @@ const NotificationBell = ({
             })}
           </div>
 
-          <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
             {entries.length === 0 ? (
               <div className="px-4 py-10 text-center">
                 <Icon name="BellOff" size={28} className="text-gray-300 mx-auto mb-2" />

@@ -77,7 +77,7 @@ const TodayBookingPanel = ({ booking, branchId, onClose, onChanged }) => {
         userRole={profile?.role || 'staff'}
       />
       {toast && (
-        <div role="status" className={`fixed top-20 left-1/2 -translate-x-1/2 z-toast px-5 py-3 rounded-spa-lg shadow-spa-elevated text-sm text-white ${toast.type === 'error' ? 'bg-error' : 'bg-text-primary'}`}>{toast.message}</div>
+        <div role="status" className={`fixed toast-top left-1/2 -translate-x-1/2 z-toast px-5 py-3 rounded-spa-lg shadow-spa-elevated text-sm text-white ${toast.type === 'error' ? 'bg-error' : 'bg-text-primary'}`}>{toast.message}</div>
       )}
     </>
   );

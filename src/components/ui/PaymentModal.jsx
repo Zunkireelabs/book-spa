@@ -1,3 +1,4 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, forwardRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { createPortal } from 'react-dom';
@@ -173,7 +174,7 @@ const MethodMenu = ({ rect, tree, usedValues, activeValue, onPick, onClose }) =>
     <div ref={ref} role="listbox" tabIndex={-1} aria-label="Payment method" data-checkout-menu aria-activedescendant={hi >= 0 ? `mm-opt-${hi}` : undefined}
       onKeyDown={onKeyDown}
       style={{ position: 'fixed', left, width, ...(flipUp ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }) }}
-      className="z-notification bg-white border border-[#E7E8E6] rounded-[10px] p-1 shadow-[0_12px_32px_-8px_rgba(14,13,12,.25)] max-h-[320px] overflow-y-auto text-[13px] outline-none">
+      className="z-popover bg-white border border-[#E7E8E6] rounded-[10px] p-1 shadow-[0_12px_32px_-8px_rgba(14,13,12,.25)] max-h-[320px] overflow-y-auto text-[13px] outline-none">
       {groups.map((g, gi) => (
         <div key={gi}>
           {g.title && <div className="px-2.5 pt-2 pb-1 text-[11px] font-medium uppercase tracking-[.04em] text-[#8A8A90]">{g.title}</div>}
@@ -276,6 +277,7 @@ const PaymentModal = ({
   onClose,
   isSubmitting,
   dueHolderSuggestions = [],
+  onAddClient = undefined, // ZNLY-327: walk-in with no client: opens the booking's Add client list (the host closes this modal)
   // ZNLY-233: true ONLY when the host's onConfirm goes through services/checkoutSubmit (so products on the bill are saved). Without it the
   // "Add a product" block is not offered, so a bill can never say "paid" while the product sale, stock and commission were dropped.
   savesProducts = false,
@@ -703,12 +705,12 @@ const PaymentModal = ({
         rewardCatalogId: null,
       });
       if (error) {
-        setRewardError(error.message || 'Failed to save reward. Please try again.');
+        setRewardError(friendlyError(error, 'Failed to save reward. Please try again.'));
         return;
       }
       setPendingReferralRewards(prev => prev.filter(r => r.referralId !== activePendingReward.referralId));
     } catch (err) {
-      setRewardError(err?.message || 'Failed to save reward. Please try again.');
+      setRewardError(friendlyError(err, 'Failed to save reward. Please try again.'));
     } finally {
       setRewardSubmitting(false);
     }
@@ -845,6 +847,10 @@ const PaymentModal = ({
     }
     if (entered > grandTotal) {
       setError(`Entered amount (${formatNPR(entered)}) exceeds the total due (${formatNPR(grandTotal)}).`);
+      return;
+    }
+    if (walkInNoClient && leftover > 0) {
+      setError('A walk-in with no client has to pay in full. Collect the whole amount, or add a client to leave a balance.');
       return;
     }
     if (leftover > 0 && !dueHolderName.trim()) {
@@ -1187,7 +1193,10 @@ const PaymentModal = ({
     if (tenders.length - 1 <= 1) setRestOn(true);
   };
   const overrideRest = (i) => { setRestOn(false); focusRow(i); };
+  // ZNLY-327: a walk-in with no client belongs to nobody: collect in full; no balance, package, membership or wallet until a client is added.
+  const walkInNoClient = !!(bookingRowInfo ? (bookingRowInfo.is_walk_in && !bookingRowInfo.customer_id) : (booking.isWalkIn && !booking.customerId));
   const startLeaveDue = () => {
+    if (walkInNoClient) return;
     setTouched(true);
     setLeaveDue(true);
     if (!dueHolderName.trim() && guestName) setDueHolderName(guestName);
@@ -1402,7 +1411,8 @@ const PaymentModal = ({
   }, []);
   useEffect(() => {
     const id = requestAnimationFrame(() => {
-      if (firstAmountRef.current) { firstAmountRef.current.focus(); firstAmountRef.current.select?.(); }
+      // Phone: don't auto-focus (it opens the keyboard and scrolls the sheet past Paying for); the dialog itself takes focus.
+      if (firstAmountRef.current && window.innerWidth >= 768) { firstAmountRef.current.focus(); firstAmountRef.current.select?.(); }
       else dialogRef.current?.focus();
     });
     return () => cancelAnimationFrame(id);
@@ -1432,7 +1442,7 @@ const PaymentModal = ({
     else pickMethod(item.value);
   };
 
-  const inputBase = 'h-8 w-[120px] rounded-[7px] border bg-white px-2.5 text-right text-[13px] font-medium tabular-nums text-[#0E0D0C] focus:outline-none focus:border-[#B9C7B6] focus:ring-[3px] focus:ring-primary/10';
+  const inputBase = 'h-8 max-[959px]:h-11 w-[120px] rounded-[7px] border bg-white px-2.5 text-right text-[13px] font-medium tabular-nums text-[#0E0D0C] focus:outline-none focus:border-[#B9C7B6] focus:ring-[3px] focus:ring-primary/10';
 
   // ───────────────────────── render ─────────────────────────
   const dueFraction = grandTotal > 0 ? Math.min(entered / grandTotal, 1) : 0;
@@ -1527,7 +1537,7 @@ const PaymentModal = ({
 
   const dialog = receipt ? (
     <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Payment collected"
-      className="checkout-dialog bg-white rounded-[14px] w-[440px] max-w-[calc(100vw-32px)] h-[min(640px,calc(100vh-64px))] flex flex-col outline-none shadow-[0_0_0_1px_rgba(14,13,12,.06),0_2px_4px_rgba(14,13,12,.04),0_24px_64px_-12px_rgba(14,13,12,.28)] animate-fade-in">
+      className="checkout-dialog bg-white rounded-[14px] w-[440px] max-w-[calc(100vw-24px)] min-[960px]:max-w-[calc(100vw-32px)] h-[min(640px,calc(100dvh-24px))] min-[960px]:h-[min(640px,calc(100dvh-64px))] max-md:w-full max-md:max-w-none max-md:h-[100dvh] max-md:rounded-none flex flex-col outline-none shadow-[0_0_0_1px_rgba(14,13,12,.06),0_2px_4px_rgba(14,13,12,.04),0_24px_64px_-12px_rgba(14,13,12,.28)] animate-fade-in">
       <div className="px-7 py-7 text-center overflow-y-auto flex-1 min-h-0"><div className="min-h-full flex flex-col justify-center">
         <div className="w-10 h-10 rounded-full bg-[#EEF3EC] text-primary grid place-items-center mx-auto"><Icon name="Check" size={20} strokeWidth={2.2} /></div>
         <div className="mt-3.5 text-[12.5px] text-[#8A8A90]">{receipt.memberOnly ? 'Member discount saved · nothing left to pay' : 'Payment collected'}</div>
@@ -1585,21 +1595,21 @@ const PaymentModal = ({
         </div>
       </div></div>
       <div className="h-16 px-5 border-t border-[#E7E8E6] flex items-center gap-2 flex-none">
-        <button type="button" onClick={printReceipt} className="h-9 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white text-[13px] font-medium inline-flex items-center gap-2 hover:bg-[#F7F7F5]"><Icon name="Printer" size={15} strokeWidth={1.6} />Print</button>
+        <button type="button" onClick={printReceipt} className="h-9 max-md:h-11 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white text-[13px] font-medium inline-flex items-center gap-2 hover:bg-[#F7F7F5]"><Icon name="Printer" size={15} strokeWidth={1.6} />Print</button>
         {whatsappUrl && (
-          <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="h-9 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white text-[13px] font-medium inline-flex items-center gap-2 hover:bg-[#F7F7F5]"><Icon name="MessageCircle" size={15} strokeWidth={1.6} />WhatsApp</a>
+          <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="h-9 max-md:h-11 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white text-[13px] font-medium inline-flex items-center gap-2 hover:bg-[#F7F7F5]"><Icon name="MessageCircle" size={15} strokeWidth={1.6} />WhatsApp</a>
         )}
-        <button type="button" autoFocus onClick={() => onClose?.({ paid: true })} className="ml-auto h-9 pl-4 pr-3 rounded-[7px] bg-primary text-white text-[13px] font-medium inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(45,90,39,.25)]">Done<kbd className="text-[10.5px] px-1.5 rounded border border-white/25 bg-white/10 font-sans">↵</kbd></button>
+        <button type="button" autoFocus onClick={() => onClose?.({ paid: true })} className="ml-auto h-9 max-md:h-11 max-md:px-6 pl-4 pr-3 rounded-[7px] bg-primary text-white text-[13px] font-medium inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(45,90,39,.25)]">Done<kbd className="max-md:hidden text-[10.5px] px-1.5 rounded border border-white/25 bg-white/10 font-sans">↵</kbd></button>
       </div>
     </div>
   ) : (
     <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Checkout"
-      className={`checkout-dialog relative bg-white rounded-[14px] ${cp.available ? 'w-[960px]' : 'w-[900px]'} max-w-[calc(100vw-32px)] h-[min(640px,calc(100vh-64px))] flex flex-col outline-none shadow-[0_0_0_1px_rgba(14,13,12,.06),0_2px_4px_rgba(14,13,12,.04),0_24px_64px_-12px_rgba(14,13,12,.28)] animate-fade-in text-[13px] text-[#0E0D0C]`}>
+      className={`checkout-dialog relative bg-white rounded-[14px] ${cp.available ? 'w-[960px]' : 'w-[900px]'} max-w-[calc(100vw-24px)] min-[960px]:max-w-[calc(100vw-32px)] h-[min(640px,calc(100dvh-24px))] min-[960px]:h-[min(640px,calc(100dvh-64px))] max-md:w-full max-md:max-w-none max-md:h-[100dvh] max-md:rounded-none flex flex-col outline-none shadow-[0_0_0_1px_rgba(14,13,12,.06),0_2px_4px_rgba(14,13,12,.04),0_24px_64px_-12px_rgba(14,13,12,.28)] animate-fade-in text-[13px] text-[#0E0D0C]`}>
       {/* Header */}
-      <div className="h-[60px] pl-6 pr-5 flex items-center gap-3 border-b border-[#E7E8E6] flex-none">
+      <div className="h-[60px] max-md:h-auto max-md:min-h-[60px] max-md:py-2 pl-6 pr-5 max-md:pl-4 max-md:pr-2 flex items-center gap-3 border-b border-[#E7E8E6] flex-none">
         <h2 className="text-[15px] font-semibold tracking-[-.2px]">Checkout</h2>
-        <span className="flex items-center gap-2 text-[#8A8A90] min-w-0">
-          {guestName && <b className="font-medium text-[#515152] truncate">{guestName}</b>}
+        <span className="flex items-center gap-2 text-[#8A8A90] min-w-0 max-md:flex-wrap max-md:gap-x-2 max-md:gap-y-0">
+          {guestName && <b className="font-medium text-[#515152] truncate max-md:whitespace-normal max-md:break-words">{guestName}</b>}
           <span className="whitespace-nowrap">· {bookingNumber}</span>
           {tierName && (
             <span className="inline-flex items-center gap-1 h-5 px-[7px] rounded-full bg-[#FBF3DF] text-[#9A6B0B] text-[11px] font-semibold">
@@ -1607,16 +1617,23 @@ const PaymentModal = ({
             </span>
           )}
         </span>
-        <kbd className="ml-auto text-[10.5px] font-medium text-[#8A8A90] border border-[#E7E8E6] rounded px-[5px] py-px bg-white font-sans">Esc</kbd>
-        <button type="button" onClick={requestClose} disabled={busy} aria-label="Close" className="w-[30px] h-[30px] rounded-[7px] grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2]"><Icon name="X" size={16} /></button>
+        <kbd className="ml-auto max-[959px]:hidden text-[10.5px] font-medium text-[#8A8A90] border border-[#E7E8E6] rounded px-[5px] py-px bg-white font-sans">Esc</kbd>
+        <button type="button" onClick={requestClose} disabled={busy} aria-label="Close" className="max-[959px]:ml-auto w-[30px] h-[30px] max-[959px]:w-11 max-[959px]:h-11 max-[959px]:-mr-2 rounded-[7px] grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2]"><Icon name="X" size={16} /></button>
+      </div>
+
+      {/* Phone: the number stays visible while the body scrolls */}
+      <div className="md:hidden flex-none flex items-center justify-between gap-3 px-4 h-10 border-b border-[#E7E8E6] bg-white text-[13px] tabular-nums" data-testid="due-compact">
+        <span className="text-[#8A8A90]">Amount due <b className="font-semibold text-[#0E0D0C] text-[14px]">NPR {fmt(grandTotal)}</b></span>
+        <span className="text-[#8A8A90]">Left <b className={`font-semibold ${leftover > 0.001 ? 'text-[#B45309]' : 'text-[#0E0D0C]'}`}>{fmt(leftover)}</b></span>
       </div>
 
       {/* Body */}
       <div className={`grid grid-cols-1 ${cp.available ? 'min-[960px]:grid-cols-[430px_minmax(0,1fr)]' : 'min-[960px]:grid-cols-[380px_minmax(0,1fr)]'} min-[960px]:grid-rows-[minmax(0,1fr)] flex-1 overflow-y-auto min-[960px]:overflow-hidden min-h-0`}
+        onFocusCapture={(e) => { const t = e.target; if (window.innerWidth < 960 && t && t.matches && t.matches('input, textarea, select')) setTimeout(() => t.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }), 300); }}
         onInputCapture={() => setTouched(true)}
         onClickCapture={(e) => { if (e.target.closest && e.target.closest('button, input, label')) setTouched(true); }}>
         {/* Left: paying for */}
-        <div className={`px-6 pt-5 ${Number(tip) > 0 ? 'pb-44' : 'pb-5'} min-[960px]:border-r border-b min-[960px]:border-b-0 border-[#E7E8E6] bg-[#FCFCFB] min-[960px]:overflow-y-auto min-h-0`}>
+        <div className={`px-6 max-md:px-4 pt-5 ${Number(tip) > 0 ? 'pb-44' : 'pb-5'} min-[960px]:border-r border-b min-[960px]:border-b-0 border-[#E7E8E6] bg-[#FCFCFB] min-[960px]:overflow-y-auto min-[960px]:min-h-0`}>
           <SectionLabel>Paying for</SectionLabel>
           <div className="flex items-center gap-2.5 h-[38px]">
             <Check on disabled />
@@ -1746,13 +1763,13 @@ const PaymentModal = ({
                 <div className="mt-2">
                   <div className="flex items-center justify-between text-[12px] text-[#8A8A90] mb-1.5">
                     <span>Redeem a voucher code</span>
-                    <button type="button" aria-label="Close voucher search" onClick={() => setShowVoucherSearch(false)} className="w-5 h-5 rounded grid place-items-center hover:bg-[#F4F4F2]"><Icon name="X" size={13} /></button>
+                    <button type="button" aria-label="Close voucher search" onClick={() => setShowVoucherSearch(false)} className="w-5 h-5 max-[959px]:w-11 max-[959px]:h-11 rounded grid place-items-center hover:bg-[#F4F4F2]"><Icon name="X" size={13} /></button>
                   </div>
                   <VoucherSearchInline onSelect={applyVoucherCode} />
                 </div>
               ) : (
                 <button type="button" onClick={() => { setTouched(true); setShowVoucherSearch(true); }}
-                  className="mt-2 text-[12.5px] text-primary font-medium inline-flex items-center gap-1.5 hover:underline">
+                  className="mt-2 max-[959px]:min-h-11 text-[12.5px] text-primary font-medium inline-flex items-center gap-1.5 hover:underline">
                   <Icon name="Ticket" size={13} strokeWidth={1.8} />Redeem a voucher code
                 </button>
               ))}
@@ -1800,7 +1817,7 @@ const PaymentModal = ({
                 )}
               </div>
             ) : (
-              <button type="button" onClick={() => setShowTip(true)} className="inline-flex items-center gap-2 text-[#515152] hover:text-[#0E0D0C]">
+              <button type="button" onClick={() => setShowTip(true)} className="inline-flex items-center gap-2 max-[959px]:min-h-11 text-[#515152] hover:text-[#0E0D0C]">
                 <Icon name="Heart" size={14} strokeWidth={1.6} />Add a tip
               </button>
             )}
@@ -1808,8 +1825,8 @@ const PaymentModal = ({
         </div>
 
         {/* Right: amount due + tenders */}
-        <div className="min-w-0 min-h-0 flex flex-col">
-         <div className="px-6 pt-5 flex-none">
+        <div className="min-w-0 min-[960px]:min-h-0 flex flex-col">
+         <div className="px-6 max-md:px-4 pt-5 flex-none">
           <div className="flex items-center justify-between gap-3 text-[12.5px] text-[#8A8A90]">
             <span>Amount due</span>
             {memberSavings > 0 && <span className="inline-flex items-center gap-1.5 text-[#9A6B0B]" data-member-saves><Icon name="Star" size={11} className="fill-current" strokeWidth={0} />Member saves NPR {fmt(memberSavings)}</span>}
@@ -1836,23 +1853,23 @@ const PaymentModal = ({
             <>
               <div className="mt-5 mb-2 text-[12.5px] text-[#515152]">How is the guest paying?</div>
               {/* Method picker: the org's configured methods. In single-payment mode it changes the one row's method. */}
-              <div className="flex bg-[#F4F4F2] rounded-[9px] p-[3px] gap-[3px]" role="group" aria-label="Payment method">
+              <div className="flex bg-[#F4F4F2] rounded-[9px] p-[3px] gap-[3px] max-[959px]:overflow-x-auto max-[959px]:snap-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="group" aria-label="Payment method">
                 {topItems.map((item) => {
                   const on = itemIsActive(item);
                   const sub = on && item.subMethods?.length ? leafLabel(activeTender.paymentMode) : item.label;
                   return (
                     <button key={item.value} type="button" aria-pressed={on} onClick={(e) => onSegClick(item, e.currentTarget)}
-                      className={`flex-auto min-w-0 h-[34px] rounded-[7px] inline-flex items-center justify-center gap-1.5 px-2.5 font-medium whitespace-nowrap ${on ? 'bg-white text-[#0E0D0C] shadow-[0_0_0_1px_rgba(14,13,12,.06),0_1px_2px_rgba(14,13,12,.08)]' : 'text-[#515152] hover:text-[#0E0D0C]'}`}>
+                      className={`flex-auto min-w-0 max-[959px]:flex-none max-[959px]:snap-start max-[959px]:min-w-fit h-[34px] max-[959px]:h-11 rounded-[7px] inline-flex items-center justify-center gap-1.5 px-2.5 font-medium whitespace-nowrap ${on ? 'bg-white text-[#0E0D0C] shadow-[0_0_0_1px_rgba(14,13,12,.06),0_1px_2px_rgba(14,13,12,.08)]' : 'text-[#515152] hover:text-[#0E0D0C]'}`}>
                       {on && <Icon name={methodIcon(item.value)} size={15} strokeWidth={1.6} className="flex-none" />}
-                      <span className="truncate whitespace-nowrap">{sub}</span>
+                      <span className="min-[960px]:truncate whitespace-nowrap">{sub}</span>
                       {on && item.subMethods?.length > 0 && <Icon name="ChevronDown" size={12} className="flex-none opacity-60" />}
                     </button>
                   );
                 })}
                 {moreItems.length > 0 && (
                   <button type="button" aria-pressed={!!activeTender && moreItems.some(itemIsActive)} onClick={(e) => openPopover('more', null, e.currentTarget)}
-                    className={`flex-auto min-w-0 h-[34px] rounded-[7px] inline-flex items-center justify-center gap-1.5 px-2.5 font-medium whitespace-nowrap ${activeTender && moreItems.some(itemIsActive) ? 'bg-white text-[#0E0D0C] shadow-[0_0_0_1px_rgba(14,13,12,.06),0_1px_2px_rgba(14,13,12,.08)]' : 'text-[#515152] hover:text-[#0E0D0C]'}`}>
-                    <span className="truncate">{activeTender && moreItems.some(itemIsActive) ? leafLabel(activeTender.paymentMode) : 'More'}</span>
+                    className={`flex-auto min-w-0 max-[959px]:flex-none max-[959px]:snap-start max-[959px]:min-w-fit h-[34px] max-[959px]:h-11 rounded-[7px] inline-flex items-center justify-center gap-1.5 px-2.5 font-medium whitespace-nowrap ${activeTender && moreItems.some(itemIsActive) ? 'bg-white text-[#0E0D0C] shadow-[0_0_0_1px_rgba(14,13,12,.06),0_1px_2px_rgba(14,13,12,.08)]' : 'text-[#515152] hover:text-[#0E0D0C]'}`}>
+                    <span className="min-[960px]:truncate">{activeTender && moreItems.some(itemIsActive) ? leafLabel(activeTender.paymentMode) : 'More'}</span>
                   </button>
                 )}
               </div>
@@ -1866,14 +1883,14 @@ const PaymentModal = ({
          </div>
 
          {error && (
-           <div role="alert" className="mx-6 mt-3 flex-none flex items-start gap-2 px-3 py-2.5 rounded-lg bg-error/5 border border-error/20 text-[12.5px] text-error">
+           <div role="alert" className="mx-6 max-md:mx-4 mt-3 flex-none flex items-start gap-2 px-3 py-2.5 rounded-lg bg-error/5 border border-error/20 text-[12.5px] text-error">
              <Icon name="AlertCircle" size={14} className="mt-0.5 flex-none" /><span>{friendlyCheckoutError(error).message}</span>
            </div>
          )}
 
          {/* Only this area scrolls: the payments list, split link, gap box, note */}
          <div className="relative flex-1 min-h-0">
-          <div ref={listRef} onScroll={measureFade} className="min-[960px]:h-full min-[960px]:overflow-y-auto px-6 pt-3 pb-5" data-testid="checkout-scroll">
+          <div ref={listRef} onScroll={measureFade} className="min-[960px]:h-full min-[960px]:overflow-y-auto px-6 max-md:px-4 pt-3 pb-5" data-testid="checkout-scroll">
           {/* Tender list */}
           {tenders.length > 0 && (
             <div className="border border-[#E7E8E6] rounded-[10px]">
@@ -1927,7 +1944,7 @@ const PaymentModal = ({
                             <span className="inline-flex items-center gap-1 flex-none text-[12px]" data-testid="qr-received">
                               <span className="inline-flex items-center gap-1 text-primary font-medium"><Icon name="CheckCircle2" size={13} strokeWidth={2} />Received</span>
                               <button type="button" aria-label={`Undo: ${label} not received yet`} title="Undo" onClick={() => updateTender(i, { qrConfirmed: null })}
-                                className="w-[22px] h-[22px] rounded-md grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2] hover:text-[#0E0D0C]"><Icon name="Undo2" size={13} strokeWidth={1.8} /></button>
+                                className="w-[22px] h-[22px] max-[959px]:w-11 max-[959px]:h-11 rounded-md grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2] hover:text-[#0E0D0C]"><Icon name="Undo2" size={13} strokeWidth={1.8} /></button>
                             </span>
                           ) : (
                             <button type="button" aria-label={`Show ${label} QR`} aria-expanded={qrOpenIdx === i} onClick={() => setQrOpenIdx(qrOpenIdx === i ? null : i)}
@@ -1955,7 +1972,7 @@ const PaymentModal = ({
                       ))}
                       {(tenders.length > 1 || isSessionPackage) && (
                         <button type="button" aria-label={`Remove ${label}`} onClick={() => { if (isSessionPackage) { setTouched(true); undoPackage(); } else if (credit) { setTouched(true); removeCredit((x) => x === t); if (tenders.length - 1 <= 1) setRestOn(true); } else dropRow(i); }}
-                          className="w-[22px] h-[22px] rounded-md grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2] flex-none"><Icon name="X" size={14} /></button>
+                          className="w-[22px] h-[22px] max-[959px]:w-11 max-[959px]:h-11 rounded-md grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2] flex-none"><Icon name="X" size={14} /></button>
                       )}
                     </div>
                     {qrFor(t) && (singleMode || (qrOpenIdx === i && !(isQrConfirmed(t) && qrUsable(t)))) && renderQrCard(t, i)}
@@ -1970,7 +1987,7 @@ const PaymentModal = ({
           )}
 
           <div>
-            <button type="button" onClick={addSplit} className="mt-2.5 text-primary font-medium text-[12.5px] inline-flex items-center gap-1.5 hover:underline">
+            <button type="button" onClick={addSplit} className="mt-2.5 max-[959px]:min-h-11 text-primary font-medium text-[12.5px] inline-flex items-center gap-1.5 hover:underline">
               <Icon name={singleMode ? 'Split' : 'Plus'} size={13} strokeWidth={2} />{singleMode ? 'Split across methods' : 'Add another method'}
             </button>
           </div>
@@ -1981,6 +1998,13 @@ const PaymentModal = ({
             <div className="mt-3 flex items-start gap-2 rounded-lg bg-[#F7F7F5] px-3 py-2.5 text-[12.5px] text-[#515152]" data-testid="treatment-only-note">
               <Icon name="Ticket" size={13} className="mt-0.5 flex-none text-[#8A8A90]" />
               <span>Service vouchers and packages pay for {treatmentWordLower}s, never products. Cash, card, wallets and the membership wallet can pay for anything.</span>
+            </div>
+          )}
+
+          {walkInNoClient && (
+            <div className="mt-3 rounded-[10px] border border-[#E7E8E6] bg-[#FAFAF9] px-3 py-2.5 text-[12.5px] text-[#515152]" data-testid="walkin-pay-note">
+              <div className="flex items-start gap-2"><Icon name="Info" size={14} className="flex-none mt-0.5" /><span>Walk-in: collect in full today, or add a client to use pay later, packages, memberships or wallet.</span></div>
+              {onAddClient && <button type="button" onClick={onAddClient} className="mt-2 h-8 px-3 rounded-[7px] border border-border bg-white text-[12.5px] font-medium text-primary inline-flex items-center gap-1.5 hover:bg-[#FAFAF9]"><Icon name="Plus" size={13} strokeWidth={2} />Add client</button>}
             </div>
           )}
 
@@ -1999,7 +2023,9 @@ const PaymentModal = ({
                   <div className="flex items-center gap-2 text-[#92600A]"><Icon name="AlertCircle" size={14} className="flex-none" /><span><b className="font-semibold tabular-nums">NPR {fmt(leftover)}</b> not covered yet</span></div>
                   <div className="mt-2 flex items-center gap-2">
                     <button type="button" onClick={addSplit} className="h-8 px-3 rounded-[7px] border border-[#E6C46F] bg-white text-[12.5px] font-medium text-[#0E0D0C] inline-flex items-center gap-1.5 hover:bg-[#FFFDF7]"><Icon name="Plus" size={13} strokeWidth={2} />Pay it with another method</button>
-                    <button type="button" onClick={startLeaveDue} className="h-8 px-3 rounded-[7px] text-[12.5px] font-medium text-[#92600A] hover:bg-[#FBEFD0]">Leave as due</button>
+                    {walkInNoClient
+                      ? <span className="text-[12px] text-[#92600A]" data-walkin-no-due>Add a client to leave a balance</span>
+                      : <button type="button" onClick={startLeaveDue} className="h-8 px-3 rounded-[7px] text-[12.5px] font-medium text-[#92600A] hover:bg-[#FBEFD0]">Leave as due</button>}
                   </div>
                 </>
               ) : (
@@ -2034,7 +2060,7 @@ const PaymentModal = ({
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Note about this payment" aria-label="Payment note" autoFocus
                 className="w-full rounded-[7px] border border-[#E7E8E6] bg-white px-3 py-2 text-[13px] placeholder:text-[#B4B4BA] focus:outline-none focus:border-[#B9C7B6] focus:ring-[3px] focus:ring-primary/10 resize-none" />
             ) : (
-              <button type="button" onClick={() => setShowNotes(true)} className="text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:text-[#0E0D0C]"><Icon name="StickyNote" size={13} strokeWidth={1.6} />Add a note</button>
+              <button type="button" onClick={() => setShowNotes(true)} className="max-[959px]:min-h-11 text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:text-[#0E0D0C]"><Icon name="StickyNote" size={13} strokeWidth={1.6} />Add a note</button>
             )}
           </div>
 
@@ -2043,7 +2069,7 @@ const PaymentModal = ({
             if (!cash.calc) {
               return (
                 <div className="mt-2.5">
-                  <button type="button" onClick={() => { focusReceivedRef.current = true; updateTender(cashIdx, { calc: true }); }} className="text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:text-[#0E0D0C]"><Icon name="Calculator" size={13} strokeWidth={1.6} />Work out change</button>
+                  <button type="button" onClick={() => { focusReceivedRef.current = true; updateTender(cashIdx, { calc: true }); }} className="max-[959px]:min-h-11 text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:text-[#0E0D0C]"><Icon name="Calculator" size={13} strokeWidth={1.6} />Work out change</button>
                 </div>
               );
             }
@@ -2052,7 +2078,7 @@ const PaymentModal = ({
             return (
               <div className="mt-2.5 relative rounded-[10px] border border-[#E7E8E6] bg-[#FAFAF9] px-3 py-2.5" data-testid="change-calc">
                 <button type="button" aria-label="Close change calculator" onClick={() => updateTender(cashIdx, { calc: false, received: '' })}
-                  className="absolute top-2 right-2 w-[22px] h-[22px] rounded-md grid place-items-center text-[#8A8A90] hover:bg-[#F1F1EF]"><Icon name="X" size={14} /></button>
+                  className="absolute top-2 right-2 w-[22px] h-[22px] max-[959px]:w-11 max-[959px]:h-11 max-[959px]:top-0 max-[959px]:right-0 rounded-md grid place-items-center text-[#8A8A90] hover:bg-[#F1F1EF]"><Icon name="X" size={14} /></button>
                 <div className="text-[12px] text-[#8A8A90] pr-7">Cash to collect <b className="font-medium text-[#0E0D0C] tabular-nums">NPR {fmt(cashAmount)}</b></div>
                 <div className="mt-2 flex items-center gap-2 flex-wrap">
                   <span className="text-[#515152]">Guest handed over</span>
@@ -2061,11 +2087,11 @@ const PaymentModal = ({
                     <AmountInput value={cash.received || ''} aria-label="Cash received"
                       ref={(el) => { if (el && focusReceivedRef.current) { focusReceivedRef.current = false; el.focus(); } }}
                       onChange={(v) => updateTender(cashIdx, { received: v })}
-                      className="h-8 w-[120px] rounded-[7px] border border-[#E7E8E6] bg-white pl-9 pr-2.5 text-right text-[13px] font-medium tabular-nums focus:outline-none focus:border-[#B9C7B6] focus:ring-[3px] focus:ring-primary/10" />
+                      className="h-8 max-[959px]:h-11 w-[120px] rounded-[7px] border border-[#E7E8E6] bg-white pl-9 pr-2.5 text-right text-[13px] font-medium tabular-nums focus:outline-none focus:border-[#B9C7B6] focus:ring-[3px] focus:ring-primary/10" />
                   </div>
                   {quickCashOptions(cashAmount).map((v) => (
                     <button key={v} type="button" onClick={() => updateTender(cashIdx, { received: String(v) })} aria-pressed={received === v}
-                      className={`h-7 px-2.5 rounded-[7px] border text-[12px] font-medium tabular-nums ${received === v ? 'border-[#B9C7B6] bg-[#EEF3EC] text-primary' : 'border-[#E7E8E6] bg-white text-[#515152] hover:bg-[#F7F7F5] hover:text-[#0E0D0C]'}`}>
+                      className={`h-7 max-[959px]:h-11 px-2.5 rounded-[7px] border text-[12px] font-medium tabular-nums ${received === v ? 'border-[#B9C7B6] bg-[#EEF3EC] text-primary' : 'border-[#E7E8E6] bg-white text-[#515152] hover:bg-[#F7F7F5] hover:text-[#0E0D0C]'}`}>
                       {fmt(v)}
                     </button>
                   ))}
@@ -2074,7 +2100,7 @@ const PaymentModal = ({
                   {!(received > 0) ? (
                     <span className="text-[12px] text-[#8A8A90]">Tap a note or type what the guest handed over</span>
                   ) : diff > 0.001 ? (
-                    <span className="text-[#515152]">Give back <b className="text-[15px] font-semibold text-primary tabular-nums">NPR {fmt(diff)}</b></span>
+                    <span className="text-[#515152] max-md:flex max-md:w-full max-md:justify-between max-md:rounded-lg max-md:bg-[#E8F5EC] max-md:px-3 max-md:py-2 max-md:text-[#0B6B3A]">Give back <b className="text-[15px] font-semibold text-primary tabular-nums">NPR {fmt(diff)}</b></span>
                   ) : diff < -0.001 ? (
                     <span className="text-warning tabular-nums">NPR {fmt(-diff)} short of the cash amount</span>
                   ) : (
@@ -2093,22 +2119,22 @@ const PaymentModal = ({
       </div>
 
       {/* Footer */}
-      <div className="min-h-[64px] pl-6 pr-5 py-2 flex items-center gap-3 border-t border-[#E7E8E6] flex-none flex-wrap">
-        <span className="text-[#8A8A90] flex gap-4 tabular-nums">
+      <div className="min-h-[64px] pl-6 pr-5 py-2 flex items-center gap-3 border-t border-[#E7E8E6] flex-none flex-wrap max-md:flex-col max-md:items-stretch max-md:gap-2 max-md:px-4 max-md:pt-3 max-md:pb-[calc(12px+env(safe-area-inset-bottom))] max-md:shadow-[0_-6px_16px_rgba(14,13,12,.04)]">
+        <span className="text-[#8A8A90] flex gap-4 tabular-nums max-md:justify-between max-md:order-1">
           <span>Total <b className="font-medium text-[#0E0D0C]">{fmt(grandTotal)}</b></span>
           <span>Entered <b className="font-medium text-[#0E0D0C]">{fmt(entered)}</b></span>
           <span>Left <b className="font-medium text-[#0E0D0C]">{fmt(leftover)}</b></span>
         </span>
-        {blockReason && <span className="ml-auto text-[12px] text-[#B45309] text-right" data-testid="checkout-reason">{blockReason}</span>}
-        <div className={`${blockReason ? '' : 'ml-auto'} flex items-center gap-2.5`}>
-          {!paidElsewhere && <button type="button" onClick={requestClose} disabled={busy} className="h-9 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white font-medium hover:bg-[#F7F7F5]">Cancel</button>}
+        {blockReason && <span className="ml-auto max-md:ml-0 max-md:order-3 max-md:text-center text-[12px] text-[#B45309] text-right" data-testid="checkout-reason">{blockReason}</span>}
+        <div className={`${blockReason ? '' : 'ml-auto'} flex items-center gap-2.5 max-md:order-2 max-md:ml-0`}>
+          {!paidElsewhere && <button type="button" onClick={requestClose} disabled={busy} className="max-md:hidden h-9 max-[959px]:h-11 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white font-medium hover:bg-[#F7F7F5]">Cancel</button>}
           {paidElsewhere ? (
-            <button type="button" autoFocus onClick={requestClose} className="h-9 px-4 rounded-[7px] bg-primary border border-primary text-white font-medium">Close</button>
+            <button type="button" autoFocus onClick={requestClose} className="h-9 max-[959px]:h-11 max-md:flex-1 max-md:h-[52px] px-4 rounded-[7px] bg-primary border border-primary text-white font-medium">Close</button>
           ) : (
           <button type="button" onClick={doSubmit} disabled={!canSubmit} title={blockReason || undefined}
-            className="h-9 pl-4 pr-3 rounded-[7px] bg-primary border border-primary text-white font-medium inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(45,90,39,.25),inset_0_1px_0_rgba(255,255,255,.15)] disabled:opacity-45 disabled:cursor-not-allowed">
+            className="h-9 max-[959px]:h-11 max-md:flex-1 max-md:h-[52px] max-md:justify-center max-md:text-[16px] max-md:rounded-[12px] pl-4 pr-3 rounded-[7px] bg-primary border border-primary text-white font-medium inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(45,90,39,.25),inset_0_1px_0_rgba(255,255,255,.15)] disabled:opacity-45 disabled:cursor-not-allowed">
             {busy ? 'Recording…' : primaryLabel}
-            {!busy && <kbd className="text-[10.5px] px-1.5 rounded border border-white/25 bg-white/10 font-sans">↵</kbd>}
+            {!busy && <kbd className="max-[959px]:hidden text-[10.5px] px-1.5 rounded border border-white/25 bg-white/10 font-sans">↵</kbd>}
           </button>
           )}
         </div>
@@ -2131,7 +2157,7 @@ const PaymentModal = ({
 
   // Backdrop: frosted, and a click outside does NOT close (a half-entered payment is too easy to lose).
   return createPortal(
-    <div className="fixed inset-0 z-modal-overlay modal-backdrop-frost flex items-center justify-center p-4"
+    <div className="fixed inset-0 z-modal-overlay modal-backdrop-frost flex items-center justify-center p-4 max-md:p-0 max-md:items-stretch"
       onMouseDown={(e) => { if (e.target === e.currentTarget) e.preventDefault(); /* a click outside neither closes nor steals focus */ }}>
       {dialog}
       {popoverEl}
@@ -2167,7 +2193,7 @@ const PopoverList = ({ rect, groups, activeValue, onPick, onClose }) => {
         }
       }}
       style={{ position: 'fixed', left, width, ...(flipUp ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }) }}
-      className="z-notification bg-white border border-[#E7E8E6] rounded-[10px] p-1 shadow-[0_12px_32px_-8px_rgba(14,13,12,.25)] max-h-64 overflow-y-auto text-[13px]">
+      className="z-popover bg-white border border-[#E7E8E6] rounded-[10px] p-1 shadow-[0_12px_32px_-8px_rgba(14,13,12,.25)] max-h-64 overflow-y-auto text-[13px]">
       {groups.map((g, gi) => (
         <div key={gi}>
           {g.title && <div className="px-2.5 pt-2 pb-1 text-[11px] font-medium uppercase tracking-[.04em] text-[#8A8A90]">{g.title}</div>}

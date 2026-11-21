@@ -144,7 +144,7 @@ const InboxBookingPanel = ({ bookingId, onClose, onChanged }) => {
         onViewBooking={() => {}}
       />
       {toast && (
-        <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-toast px-5 py-3 rounded-lg shadow-lg ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
+        <div className={`fixed toast-top left-1/2 -translate-x-1/2 z-toast px-5 py-3 rounded-lg shadow-lg ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
           <span className="text-sm font-medium">{toast.msg}</span>
         </div>
       )}

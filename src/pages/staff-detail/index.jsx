@@ -24,6 +24,7 @@ import {
 } from '../../services/api';
 import * as profileApi from '../../services/therapistProfileApi';
 import { parsePhone } from '../../components/ui/CountryCodeSelect';
+import { phoneFieldProblem, phoneFieldValue } from '../../components/ui/PhoneField';
 import { nepalNow } from '../../utils/customerDirectory';
 import { hoursFromShiftRow, timeToMinutes, DB_DOW_LABELS } from '../../utils/staffDay';
 import { todayStatusLine, STATUS_DOT_COLOR } from '../../utils/todayStatusLine';
@@ -185,6 +186,7 @@ const StaffDetailPage = () => {
       rating: t.rating != null ? String(t.rating) : '',
       phone: national,
       countryCode: dial,
+      originalPhone: t.phone || '',
       address: t.address || '',
       city: t.city || '',
       email: t.email || '',
@@ -364,6 +366,8 @@ const StaffDetailPage = () => {
       if (up.error) throw new Error(up.error.message || 'Failed to upload photo.');
       photoUrl = up.url;
     }
+    const phoneIssue = phoneFieldProblem({ dial: form.countryCode, national: form.phone, original: form.originalPhone });
+    if (phoneIssue) throw new Error(phoneIssue);
     return {
       name: form.name.trim(),
       gender: form.gender,
@@ -374,7 +378,7 @@ const StaffDetailPage = () => {
       bio: form.bio.trim(),
       experienceYears: form.experienceYears === '' ? null : parseInt(form.experienceYears, 10),
       rating: enableStaffRatings && isAdmin ? (form.rating === '' ? null : parseFloat(form.rating)) : undefined, // only admins may change a rating
-      phone: form.phone.trim() ? `${form.countryCode}${form.phone.trim().replace(/\D/g, '')}` : '',
+      phone: phoneFieldValue({ dial: form.countryCode, national: form.phone, original: form.originalPhone }) || '',
       address: form.address.trim(),
       city: form.city.trim(),
       email: form.email.trim(),

@@ -16,7 +16,10 @@ const LOOKS = { now: 'text-primary', upcoming: 'text-text-secondary', 'permanent
 // room for the line = the cell minus its padding, the avatar and the gap (the name sits above and truncates on its own)
 const roomInCell = (el) => (el.closest('[data-col-header]')?.clientWidth ?? 0) - 16 - 24 - 8 - 16;
 
-const TransferHeaderLine = ({ desc, onOpen }) => {
+// phone: the line sits under the name (nothing beside it), so only the cell padding, the icon and its gap come off
+const roomInPhoneCell = (el) => (el.closest('[data-col-header]')?.clientWidth ?? 0) - 16 - 10 - 4 - 4;
+
+const TransferHeaderLine = ({ desc, onOpen, phone = false }) => {
   const upcoming = desc.state === 'upcoming' || desc.state === 'permanent-upcoming';
   return (
     <button
@@ -24,10 +27,10 @@ const TransferHeaderLine = ({ desc, onOpen }) => {
       data-transfer-line={desc.state}
       onClick={(e) => { e.stopPropagation(); onOpen?.(); }}
       aria-label={desc.sentence}
-      className={`group inline-flex items-center gap-1 font-body text-[10px] leading-tight text-left whitespace-nowrap ${LOOKS[desc.state] || 'text-text-tertiary'}`}
+      className={`group inline-flex items-center gap-1 font-body ${phone ? 'text-[10.5px] max-w-full' : 'text-[10px]'} leading-tight text-left whitespace-nowrap ${LOOKS[desc.state] || 'text-text-tertiary'}`}
     >
       <Icon name={upcoming ? 'Calendar' : 'ArrowRightLeft'} size={10} className="flex-shrink-0" />
-      <TransferFitText candidates={[desc.short, desc.tiny, desc.word]} getRoom={roomInCell} className="group-hover:underline" />
+      <TransferFitText candidates={[desc.short, desc.tiny, desc.word]} getRoom={phone ? roomInPhoneCell : roomInCell} className="group-hover:underline" />
     </button>
   );
 };

@@ -129,7 +129,8 @@ describe('My day uses the Bookings list status mapping (ZNLY-237)', () => {
   });
   it('counts and meta line follow the same statuses', () => {
     const s = dayStatus([t('a', 'Completed'), t('b', 'No Show'), t('c', 'Confirmed'), t('d', 'Cancelled')], '18:30', '2026-11-17');
-    expect(s).toMatchObject({ done: 1, noShow: 1, cancelled: 1, open: 1, late: 1, allClosed: false });
-    expect(dayMeta(s)).toBe('1 of 4 done · 1 no-show · 1 cancelled');
+    // ZNLY-276: a no-show is finished; total leaves out the cancelled one
+    expect(s).toMatchObject({ total: 3, done: 2, noShow: 1, cancelled: 1, open: 1, late: 1, allClosed: false });
+    expect(dayMeta(s)).toBe('2 of 3 finished · 1 no-show · 1 cancelled');
   });
 });

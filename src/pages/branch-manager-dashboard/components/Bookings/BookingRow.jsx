@@ -48,7 +48,9 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
   const mins = minutesOf(b);
   const isOnline = b.createdBy == null;
   const bg = selected ? 'bg-[#F2F6F0]' : unread ? 'bg-[#F7FAF6] hover:bg-[#F2F6F0]' : 'hover:bg-[#FAFAF9]';
-  const cell = 'h-14 border-b border-[#F1F1EF]';
+  // Phone (no `sm` column set): the row stacks name, phone, service and status, so it gets real vertical padding and a 64px floor
+  // (the status chip used to touch the divider / next row at the fixed 56px). From sm the columns are single-line: unchanged.
+  const cell = bp.sm ? 'h-14 border-b border-[#F1F1EF]' : 'h-16 py-3 border-b border-[#F1F1EF]';
   return (
     <tr data-booking-id={b.bookingId} data-unread={unread || undefined} data-dim={dim || undefined} tabIndex={0} aria-selected={selected || undefined}
       onClick={onOpen} onKeyDown={(e) => {
@@ -66,11 +68,12 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
           {unread && <i className="w-2 h-2 rounded-full bg-[#22A04B] flex-shrink-0" aria-label="New online booking, not opened yet" title="New online booking · not opened yet" />}
           <span className="truncate">{nameForList(b.customerName, b.customerPhone)}</span>
           {b.specialRequests && <span title={b.specialRequests} aria-label={`Note: ${b.specialRequests}`} className="text-[#8A8A90] flex-shrink-0"><Icon name="MessageSquare" size={13} /></span>}
+          {b.isWalkIn && <span className="h-5 rounded-full px-[7px] text-[11.5px] font-medium inline-flex items-center bg-warning/15 text-warning flex-shrink-0">Walk-in</span>}
           {isOnline && <span className="h-5 rounded-full px-[7px] text-[11.5px] font-medium inline-flex items-center bg-[#EEF0FF] text-[#4F46E5] flex-shrink-0">Online</span>}
         </div>
         <div className="text-[12.5px] text-[#8A8A90] mt-0.5 truncate">{formatPhoneGrouped(b.customerPhone)}</div>
         {!bp.md && <div className="text-[12.5px] text-[#515152] truncate">{b.service}</div>}
-        {!bp.sm && <div className="mt-0.5 flex items-center gap-2"><StatusPill b={b} />{late != null && <span className="text-[11.5px] font-medium text-[#B45309]">Late · {formatLate(late)}</span>}</div>}
+        {!bp.sm && <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1"><StatusPill b={b} />{late != null && <span className="text-[11.5px] font-medium text-[#B45309] whitespace-nowrap">Late · {formatLate(late)}</span>}</div>}
       </td>
       {bp.md && columns.service && (
         <td className={`${cell} pr-3 ${dim ? 'opacity-[.55]' : ''}`}>
@@ -101,16 +104,16 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
       )}
       {bp.sm && <td className={`${cell} pr-3 ${dim ? 'opacity-[.55]' : ''}`}>
         <StatusPill b={b} />
-        {late != null && <div className="text-[11.5px] font-medium text-[#B45309] mt-0.5">Late · {formatLate(late)}</div>}
+        {late != null && <div className="text-[11.5px] font-medium text-[#B45309] mt-0.5 whitespace-nowrap">Late · {formatLate(late)}</div>}
       </td>}
       {bp.sm && columns.amount && <td className={`${cell} pr-4 text-right whitespace-nowrap ${dim ? 'opacity-[.55]' : ''}`}><AmountCell a={amount} /></td>}
-      <td className={`${cell} w-[88px] pl-1 pr-1`}>
+      <td className={`${cell} w-[112px] pl-1 pr-1`}>
         <div className="flex gap-1.5 justify-end items-center text-[#8A8A90]">
           {action && (
-            <button type="button" disabled={busy} onClick={(e) => { e.stopPropagation(); onAction(action); }}
-              className="h-[26px] px-[9px] border border-[#CFDCCC] rounded-md bg-white text-[12px] font-medium text-primary hover:bg-[#F2F6F0] disabled:opacity-50">{busy ? '…' : action.label}</button>
+            <button type="button" disabled={busy || !!action.blocked} title={action.blocked || undefined} onClick={(e) => { e.stopPropagation(); onAction(action); }}
+              className="h-[26px] px-[9px] flex-shrink-0 whitespace-nowrap border border-[#CFDCCC] rounded-md bg-white text-[12px] font-medium text-primary hover:bg-[#F2F6F0] disabled:opacity-50">{busy ? '…' : action.label}</button>
           )}
-          <Icon name="ChevronRight" size={15} />
+          <Icon name="ChevronRight" size={15} className="flex-shrink-0" />
         </div>
       </td>
     </tr>

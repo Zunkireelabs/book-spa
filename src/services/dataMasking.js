@@ -1,3 +1,4 @@
+import { isOwnCalendar } from './staffAccessRules';
 // ZNLY-235: the ONE place that decides how a hidden customer detail looks and who counts as restricted.
 // The database already masks for restricted logins (migration 393: bookings_safe, customers_safe, ...); the same two
 // mask functions exist in SQL (mask_person_name, mask_phone_digits) and are held in step by dataMasking.test.js.
@@ -32,11 +33,14 @@ export const nameWithTail = (name, phone) => { const t = phoneTail(phone); retur
 export function viewerAccess(profile) {
   const staff = !!profile && profile.role === 'staff';
   return {
-    ownOnly: !!profile && !['manager', 'admin'].includes(profile.role) && profile.calendar_visibility === 'own',
+    ownOnly: !!profile && !['manager', 'admin'].includes(profile.role) && isOwnCalendar(profile.calendar_visibility),
     canViewCustomerDetails: !staff || profile.can_view_customer_details !== false,
     canViewPrices: !staff || profile.can_view_prices !== false,
   };
 }
+
+// The calendar columns a login may see (ZNLY-278): an own-only login gets just its own team member, everyone else gets the list unchanged.
+export const calendarColumnsFor = (ownOnly, therapists, ownTherapistId) => (ownOnly ? (therapists || []).filter((t) => t.id === ownTherapistId) : therapists);
 
 // True when this login must read sensitive tables through the *_safe views.
 export const isRestricted = (profile) => {

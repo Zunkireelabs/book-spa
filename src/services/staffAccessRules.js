@@ -4,7 +4,16 @@ import { wordBranches } from '../utils/industryTerms';
 
 export const ROLE_LABELS = { staff: 'Staff', manager: 'Manager', admin: 'Admin', admin_viewer: 'Admin viewer' };
 export const CALENDAR_LABELS = { own: 'Own calendar', own_view: 'Own calendar (view only)', all: 'All calendars', all_view: 'All calendars (view only)' };
-export const CALENDAR_OPTIONS = Object.entries(CALENDAR_LABELS).map(([value, label]) => ({ value, label }));
+// ZNLY-284: the two view-only values are not enforced yet (ZNLY-283), so the picker no longer OFFERS them. CALENDAR_LABELS keeps all four so a
+// login that already has one is still named truthfully. A login whose current value is a *_view keeps it selected (no rewrite); choosing Own / All
+// replaces it, and from then on it is gone from the list.
+export const CALENDAR_OPTIONS = ['own', 'all'].map((value) => ({ value, label: CALENDAR_LABELS[value] }));
+export const isViewOnlyCalendar = (value) => value === 'own_view' || value === 'all_view';
+export const calendarOptionsFor = (current) => (isViewOnlyCalendar(current) ? [...CALENDAR_OPTIONS, { value: current, label: CALENDAR_LABELS[current] }] : CALENDAR_OPTIONS);
+export const VIEW_ONLY_NOTE = "View only isn't enforced yet. This login can still make changes.";
+
+// An own-only calendar login: 'own' and 'own_view' (view only). The one definition viewerAccess (dataMasking) and resolveVisibility (api) share.
+export const isOwnCalendar = (visibility) => ['own', 'own_view'].includes(visibility);
 
 // Who sees the Access section at all: managers and admins edit, an admin viewer reads.
 export const canViewAccess = (viewerRole) => ['manager', 'admin', 'admin_viewer'].includes(viewerRole);

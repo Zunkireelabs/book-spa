@@ -1,3 +1,4 @@
+import ClientDayLine from './ClientDayLine';
 import { isNoShow } from '../../../../services/bookingTransformers';
 import { nameForList } from '../../../../services/dataMasking';
 import React, { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -195,6 +196,7 @@ export function BookingHoverContent({ booking, draggable }) {
       )}
 
       <AvailabilityNoteLine note={booking.availabilityNote} />
+      <ClientDayLine info={booking._clientDay} range={booking._clientDay ? compactRange(booking._clientDay.first, booking._clientDay.last) : ''} className="!mt-2" />
       <AlertsBlock customerNotes={booking.customerNotes} specialRequests={booking.specialRequests} className="!mt-3" />
       {booking.referredBy && <div className="text-xs text-text-secondary">Referred by {booking.referredBy}</div>}
 

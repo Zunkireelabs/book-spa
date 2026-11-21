@@ -440,7 +440,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
 
   const handleQuickCreateSubmit = useCallback(async (formData) => {
     const r = await submitQuickCreate({ formData, branchId, guard });
-    if (r.error) return r.error;
+    if (r.error) return { message: r.error, code: r.code };
     showToast(r.toast.msg, r.toast.type);
     // The booking exists for real: flip the waitlist entry to 'booked'. Best-effort, a failure here never undoes the booking.
     if (bookingWaitlistEntryId && r.bookingId) {

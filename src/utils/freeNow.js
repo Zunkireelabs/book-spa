@@ -7,7 +7,8 @@
 // set is open inside branch hours (the clamp is already in the shift), shown as "No hours set · open".
 import { lateMinutes } from './bookingsList';
 import { todayStatusLine } from './todayStatusLine';
-import { wordBranchCap } from './industryTerms';
+import { wordBranchCap, localizeTerms } from './industryTerms';
+import { isOwed } from '../lib/dashboardMoney';
 
 export const toMin = (t) => { if (t == null || t === '') return null; const [h, m] = String(t).slice(0, 5).split(':').map(Number); return h * 60 + (m || 0); };
 export const fromMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -197,17 +198,26 @@ export const isUnseen = (b) => isNewOnline(b);
 const isToday = (b, ctx) => String(b.date).slice(0, 10) === ctx.date;
 export const needsTherapist = (b, ctx) => isToday(b, ctx) && (dbStatus(b) === 'pending' || dbStatus(b) === 'confirmed') && !((b.therapists || []).length || b.therapist);
 
+/** Finished (Completed) today with money still owed. Reuses the dashboard's loose-ends rule (lib/dashboardMoney isOwed) on this row's fields: no second rule. */
+export const owedToday = (b, ctx) => isToday(b, ctx) && isOwed({
+  status: dbStatus(b) === 'completed' ? 'Completed' : b.status,
+  payment_status: b.paymentStatus,
+  final_amount: b.finalAmount,
+  ...(Array.isArray(b.payments) ? { payments: b.payments } : { amount_paid: b.amountPaid }),
+});
+
 /** Rows behind each "Needs you now" item (for the Review / View / Assign filters). */
 export function matchesNeed(b, need, ctx) {
   if (!isToday(b, ctx)) return false;
   if (need === 'online') return isNewOnline(b);
   if (need === 'late') return lateMinutes(b, { today: ctx.date, nowHM: fromMin(ctx.nowMin) }) != null;
   if (need === 'assign') return needsTherapist(b, ctx);
+  if (need === 'unpaid') return owedToday(b, ctx);
   return true;
 }
 
 /**
- * @returns {{ id:'online'|'late'|'assign', count:number, text:string, action:string, tel?:string }[]}  only items with count > 0.
+ * @returns {{ id:'online'|'late'|'unpaid'|'assign', count:number, text:string, action:string, tel?:string }[]}  only items with count > 0.
  */
 export function needsYouNow(rows, ctx) {
   const today = rows.filter((b) => isToday(b, ctx));
@@ -224,7 +234,9 @@ export function needsYouNow(rows, ctx) {
   } else if (late.length > 1) {
     items.push({ id: 'late', count: late.length, text: `${late.length} bookings are running late`, action: 'View' });
   }
+  const unpaid = today.filter((b) => owedToday(b, ctx));
+  if (unpaid.length) items.push({ id: 'unpaid', count: unpaid.length, text: `${unpaid.length} finished but not paid`, action: 'Collect' });
   const assign = today.filter((b) => needsTherapist(b, ctx));
-  if (assign.length) items.push({ id: 'assign', count: assign.length, text: `${assign.length} booking${assign.length === 1 ? '' : 's'} need${assign.length === 1 ? 's' : ''} a therapist`, action: 'Assign' });
+  if (assign.length) items.push({ id: 'assign', count: assign.length, text: localizeTerms(`${assign.length} booking${assign.length === 1 ? '' : 's'} need${assign.length === 1 ? 's' : ''} a therapist`), action: 'Assign' });
   return items;
 }

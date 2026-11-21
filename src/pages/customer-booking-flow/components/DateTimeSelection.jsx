@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import { fetchBranchAvailabilityWindow, fetchTherapistAvailabilityWindow, fetchPublicClosedDateRanges, fetchBranchSlotHours, fetchServiceEligibleGenderHeadcount, getRoomCapacity } from '../../../services/api';
@@ -133,7 +134,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
       .then(setTherapistWindow)
       .catch((err) => {
         console.error('[DateTimeSelection] therapist availability fetch failed:', err.message);
-        setTherapistWindowError(err.message || 'Could not load availability.');
+        setTherapistWindowError(friendlyError(err, 'Could not load availability.'));
       });
   };
 

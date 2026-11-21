@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
-import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
+import { parsePhone } from '../../../../components/ui/CountryCodeSelect';
+import PhoneField, { phoneFieldProblem, phoneFieldValue } from '../../../../components/ui/PhoneField';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import PaymentMethodSelector from '../../../../components/ui/PaymentMethodSelector';
 import {
   PanelShell, FormBody, Field, SelectField, TextInput, MoneyInput, DateField, InfoRows, InlineError,
   CONTROL, CONTROL_ERROR, controlA11y,
 } from '../../../../components/ui/PanelFormKit';
+import ServicePickRow from '../../../../components/ui/ServicePickRow';
 import { useBranch } from '../../../../contexts/BranchContext';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
@@ -37,6 +39,7 @@ const intOnly = (v) => String(v).replace(/\D/g, '').slice(0, 4);
 // Optional prefill (Packages page): `initialCustomer` ({ id?, full_name, phone }) for Renew, `initialPackageTypeId` for Renew / Sell.
 const NewPackagePanel = ({ userRole, onClose, onIssued, initialCustomer = null, initialPackageTypeId = null }) => {
   const { branchId, branchName, isOverall } = useBranch();
+  const pickerBranchId = isOverall ? null : branchId;
   const { profile } = useAuth();
   const { orgId, paymentMethods } = useOrg();
   const isAdmin = (userRole || profile?.role) === 'admin';
@@ -55,6 +58,7 @@ const NewPackagePanel = ({ userRole, onClose, onIssued, initialCustomer = null, 
   const [linkedCustomer, setLinkedCustomer] = useState(null);
   const [guestCountryCode, setGuestCountryCode] = useState('+977');
   const [guestPhone, setGuestPhone] = useState('');
+  const [guestPhoneOrig, setGuestPhoneOrig] = useState(undefined); // a picked customer's stored number: not re-checked while untouched
   const [guestOtherInfo, setGuestOtherInfo] = useState('');
   const [paidAmount, setPaidAmount] = useState('');
   const [sessionsTotal, setSessionsTotal] = useState('');
@@ -136,9 +140,11 @@ const NewPackagePanel = ({ userRole, onClose, onIssued, initialCustomer = null, 
     || (selectedType && (paidAmount !== (selectedType.standard_price != null ? String(selectedType.standard_price) : '')
       || (!fixedSessions && sessionsTotal))));
 
+  const phoneIssue = digitsOf(guestPhone) ? phoneFieldProblem({ dial: guestCountryCode, national: guestPhone, original: guestPhoneOrig }) : '';
   const reason = types === null ? 'Loading package types…'
     : !packageTypeId ? 'Pick a package type'
     : !guestName.trim() ? 'Enter the guest name'
+    : phoneIssue ? phoneIssue
     : !(sessionsTotalNum > 0) ? 'Enter the sessions'
     : dueAmountNum > 0 && !dueHolderName.trim() ? 'Name who settles the due'
     : '';
@@ -174,6 +180,7 @@ const NewPackagePanel = ({ userRole, onClose, onIssued, initialCustomer = null, 
       const { dial, national } = parsePhone(customer.phone);
       setGuestCountryCode(dial);
       setGuestPhone(national);
+      setGuestPhoneOrig(customer.phone);
       phoneFromPick.current = true;
     }
   };
@@ -206,7 +213,6 @@ const NewPackagePanel = ({ userRole, onClose, onIssued, initialCustomer = null, 
     if (submittingRef.current || reason || isOverall) return;
     const next = {};
     const phoneDigits = digitsOf(guestPhone);
-    if (phoneDigits && (phoneDigits.length < 7 || phoneDigits.length > 15)) next.phone = 'Enter a valid phone number (7–15 digits).';
     if (baseAmount != null && paidAmountNum > baseAmount) next.paid = `Paid can't be more than the price (${formatNPR(baseAmount)}).`;
     if (issuedDate > today) next.issued = "The issued date can't be in the future.";
     if (!issuedDate || !expiryDate || expiryDate < issuedDate) next.expiry = 'Expiry date cannot be before the issued date.';
@@ -229,7 +235,7 @@ const NewPackagePanel = ({ userRole, onClose, onIssued, initialCustomer = null, 
       packageTypeId,
       customerId: linkedCustomer?.id || null,
       guestName: guestName.trim() || null,
-      guestInfo: phoneDigits ? `${guestCountryCode}${phoneDigits}` : (guestOtherInfo.trim() || null),
+      guestInfo: phoneDigits ? phoneFieldValue({ dial: guestCountryCode, national: guestPhone, original: guestPhoneOrig }) : (guestOtherInfo.trim() || null),
       issuedDate,
       expiryDate,
       paidAmount: paidAmountNum,
@@ -369,19 +375,13 @@ const NewPackagePanel = ({ userRole, onClose, onIssued, initialCustomer = null, 
             />
           </Field>
 
-          <Field label="Phone" id="pkg-phone" error={errors.phone}>
-            <div className="flex">
-              <CountryCodeSelect value={guestCountryCode} onChange={setGuestCountryCode} />
-              <input
-                {...controlA11y('pkg-phone', errors.phone)}
-                type="tel"
-                inputMode="numeric"
-                value={guestPhone}
-                onChange={(e) => { setGuestPhone(e.target.value.replace(/\D/g, '').slice(0, 15)); phoneFromPick.current = false; clearError('phone'); }}
-                placeholder="9841234567"
-                className={`flex-1 min-w-0 h-10 px-3 text-[13px] border rounded-r-spa rounded-l-none bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary ${errors.phone ? 'border-error' : 'border-border'}`}
-              />
-            </div>
+          <Field label="Phone" id="pkg-phone">
+            <PhoneField
+              id="pkg-phone" placeholder="9841234567" original={guestPhoneOrig}
+              dial={guestCountryCode} national={guestPhone}
+              onChange={({ dial, national }) => { if (dial !== guestCountryCode) setGuestCountryCode(dial); else { setGuestPhone(national.slice(0, 15)); phoneFromPick.current = false; clearError('phone'); } }}
+              inputClassName={`flex-1 min-w-0 h-10 px-3 text-[13px] max-md:text-[16px] border rounded-r-spa rounded-l-none bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary ${errors.phone ? 'border-error' : 'border-border'}`}
+            />
           </Field>
 
           <Field
@@ -423,7 +423,7 @@ const NewPackagePanel = ({ userRole, onClose, onIssued, initialCustomer = null, 
                 <TextInput {...controlA11y('pkg-nt-name', newTypeErrors.name)} error={newTypeErrors.name} placeholder="e.g. Annual Package - 60 min" value={newType.name} onChange={(e) => { setNewType((p) => ({ ...p, name: e.target.value })); setNewTypeErrors((x) => ({ ...x, name: undefined })); }} />
               </Field>
               <Field label="Service" required id="pkg-nt-service" error={newTypeErrors.serviceId}>
-                <SelectField value={newType.serviceId} onChange={(v) => { setNewType((p) => ({ ...p, serviceId: v })); setNewTypeErrors((x) => ({ ...x, serviceId: undefined })); }} options={services.map((s) => ({ value: s.id, label: s.name }))} placeholder="Select service" />
+                <ServicePickRow required services={services} value={newType.serviceId} onChange={(v) => { setNewType((p) => ({ ...p, serviceId: v })); setNewTypeErrors((x) => ({ ...x, serviceId: undefined })); }} branchId={pickerBranchId} title="Service for the package" ariaLabel="Service" />
               </Field>
               <div className={SPLIT}>
                 <Field label="Sessions" required id="pkg-nt-sessions" error={newTypeErrors.defaultSessions}>

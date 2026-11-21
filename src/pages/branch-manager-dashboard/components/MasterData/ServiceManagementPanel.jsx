@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import BottomSheet, { SheetRow, useMediaQuery } from '../../../../components/ui/BottomSheet';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import ConfirmDialog from '../../../../components/ui/ConfirmDialog';
@@ -24,6 +25,11 @@ const tierRangeLabel = (service, tiers) => {
   return lo === hi ? formatNPR(lo) : `${formatNPR(lo)} \u2013 ${formatNPR(hi)}`;
 };
 
+// Phone row: the short offer badge (the campaign name and the crossed-out price stay in Edit).
+const offerBadge = (s) => (s.offer_enabled
+  ? (s.offer_type === 'percent' ? `-${s.offer_value}%` : 'Offer')
+  : s.category_offer_percent ? `-${s.category_offer_percent}%` : 'Offer');
+
 const ServiceManagementPanel = () => {
   const navigate = useNavigate();
   const { orgSlug } = useParams();
@@ -38,6 +44,16 @@ const ServiceManagementPanel = () => {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [flashId, flash] = useFlashRow();
+  const phone = useMediaQuery('(max-width: 767.98px)'); // below md: a card list instead of the table
+  const [menuFor, setMenuFor] = useState(null);          // the service whose ⋮ sheet is open
+  const [undoToast, setUndoToast] = useState(null);      // { msg, undo } shown above the phone nav, same pattern as the calendar's Assign toast
+  const undoTimer = useRef(null);
+  useEffect(() => () => clearTimeout(undoTimer.current), []);
+  const showUndo = (toast) => {
+    clearTimeout(undoTimer.current);
+    setUndoToast(toast);
+    undoTimer.current = setTimeout(() => setUndoToast(null), 6000);
+  };
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -80,7 +96,7 @@ const ServiceManagementPanel = () => {
     setError(null);
     const result = await fetchServicesForManagement();
     if (result.error) {
-      setError(result.error.message || 'Failed to load services.');
+      setError(friendlyError(result.error, 'Failed to load services.'));
     } else {
       setServices(result.data || []);
       // A tiered service charges by who does it, so the list shows its range, as the online page does.
@@ -109,7 +125,7 @@ const ServiceManagementPanel = () => {
     await executeToggle(service, true);
   };
 
-  const executeToggle = async (service, newState) => {
+  const executeToggle = async (service, newState, isUndo = false) => {
     setError(null);
     setToggling(true);
     const result = await toggleServiceActive({ serviceId: service.id, isActive: newState });
@@ -118,6 +134,8 @@ const ServiceManagementPanel = () => {
       setError(friendlyError(result.error, 'Toggle failed.'));
     } else {
       await loadServices();
+      // Undo flips it straight back (no second "Deactivate?" confirm: the person just undid their own action).
+      if (!isUndo) showUndo({ msg: `${service.name} turned ${newState ? 'on' : 'off'}`, undo: async () => { clearTimeout(undoTimer.current); setUndoToast(null); await executeToggle(service, !newState, true); } });
     }
     setConfirmToggle(null);
   };
@@ -156,15 +174,16 @@ const ServiceManagementPanel = () => {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Service Management</h3>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          {/* Phone: no heading (the page title is already "Services"); desktop keeps it. */}
+          <h3 className="hidden md:block font-heading font-heading-semibold text-lg text-text-primary">Service Management</h3>
           <p className="font-body text-sm text-text-secondary">
             {services.length} service{services.length !== 1 ? 's' : ''} configured — price changes affect future bookings only
           </p>
         </div>
-        <Button variant="primary" size="sm" iconName="Plus" iconSize={16} onClick={() => handleOpenCreate()}>
-          Add Service
+        <Button variant="primary" size="sm" iconName="Plus" iconSize={16} onClick={() => handleOpenCreate()} className="whitespace-nowrap flex-shrink-0">
+          <span className="md:hidden">Add</span><span className="hidden md:inline">Add Service</span>
         </Button>
       </div>
 
@@ -212,8 +231,47 @@ const ServiceManagementPanel = () => {
         }}
       />
 
+      {phone && (
+        <div className="bg-surface border border-border rounded-[12px] overflow-hidden" data-testid="services-cards">
+          {filteredServices.length === 0 ? (
+            <p className="px-4 py-8 text-center text-text-secondary font-body text-sm">
+              {services.length === 0 ? (
+                <>No services yet. <button type="button" onClick={() => handleOpenCreate()} className="text-primary font-body-medium hover:underline">Add the first service</button></>
+              ) : 'No services match your filters.'}
+            </p>
+          ) : filteredServices.map((s) => {
+            const price = s.is_on_offer ? formatNPR(s.effective_price_npr) : (tierRangeLabel(s, tierPrices[s.id]) || formatNPR(s.price_npr));
+            return (
+              <div key={s.id} role="button" tabIndex={0} onClick={() => handleOpenEdit(s)} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) handleOpenEdit(s); }}
+                className={`flex items-center gap-2.5 pl-3.5 pr-1 py-[11px] min-h-[64px] border-b border-[#EEF0F1] last:border-b-0 cursor-pointer ${rowTone(false, flashId === s.id)} ${s.is_active ? '' : 'opacity-60'}`}>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-text-primary line-clamp-2">{s.name}</div>
+                  <div className="mt-0.5 flex items-center gap-1.5 text-xs text-text-secondary whitespace-nowrap overflow-hidden">
+                    {!s.is_active && <span className="flex-shrink-0 px-1.5 py-px rounded-[5px] bg-[#F1F3F4] text-[10px] font-medium">Inactive</span>}
+                    <span className="min-w-0 truncate">{s.category || (isSpa ? 'Spa' : '—')}</span>
+                    <span className="flex-shrink-0">· {s.duration_minutes} min ·</span>
+                    <span className="flex-shrink-0 font-data text-text-primary">{price}</span>
+                    {s.is_on_offer && <span className="flex-shrink-0 px-1.5 py-px rounded-[5px] bg-warning/10 text-warning text-[10px] font-medium">{offerBadge(s)}</span>}
+                  </div>
+                </div>
+                <button type="button" onClick={(e) => { e.stopPropagation(); handleToggle(s); }} aria-label={s.is_active ? `Deactivate ${s.name}` : `Activate ${s.name}`}
+                  className="flex-shrink-0 w-11 h-11 grid place-items-center">
+                  <span className={`relative inline-flex h-6 w-10 items-center rounded-full spa-transition-fast ${s.is_active ? 'bg-success' : 'bg-border'}`}>
+                    <span className={`inline-block h-[18px] w-[18px] rounded-full bg-white spa-transition-fast transform ${s.is_active ? 'translate-x-[19px]' : 'translate-x-[3px]'}`} />
+                  </span>
+                </button>
+                <button type="button" onClick={(e) => { e.stopPropagation(); setMenuFor(s); }} aria-label={`More actions for ${s.name}`}
+                  className="flex-shrink-0 w-11 h-11 grid place-items-center text-text-secondary">
+                  <Icon name="MoreVertical" size={18} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Table */}
-      <div className="bg-surface border border-border rounded-spa overflow-hidden">
+      {!phone && <div className="bg-surface border border-border rounded-spa overflow-hidden">
         <table className="w-full">
           <thead>
             <tr className="bg-background border-b border-border">
@@ -306,7 +364,31 @@ const ServiceManagementPanel = () => {
             )}
           </tbody>
         </table>
-      </div>
+      </div>}
+
+      {menuFor && (
+        <BottomSheet isOpen onClose={() => setMenuFor(null)} title={(
+          <>
+            <span className="block truncate leading-tight">{menuFor.name}</span>
+            <span className="block truncate text-xs font-body font-normal text-text-secondary leading-tight mt-0.5">
+              {[menuFor.category || (isSpa ? 'Spa' : null), `${menuFor.duration_minutes} min`, menuFor.is_on_offer ? formatNPR(menuFor.effective_price_npr) : (tierRangeLabel(menuFor, tierPrices[menuFor.id]) || formatNPR(menuFor.price_npr)), menuFor.is_active ? 'Active' : 'Inactive'].filter(Boolean).join(' · ')}
+            </span>
+          </>
+        )}>
+          <div className="px-4 pb-3">
+            <SheetRow icon="Pencil" label="Edit service" className="min-h-[52px]" onClick={() => { const s = menuFor; setMenuFor(null); handleOpenEdit(s); }} trailing={<span />} />
+            <SheetRow icon={menuFor.is_active ? 'EyeOff' : 'Eye'} label={menuFor.is_active ? 'Deactivate' : 'Activate'} className="min-h-[52px]" onClick={() => { const s = menuFor; setMenuFor(null); handleToggle(s); }} trailing={<span />} />
+            <SheetRow icon="Trash2" label="Delete…" danger className="min-h-[52px]" onClick={() => { const s = menuFor; setMenuFor(null); setConfirmDelete(s); }} trailing={<span />} />
+          </div>
+        </BottomSheet>
+      )}
+
+      {undoToast && (
+        <div role="status" className="fixed toast-bottom left-4 right-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:max-w-[420px] z-toast px-4 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center gap-4 bg-text-primary text-white">
+          <span className="flex-1 min-w-0 truncate font-body text-sm">{undoToast.msg}</span>
+          <button type="button" onClick={undoToast.undo} className="flex-shrink-0 min-h-[44px] -my-2 px-2 text-sm font-semibold text-[#9BD48F]">Undo</button>
+        </div>
+      )}
 
       {/* Deactivate / delete: small centred confirms (create / edit open the service detail page) */}
       {confirmToggle && (

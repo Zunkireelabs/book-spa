@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useCallback, useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { fetchOutreachProviderConfig, upsertOutreachProviderConfig } from '../../../../services/api';
@@ -19,7 +20,7 @@ const ProviderSettingsPanel = () => {
     setError(null);
     const { data, error: fetchError } = await fetchOutreachProviderConfig();
     if (fetchError) {
-      setError(fetchError.message || 'Failed to load provider configuration.');
+      setError(friendlyError(fetchError, 'Failed to load provider configuration.'));
       setLoading(false);
       return;
     }
@@ -52,7 +53,7 @@ const ProviderSettingsPanel = () => {
     setSaving(false);
 
     if (upsertError) {
-      setSaveError(upsertError.message || 'Failed to save provider configuration.');
+      setSaveError(friendlyError(upsertError, 'Failed to save provider configuration.'));
       return;
     }
 

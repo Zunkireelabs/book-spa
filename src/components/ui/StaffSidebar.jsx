@@ -11,7 +11,8 @@ import { useOrg } from 'contexts/OrgContext';
 import { useAutoRefresh } from 'hooks/useAutoRefresh';
 import { fetchPendingApprovalCount } from 'services/api';
 import { useOptionalCommandPalette, SHORTCUT_LABEL } from 'components/CommandPalette/useCommandPalette';
-import { getNav, navPath, isNavItemActive } from 'navigation/navRegistry';
+import { getNav, navPath } from 'navigation/navRegistry';
+import { resolveActiveNav } from 'navigation/navActive';
 import { useNotifications } from 'contexts/NotificationsContext';
 import { pinHint } from './pinHint';
 
@@ -102,19 +103,23 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   // The current `?view=`; the bare dashboard URL is the landing view: the dashboard for managers/admins, the calendar for staff.
   const onDashboard = location.pathname === basePath;
   const currentView = onDashboard ? (new URLSearchParams(location.search).get('view') || (userRole === 'staff' ? 'calendar' : 'dashboard')) : null;
-  const isItemActive = (item) => (item.path ? location.pathname.endsWith(`/${item.path}`) : currentView !== null && isNavItemActive(item, currentView));
 
   // New Booking is no longer a nav item (it is a tab under Bookings); the mobile FAB remains.
-  const showNewBookingFab = !isOverall;
 
   // Mobile: a few primary pills, everything else in the "More" sheet (grouped by section, Settings last).
   const flatItems = [
     ...sections.flatMap((sec) => sec.items.map((item) => ({ ...item, groupLabel: sec.label }))),
     ...footer.map((item) => ({ ...item, groupLabel: null, isFooter: true })),
-  ].map((item) => ({ ...item, path: navPath(item, basePath) }));
+  ].map((item) => ({ ...item, routePath: item.path, path: navPath(item, basePath) }));
   const primaryIds = ['dashboard', 'calendar', 'bookings', isManagerOrAdmin ? 'customers' : null].filter(Boolean);
   const mobilePrimaryItems = primaryIds.map((id) => flatItems.find((i) => i.id === id)).filter(Boolean);
   const mobileOverflowItems = flatItems.filter((i) => !primaryIds.includes(i.id));
+  // One shared rule (navigation/navActive.js): the single current item, and the phone pill it lights ('more' for pages inside More).
+  const active = resolveActiveNav({ pathname: location.pathname, view: onDashboard ? new URLSearchParams(location.search).get('view') : null, role: userRole, items: flatItems, primaryIds });
+  const isItemActive = (item) => item.id === active.itemId;
+  // The FAB is hidden on calendar and dashboard (they have their own New booking) and on everything that belongs to Settings (views and the
+  // /services, /locations editors): it covered rows and form fields there. Same shared rule as the nav highlight, no hand list.
+  const showNewBookingFab = !isOverall && currentView !== 'calendar' && currentView !== 'dashboard' && active.itemId !== 'settings';
 
   const renderNavItem = (item) => {
     const badgeCount = item.id === 'inbox' ? inboxUnread : (item.id === 'dashboard' ? pendingApprovals : 0);
@@ -353,7 +358,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                 className={`relative flex flex-col items-center justify-center rounded-full transition-all duration-200 ${
                   isScrolling ? 'px-2 py-1 gap-0.5' : 'px-2.5 py-1.5 gap-0.5'
                 } ${
-                  isItemActive(item)
+                  active.tabId === item.id
                     ? 'bg-primary/10 text-primary'
                     : 'text-gray-500 hover:text-gray-900 hover:bg-background'
                 }`}
@@ -375,7 +380,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
               className={`flex flex-col items-center justify-center rounded-full transition-all duration-200 ${
                 isScrolling ? 'px-2 py-1 gap-0.5' : 'px-2.5 py-1.5 gap-0.5'
               } ${
-                mobileMoreOpen ? 'bg-primary/10 text-primary' : 'text-gray-500 hover:text-gray-900 hover:bg-background'
+                (mobileMoreOpen || active.tabId === 'more') ? 'bg-primary/10 text-primary' : 'text-gray-500 hover:text-gray-900 hover:bg-background'
               }`}
             >
               <Icon name="MoreHorizontal" size={isScrolling ? 19 : 20} />

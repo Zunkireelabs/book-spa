@@ -158,7 +158,7 @@ const PaymentMethodSelector = ({
         createPortal(
           <div
             ref={flyoutRef}
-            className="fixed z-notification w-32 max-w-[60vw] bg-surface border border-border rounded-spa shadow-spa-elevated p-1 animate-fade-in"
+            className="fixed z-popover w-32 max-w-[60vw] bg-surface border border-border rounded-spa shadow-spa-elevated p-1 animate-fade-in"
             style={{ top: submenuPos.top, left: submenuPos.left }}
           >
             {activeGroupItem.subMethods.map((sub) => {

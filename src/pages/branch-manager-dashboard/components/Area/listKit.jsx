@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import ScrollRow from 'components/ui/ScrollRow';
 import { viewerAccess } from 'services/dataMasking';
 import { Link } from 'react-router-dom';
 import { localizeBranch } from '../../../../utils/industryTerms';
@@ -50,7 +51,7 @@ export const useToast = () => {
     return () => clearTimeout(t);
   }, [toast]);
   const toastNode = toast ? (
-    <div role="status" className={`fixed top-20 left-1/2 -translate-x-1/2 z-toast px-4 py-2.5 rounded-lg shadow-lg text-[13px] font-medium ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-text-primary text-white'}`}>
+    <div role="status" className={`fixed toast-top left-1/2 -translate-x-1/2 z-toast px-4 py-2.5 rounded-lg shadow-lg text-[13px] font-medium ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-text-primary text-white'}`}>
       {toast.msg}
     </div>
   ) : null;
@@ -112,7 +113,7 @@ export const ListPageShell = ({ view, title, lead, actions, counts = {}, childre
           <h1 className="text-[20px] font-semibold tracking-[-0.45px] text-text-primary">{title}</h1>
           <p className="text-[13px] text-[#8A8A90] mt-[3px] tabular-nums" data-lead>{lead}</p>
         </div>
-        <div className="flex gap-2 flex-wrap">{actions}</div>
+        <ScrollRow className="flex-wrap md:flex-wrap max-md:flex-nowrap" wrapperClassName="max-md:w-full">{actions}</ScrollRow>
       </div>
       <div ref={tabsRef} className="sticky top-0 z-sticky-filter bg-white pt-[14px]">
         <div role="tablist" aria-label={title} className="flex items-center gap-[22px] border-b border-border overflow-x-auto overflow-y-hidden">
@@ -120,7 +121,7 @@ export const ListPageShell = ({ view, title, lead, actions, counts = {}, childre
             const on = t.view === view;
             return (
               <Link key={t.view} role="tab" aria-selected={on} to={{ search: `?view=${t.view}` }}
-                className={`h-[38px] flex items-center gap-[7px] text-[13px] font-medium relative whitespace-nowrap flex-shrink-0 ${on ? 'text-text-primary' : 'text-[#515152] hover:text-text-primary'}`}>
+                className={`h-[38px] max-md:h-11 flex items-center gap-[7px] text-[13px] font-medium relative whitespace-nowrap flex-shrink-0 ${on ? 'text-text-primary' : 'text-[#515152] hover:text-text-primary'}`}>
                 {t.label}{counts[t.view] != null && <span className="text-[#8A8A90] tabular-nums" data-count={t.view}>{counts[t.view]}</span>}
                 {on && <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-text-primary rounded" />}
               </Link>
@@ -164,7 +165,7 @@ export const RangeMenu = ({ id, from, to, today, onPick }) => {
   const [ct, setCt] = useState(to);
   useEffect(() => { setCf(from); setCt(to); }, [from, to]);
   return (
-    <Menu trigger={(open, toggle) => (
+    <Menu title="Date range" trigger={(open, toggle) => (
       <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} data-range
         className="h-[34px] px-3 rounded-[7px] border border-border bg-white text-[13px] font-medium inline-flex items-center gap-2 hover:bg-[#FAFAF9] whitespace-nowrap">
         <Icon name="Calendar" size={14} className="text-[#8A8A90]" />{rangeLabel(id, from, to)}<Icon name="ChevronDown" size={13} className="text-[#8A8A90]" />
@@ -204,7 +205,7 @@ SearchBox.displayName = 'SearchBox';
 
 /** "Sort <b>Label</b> ▾" menu over `{ id: { label } }`. */
 export const SortMenu = ({ sorts, value, onChange, label = 'Sort' }) => (
-  <Menu trigger={(open, toggle) => (
+  <Menu title="Sort by" trigger={(open, toggle) => (
     <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} className="h-7 px-2 rounded-md text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:bg-[#FAFAF9] whitespace-nowrap">
       {label} <b className="text-text-primary font-medium">{localizeBranch(sorts[value].label)}</b><Icon name="ChevronDown" size={13} />
     </button>)}>

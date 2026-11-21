@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import FilterBar from '../../../components/ui/FilterBar';
@@ -68,7 +69,7 @@ const DiscountsPanel = ({ branchId }) => {
     setError(null);
     const result = await fetchAllDiscounts(branchId);
     if (result.error) {
-      setError(result.error.message || 'Failed to load discounts.');
+      setError(friendlyError(result.error, 'Failed to load discounts.'));
     } else {
       setDiscounts(result.data || []);
     }

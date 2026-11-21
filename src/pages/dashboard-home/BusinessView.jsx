@@ -1,3 +1,4 @@
+import { dayProgress } from '../../lib/dayProgress';
 import React, { useEffect, useState } from 'react';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
@@ -27,7 +28,7 @@ const Change = ({ pct }) => (pct == null ? <span className="text-gray-400">—</
 const BusinessView = ({ data, dataError, branchIds, today, role, onOpenBranch, onReload }) => {
   const loc = wordBranch(); // the app's own word for a site; useIndustry's locationLabel means rooms here
   const locs = wordBranches();
-  const [groups, setGroups] = useState([]);
+  const [groups, setGroups] = useState(null); // null = still loading
   const [needsError, setNeedsError] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [message, setMessage] = useState(null);
@@ -58,10 +59,11 @@ const BusinessView = ({ data, dataError, branchIds, today, role, onOpenBranch, o
   const canAct = role === 'admin';
   const rows = data?.branches || [];
   const weekday = weekdayName(today);
-  const discounts = adminDiscounts(groups);
-  const waiting = summarizeWaiting(groups);
-  const needCount = groups.reduce((n, g) => n + g.total, 0);
-  const needsOf = (id) => groups.find((g) => g.branch_id === id)?.total || 0;
+  const needsLoading = groups === null && !needsError;
+  const discounts = adminDiscounts(groups || []);
+  const waiting = summarizeWaiting(groups || []);
+  const needCount = (groups || []).reduce((n, g) => n + g.total, 0);
+  const needsOf = (id) => (groups || []).find((g) => g.branch_id === id)?.total || 0;
 
   const change = pctChange(pulse.revenue, pulse.revenue_prev);
   const behind = rows.map((r) => ({ name: r.name, pct: pctChange(r.revenue, r.revenue_prev) })).filter((r) => r.pct != null && r.pct < 0).sort((a, b) => a.pct - b.pct)[0];
@@ -79,7 +81,7 @@ const BusinessView = ({ data, dataError, branchIds, today, role, onOpenBranch, o
               <b>{plural(pulse.bookings || 0, 'booking')}</b> across {plural(rows.length, loc, locs)}
               {canMoney && <>{sep}<b>{npr(pulse.revenue)}</b> taken{change != null && change !== 0 && <> <span className={change > 0 ? 'text-primary font-medium' : 'text-error font-medium'}>{change > 0 ? '+' : '−'}{Math.abs(change)}%</span> vs last {weekday.slice(0, 3)}</>}</>}
               {behind && <>{sep}{behind.name} is behind <span className="text-error">−{Math.abs(behind.pct)}%</span></>}
-              {!needsError && <>{sep}<span className={needCount ? 'text-warning font-medium' : ''}>{needCount === 0 ? 'nothing needs someone' : `${needCount} ${needCount === 1 ? 'thing needs' : 'things need'} someone`}</span></>}
+              {!needsError && !needsLoading && <>{sep}<span className={needCount ? 'text-warning font-medium' : ''}>{needCount === 0 ? 'nothing needs someone' : `${needCount} ${needCount === 1 ? 'thing needs' : 'things need'} someone`}</span></>}
             </div>
           </div>
           <Card icon="Building2" title={`${wordBranchesCap()} today`} meta={`Click a row to open that ${loc}`}>
@@ -104,14 +106,14 @@ const BusinessView = ({ data, dataError, branchIds, today, role, onOpenBranch, o
                           className="border-b border-gray-100 last:border-0 cursor-pointer hover:bg-gray-50 focus:outline-none focus-visible:bg-gray-50">
                           <td className="px-3.5 py-2.5"><div className="font-semibold text-gray-900">{r.name}</div>{r.manager && <div className="text-[11px] text-gray-500">Manager {r.manager}</div>}</td>
                           <td className="px-3.5 py-2.5 text-right font-data text-[12.5px] whitespace-nowrap">{r.busy_now} of {r.working} busy</td>
-                          <td className="px-3.5 py-2.5 text-right font-data text-[12.5px]">{r.completed} / {r.bookings}</td>
+                          <td className="px-3.5 py-2.5 text-right font-data text-[12.5px]">{dayProgress(r).finished} / {dayProgress(r).total}</td>
                           {canMoney && <td className="px-3.5 py-2.5 text-right font-data text-[12.5px] whitespace-nowrap">{npr(r.revenue)}</td>}
                           {canMoney && <td className="px-3.5 py-2.5 text-right font-data text-[12.5px]"><Change pct={pctChange(r.revenue, r.revenue_prev)} /></td>}
                           <td className="px-3.5 py-2.5 text-right font-data text-[12.5px] whitespace-nowrap">
                             {pct == null ? '—' : <><span className="inline-block w-14 h-[5px] bg-gray-100 rounded-full overflow-hidden align-middle mr-1.5"><i className={`block h-full ${pct < 45 ? 'bg-accent' : 'bg-primary'}`} style={{ width: `${Math.min(100, pct)}%` }} /></span>{pct}%</>}
                           </td>
                           {canMoney && <td className={`px-3.5 py-2.5 text-right font-data text-[12.5px] whitespace-nowrap ${Number(r.unpaid) > 0 ? 'text-warning' : ''}`}>{npr(r.unpaid)}</td>}
-                          <td className="px-3.5 py-2.5 text-right font-data text-[12.5px]">{needsError ? '—' : n}</td>
+                          <td className="px-3.5 py-2.5 text-right font-data text-[12.5px]">{needsError || needsLoading ? '—' : n}</td>
                         </tr>
                       );
                     })}
@@ -124,7 +126,7 @@ const BusinessView = ({ data, dataError, branchIds, today, role, onOpenBranch, o
       )}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 sm:gap-4">
         <div className="lg:col-span-3">
-          <Card icon="Inbox" title="Needs action" count={needCount} meta="Money owed, or items a manager can't clear" error={needsError} onRetry={retry}>
+          <Card icon="Inbox" title="Needs action" count={needCount} meta="Money owed, or items a manager can't clear" error={needsError} onRetry={retry} loading={needsLoading}>
             <GroupBand>Needs you (admin)</GroupBand>
             {discounts.length === 0 && <p className="text-sm text-gray-500 py-2.5">Nothing needs you right now ✓</p>}
             {discounts.map((b) => {

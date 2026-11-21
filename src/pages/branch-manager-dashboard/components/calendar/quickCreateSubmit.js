@@ -1,4 +1,5 @@
 import { createBooking, createComboBookingItems } from '../../../../services/api';
+import { friendlyError } from '../../../../utils/friendlyError';
 import { wordBranch } from '../../../../utils/industryTerms';
 
 // Create the booking(s) from the QuickCreatePanel form. Shared by the Calendar and the Dashboard so both host the panel identically.
@@ -28,6 +29,9 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
         customerPhone: person.customerPhone,
         customerEmail: person.customerEmail,
         customerGender: person.customerGender,
+        knownCustomerId: person.knownCustomerId || undefined, // ZNLY-303: a guest picked from customer search links to that customer
+        isWalkIn: person.isWalkIn || undefined, // ZNLY-327
+        walkInLabel: person.walkInLabel || undefined,
         specialRequests: formData.specialRequests,
         therapistIds: person.therapistIds,
         roomId: person.roomId || undefined,
@@ -37,11 +41,11 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
       if (result.error) {
         const who = person.customerName || `person ${i + 1}`;
         const tail = created > 0 ? ` (${created} booking${created > 1 ? 's' : ''} already created)` : '';
-        return { error: `Failed for ${who}: ${result.error.message || 'could not create booking.'}${tail}` };
+        return { error: `Failed for ${who}: ${friendlyError(result.error, 'could not create booking.')}${tail}`, code: result.error.code };
       }
       created++;
     }
-    return { toast: { msg: `${created} group bookings created successfully` } };
+    return { toast: { msg: `${created} bookings created for ${people[0]?.customerName || 'the group'}` } };
   }
 
   const result = await guard((overrideReason) => createBooking({
@@ -64,9 +68,11 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
     referringRewardType: formData.referringRewardType,
     referringRewardAmount: formData.referringRewardAmount,
     knownCustomerId: formData.knownCustomerId || undefined,
+    isWalkIn: formData.isWalkIn || undefined, // ZNLY-327: no customer profile
+    walkInLabel: formData.walkInLabel || undefined,
     overrideReason,
   }));
-  if (result.error) return { error: result.error.message || 'Failed to create booking.' };
+  if (result.error) return { error: friendlyError(result.error, 'Failed to create booking.'), code: result.error.code };
 
   if (formData.comboAssignments?.length > 0 && result.data?.id) {
     const comboResult = await createComboBookingItems({
@@ -79,12 +85,12 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
       overrideReason: result.overrideReason,
     });
     if (comboResult.error) {
-      return { toast: { msg: `Booking created, but combo components failed: ${comboResult.error.message || 'unknown error'}`, type: 'error' }, bookingId: result.data?.id };
+      return { toast: { msg: `Booking created, but combo components failed: ${friendlyError(comboResult.error, 'please check the booking')}`, type: 'error' }, bookingId: result.data?.id };
     }
   }
 
   if (result.data?._therapistAssignmentWarning) {
-    return { toast: { msg: `Booking created, but: ${result.data._therapistAssignmentWarning}`, type: 'error' }, bookingId: result.data?.id };
+    return { toast: { msg: `Booking created, but: ${result.data._therapistAssignmentWarning}`, type: 'error' }, bookingId: result.data?.id, bookingNumber: result.data?.booking_number };
   }
-  return { toast: { msg: 'Booking created successfully' }, bookingId: result.data?.id };
+  return { toast: { msg: 'Booking created successfully' }, bookingId: result.data?.id, bookingNumber: result.data?.booking_number };
 }

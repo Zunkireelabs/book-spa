@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react';
+import { CreateBookingHost } from '../../dashboard-home/DashboardPanels';
+import { newBookingSlot } from './calendar/newBookingSlot';
 import UnlinkedLoginNotice from '../../../components/ui/UnlinkedLoginNotice';
 import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate, useLocation, useNavigationType } from 'react-router-dom';
@@ -33,6 +35,7 @@ import FreeNowChip from './Bookings/FreeNowChip';
 import BookingRow, { COLUMN_DEFS } from './Bookings/BookingRow';
 import { useIndustry } from '../../../hooks/useIndustry';
 import { teamMemberCap, teamMemberLower, teamMemberWord } from '../../../utils/industryTerms';
+import ScrollRow from '../../../components/ui/ScrollRow';
 
 const COLS_KEY = 'zennly.bookings.columns';
 const readCols = () => { try { return { service: true, therapist: true, amount: true, ...JSON.parse(localStorage.getItem(COLS_KEY) || '{}') }; } catch { return { service: true, therapist: true, amount: true }; } };
@@ -70,7 +73,7 @@ const BookingsViewPanel = ({ branchId }) => {
   const range = useMemo(() => rangeFromParams(sp, today), [sp, today]);
   const viewChip = VIEWS.some((v) => v.id === sp.get('bv')) ? sp.get('bv') : 'all';
   const sort = SORTS[sp.get('sort')] ? sp.get('sort') : 'time';
-  const need = ['online', 'late', 'assign'].includes(sp.get('nf')) ? sp.get('nf') : '';
+  const need = ['online', 'late', 'unpaid', 'assign'].includes(sp.get('nf')) ? sp.get('nf') : '';
   const isTodayView = range.from === range.to && range.from === today && !isOverall;
   const nowMin = toMin(nowHM);
   const needCtx = useMemo(() => ({ date: today, nowMin }), [today, nowMin]);
@@ -258,7 +261,7 @@ const BookingsViewPanel = ({ branchId }) => {
   };
   const bookTherapist = (therapistId) => navigate(`?view=calendar&newBooking=1&bt=${therapistId}&btime=${fromMin(nextSlot10(nowMin))}`);
 
-  const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
+  const showToast = (msg, type = 'success', action = null) => { setToast({ msg, type, action }); setTimeout(() => setToast(null), action ? 7000 : 3000); };
 
   // ── Derived ─────────────────────────────────────────────────────────────────────────────────────────────────────────
   const therapistOptions = useMemo(() => {
@@ -417,6 +420,36 @@ const BookingsViewPanel = ({ branchId }) => {
     URL.revokeObjectURL(a.href);
   };
 
+  // ── New booking (ZNLY-301): the one New booking panel opens on top of this list ─────────────────────────────────────
+  // `?view=new-booking` (⌘K, Customers / Memberships / Packages / customer-detail "Book") opens it too, prefilled from location.state.
+  const viewParam = sp.get('view');
+  const navLoc = useLocation();
+  const navState = navLoc.state;
+  const canCreate = !isOverall && !readOnly && ['staff', 'manager', 'admin'].includes(role);
+  const [createSlot, setCreateSlot] = useState(null);
+  const [hoursWaited, setHoursWaited] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setHoursWaited(true), 1200); return () => clearTimeout(t); }, []);
+  const openCreate = (prefill) => setCreateSlot(newBookingSlot({ today, nowHM, branchHours, prefill }));
+  const handledNewRef = useRef(null);
+  useEffect(() => {
+    if (viewParam !== 'new-booking' || !canCreate || !branchId || (branchHours === undefined && !hoursWaited)) return;
+    const key = navLoc.key || 'x';
+    if (handledNewRef.current === key) return;
+    handledNewRef.current = key;
+    openCreate(navState?.prefill);
+  }, [viewParam, canCreate, branchId, branchHours, hoursWaited]); // eslint-disable-line react-hooks/exhaustive-deps
+  // "View" on the created-booking toast: open it by id whatever day the list shows (the panel fetches it, so it need not be in
+  // the loaded rows) and move the list to the booking's day so it appears in context. One patch, straight to the URL (no dirty guard:
+  // nothing is open at this point).
+  const viewCreated = (info) => {
+    const d = info.bookingDate;
+    patch({ open: info.bookingId, ...(d && (d < range.from || d > range.to) ? { r: '', d: d === today ? '' : d, from: '', to: '' } : {}) });
+  };
+  const closeCreate = () => {
+    setCreateSlot(null);
+    if (viewParam === 'new-booking') navigate('?view=bookings', { replace: true }); // no Back trap
+  };
+
   // ── Header actions (portaled into the area header) ──────────────────────────────────────────────────────────────────
   const [actionsEl, setActionsEl] = useState(null);
   useEffect(() => { setActionsEl(document.getElementById('area-header-actions')); }, []);
@@ -427,6 +460,7 @@ const BookingsViewPanel = ({ branchId }) => {
   const headerActions = actionsEl && createPortal(
     <>
       {liveBadge}
+      {canCreate && <button type="button" onClick={() => openCreate()} className="h-8 px-3 rounded-md bg-primary text-white text-[13px] font-medium inline-flex items-center gap-1.5 hover:bg-primary/90 whitespace-nowrap"><Icon name="Plus" size={14} /><span className="sm:hidden">New</span><span className="hidden sm:inline">New booking</span></button>}
       {canExport && <button type="button" onClick={exportCsv} disabled={!visible.length} className="h-8 px-3 border border-border rounded-md bg-white text-[13px] font-medium inline-flex items-center gap-1.5 hover:bg-[#FAFAF9] disabled:opacity-50 disabled:cursor-not-allowed"><Icon name="Download" size={14} />Export</button>}
     </>, actionsEl);
 
@@ -532,7 +566,7 @@ const BookingsViewPanel = ({ branchId }) => {
   );
   const sortCols = (
     <div className="flex items-center gap-2 sm:ml-auto">
-      <Menu trigger={(open, toggle) => (
+      <Menu title="Sort by" trigger={(open, toggle) => (
         <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} className="h-7 px-2 rounded-md text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:bg-[#FAFAF9]">
           Sort <b className="text-text-primary font-medium">{SORTS[sort].label}</b><Icon name="ChevronDown" size={13} />
         </button>)}>
@@ -541,7 +575,7 @@ const BookingsViewPanel = ({ branchId }) => {
             {s.label}{sort === id && <Icon name="Check" size={13} />}
           </button>))}
       </Menu>
-      <Menu trigger={(open, toggle) => (
+      <Menu title="Columns" trigger={(open, toggle) => (
         <button type="button" onClick={toggle} aria-label="Columns" aria-haspopup="menu" aria-expanded={open} className="w-[30px] h-[30px] border border-border rounded-md grid place-items-center text-[#515152] hover:bg-[#FAFAF9]"><Icon name="Columns" size={15} /></button>)}>
         {() => COLUMN_DEFS.map((c) => (
           <label key={c.id} className="flex items-center gap-2 px-3 py-1.5 text-[13px] hover:bg-[#FAFAF9] cursor-pointer">
@@ -603,7 +637,7 @@ const BookingsViewPanel = ({ branchId }) => {
     <div ref={tabsBoxRef} className="relative flex items-center whitespace-nowrap min-w-0 flex-1" style={{ gap: tabGap }} role="tablist" aria-label="Booking views">
       {VIEWS.filter((v) => visibleIds.includes(v.id)).map((v) => tabButton(v))}
       {hiddenViews.length > 0 && (
-        <Menu trigger={(open, toggle) => (
+        <Menu title="Show bookings" trigger={(open, toggle) => (
           <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} data-views-more
             className="h-[38px] inline-flex items-center gap-1 text-[13px] font-medium text-[#515152] hover:text-text-primary flex-shrink-0">
             More<Icon name="ChevronDown" size={13} />
@@ -617,8 +651,11 @@ const BookingsViewPanel = ({ branchId }) => {
         </Menu>
       )}
       {/* Off-screen copy used only to measure every chip's natural width. */}
-      <div ref={tabsMeasureRef} aria-hidden="true" className="absolute left-0 top-0 invisible pointer-events-none flex whitespace-nowrap" style={{ gap: tabGap }}>
-        {VIEWS.map((v) => tabButton(v, true))}
+      {/* Clipped (h-0 overflow-hidden) so its natural width (wider than a phone) never adds page scroll width, which iOS Safari counts even for invisible absolutes. */}
+      <div aria-hidden="true" className="absolute left-0 top-0 w-full h-0 overflow-hidden invisible pointer-events-none">
+        <div ref={tabsMeasureRef} className="flex w-max whitespace-nowrap" style={{ gap: tabGap }}>
+          {VIEWS.map((v) => tabButton(v, true))}
+        </div>
       </div>
     </div>
   );
@@ -636,6 +673,8 @@ const BookingsViewPanel = ({ branchId }) => {
   // colSpan must equal the number of columns actually showing (hidden ones are display:none), or the fixed layout grows a phantom column.
   const colCount = 3 + (isSm ? (columns.amount ? 2 : 1) : 0) + (isMd && columns.service ? 1 : 0) + (isLg && columns.therapist ? 1 : 0);
 
+  // The right column (action button + chevron) is one fixed width sized for the longest label ("Complete"), so no row ever pushes its chevron off the edge.
+  const ACTION_COL_W = 112;
   // One <colgroup> shared by the heading table and every day table so their columns line up exactly.
   const colgroup = (
     <colgroup>
@@ -645,7 +684,7 @@ const BookingsViewPanel = ({ branchId }) => {
       {isLg && columns.therapist && <col style={{ width: '16%' }} />}
       {isSm && <col style={{ width: 132 }} />}
       {isSm && columns.amount && <col style={{ width: 112 }} />}
-      <col style={{ width: isSm ? 88 : 84 }} />
+      <col style={{ width: ACTION_COL_W }} />
     </colgroup>
   );
   const rowProps = (b) => ({
@@ -707,8 +746,9 @@ const BookingsViewPanel = ({ branchId }) => {
       {headerActions}
       <UnlinkedLoginNotice />
       {toast && (
-        <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-toast px-5 py-3 rounded-lg shadow-lg flex items-center gap-2 ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
+        <div className={`fixed toast-top left-1/2 -translate-x-1/2 z-toast px-5 py-3 rounded-lg shadow-lg flex items-center gap-2 ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
           <span className="text-sm font-medium">{toast.msg}</span>
+          {toast.action && <button type="button" onClick={() => { toast.action.run(); setToast(null); }} className="ml-2 min-h-[32px] px-2 text-sm font-semibold underline">{toast.action.label}</button>}
         </div>
       )}
       {needsLine}
@@ -721,7 +761,7 @@ const BookingsViewPanel = ({ branchId }) => {
         </div>
         {viewRow}
       </div>
-      {!isMd && <div className="flex items-center gap-2 py-2.5 flex-wrap">{chips}{sortCols}</div>}
+      {!isMd && <ScrollRow className="py-2.5" wrapperClassName="py-0">{chips}{sortCols}</ScrollRow>}
       <div data-bookings-root>
         {error ? (
           <div className="border border-error/20 bg-error/5 rounded-lg p-4 mt-3 flex items-center gap-3 text-[13px] text-error">
@@ -784,6 +824,19 @@ const BookingsViewPanel = ({ branchId }) => {
         userRole={role}
         onViewBooking={handleViewBooking}
       />
+      {createSlot && (
+        <CreateBookingHost
+          slot={createSlot}
+          branchId={branchId}
+          onClose={closeCreate}
+          onCreated={(t, info) => {
+            closeCreate();
+            load();
+            const msg = info?.bookingNumber && t?.type !== 'error' ? `Booking ${info.bookingNumber} created` : (t?.msg || 'Booking created');
+            showToast(msg, t?.type || 'success', info?.bookingId ? { label: 'View', run: () => viewCreated(info) } : null);
+          }}
+        />
+      )}
     </div>
   );
 };

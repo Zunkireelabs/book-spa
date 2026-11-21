@@ -32,7 +32,7 @@ const FrontDeskView = ({ data, dataError, branchId, today, nowMin, role, staffLa
   const { profile } = useAuth();
   const canViewPrices = viewerAccess(profile).canViewPrices; // ZNLY-235: no collect rows or amounts for a no-prices login
   const [, setSearchParams] = useSearchParams();
-  const [queue, setQueue] = useState([]);
+  const [queue, setQueue] = useState(null); // null = still loading
   const [queueError, setQueueError] = useState(false);
   const [panel, setPanel] = useState(null);
   const [busyId, setBusyId] = useState(null);
@@ -95,10 +95,10 @@ const FrontDeskView = ({ data, dataError, branchId, today, nowMin, role, staffLa
       <DeskButtons onNew={bookNew} onWalkIn={walkIn} onGo={go} extras={canAct} />
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 sm:gap-4">
         <div className="lg:col-span-3 space-y-3 sm:space-y-4">
-          <Card icon="Clock" title="Next up" count={queue.filter((b) => b.action !== 'with').length} error={queueError} onRetry={refresh}
+          <Card icon="Clock" title="Next up" count={(queue || []).filter((b) => b.action !== 'with').length} error={queueError} loading={queue === null && !queueError} onRetry={refresh}
             meta={<span className="inline-flex items-center gap-1.5"><i className="w-1.5 h-1.5 rounded-full bg-success" />Live · updates by itself</span>}>
-            {queue.length === 0 && <p className="text-sm text-gray-500">Nothing waiting at the desk ✓</p>}
-            {queue.filter((b) => canViewPrices || b.action !== 'collect').map(rowFor)}
+            {queue && queue.length === 0 && <p className="text-sm text-gray-500">Nothing waiting at the desk ✓</p>}
+            {(queue || []).filter((b) => canViewPrices || b.action !== 'collect').map(rowFor)}
           </Card>
           <Card icon="Users" title="Free right now" error={dataError} onRetry={refresh}>
             {free.length === 0 ? <p className="text-sm text-gray-500">No one is free right now.</p> : (

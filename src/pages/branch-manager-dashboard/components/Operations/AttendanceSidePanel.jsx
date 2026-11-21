@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import SidePanel from '../../../../components/ui/SidePanel';
 import CustomSelect from '../../../../components/ui/CustomSelect';
@@ -193,7 +194,7 @@ const AttendanceSidePanel = ({ open, onClose, person, date, today, shift, initia
       const o = punches.find((q) => !q.checkOut && q.id !== skipId);
       return o ? `Already checked in at ${bn(o.branchId)} since ${fmt(o.checkIn)}` : 'Already checked in. Check out first.';
     }
-    return err.message || 'Could not save.';
+    return friendlyError(err, 'Could not save.');
   };
   // Run one punch write from its own box. Editing / deleting needs a reason, adding only on a past day.
   const runPunch = async (needsReasonHere, fn, skipId = null) => {
@@ -242,7 +243,7 @@ const AttendanceSidePanel = ({ open, onClose, person, date, today, shift, initia
     setSaving(false);
     if (res?.error) {
       if (res.error.code === 'ATTENDANCE_REASON_REQUIRED') { setReasonShown(true); setError('Add a reason to save this change.'); setTimeout(() => reasonRef.current?.focus(), 30); }
-      else setError(res.error.message || 'Could not save.');
+      else setError(friendlyError(res.error, 'Could not save.'));
     }
   };
 

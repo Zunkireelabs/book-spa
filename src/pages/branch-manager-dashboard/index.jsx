@@ -81,7 +81,6 @@ import TemplateEditorPanel from './components/Outreach/TemplateEditorPanel';
 import ReviewQueuePanel from './components/Outreach/ReviewQueuePanel';
 import MessageLogPanel from './components/Outreach/MessageLogPanel';
 import ProviderSettingsPanel from './components/Outreach/ProviderSettingsPanel';
-import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
 import CheckBookingPanel from '../branch-staff-dashboard/components/CheckBookingPanel';
 import CollectPaymentPanel from '../branch-staff-dashboard/components/CollectPaymentPanel';
 import EnrollMemberPanel from './components/Memberships/EnrollMemberPanel';
@@ -415,7 +414,7 @@ const BranchManagerDashboard = () => {
     const outreachAdmin = OUTREACH_ENABLED && profile?.role === 'admin';
     switch (view) {
       case 'bookings': return withBookingsList(null);
-      case 'new-booking': return !isOverall ? <StaffBookingForm onBookingCreated={loadData} /> : null;
+      case 'new-booking': return !isOverall ? withBookingsList(null) : null; // the New booking panel opens over the list (BookingsViewPanel reads ?view=new-booking)
       case 'check-booking': return !isOverall ? <CheckBookingPanel branchId={branchId} /> : null;
       // Front-desk tools (ZNLY-149): manager and admin sell and collect too; admin_viewer stays read-only.
       case 'collect-payment': return frontDesk && !isOverall ? <CollectPaymentPanel onSuccess={showSuccess} /> : null;
@@ -425,7 +424,7 @@ const BranchManagerDashboard = () => {
             onClose={() => setSearchParams({ view: 'bookings' })}
             onEnrolled={(id, info) => {
               setSearchParams({ view: 'bookings' });
-              showSuccess(info?.message || 'Membership created.');
+              showSuccess(info.message || 'Membership created.');
             }}
           />,
         ) : null;
@@ -542,11 +541,11 @@ const BranchManagerDashboard = () => {
         }
         floating={
           actionSuccess ? (
-            <div className="fixed top-16 sm:top-20 left-4 right-4 sm:left-1/2 sm:right-auto sm:transform sm:-translate-x-1/2 z-toast bg-success text-white px-4 sm:px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in">
+            <div className="fixed toast-top left-4 right-4 sm:left-1/2 sm:right-auto sm:transform sm:-translate-x-1/2 z-toast bg-success text-white px-4 sm:px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in">
               <span className="font-body font-body-medium text-sm">{actionSuccess}</span>
             </div>
           ) : newBookingNotification && (
-            <div className="fixed top-16 sm:top-20 left-4 right-4 sm:left-auto sm:right-6 z-toast bg-primary text-white px-4 sm:px-5 py-3 rounded-lg shadow-lg animate-fade-in sm:max-w-sm">
+            <div className="fixed toast-top left-4 right-4 sm:left-auto sm:right-6 z-toast bg-primary text-white px-4 sm:px-5 py-3 rounded-lg shadow-lg animate-fade-in sm:max-w-sm">
               <div className="flex items-start space-x-3">
                 <div className="flex-shrink-0 mt-0.5">
                   <Icon name="CalendarPlus" size={20} />

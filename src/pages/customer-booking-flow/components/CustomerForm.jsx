@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 
 import Input from '../../../components/ui/Input';
-import CountryCodeSelect from '../../../components/ui/CountryCodeSelect';
+import PhoneField from '../../../components/ui/PhoneField';
+import { phoneProblem } from '../../../utils/phone';
 import Icon from '../../../components/AppIcon';
 import { checkExistingCustomerByPhone, findCustomerMatch } from '../../../services/api';
 import { formatNPR } from '../../../services/bookingTransformers';
@@ -63,16 +64,12 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
       }
 
       case 'phone': {
-        // Nepal keeps the strict 10-digit mobile format (the overwhelming common
-        // case); any other selected country code just gets a loose sanity-length
-        // check, since we don't carry per-country phone rules anywhere in this app.
-        const isNepal = (customerInfo.phoneCountryCode || '+977') === '+977';
-        const digits = value.replace(/\D/g, '');
-        const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
+        // The shared validator (ZNLY-331): a real number for the chosen country, the same rule as the staff forms.
+        const phoneIssue = phoneProblem(customerInfo.phoneCountryCode || '+977', value, { walkInHint: false });
         if (!value.trim()) {
           newErrors.phone = 'Phone number is required';
-        } else if (!phoneValid) {
-          newErrors.phone = isNepal ? 'Please enter a valid Nepali phone number' : 'Please enter a valid phone number';
+        } else if (phoneIssue) {
+          newErrors.phone = phoneIssue;
         } else {
           delete newErrors.phone;
         }
@@ -397,29 +394,15 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
             <label className="font-body font-body-medium text-sm text-text-primary">
               Phone number <span className="text-error">*</span>
             </label>
-            <div className="flex">
-              <CountryCodeSelect
-                value={customerInfo.phoneCountryCode || '+977'}
-                onChange={(dial) => onCustomerInfoChange({ ...customerInfo, phoneCountryCode: dial })}
-              />
-              {/* Input always renders wrapped in its own <div> (see Input.jsx), so that
-                  div — not the <input> itself — is the actual flex item here; a
-                  `flex-1` passed as Input's className lands on the <input> and has no
-                  effect on the row's layout. Wrapping it in this flex-1 div instead is
-                  what actually makes it grow to fill the row. */}
-              <div className="flex-1">
-                <Input
-                  type="tel"
-                  name="phone"
-                  data-ph-mask
-                  value={customerInfo.phone || ''}
-                  onChange={handleInputChange}
-                  onBlur={handleBlur}
-                  placeholder="9841234567"
-                  className={`w-full rounded-l-none ${errors.phone ? 'border-error' : ''}`}
-                />
-              </div>
-            </div>
+            <PhoneField
+              name="phone" id="customer-phone" placeholder="9841234567" showProblem={false} dataPhMask
+              dial={customerInfo.phoneCountryCode || '+977'} national={customerInfo.phone || ''}
+              onBlur={handleBlur}
+              onChange={({ dial, national }) => (dial !== (customerInfo.phoneCountryCode || '+977')
+                ? onCustomerInfoChange({ ...customerInfo, phoneCountryCode: dial })
+                : handleInputChange({ target: { name: 'phone', value: national } }))}
+              inputClassName={`flex-1 min-w-0 px-3 py-2 text-base sm:text-sm border rounded-r-spa rounded-l-none bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary ${errors.phone ? 'border-error' : 'border-border'}`}
+            />
             {errors.phone && (
               <p className="font-caption font-caption-normal text-xs text-error flex items-center space-x-1">
                 <Icon name="AlertCircle" size={12} />
@@ -517,21 +500,13 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
                   onChange={handleInputChange}
                   placeholder="Name"
                 />
-                <div className="flex">
-                  <CountryCodeSelect
-                    value={customerInfo.referralCountryCode || '+977'}
-                    onChange={(dial) => onCustomerInfoChange({ ...customerInfo, referralCountryCode: dial })}
-                  />
-                  <Input
-                    type="tel"
-                    name="referralPhone"
-                    data-ph-mask
-                    value={customerInfo.referralPhone || ''}
-                    onChange={handleInputChange}
-                    placeholder="Phone number"
-                    className="flex-1 rounded-l-none"
-                  />
-                </div>
+                <PhoneField
+                  name="referralPhone" id="referral-phone" placeholder="Phone number" showProblem={false} dataPhMask
+                  dial={customerInfo.referralCountryCode || '+977'} national={customerInfo.referralPhone || ''}
+                  onChange={({ dial, national }) => (dial !== (customerInfo.referralCountryCode || '+977')
+                    ? onCustomerInfoChange({ ...customerInfo, referralCountryCode: dial })
+                    : handleInputChange({ target: { name: 'referralPhone', value: national } }))}
+                />
                 {customerInfo.referralPhone && customerInfo.phone && customerInfo.referralPhone === customerInfo.phone && (
                   <p className="font-caption font-caption-normal text-xs text-warning flex items-center space-x-1 sm:col-span-2">
                     <Icon name="AlertCircle" size={12} />

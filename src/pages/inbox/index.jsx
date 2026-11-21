@@ -448,15 +448,15 @@ const InboxBody = () => {
         </SidePanel>
       )}
       {topUndo && (
-        <div role="status" className="fixed bottom-6 left-1/2 -translate-x-1/2 z-toast bg-gray-900 text-white text-[13.5px] rounded-xl pl-4 pr-3.5 pt-2.5 pb-3 shadow-spa-elevated overflow-hidden flex items-center gap-4">
+        <div role="status" className="fixed toast-bottom left-1/2 -translate-x-1/2 z-toast bg-gray-900 text-white text-[13.5px] rounded-xl pl-4 pr-3.5 pt-2.5 pb-3 shadow-spa-elevated overflow-hidden flex items-center gap-4">
           <span>{words.one.charAt(0).toUpperCase() + words.one.slice(1)} {topUndo.bookingNo || ''} confirmed{topUndo.guest ? ` · ${topUndo.guest}` : ''}</span>
           <button type="button" onClick={() => undoConfirm(topUndo.id)} className="font-semibold text-accent rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">Undo</button>
           <span className="absolute left-0 bottom-0 h-[3px] bg-accent" style={{ width: barOn ? '0%' : '100%', transition: barOn ? `width ${CONFIRM_UNDO_MS}ms linear` : 'none' }} />
         </div>
       )}
-      {flash && <div role="alert" className="fixed bottom-6 left-1/2 -translate-x-1/2 z-toast bg-error text-white text-[13px] rounded-full px-4 py-2 shadow-spa-elevated">{flash}</div>}
+      {flash && <div role="alert" className="fixed toast-bottom left-1/2 -translate-x-1/2 z-toast bg-error text-white text-[13px] rounded-full px-4 py-2 shadow-spa-elevated">{flash}</div>}
       {muted && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-toast bg-text-primary text-white text-[13px] rounded-full px-4 py-2 shadow-spa-elevated">
+        <div className="fixed toast-bottom left-1/2 -translate-x-1/2 z-toast bg-text-primary text-white text-[13px] rounded-full px-4 py-2 shadow-spa-elevated">
           {muted} will no longer pop up or play a sound. <Link to="?c=settings" className="underline ml-1">Settings</Link>
         </div>
       )}

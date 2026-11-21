@@ -128,3 +128,7 @@ the gap was mentioned rather than resolved.
 authenticate (`/mcp` → plane) *before* starting work, not after. CLAUDE.md's hard rule is
 explicit: no work without a ticket, and a PR without a ZNLY id in its title doesn't merge.
 Noting the gap repeatedly is not the same as closing it.
+
+## 2026-11-21: PR to stage failed CI three ways that local checks hid
+- **Pattern:** local `npm test` + `npm run build` passed; CI failed on (1) `npm ci` because the lockfile was regenerated with npm 11 while CI uses node 22 / npm 10, (2) ESLint parse error on a duplicate import that Vitest tolerates, (3) a test that relied on a flag from the untracked local `.env` (CI only has the tracked `.env.local`).
+- **Rule:** before opening any PR, run the CI sequence from clean: `rm -rf node_modules && npm ci && npm run lint && npm test && npm run build`, with any untracked `.env*` moved aside. Regenerate lockfiles with `npx npm@10` when adding a dependency. Tests that depend on feature flags must mock `lib/featureFlags`.

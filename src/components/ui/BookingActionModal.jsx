@@ -1,3 +1,5 @@
+import { futureBookingMessage } from '../../services/bookingTransformers';
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { viewerAccess, isRestricted } from '../../services/dataMasking';
@@ -6,6 +8,7 @@ import BookingHistory from './BookingHistory';
 import { createPortal } from 'react-dom';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
+import ServicePickRow from './ServicePickRow';
 import PaymentModal from './PaymentModal';
 import { submitCheckout } from '../../services/checkoutSubmit';
 import ConfirmDialog, { CANCEL_REASON_OPTIONS } from './ConfirmDialog';
@@ -23,11 +26,21 @@ import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
 import BlockOverlapWarning from './BlockOverlapWarning';
-import SidePanel from './SidePanel';
+import SidePanel, { PANEL_WIDTH_BOOKING } from './SidePanel';
+import { DetentSheet, SheetExpandButton, useMediaQuery, releaseSheetEntry } from './BottomSheet';
+import ClientDayLine from '../../pages/branch-manager-dashboard/components/calendar/ClientDayLine';
+import { compactRange } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
+import BookingCustomerLine from './BookingCustomerLine';
+import WalkInClientLine from './WalkInClientLine';
+import { useNavigate } from 'react-router-dom';
 import AvailabilityNoteLine from './AvailabilityNoteLine';
 import { AlertsBlock } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
 import { getBookingStatusColors } from '../../utils/bookingStatusColors';
+import { editFormChanged, editFormSeed, editChanges, isClientlessWalkIn, newBookingFormChanged } from '../../utils/editDetails';
 import { formatPhoneGrouped } from '../../utils/phone';
+import { parsePhone } from './CountryCodeSelect';
+import PhoneField, { usePhoneState, phoneFieldProblem, phoneFieldValue } from './PhoneField';
+import DateTimeRow from './DateTimeRow';
 import { useBlockOverlap } from '../../hooks/useBlockOverlap';
 import { Segmented } from './PanelFormKit';
 import { memberDiscountFor } from '../../services/memberDiscount';
@@ -36,6 +49,11 @@ import { MEMBERSHIP_ENABLED, PRODUCTS_ENABLED } from '../../lib/featureFlags';
 import { humanizePaymentMethod } from '../../services/paymentMethods';
 import { wordBranchCap } from '../../utils/industryTerms';
 import { canonicalMode } from 'lib/dayMoney';
+import StaffPicker from './StaffPicker';
+import StaffPickRow from './StaffPickRow';
+import { pickedRowStatus, pickedRowStatusMulti, staffDayRanges, rangeLabel, clockToMin } from '../../utils/staffFit';
+import { useDayAvailability } from '../../hooks/useDayAvailability';
+import { staffPickIncomplete } from '../../utils/staffFit';
 
 function getNepalNow() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
@@ -71,8 +89,6 @@ function formatCreatedAt(iso) {
 }
 
 // Status badge styles
-// Booking details panel width: 560 on wide screens, shrinking (never below 420) so the calendar isn't starved.
-const BOOKING_PANEL_WIDTH = 'min(560px, max(420px, 100vw - 720px))';
 
 // Discount tab, member part (V22 addendum A): the tier's discount for this booking. Undecided (applies itself at checkout,
 // "Apply now" / "Don't apply for this visit"), applied ("Remove"), declined ("Apply N%"), or a better rate than the booking's
@@ -209,6 +225,8 @@ function correctionFieldsFromBooking(booking) {
     start_time: booking?.startTime ? booking.startTime.slice(0, 5) : '',
     customer_name: booking?.customerName || '',
     customer_phone: booking?.customerPhone || '',
+    // ZNLY-331: how the phone is shown in PhoneField; customer_phone (above) stays the value that is diffed and saved.
+    _phone: parsePhone(booking?.customerPhone || ''),
   };
 }
 
@@ -222,7 +240,7 @@ const RestrictedNotes = ({ bookingId, value, onSaved }) => {
     setBusy(true); setErr(null);
     const { error } = await supabaseClient.rpc('restricted_set_booking_notes', { p_booking_id: bookingId, p_notes: text });
     setBusy(false);
-    if (error) setErr(error.message); else onSaved?.();
+    if (error) setErr(friendlyError(error)); else onSaved?.();
   };
   return (
     <div className="space-y-1.5" data-restricted-notes>
@@ -238,6 +256,7 @@ const RestrictedNotes = ({ bookingId, value, onSaved }) => {
 };
 
 const BookingActionModal = ({
+  clientDay = null, // ZNLY-281: { count, first, last } of this client's bookings that day (calendar only)
   isOpen = false,
   onClose,
   booking = null,
@@ -262,6 +281,9 @@ const BookingActionModal = ({
   branchHours,
   defaultNewBookingMode,
   userRole = 'staff',
+  dayBookings = null, // raw calendar bookings of the day: turns on the time-aware Staff list (Free / Busy then / Best fit); null = plain list
+  offStaff = {}, // { staffId: 'Off today' | 'On leave' } for the Staff list's Off today group
+  initialTab = null, // tab to open on for a newly opened booking (e.g. 'assign'); default Details
   // variant: 'modal' (default, centered dialog — every other caller) | 'panel' (docked SidePanel, used by the calendar).
   // Printing an invoice hands the customer their own name/phone on paper: an account with customer details hidden must not
   // get that affordance (same gate as issue_invoice(), migration-334).
@@ -269,6 +291,7 @@ const BookingActionModal = ({
   variant = 'modal',
   previewBooking = null,   // panel only: the calendar card's already-known data, shown while the full booking loads
   onRefreshBooking,        // panel only: re-fetch the open booking after an in-place action (status change)
+  liveBackdrop = false,    // panel on phones: the page behind stays live (calendar): no scrim, no focus trap at half
   guardRef,                // panel only: parent calls guardRef.current(action) to run `action` through the dirty guard
   // Optional: when provided, a small "view" affordance appears on each Related-
   // services/Other-unpaid-bookings row, letting staff jump straight to THAT
@@ -283,7 +306,8 @@ const BookingActionModal = ({
   onRescheduleStart,
 }) => {
   const { branchId } = useBranch();
-  const { paymentMethods, orgSettings, staffLabel, staffLabelPlural } = useOrg();
+  const { org: orgForNav, paymentMethods, orgSettings, staffLabel, staffLabelPlural } = useOrg();
+  const navigate = useNavigate();
   const cancelReasonOptions = orgSettings?.cancellation_reasons?.length
     ? orgSettings.cancellation_reasons
     : CANCEL_REASON_OPTIONS;
@@ -297,17 +321,28 @@ const BookingActionModal = ({
   const [activeTab, setActiveTab] = useState('details');
   const [isFirstBooking, setIsFirstBooking] = useState(false);
   const [selectedTherapists, setSelectedTherapists] = useState([]);
-  const [therapistSearch, setTherapistSearch] = useState('');
+  // ZNLY-312: callers that pass no day data (everything but the calendar's day view) get Free / Busy / Off from the panel's own
+  // fetch of the booking's day. Own-only logins keep the plain list: RLS hides colleagues' bookings, so everyone would look Free.
+  const ownOnlyViewer = viewerAccess(viewerProfile).ownOnly;
+  const ownDay = useDayAvailability({
+    branchId: booking?.branchId || branchId,
+    date: booking?.date,
+    enabled: !!(isOpen && activeTab === 'assign' && booking?.bookingId && dayBookings == null && !ownOnlyViewer),
+    refreshKey: `${booking?.therapist?.id || ''}|${(booking?.therapists || []).map((t) => t.id).join(',')}`,
+  });
+  const effDayBookings = dayBookings ?? (ownDay.ready ? ownDay.bookings : null);
+  const effOffStaff = dayBookings != null ? offStaff : (ownDay.ready ? ownDay.offById : offStaff);
   const [selectedRoom, setSelectedRoom] = useState('');
   // Per-companion (non-primary therapist) room override for couple bookings where each
   // person is in a separate room — { [therapistId]: roomId }. Primary therapist (index 0
   // of selectedTherapists) always uses selectedRoom above.
   const [therapistRoomOverrides, setTherapistRoomOverrides] = useState({});
   const [companionName, setCompanionName] = useState('');
-  const [companionPhone, setCompanionPhone] = useState('');
+  const companionPhone = usePhoneState('');
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [addClientSignal, setAddClientSignal] = useState(0); // ZNLY-327: the Payment tab's "＋ Add client" opens the header's client list
   // Products added to this visit (V26, product_sales.booking_id): read-only lines on the Payment tab; a manager/admin can refund one.
   const [visitProducts, setVisitProducts] = useState([]);
   const [visitProductRefund, setVisitProductRefund] = useState(null); // the sale awaiting a refund confirmation
@@ -451,7 +486,7 @@ const BookingActionModal = ({
       });
       setTherapistRoomOverrides(overrides);
       setCompanionName(booking.companionName || '');
-      setCompanionPhone(booking.companionPhone || '');
+      companionPhone.reset(booking.companionPhone || '');
     }
   }, [booking?.bookingId]);
 
@@ -460,7 +495,6 @@ const BookingActionModal = ({
     setIsEditing(false);
     setEditError(null);
     setActionError(null);
-    setTherapistSearch('');
     setNewBookingMode(null);
     setNewBookingError(null);
     setNewBookingForm({});
@@ -480,7 +514,7 @@ const BookingActionModal = ({
       setIsFirstBooking(false);
       return;
     }
-    getCustomerFirstBookingFlag(booking.customerId, booking.bookingId, booking.date, booking.startTime).then((result) => {
+    getCustomerFirstBookingFlag(booking.customerId, booking.bookingId, booking.date, booking.startTime, booking.isWalkIn).then((result) => {
       if (!cancelled) setIsFirstBooking(!!result.data?.isFirstBooking);
     });
     return () => { cancelled = true; };
@@ -615,13 +649,13 @@ const BookingActionModal = ({
         rewardCatalogId: null,
       });
       if (error) {
-        setRewardError(error.message || 'Failed to save reward. Please try again.');
+        setRewardError(friendlyError(error, 'Failed to save reward. Please try again.'));
         return;
       }
       const refreshed = await fetchCustomerReferralForBooking(booking.bookingId);
       setCustomerReferral(refreshed.data || null);
     } catch (err) {
-      setRewardError(err?.message || 'Failed to save reward. Please try again.');
+      setRewardError(friendlyError(err, 'Failed to save reward. Please try again.'));
     } finally {
       setRewardSubmitting(false);
     }
@@ -698,6 +732,24 @@ const BookingActionModal = ({
     therapistIds: newBookingForm.therapistId ? [newBookingForm.therapistId] : (newBookingMode === 'rebook' ? bookingTherapistIds : []),
     roomId: newBookingForm.roomId || (newBookingMode === 'rebook' ? booking?.roomId || null : null),
   }, !!newBookingMode);
+  // ZNLY-310: Rebook / Add another service pick staff for the FORM's own date + time + service length, not the original booking's.
+  // Day data: the caller's dayBookings only when the form date is that booking's date, else the panel's own fetch (own-only logins: plain list).
+  const reuseFormDay = dayBookings != null && !!booking?.date && newBookingForm.date === booking.date;
+  const formDay = useDayAvailability({
+    branchId: booking?.branchId || branchId,
+    date: newBookingForm.date,
+    enabled: !!(isOpen && newBookingMode && newBookingForm.date && newBookingForm.startTime && !reuseFormDay && !ownOnlyViewer),
+  });
+  const formDayBookings = reuseFormDay ? dayBookings : (formDay.ready ? formDay.bookings : null);
+  const formDayOff = reuseFormDay ? offStaff : (formDay.ready ? formDay.offById : {});
+  const formSlotMin = (() => { const [h, m] = String(newBookingForm.startTime || '').slice(0, 5).split(':').map(Number); return h * 60 + (m || 0); })();
+  const formSlotEnd = formSlotMin + (newService?.duration_minutes || currentDurationMin);
+  const formHHMM = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const formPickInfo = pickedRowStatus((therapists || []).find((x) => x.id === newBookingForm.therapistId), {
+    slot: formDayBookings ? { start: formSlotMin, end: formSlotEnd } : null,
+    rangesById: formDayBookings ? staffDayRanges(formDayBookings, { date: newBookingForm.date }) : {},
+    offById: formDayOff, date: newBookingForm.date, today: nepalNow().today,
+  });
 
   // Extend-duration options (same service, category, longer duration)
   const [showExtendPanel, setShowExtendPanel] = useState(false);
@@ -739,7 +791,7 @@ const BookingActionModal = ({
     try {
       const result = await onEditBooking(booking.bookingId, { serviceId: option.id });
       if (result?.error) {
-        setExtendError(result.error.message || 'Failed to extend service.');
+        setExtendError(friendlyError(result.error, 'Failed to extend service.'));
       } else {
         setShowExtendPanel(false);
       }
@@ -751,15 +803,7 @@ const BookingActionModal = ({
   };
 
   const startEditing = () => {
-    setEditForm({
-      customerName: booking.customerName || '',
-      customerPhone: booking.customerPhone || '',
-      serviceId: booking.serviceId || '',
-      date: booking.date || '',
-      startTime: booking.startTime ? booking.startTime.slice(0, 5) : booking.time || '',
-      specialRequests: booking.specialRequests || '',
-      referredBy: booking.referredBy || '',
-    });
+    setEditForm(editFormSeed(booking));
     setEditError(null);
     setIsEditing(true);
   };
@@ -769,29 +813,29 @@ const BookingActionModal = ({
     setEditError(null);
   };
 
+  // ZNLY-327: a phone typed in Edit details must be a real number for its country; a number left untouched always saves as stored.
+  const editPhoneProblem = phoneFieldProblem({ dial: editForm.phoneDial, national: editForm.phoneNational, original: editForm.customerPhone, walkInHint: true });
   const handleSaveEdit = async () => {
     if (!booking || !onEditBooking) return;
     setEditError(null);
 
-    if (!editForm.customerName.trim()) {
+    const walkInEdit = isClientlessWalkIn(booking);
+    if (!walkInEdit && !editForm.customerName.trim()) {
       setEditError('Customer name is required.');
       return;
     }
     if (editBlockMsg) return;
+    if (!walkInEdit && editPhoneProblem) { setEditError(editPhoneProblem); return; }
+
+    // Only what the user changed is sent (ZNLY-330); nothing changed just closes the form.
+    const updates = editChanges(editForm, booking, phoneFieldValue({ dial: editForm.phoneDial, national: editForm.phoneNational, original: editForm.customerPhone }));
+    if (Object.keys(updates).length === 0) { setIsEditing(false); return; }
 
     setIsLoading(true);
     try {
-      const result = await onEditBooking(booking.bookingId, {
-        customerName: editForm.customerName.trim(),
-        customerPhone: editForm.customerPhone.trim() || null,
-        serviceId: editForm.serviceId || undefined,
-        date: editForm.date || undefined,
-        startTime: editForm.startTime ? editForm.startTime + ':00' : undefined,
-        specialRequests: editForm.specialRequests.trim() || null,
-        referredBy: (editForm.referredBy || '').trim() || null,
-      });
+      const result = await onEditBooking(booking.bookingId, updates);
       if (result?.error) {
-        setEditError(result.error.message || 'Failed to update booking.');
+        setEditError(friendlyError(result.error, 'Failed to update booking.'));
       } else {
         setIsEditing(false);
       }
@@ -886,7 +930,7 @@ const BookingActionModal = ({
         onClose();
       }
     } catch (err) {
-      setNewBookingError(err?.message || 'Unexpected error. Please try again.');
+      setNewBookingError(friendlyError(err, 'Unexpected error. Please try again.'));
     } finally {
       setNewBookingSubmitting(false);
     }
@@ -1025,6 +1069,10 @@ const BookingActionModal = ({
       setCorrectionError('Change at least one field before saving.');
       return;
     }
+    if (correctionFields?._phone) {
+      const phoneIssue = phoneFieldProblem({ ...correctionFields._phone, original: correctionInitialFields?.customer_phone });
+      if (phoneIssue) { setCorrectionError(phoneIssue); return; }
+    }
     // Reason is collected in the confirm dialog itself, right before submit —
     // not required to already be filled in while still editing.
     setCorrectionConfirming('save');
@@ -1041,7 +1089,7 @@ const BookingActionModal = ({
       });
       setCorrectionSubmitting(false);
       if (rpcError) {
-        setCorrectionError(rpcError.message || 'Failed to delete booking.');
+        setCorrectionError(friendlyError(rpcError, 'Failed to delete booking.'));
         return;
       }
       setCorrectionConfirming(null);
@@ -1059,7 +1107,7 @@ const BookingActionModal = ({
       });
       if (rpcError) {
         setCorrectionSubmitting(false);
-        setCorrectionError(rpcError.message || 'Failed to correct booking.');
+        setCorrectionError(friendlyError(rpcError, 'Failed to correct booking.'));
         return;
       }
       bookingSaved = true;
@@ -1087,7 +1135,7 @@ const BookingActionModal = ({
             setCorrectionSubmitting(false);
             setCorrectionError(
               (bookingSaved ? 'Booking changes saved. ' : '')
-              + `Failed to correct payment ${paymentId}: ${rpcError.message || 'please try again.'}`
+              + `Failed to correct payment ${paymentId}: ${friendlyError(rpcError, 'please try again.')}`
             );
             return;
           }
@@ -1105,7 +1153,7 @@ const BookingActionModal = ({
               (bookingSaved ? 'Booking changes saved. ' : '')
               + (changes.mode ? 'Payment method corrected, but the ' : 'Failed to correct payment ')
               + `${paymentId}${changes.mode ? ' amount correction failed: ' : ': '}`
-              + (rpcError.message || 'please try again.')
+              + (friendlyError(rpcError, 'please try again.'))
             );
             return;
           }
@@ -1123,6 +1171,7 @@ const BookingActionModal = ({
   const handleAssignTherapist = async () => {
     if (!booking) return;
 
+    if (selectedTherapists.length > 1 && currentServiceObj?.is_couple && companionPhone.problem) { setActionError(companionPhone.problem); return; }
     setIsLoading(true);
     setActionError(null);
     try {
@@ -1144,14 +1193,14 @@ const BookingActionModal = ({
           selectedRoom || null,
           overridesToSend,
           isCoupleAssignment ? (companionName.trim() || null) : undefined,
-          isCoupleAssignment ? (companionPhone.trim() || null) : undefined
+          isCoupleAssignment ? (companionPhone.value || null) : undefined
         );
       }
       // The panel stays open on the updated booking (like status changes); the modal closes as before.
       if (variant === 'panel') await onRefreshBooking?.(booking.bookingId);
       else onClose();
     } catch (error) {
-      setActionError(error?.message || 'Assignment failed. Please try again.');
+      setActionError(friendlyError(error, 'Assignment failed. Please try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -1173,7 +1222,7 @@ const BookingActionModal = ({
         onClose();
       }
     } catch (error) {
-      setActionError(error?.message || 'Status update failed. Please try again.');
+      setActionError(friendlyError(error, 'Status update failed. Please try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -1258,6 +1307,15 @@ const BookingActionModal = ({
   const [panelConfirm, setPanelConfirm] = useState(null); // { type: 'close' | 'switch', action? }
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef(null);
+  // ZNLY-285: below md the panel is a two-detent bottom sheet (half / full) instead of the right-hand SidePanel.
+  const phoneViewport = useMediaQuery('(max-width: 767px)');
+  const useSheet = isPanel && phoneViewport;
+  const [detent, setDetent] = useState('half');
+  useEffect(() => { if (!isOpen) setDetent('half'); }, [isOpen]);
+  // Anything that needs room (edit, payment, + Service, Extend) opens the sheet fully.
+  useEffect(() => {
+    if (useSheet && isOpen && (isEditing || showExtendPanel || showPaymentModal || newBookingMode)) setDetent('full');
+  }, [useSheet, isOpen, isEditing, showExtendPanel, showPaymentModal, newBookingMode]);
   // Two-column Customer | Service layout only when the panel body is >= 520px wide (container-based, not viewport-based).
   const bodyRef = useRef(null);
   const [wideBody, setWideBody] = useState(false);
@@ -1277,8 +1335,14 @@ const BookingActionModal = ({
   const bookingTherapistIdsStr = booking
     ? (booking.therapists?.length > 0 ? booking.therapists.map(t => t.id) : (booking.therapist?.id ? [booking.therapist.id] : [])).slice().sort().join(',')
     : '';
+  // Open forms count as unsaved only when a value really differs from where it started (ZNLY-326). The extend panel holds no
+  // value (picking an option applies at once), so opening it alone is never dirty.
+  const formDirty = !!booking && (
+    (isEditing && editFormChanged(editForm, booking))
+    || (!!newBookingMode && newBookingFormChanged(newBookingForm, newBookingMode, booking, new Date().toISOString().slice(0, 10)))
+  );
   const isDirty = !!booking && (
-    isEditing || !!newBookingMode || showExtendPanel
+    formDirty
     || !!String(discountValue || '').trim() || !!String(discountReason || '').trim()
     || (selectedTherapists.slice().sort().join(',') !== bookingTherapistIdsStr)
     || ((selectedRoom || '') !== (booking.roomId || ''))
@@ -1291,16 +1355,35 @@ const BookingActionModal = ({
     };
     return () => { guardRef.current = null; };
   });
-  useEffect(() => { setPanelConfirm(null); setMoreOpen(false); if (booking) setActiveTab('details'); }, [booking?.bookingId]);
+  useEffect(() => { setPanelConfirm(null); setMoreOpen(false); if (booking) setActiveTab(initialTab || 'details'); }, [booking?.bookingId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!moreOpen) return undefined;
     const onDown = (e) => { if (moreRef.current && !moreRef.current.contains(e.target)) setMoreOpen(false); };
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
   }, [moreOpen]);
+  // Leaving Edit details for another tab: unsaved edits go through the same discard confirm as closing; a clean form switches at once.
+  const goTab = (id) => {
+    const go = () => { setActiveTab(id); setActionError(null); if (id !== 'details') setIsEditing(false); };
+    if (isEditing && id !== 'details' && editFormChanged(editForm, booking)) setPanelConfirm({ type: 'switch', action: go });
+    else go();
+  };
   const requestPanelClose = () => {
     if (isDirty) setPanelConfirm({ type: 'close' });
     else onClose?.();
+  };
+  // Leaving for another page goes through the same unsaved-changes guard as closing.
+  const requestPanelCloseThen = (go) => {
+    if (isDirty) setPanelConfirm({ type: 'switch', action: go });
+    else go();
+  };
+
+  // Collapsing full -> half closes any edit / extend / add form; unsaved edits go through the same discard guard as closing.
+  const changeDetent = (next) => {
+    if (next !== 'half') { setDetent(next); return; }
+    const collapse = () => { if (isEditing) cancelEditing(); setShowExtendPanel(false); setNewBookingMode(null); setDetent('half'); };
+    if (formDirty) setPanelConfirm({ type: 'switch', action: collapse });
+    else collapse();
   };
 
   if (!isOpen) return null;
@@ -1311,11 +1394,40 @@ const BookingActionModal = ({
     const pvStatusLabel = String(pv.status || '').toLowerCase();
     const pvColors = getBookingStatusColors(pvStatusLabel === 'in-progress' ? 'In-Progress' : pvStatusLabel === 'no show' ? 'No Show' : pvStatusLabel.charAt(0).toUpperCase() + pvStatusLabel.slice(1));
     // Same tree shape as the loaded panel (fragment > SidePanel) so switching bookings doesn't remount/re-animate it.
+    if (useSheet) {
+      return (
+        <DetentSheet
+          isOpen detent={detent} onDetentChange={changeDetent} onClose={onClose} scrim={!liveBackdrop} titleId="booking-panel-title"
+          header={(
+            <div className="border-b border-border">
+              <div className="flex items-center justify-between gap-1 pl-5 pr-2">
+                <h3 id="booking-panel-title" className="min-w-0 truncate font-heading font-heading-semibold text-[16px] text-text-primary">{pv.customerName || 'Booking'}</h3>
+                <div className="flex items-center flex-shrink-0">
+                  <SheetExpandButton full={detent === 'full'} onToggle={() => changeDetent(detent === 'full' ? 'half' : 'full')} />
+                  <button type="button" onClick={onClose} aria-label="Close" className="w-11 h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background spa-transition-fast"><Icon name="X" size={18} /></button>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 px-5 pb-2 -mt-1 min-h-[28px]">
+                {pv.status && <span className="px-2 py-0.5 rounded-full text-[11px] font-medium capitalize flex-shrink-0" style={{ backgroundColor: pvColors.fill, color: pvColors.text }}>{pvStatusLabel.replace('-', ' ')}</span>}
+              </div>
+            </div>
+          )}
+        >
+          <div className="p-5 space-y-5" aria-busy="true">
+            <div>
+              <p className="text-[13px] text-text-primary">{pv.serviceName || pv.service || ''}</p>
+              <p className="text-[13px] text-text-secondary mt-0.5">{[pv.date, pv.startTime && pv.endTime ? `${pv.startTime.slice(0, 5)}–${pv.endTime.slice(0, 5)}` : ''].filter(Boolean).join(' · ')}</p>
+            </div>
+            {[0, 1].map((i) => (<div key={i} className="space-y-2 animate-pulse"><div className="h-3 w-24 bg-gray-100 rounded" /><div className="h-4 w-full bg-gray-100 rounded" /></div>))}
+          </div>
+        </DetentSheet>
+      );
+    }
     return (
       <>
       <SidePanel
         isOpen
-        width={BOOKING_PANEL_WIDTH}
+        width={PANEL_WIDTH_BOOKING}
         onClose={onClose}
         title={(
           <span className="flex items-center gap-2 min-w-0">
@@ -1370,6 +1482,8 @@ const BookingActionModal = ({
   // rooms.requires_therapist, not a hardcoded room/branch list.
   const selectedRoomObj = rooms.find(r => r.id === selectedRoom);
   const isTherapistOptional = selectedRoomObj?.requires_therapist === false;
+  // Save assignment waits for a complete pick: someone, or both people for a couple service (ZNLY-300).
+  const assignIncomplete = staffPickIncomplete({ isCouple: !!currentServiceObj?.is_couple, optional: isTherapistOptional, count: selectedTherapists.length });
 
   const nextStatuses = isViewer ? [] : getNextStatuses(booking.status);
   // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).
@@ -1387,7 +1501,7 @@ const BookingActionModal = ({
     setMemberBusy(true);
     setDiscountError(null);
     const { error } = await applyMemberDiscount({ bookingId: booking.bookingId, remove });
-    if (error) setDiscountError(error.message || 'Could not change the member discount.');
+    if (error) setDiscountError(friendlyError(error, 'Could not change the member discount.'));
     await loadMemberCtx();
     await onRefreshBooking?.(booking.bookingId);
     setMemberBusy(false);
@@ -1495,7 +1609,7 @@ const BookingActionModal = ({
       }
 
       if (failed) {
-        setDiscountError(lastResult?.error?.message || 'Failed to apply discount.');
+        setDiscountError(friendlyError(lastResult?.error, 'Failed to apply discount.'));
       } else if (lastResult?.data?.isPending) {
         setDiscountSuccess('pending');
         setDiscountValue('');
@@ -1539,14 +1653,99 @@ const BookingActionModal = ({
       </span>
     </span>
   );
+  // Panel header: name + status + pencil + ×, then the customer subline (phone · View profile · birthday). Restricted staff: name + status only.
+  const canEditDetails = !restricted && !isMutationBlocked && !!onEditBooking;
+  // ZNLY-327: a walk-in with no client gets "＋ Add client" instead of View profile / phone / birthday; a walk-in that has one keeps a small tag.
+  const walkInNoClient = !!booking.isWalkIn && !booking.customerId;
+  // Add client changes no money, so it follows the API's own lifecycle rule (a closed day, Cancelled and No Show refuse); a paid, in-progress or Completed booking may still get one.
+  const canAddClient = !restricted && !isViewer && !isLocked && booking.status !== 'Cancelled' && booking.status !== 'No Show';
+  const walkInTag = booking.isWalkIn ? <span className="px-2 py-0.5 rounded-full text-[11px] font-medium flex-shrink-0 inline-flex items-center gap-1 bg-warning/15 text-warning" data-walkin-tag><span aria-hidden="true">🚶</span>Walk-in</span> : null;
+  const customerLine = walkInNoClient
+    ? <WalkInClientLine booking={booking} canAdd={canAddClient} openSignal={addClientSignal} onLinked={() => onRefreshBooking?.(booking.bookingId)} />
+    : <BookingCustomerLine booking={booking} restricted={restricted} canEdit={!isViewer} onSaved={() => onRefreshBooking?.(booking.bookingId)} />;
+  const desktopPanelHeader = (
+    <div className="border-b border-border">
+      <div className="min-h-14 flex items-center justify-between gap-2 px-5 py-2">
+        <div className="min-w-0 flex items-center gap-2">
+        <h3 id="booking-panel-title" className="font-heading font-heading-semibold text-[15px] text-text-primary min-w-0 flex items-center gap-2">
+          <span className="truncate">{booking.customerName}</span>
+          <span className="px-2 py-0.5 rounded-full text-[11px] font-medium flex-shrink-0 first-letter:uppercase" style={{ backgroundColor: statusColors.fill, color: statusColors.text }}>
+            {booking.status.replace('-', ' ')}
+          </span>
+          {walkInTag}
+        </h3>
+        {!restricted && booking.customerId && (
+          <button type="button" onClick={() => requestPanelCloseThen(() => { releaseSheetEntry(); navigate(`/${orgForNav?.slug}/customers/${booking.customerId}`); })}
+            className="relative flex-shrink-0 whitespace-nowrap text-[13px] font-medium text-primary hover:underline before:content-[''] before:absolute before:-inset-x-1 before:-inset-y-3">
+            View profile
+          </button>
+        )}
+        </div>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {canEditDetails && (
+            <button type="button" onClick={() => { setActiveTab('details'); startEditing(); }} title="Edit booking details" aria-label="Edit booking details"
+              className="w-8 h-8 max-lg:w-11 max-lg:h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background hover:text-primary spa-transition-fast">
+              <Icon name="Pencil" size={15} />
+            </button>
+          )}
+          {useSheet && <SheetExpandButton full={detent === 'full'} onToggle={() => changeDetent(detent === 'full' ? 'half' : 'full')} />}
+          <button type="button" onClick={requestPanelClose} aria-label="Close"
+            className="w-8 h-8 max-lg:w-11 max-lg:h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background spa-transition-fast">
+            <Icon name="X" size={18} />
+          </button>
+        </div>
+      </div>
+      {customerLine}
+    </div>
+  );
+
+  // Phone sheet header (ZNLY-285): row 1 name + controls, row 2 status chip · View profile, row 3 the customer line.
+  const sheetHeader = (
+    <div className="border-b border-border">
+      <div className="flex items-center justify-between gap-1 pl-5 pr-2">
+        <h3 id="booking-panel-title" className="min-w-0 truncate font-heading font-heading-semibold text-[16px] text-text-primary">{booking.customerName}</h3>
+        <div className="flex items-center flex-shrink-0">
+          {canEditDetails && (
+            <button type="button" onClick={() => { setActiveTab('details'); startEditing(); }} aria-label="Edit booking details"
+              className="w-11 h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background hover:text-primary spa-transition-fast">
+              <Icon name="Pencil" size={15} />
+            </button>
+          )}
+          <SheetExpandButton full={detent === 'full'} onToggle={() => changeDetent(detent === 'full' ? 'half' : 'full')} />
+          <button type="button" onClick={requestPanelClose} aria-label="Close"
+            className="w-11 h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background spa-transition-fast">
+            <Icon name="X" size={18} />
+          </button>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 px-5 pb-2 -mt-1">
+        <span className="px-2 py-0.5 rounded-full text-[11px] font-medium flex-shrink-0 first-letter:uppercase" style={{ backgroundColor: statusColors.fill, color: statusColors.text }}>
+          {booking.status.replace('-', ' ')}
+        </span>
+        {walkInTag}
+        {!restricted && booking.customerId && (
+          <button type="button" onClick={() => requestPanelCloseThen(() => { releaseSheetEntry(); navigate(`/${orgForNav?.slug}/customers/${booking.customerId}`); })}
+            className="relative flex-shrink-0 whitespace-nowrap text-[13px] font-medium text-primary hover:underline before:content-[''] before:absolute before:-inset-x-2 before:-inset-y-3">
+            View profile
+          </button>
+        )}
+      </div>
+      {customerLine}
+    </div>
+  );
+  const panelHeader = useSheet ? sheetHeader : desktopPanelHeader;
 
   // Primary next action for the booking's status; everything else lives in the "⋯" overflow.
   const primaryStatusTarget = booking.status === 'pending' ? 'confirmed' : booking.status === 'confirmed' ? 'in-progress' : booking.status === 'in-progress' ? 'completed' : null;
+  // ZNLY-275: a booking for a later day can't be started, completed or marked no-show; staff move it to today first.
+  const futureStart = futureBookingMessage(booking.date, 'start');
+  const futureComplete = futureBookingMessage(booking.date, 'complete');
+  const futureNoShow = futureBookingMessage(booking.date, 'noshow');
   const primaryAction = (() => {
     if (isLocked || isViewer) return null;
     if (booking.status === 'pending') return { key: 'confirm', label: 'Confirm', run: () => handleStatusUpdate('confirmed') };
-    if (booking.status === 'confirmed') return { key: 'start', label: 'Start', run: () => handleStatusUpdate('in-progress') };
-    if (booking.status === 'in-progress') return { key: 'complete', label: 'Complete', run: () => handleStatusUpdate('completed') };
+    if (booking.status === 'confirmed') return { key: 'start', label: 'Start', blocked: futureStart, run: () => handleStatusUpdate('in-progress') };
+    if (booking.status === 'in-progress') return { key: 'complete', label: 'Complete', blocked: futureComplete, run: () => handleStatusUpdate('completed') };
     if (canPay) return { key: 'pay', label: 'Collect payment', run: () => { setActiveTab('payment'); setShowPaymentModal(true); } };
     return null;
   })();
@@ -1574,13 +1773,13 @@ const BookingActionModal = ({
     // Other status transitions that aren't the primary action (e.g. Pending → Start isn't valid, so only no-show/cancel remain).
     ...nextStatuses
       .filter((st) => st !== 'cancelled' && st !== 'no show' && st !== primaryStatusTarget)
-      .map((st) => ({ key: `st-${st}`, label: st === 'in-progress' ? 'Start' : st.charAt(0).toUpperCase() + st.slice(1), icon: 'ArrowRight', run: () => handleStatusUpdate(st) })),
+      .map((st) => ({ key: `st-${st}`, label: st === 'in-progress' ? 'Start' : st.charAt(0).toUpperCase() + st.slice(1), icon: 'ArrowRight', disabled: (st === 'in-progress' && !!futureStart) || (st === 'completed' && !!futureComplete), reason: st === 'completed' ? futureComplete : futureStart, run: () => handleStatusUpdate(st) })),
     // Zennly-only: Reschedule creates a new booking and cancels this one (the caller runs the slot picker).
     !isViewer && onRescheduleStart && !isTerminal && !isLocked && (() => {
       const blocked = isServiceStarted || booking.paymentStatus === 'paid';
       return { key: 'reschedule', label: 'Reschedule', icon: 'CalendarClock', disabled: blocked, reason: booking.paymentStatus === 'paid' ? 'Cannot reschedule a paid booking.' : 'This service has already started.', run: () => onRescheduleStart(booking) };
     })(),
-    !isTerminal && !isLocked && nextStatuses.includes('no show') && { key: 'noshow', label: 'Mark no-show', icon: 'UserX', disabled: noShowGated, reason: "Available after the booking's scheduled time", run: () => setPendingStatus('no show') },
+    !isTerminal && !isLocked && nextStatuses.includes('no show') && { key: 'noshow', label: 'Mark no-show', icon: 'UserX', disabled: noShowGated || !!futureNoShow, reason: futureNoShow || "Available after the booking's scheduled time", run: () => setPendingStatus('no show') },
     !isTerminal && !isLocked && nextStatuses.includes('cancelled') && { key: 'cancel', label: 'Cancel booking', icon: 'XCircle', danger: true, run: () => setPendingStatus('cancelled') },
   ].filter(Boolean);
 
@@ -1674,14 +1873,17 @@ const BookingActionModal = ({
           </div>
           <div className="flex-1" />
           {activeTab === 'assign' && !isAssignmentBlocked ? (
-            <Button variant="primary" size="sm" onClick={handleAssignTherapist} loading={isLoading} disabled={selectedTherapists.length === 0 && !isTherapistOptional}>Save assignment</Button>
+            <Button variant="primary" size="sm" onClick={handleAssignTherapist} loading={isLoading} disabled={assignIncomplete}>Save assignment</Button>
           ) : primaryAction ? (
-            <Button variant="primary" size="sm" onClick={primaryAction.run} loading={isLoading}>{primaryAction.label}</Button>
+            <Button variant="primary" size="sm" onClick={primaryAction.run} loading={isLoading} disabled={!!primaryAction.blocked} title={primaryAction.blocked || undefined}>{primaryAction.label}</Button>
           ) : null}
         </>
       )}
     </div>
   );
+  // Visible reason next to the disabled Start / Complete / No-show (the same sentence is on their tooltips).
+  const futureNote = !isTerminal && !isLocked && !isViewer && !panelConfirm && !isEditing && ((booking.status === 'confirmed' ? futureStart : booking.status === 'in-progress' ? futureComplete : null) || null);
+  const panelFooterWithNote = futureNote ? (<div><p className="px-1 pb-2 text-[12px] text-text-secondary" data-future-note>{futureNote}</p>{panelFooter}</div>) : panelFooter;
 
   // Equal-fit tab bar for the panel: never scrolls horizontally.
   const panelTabs = [
@@ -1699,7 +1901,7 @@ const BookingActionModal = ({
             type="button"
             role="tab"
             aria-selected={activeTab === tab.id}
-            onClick={() => { setActiveTab(tab.id); setActionError(null); if (tab.id !== 'details') setIsEditing(false); }}
+            onClick={() => goTab(tab.id)}
             className={`h-11 flex items-center justify-center gap-1.5 text-[13px] font-body font-body-medium border-b-2 -mb-px spa-transition-fast whitespace-nowrap ${
               activeTab === tab.id ? 'border-primary text-primary' : 'border-transparent text-text-secondary hover:text-text-primary'
             }`}
@@ -1720,11 +1922,7 @@ const BookingActionModal = ({
               {tabs.map((tab, index) => (
                 <button
                   key={tab.id}
-                  onClick={() => {
-                    setActiveTab(tab.id);
-                    setActionError(null);
-                    if (tab.id !== 'details') setIsEditing(false);
-                  }}
+                  onClick={() => goTab(tab.id)}
                   className={`flex items-center gap-1.5 sm:gap-2 py-3 sm:py-4 px-3 sm:px-1 border-b-2 spa-transition-fast whitespace-nowrap flex-shrink-0 min-h-[44px] ${
                     index === tabs.length - 1 ? 'mr-4 sm:mr-6' : ''
                   } ${
@@ -1797,6 +1995,7 @@ const BookingActionModal = ({
             {/* Details Tab */}
             {activeTab === 'details' && (
               <div className={isPanel ? 'space-y-5' : 'space-y-4 sm:space-y-6'}>
+                <ClientDayLine info={clientDay} range={clientDay ? compactRange(clientDay.first, clientDay.last) : ''} />
                 {/* Lock / Immutability Banner — payment-aware on Completed so it complements the Record Payment button */}
                 {isMutationBlocked && (() => {
                   const banner = isLocked
@@ -1862,7 +2061,8 @@ const BookingActionModal = ({
                     <div className="flex flex-wrap gap-2">
                       {nextStatuses.map((status) => {
                         const needsConfirm = status === 'cancelled' || status === 'no show';
-                        const noShowBlocked = status === 'no show' && !hasBookingStarted(booking);
+                        const futureBlock = status === 'in-progress' ? futureStart : status === 'completed' ? futureComplete : status === 'no show' ? futureNoShow : null;
+                        const noShowBlocked = (status === 'no show' && !hasBookingStarted(booking)) || !!futureBlock;
                         const rescheduleDisabled = isServiceStarted || isLocked || booking.paymentStatus === 'paid';
                         return (
                           <React.Fragment key={status}>
@@ -1885,7 +2085,7 @@ const BookingActionModal = ({
                               onClick={() => needsConfirm ? setPendingStatus(status) : handleStatusUpdate(status)}
                               loading={isLoading}
                               disabled={noShowBlocked}
-                              title={noShowBlocked ? "Available after the booking's scheduled time" : undefined}
+                              title={noShowBlocked ? (futureBlock || "Available after the booking's scheduled time") : undefined}
                             >
                               {status === 'in-progress' ? 'Start' : status === 'no show' ? 'No show' : status.charAt(0).toUpperCase() + status.slice(1)}
                             </Button>
@@ -1920,7 +2120,6 @@ const BookingActionModal = ({
                   const payState = paymentStatusLabel(booking);
                   const pay = { label: payState.label, cls: payState.tone === 'success' ? 'bg-success/10 text-success' : payState.tone === 'neutral' ? 'bg-border-muted text-text-secondary' : 'bg-warning/10 text-warning' };
                   const npr = (n) => `NPR ${Number(n || 0).toLocaleString('en-IN')}`;
-                  const phone = booking.customerPhone ? formatPhoneGrouped(booking.customerPhone) : '';
                   const copy = (v) => { try { navigator.clipboard?.writeText(v); } catch (_) { /* clipboard unavailable */ } };
                   const copyBtn = (value, label) => (
                     <button type="button" onClick={() => copy(value)} aria-label={label} title={label}
@@ -1965,34 +2164,13 @@ const BookingActionModal = ({
                         <RestrictedNotes bookingId={booking.bookingId} value={booking.specialRequests} onSaved={() => onRefreshBooking?.(booking.bookingId)} />
                       )}
 
-                      <div className="border-t border-border pt-5 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <h3 className={sectionHead}>Customer</h3>
-                          {!isMutationBlocked && onEditBooking && (
-                            <button onClick={startEditing} className="p-1.5 -mr-1.5 rounded-spa hover:bg-background spa-transition-fast text-text-secondary hover:text-primary" title="Edit booking details" aria-label="Edit booking details">
-                              <Icon name="Pencil" size={14} />
-                            </button>
-                          )}
+                      {!restricted && booking.customerEmail && (
+                        <div className="group flex items-center gap-2 text-[13px] text-text-primary min-w-0">
+                          <Icon name="Mail" size={14} className="text-text-tertiary flex-shrink-0" />
+                          <span className="break-all">{booking.customerEmail}</span>
+                          {copyBtn(booking.customerEmail, 'Copy email')}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-body text-sm font-medium text-text-primary">{booking.customerName}</p>
-                          {booking.isNewCustomer && <span className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-medium">New</span>}
-                        </div>
-                        {phone && (
-                          <div className="group flex items-center gap-2 text-[13px] text-text-primary">
-                            <Icon name="Phone" size={14} className="text-text-tertiary flex-shrink-0" />
-                            <a href={`tel:${String(booking.customerPhone).replace(/\s/g, '')}`} className="hover:underline tabular-nums">{phone}</a>
-                            {copyBtn(String(booking.customerPhone), 'Copy phone')}
-                          </div>
-                        )}
-                        {booking.customerEmail && (
-                          <div className="group flex items-center gap-2 text-[13px] text-text-primary min-w-0">
-                            <Icon name="Mail" size={14} className="text-text-tertiary flex-shrink-0" />
-                            <span className="break-all">{booking.customerEmail}</span>
-                            {copyBtn(booking.customerEmail, 'Copy email')}
-                          </div>
-                        )}
-                      </div>
+                      )}
 
                       {booking.referredBy && (
                         <div className="border-t border-border pt-5 space-y-2">
@@ -2007,6 +2185,63 @@ const BookingActionModal = ({
                 {!(isPanel && !isEditing) && (
                 <>
                 {/* Customer & Service Information - Responsive grid */}
+                {isEditing && !showAdminCorrection ? (
+                  <div className="space-y-4">
+                    {/* Edit details (ZNLY-324): one column at every width, same controls as New booking. */}
+                    <h3 className="font-body font-medium text-xs uppercase tracking-wider text-text-tertiary">Booking</h3>
+                    <div>
+                      <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Date &amp; time <span className="text-error">*</span></label>
+                      <DateTimeRow
+                        date={editForm.date}
+                        time={editForm.startTime}
+                        onDateChange={(d) => setEditForm(f => ({ ...f, date: d }))}
+                        onTimeChange={(t) => setEditForm(f => ({ ...f, startTime: t }))}
+                        branchHours={branchHours}
+                      />
+                      {editForm.startTime && !isWithinBranchHours(editForm.startTime) && (
+                        <p className="font-caption text-[11px] text-warning mt-1.5">
+                          Outside branch hours ({format12h(branchHours?.openTime?.slice(0, 5) || '09:00')} – {format12h(branchHours?.closeTime?.slice(0, 5) || '21:00')})
+                        </p>
+                      )}
+                      <BlockOverlapWarning message={editBlockMsg} className="mt-2" />
+                    </div>
+                    <div>
+                      <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Service <span className="text-error">*</span></label>
+                      {services?.length > 0 ? (
+                        <ServicePickRow required services={services} value={editForm.serviceId} onChange={(val) => setEditForm(f => ({ ...f, serviceId: val }))} branchId={booking?.branchId || branchId} canViewPrices={canViewPrices} title="Service for this booking" sub={booking.customerName || ''} ariaLabel="Service" />
+                      ) : (
+                        <p className="font-body font-body-normal text-sm text-text-primary">{booking.service}</p>
+                      )}
+                    </div>
+                    {canViewPrices && (
+                      <div className="flex items-center justify-between gap-3 rounded-spa bg-background px-3 py-2 text-[13px]">
+                        <span className="text-text-secondary">Payment <span className={`font-body-medium ${payTone(booking)}`}>{paymentStatusLabel(booking, { partialText: 'Partial' }).label}</span></span>
+                        <button type="button" onClick={() => goTab('payment')} className="text-primary font-body-medium hover:underline whitespace-nowrap">Payment tab ›</button>
+                      </div>
+                    )}
+                    <h3 className="font-body font-medium text-xs uppercase tracking-wider text-text-tertiary pt-1">Customer</h3>
+                    <div>
+                      {walkInNoClient ? (
+                        <label className="flex items-baseline justify-between font-body font-body-medium text-[13px] text-text-primary mb-1.5"><span>Name</span><span className="text-xs font-normal text-text-secondary">optional</span></label>
+                      ) : (
+                        <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Name <span className="text-error">*</span></label>
+                      )}
+                      <input type="text" value={editForm.customerName} onChange={(e) => setEditForm(f => ({ ...f, customerName: e.target.value }))} className={inputClasses}
+                        {...(walkInNoClient ? { placeholder: 'First name, e.g. Ram', maxLength: 40 } : {})} />
+                    </div>
+                    {walkInNoClient ? (
+                      canAddClient ? (
+                        <button type="button" onClick={() => setAddClientSignal((n) => n + 1)} className="text-sm font-body-medium text-primary hover:underline">＋ Add client</button>
+                      ) : null
+                    ) : (
+                      <PhoneField
+                        label="Phone" id="edit-booking-phone" walkInHint placeholder="Phone number"
+                        dial={editForm.phoneDial} national={editForm.phoneNational} original={editForm.customerPhone}
+                        onChange={({ dial, national }) => setEditForm(f => ({ ...f, phoneDial: dial, phoneNational: national }))}
+                      />
+                    )}
+                  </div>
+                ) : (
                 <div className={isPanel ? `grid gap-6 ${wideBody ? 'grid-cols-2' : 'grid-cols-1'}` : 'grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6'}>
                   <div className="space-y-3 sm:space-y-4">
                     <div className="flex items-center justify-between">
@@ -2044,6 +2279,7 @@ const BookingActionModal = ({
                             value={editForm.customerName}
                             onChange={(e) => setEditForm(f => ({ ...f, customerName: e.target.value }))}
                             className={inputClasses}
+                            {...(walkInNoClient ? { placeholder: 'First name, e.g. Ram (optional)', maxLength: 40 } : {})}
                           />
                         ) : (
                           <p className="font-body font-body-normal text-sm text-text-primary">{booking.customerName}</p>
@@ -2063,20 +2299,20 @@ const BookingActionModal = ({
                           )}
                         </label>
                         {showAdminCorrection ? (
-                          <input
-                            type="tel"
-                            value={correctionFields.customer_phone}
-                            onChange={(e) => setCorrectionField('customer_phone', e.target.value)}
-                            className={inputClasses}
-                            placeholder="Phone number"
+                          <PhoneField
+                            id="correction-phone" placeholder="Phone number"
+                            dial={correctionFields._phone.dial} national={correctionFields._phone.national} original={correctionInitialFields?.customer_phone}
+                            onChange={({ dial, national }) => setCorrectionFields((prev) => ({ ...prev, _phone: { dial, national }, customer_phone: phoneFieldValue({ dial, national, original: correctionInitialFields?.customer_phone }) || '' }))}
                           />
+                        ) : isEditing && walkInNoClient ? (
+                          canAddClient ? (
+                            <button type="button" onClick={() => setAddClientSignal((n) => n + 1)} className="text-sm font-body-medium text-primary hover:underline">＋ Add client</button>
+                          ) : <p className="font-body text-sm text-text-secondary italic">Not provided</p>
                         ) : isEditing ? (
-                          <input
-                            type="tel"
-                            value={editForm.customerPhone}
-                            onChange={(e) => setEditForm(f => ({ ...f, customerPhone: e.target.value }))}
-                            className={inputClasses}
-                            placeholder="Phone number"
+                          <PhoneField
+                            id="edit-booking-phone-modal" walkInHint placeholder="Phone number"
+                            dial={editForm.phoneDial} national={editForm.phoneNational} original={editForm.customerPhone}
+                            onChange={({ dial, national }) => setEditForm(f => ({ ...f, phoneDial: dial, phoneNational: national }))}
                           />
                         ) : (
                           booking.customerPhone ? (
@@ -2098,19 +2334,7 @@ const BookingActionModal = ({
                         <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Service</label>
                         {isEditing && services?.length > 0 ? (
                           <>
-                            <CustomSelect
-                              value={editForm.serviceId}
-                              onChange={(val) => setEditForm(f => ({ ...f, serviceId: val }))}
-                              options={services.map(s => ({ value: s.id, label: s.name }))}
-                              placeholder="Select service"
-                              searchable
-                              size="sm"
-                            />
-                            {selectedService && (
-                              <p className="font-caption text-xs text-text-secondary mt-1">
-                                {selectedService.duration_minutes} min — NPR {selectedService.price_npr?.toLocaleString('en-IN')}
-                              </p>
-                            )}
+                            <div className="mt-1"><ServicePickRow required services={services} value={editForm.serviceId} onChange={(val) => setEditForm(f => ({ ...f, serviceId: val }))} branchId={booking?.branchId || branchId} canViewPrices={canViewPrices} title="Service for this booking" sub={booking.customerName || ''} ariaLabel="Service" /></div>
                           </>
                         ) : (
                           <p className="font-body font-body-normal text-sm text-text-primary">{booking.service}</p>
@@ -2213,6 +2437,7 @@ const BookingActionModal = ({
                     </div>
                   </div>
                 </div>
+                )}
 
                 {/* Therapist(s) */}
                 {(booking.therapists?.length > 0 || booking.therapist) && !isEditing && (
@@ -2241,7 +2466,11 @@ const BookingActionModal = ({
 
                 {/* Special Requests */}
                 <div className="space-y-1.5 sm:space-y-2">
-                  <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Special Requests</label>
+                  {isEditing && !showAdminCorrection ? (
+                    <label className="block font-body font-body-medium text-[13px] text-text-primary">Special requests</label>
+                  ) : (
+                    <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Special Requests</label>
+                  )}
                   {isEditing ? (
                     <textarea
                       value={editForm.specialRequests}
@@ -2261,7 +2490,14 @@ const BookingActionModal = ({
 
                 {/* Referred by — type freely or pick an existing therapist */}
                 <div className="space-y-1.5 sm:space-y-2">
-                  <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Referred by</label>
+                  {isEditing && !showAdminCorrection ? (
+                    <div className="flex items-baseline justify-between">
+                      <label className="font-body font-body-medium text-[13px] text-text-primary">Referred by</label>
+                      <span className="text-[12px] text-text-tertiary">optional</span>
+                    </div>
+                  ) : (
+                    <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Referred by</label>
+                  )}
                   {isEditing ? (
                     <div className="relative">
                       <input
@@ -2434,154 +2670,98 @@ const BookingActionModal = ({
                   </div>
                 )}
 
-                {/* Section 1: Therapist */}
-                <div className="space-y-3">
-                  <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
-                    Therapist
-                  </h3>
-                  {isTherapistOptional && (
-                    <p className="font-caption font-caption-normal text-xs text-text-secondary">
-                      Optional for {selectedRoomObj?.name} — self-service room, no therapist required.
-                    </p>
-                  )}
-                  {therapists.length === 0 ? (
-                    <p className="font-body font-body-normal text-sm text-text-secondary">No {(staffLabelPlural || 'team members').toLowerCase()} available.</p>
-                  ) : (
-                    <div>
-                      <div className="relative mb-2">
-                        <Icon name="Search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
-                        <input
-                          type="text"
-                          value={therapistSearch}
-                          onChange={(e) => setTherapistSearch(e.target.value)}
-                          placeholder={`Search ${(staffLabelPlural || 'team members').toLowerCase()}...`}
-                          className="w-full pl-8 pr-3 py-2 bg-background border border-border rounded-spa text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
-                        />
-                      </div>
-                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                      {therapists
-                        .filter(t => !therapistSearch.trim() || t.name.toLowerCase().includes(therapistSearch.toLowerCase()))
-                        .map((therapist) => {
-                        const isSelected = selectedTherapists.includes(therapist.id);
-                        const isCurrentlyAssigned = booking?.therapists?.some(t => t.id === therapist.id)
-                          || booking?.therapist?.id === therapist.id;
+                {(() => {
+                  // ZNLY-286: staff + room lists. One scroll area (the panel body); words come from the org's staff label.
+                  const TAG = 'ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-success/10 text-success';
+                  const isPlural = !!currentServiceObj?.is_couple || selectedTherapists.length > 1;
+                  const staffHeading = isPlural ? (staffLabelPlural || 'Team') : (staffLabel || 'Team member');
+                  const staffLower = (staffLabel || 'team member').toLowerCase();
+                  const assignedIds = (booking?.therapists?.length ? booking.therapists.map(t => t.id) : (booking?.therapist?.id ? [booking.therapist.id] : []));
+                  return (
+                    <>
+                      {/* Section 1: staff (shared row + list, ZNLY-300 / ZNLY-318) */}
+                      {(() => {
+                        const s0 = clockToMin(booking?.startTime); const e0 = clockToMin(booking?.endTime);
+                        const ownNames = Object.fromEntries([...(booking?.therapists || []), booking?.therapist].filter((t) => t?.id).map((t) => [t.id, t.name]));
+                        const nameFor = (tid) => (therapists || []).find((t) => t.id === tid)?.name || ownNames[tid] || '';
+                        const maxPick = currentServiceObj?.is_couple ? 2 : (selectedTherapists.length > 1 ? Infinity : 1);
+                        const picked = selectedTherapists.map((tid) => (therapists || []).find((t) => t.id === tid) || { id: tid, name: ownNames[tid] || 'Unknown' });
+                        const info = pickedRowStatusMulti(picked, {
+                          slot: effDayBookings && s0 != null ? { start: s0, end: e0 > s0 ? e0 : s0 + 60 } : null,
+                          rangesById: effDayBookings && booking?.date ? staffDayRanges(effDayBookings, { date: booking.date, excludeBookingId: booking.bookingId || null }) : {},
+                          offById: effOffStaff || {}, date: booking?.date, today: nepalNow().today,
+                        });
+                        const savedPeople = assignedIds.map(nameFor).filter(Boolean);
                         return (
-                          <label
-                            key={therapist.id}
-                            className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 spa-transition-fast min-h-[52px] ${
-                              isAssignmentBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                            } ${
-                              isSelected
-                                ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              value={therapist.id}
-                              checked={isSelected}
+                          <div>
+                            <h3 className="mb-2 font-heading font-heading-medium text-sm sm:text-base text-text-primary">{staffHeading}{Number.isFinite(maxPick) && maxPick > 1 && <span className="ml-2 text-xs font-normal text-text-secondary">Pick {maxPick}</span>}</h3>
+                            <StaffPickRow
+                              key={booking?.bookingId}
+                              people={picked}
+                              max={maxPick}
+                              statusLine={isAssignmentBlocked ? '' : info.statusLine}
+                              pill={isAssignmentBlocked ? null : info.pill}
+                              problem={isAssignmentBlocked ? '' : info.problem}
+                              assignedIds={assignedIds}
+                              assignedNames={savedPeople}
                               disabled={isAssignmentBlocked}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedTherapists(prev => [...prev, therapist.id]);
-                                } else {
-                                  setSelectedTherapists(prev => prev.filter(id => id !== therapist.id));
-                                }
-                              }}
-                              className="text-primary focus:ring-primary w-4 h-4 rounded disabled:cursor-not-allowed"
+                              emptyLabel={`Pick ${staffLower}`}
+                              title={`${staffHeading} for the booking`}
+                              renderPicker={(close) => (
+                                <StaffPicker
+                                  people={therapists}
+                                  selectedIds={selectedTherapists}
+                                  onChange={(ids) => { setSelectedTherapists(ids); if (maxPick === 1) close(); }}
+                                  max={maxPick}
+                                  header={{ title: `${staffHeading} for the booking${maxPick === 2 ? ' · pick 2' : ''}`, sub: [booking?.service || booking?.serviceName, s0 != null && e0 != null ? rangeLabel(s0, e0) : ''].filter(Boolean).join(' · ') }}
+                                  onNone={isTherapistOptional ? () => { setSelectedTherapists([]); close(); } : null}
+                                  noneLabel={`No ${staffLower} · self-service`}
+                                  staffLabel={staffLabel || 'Team member'}
+                                  staffLabelPlural={staffLabelPlural || 'Team'}
+                                  slot={booking?.date && booking?.startTime ? { date: booking.date, start: booking.startTime, end: booking.endTime } : null}
+                                  serviceId={booking?.serviceId || null}
+                                  bookings={effDayBookings}
+                                  excludeBookingId={booking?.bookingId || null}
+                                  offById={effOffStaff}
+                                  assignedIds={assignedIds}
+                                  disabled={isAssignmentBlocked}
+                                />
+                              )}
                             />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="font-body font-body-medium text-sm text-text-primary truncate">
-                                  {therapist.name}
-                                  {isCurrentlyAssigned && (
-                                    <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-success/10 text-success">Assigned</span>
-                                  )}
-                                </span>
-                                <span className="text-xs font-caption font-caption-normal text-text-secondary capitalize flex-shrink-0">
-                                  {therapist.gender}
-                                </span>
-                              </div>
-                              {therapist.specialties && therapist.specialties.length > 0 && (
-                                <div className="flex flex-wrap gap-1 mt-1">
-                                  {therapist.specialties.map((specialty) => (
-                                    <span
-                                      key={specialty}
-                                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-accent/10 text-accent"
-                                    >
-                                      {specialty}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Section 2: Room */}
-                {rooms.length > 0 && (
-                  <div className="space-y-3">
-                    <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
-                      Room
-                    </h3>
-                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                      {/* Unassign room option */}
-                      <label
-                        className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 spa-transition-fast min-h-[44px] ${
-                          isAssignmentBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                        } ${
-                          selectedRoom === ''
-                            ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="room"
-                          value=""
-                          checked={selectedRoom === ''}
-                          disabled={isAssignmentBlocked}
-                          onChange={() => setSelectedRoom('')}
-                          className="text-primary focus:ring-primary w-4 h-4 disabled:cursor-not-allowed"
-                        />
-                        <span className="font-body font-body-normal text-sm text-text-secondary italic">No room assigned</span>
-                      </label>
-                      {rooms.map((room) => (
-                        <label
-                          key={room.id}
-                          className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 spa-transition-fast min-h-[44px] ${
-                            isAssignmentBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                          } ${
-                            selectedRoom === room.id
-                              ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="room"
-                            value={room.id}
-                            checked={selectedRoom === room.id}
-                            disabled={isAssignmentBlocked}
-                            onChange={(e) => setSelectedRoom(e.target.value)}
-                            className="text-primary focus:ring-primary w-4 h-4 disabled:cursor-not-allowed"
-                          />
-                          <div className="flex items-center gap-2">
-                            <Icon name="DoorOpen" size={14} className="text-text-secondary" />
-                            <span className="font-body font-body-medium text-sm text-text-primary">
-                              {room.name}
-                              {booking?.roomId === room.id && (
-                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-primary/10 text-primary">Allocated</span>
-                              )}
-                            </span>
+                            {isTherapistOptional && (
+                              <p className="mt-1 font-caption font-caption-normal text-xs text-text-secondary">
+                                Optional for {selectedRoomObj?.name} — self-service room, no {staffLower} required.
+                              </p>
+                            )}
                           </div>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                        );
+                      })()}
+
+                      {/* Section 2: Room (same CustomSelect as New booking) */}
+                      {rooms.length > 0 && (
+                        <div>
+                          <h3 className="mb-2 font-heading font-heading-medium text-sm sm:text-base text-text-primary">Room</h3>
+                          <CustomSelect
+                            value={selectedRoom}
+                            onChange={(val) => setSelectedRoom(val)}
+                            disabled={isAssignmentBlocked}
+                            options={[
+                              { value: '', label: 'No room assigned' },
+                              ...rooms.map((room) => ({
+                                value: room.id,
+                                label: <>{room.name}{booking?.roomId === room.id && <span className={TAG}>Allocated</span>}</>,
+                                searchLabel: room.name,
+                              })),
+                            ]}
+                            placeholder="No room assigned"
+                            size="md"
+                            searchable
+                          />
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
 
                 {/* Section 2b: Couple in separate rooms — surfaced only for a couple-flagged
                     service with 2+ therapists selected, not any multi-therapist assignment. */}
@@ -2624,13 +2804,7 @@ const BookingActionModal = ({
                         placeholder="Companion's name (optional)"
                         className="w-full px-3 py-2 bg-background border border-border rounded-spa text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                       />
-                      <input
-                        type="tel"
-                        value={companionPhone}
-                        onChange={(e) => setCompanionPhone(e.target.value)}
-                        placeholder="Companion's phone (optional)"
-                        className="w-full px-3 py-2 bg-background border border-border rounded-spa text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
-                      />
+                      <PhoneField {...companionPhone.field} id="assign-companion-phone" placeholder="Companion's phone (optional)" />
                     </div>
                   </div>
                 )}
@@ -3039,7 +3213,7 @@ const BookingActionModal = ({
                               discountReason: 'Discount cancelled',
                             });
                             if (result?.error) {
-                              setDiscountError(result.error.message || 'Failed to cancel discount.');
+                              setDiscountError(friendlyError(result.error, 'Failed to cancel discount.'));
                             } else {
                               setDiscountSuccess('removed');
                             }
@@ -3741,14 +3915,7 @@ const BookingActionModal = ({
                   {newBookingMode === 'add-service' && (
                     <div className="sm:col-span-2">
                       <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Service *</label>
-                      <CustomSelect
-                        value={newBookingForm.serviceId}
-                        onChange={(val) => setNewBookingForm(f => ({ ...f, serviceId: val }))}
-                        options={services.map(s => ({ value: s.id, label: `${s.name} — ${s.duration_minutes}min — NPR ${s.price_npr}` }))}
-                        placeholder="Select service..."
-                        searchable
-                        size="sm"
-                      />
+                      <ServicePickRow required services={services} value={newBookingForm.serviceId} onChange={(val) => setNewBookingForm(f => ({ ...f, serviceId: val }))} branchId={booking?.branchId || branchId} canViewPrices={canViewPrices} title="Service to add" sub={booking.customerName || ''} ariaLabel="Service" />
                     </div>
                   )}
 
@@ -3777,29 +3944,50 @@ const BookingActionModal = ({
                     />
                   </div>
 
-                  {/* Therapist */}
-                  <div>
-                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">{staffLabel}</label>
-                    <CustomSelect
-                      value={newBookingForm.therapistId}
-                      onChange={(val) => setNewBookingForm(f => ({ ...f, therapistId: val }))}
-                      options={[{ value: '', label: 'Any available' }, ...therapists.map(t => ({ value: t.id, label: t.name }))]}
-                      placeholder="Any available"
-                      size="sm"
+                  {/* Staff (shared row + list, ZNLY-310) */}
+                  <div className="sm:col-span-2">
+                    <label className="flex items-baseline justify-between font-body font-body-medium text-xs text-text-secondary mb-1">{staffLabel} <span className="font-normal text-text-tertiary">optional</span></label>
+                    <StaffPickRow
+                      id={newBookingForm.therapistId || null}
+                      {...formPickInfo}
+                      emptyLabel={`Pick ${(staffLabel || 'team member').toLowerCase()}`}
+                      title={`${staffLabel} for ${newBookingMode === 'rebook' ? 'rebook' : 'add service'}`}
+                      renderPicker={(close) => (
+                        <StaffPicker
+                          people={therapists}
+                          selectedIds={newBookingForm.therapistId ? [newBookingForm.therapistId] : []}
+                          onChange={(ids) => { setNewBookingForm(f => ({ ...f, therapistId: ids[0] || '' })); close(); }}
+                          max={1}
+                          header={{
+                            title: `${staffLabel} for ${newBookingMode === 'rebook' ? 'rebook' : 'add service'} · ${booking.customerName}`,
+                            sub: `${newService?.name || booking.service || 'Service'}${newBookingForm.date && newBookingForm.startTime ? ` · ${new Date(`${newBookingForm.date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '')} ${format12h(newBookingForm.startTime)}` : ''}`,
+                          }}
+                          onNone={() => { setNewBookingForm(f => ({ ...f, therapistId: '' })); close(); }}
+                          noneLabel={`No ${(staffLabel || 'team member').toLowerCase()} · assign later`}
+                          staffLabel={staffLabel || 'Team member'}
+                          staffLabelPlural={staffLabelPlural || 'Team'}
+                          slot={newBookingForm.date && newBookingForm.startTime ? { date: newBookingForm.date, start: formHHMM(formSlotMin), end: formHHMM(formSlotEnd) } : null}
+                          serviceId={newBookingForm.serviceId || null}
+                          bookings={formDayBookings}
+                          offById={formDayOff}
+                        />
+                      )}
                     />
                   </div>
 
-                  {/* Room */}
-                  <div>
-                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Room</label>
-                    <CustomSelect
-                      value={newBookingForm.roomId}
-                      onChange={(val) => setNewBookingForm(f => ({ ...f, roomId: val }))}
-                      options={[{ value: '', label: 'Any available' }, ...rooms.map(r => ({ value: r.id, label: r.name }))]}
-                      placeholder="Any available"
-                      size="sm"
-                    />
-                  </div>
+                  {/* Room: only where the business has rooms */}
+                  {rooms.length > 0 && (
+                    <div className="sm:col-span-2">
+                      <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Room</label>
+                      <CustomSelect
+                        value={newBookingForm.roomId}
+                        onChange={(val) => setNewBookingForm(f => ({ ...f, roomId: val }))}
+                        options={[{ value: '', label: 'Any available' }, ...rooms.map(r => ({ value: r.id, label: r.name }))]}
+                        placeholder="Any available"
+                        size="sm"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <BlockOverlapWarning message={newBookingBlockMsg} />
@@ -3843,7 +4031,7 @@ const BookingActionModal = ({
             const { error } = await refundProductSale({ saleId: visitProductRefund.id, reason: (note || '').trim() || null });
             setIsLoading(false);
             setVisitProductRefund(null);
-            if (error) { setActionError(error.message || 'Could not refund the product.'); return; }
+            if (error) { setActionError(friendlyError(error, 'Could not refund the product.')); return; }
             loadVisitProducts();
           }}
         />
@@ -4037,6 +4225,7 @@ const BookingActionModal = ({
             ...previousDueBookings.filter(pb => selectedPreviousDueIds.has(pb.bookingId)),
           ]}
           dueHolderSuggestions={dueHolderSuggestions}
+          onAddClient={walkInNoClient && canAddClient ? () => { setShowPaymentModal(false); setAddClientSignal((n) => n + 1); } : undefined}
           onConfirm={handlePaymentConfirm}
           onClose={(res) => {
             setShowPaymentModal(false);
@@ -4051,9 +4240,29 @@ const BookingActionModal = ({
   );
 
   if (isPanel) {
+    if (useSheet) {
+      return (
+        <>
+          <DetentSheet
+            isOpen={isOpen}
+            detent={detent}
+            onDetentChange={changeDetent}
+            onClose={requestPanelClose}
+            scrim={!liveBackdrop}
+            titleId="booking-panel-title"
+            header={panelHeader}
+            footer={panelFooterWithNote}
+          >
+            {panelTabsNode}
+            {contentNode}
+          </DetentSheet>
+          {createPortal(overlays, document.body)}
+        </>
+      );
+    }
     return (
       <>
-        <SidePanel isOpen={isOpen} width={BOOKING_PANEL_WIDTH} title={panelTitle} onClose={requestPanelClose} footer={panelFooter}>
+        <SidePanel isOpen={isOpen} width={PANEL_WIDTH_BOOKING} header={panelHeader} titleId="booking-panel-title" onClose={requestPanelClose} footer={panelFooterWithNote}>
           {panelTabsNode}
           {contentNode}
         </SidePanel>
@@ -4202,7 +4411,7 @@ const BookingActionModal = ({
                       variant="primary"
                       onClick={handleAssignTherapist}
                       loading={isLoading}
-                      disabled={selectedTherapists.length === 0 && !isTherapistOptional}
+                      disabled={assignIncomplete}
                       className="min-h-[44px] sm:min-h-0"
                     >
                       Save Assignment

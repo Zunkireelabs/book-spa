@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import { dayMoneyView } from '../../../lib/dayMoney';
 import DayMoneyRows from '../../../components/ui/DayMoneyRows';
@@ -8,10 +9,7 @@ import { getDailyOperationalReport, exportDailyReportCSV, closeDay, fetchAttenda
 import { useIndustry } from '../../../hooks/useIndustry';
 import { paymentStatusLabel } from '../../../utils/paymentStatusLabel';
 import { wordBranch } from '../../../utils/industryTerms';
-
-function formatNPR(amount) {
-  return `NPR ${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+import { formatNPR } from '../../../services/bookingTransformers';
 
 function formatDate(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -52,7 +50,7 @@ const DailyOperationalReportPanel = ({ branchId }) => {
     ]);
 
     if (reportRes.error) {
-      setError(reportRes.error.message || 'Failed to load daily report.');
+      setError(friendlyError(reportRes.error, 'Failed to load daily report.'));
     } else {
       setReport(reportRes.data);
     }
@@ -73,7 +71,7 @@ const DailyOperationalReportPanel = ({ branchId }) => {
     const { error: closeError } = await closeDay(branchId, selectedDate);
 
     if (closeError) {
-      setError(closeError.message || 'Failed to close the day.');
+      setError(friendlyError(closeError, 'Failed to close the day.'));
     } else {
       setSuccessMsg('Day closed successfully. All bookings are now locked.');
       await loadReport();
@@ -337,17 +335,8 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                 <Icon name="CreditCard" size={18} className="text-primary" />
                 <span>Payment Breakdown</span>
               </h3>
-              <div className="space-y-3">
-                <DayMoneyRows data={report} fmt={formatNPR} lab="text-sm text-text-secondary" val="text-sm font-semibold text-text-primary" head="text-sm font-semibold text-text-primary" />
-                {[['product', 'Products', 'Package'], ['voucher', 'Voucher sales', 'Ticket'], ['membership', 'Membership deposits', 'Wallet'], ['package', 'Package sales', 'Gift']].filter(([k]) => Number(report.sources?.[k]) > 0).map(([k, label, icon]) => (
-                  <div key={k} className="border-t border-border pt-2 flex items-center justify-between" data-source-line={k}>
-                    <div className="flex items-center gap-2">
-                      <Icon name={icon} size={14} className="text-text-secondary" />
-                      <span className="text-sm text-text-secondary">of which: {label}</span>
-                    </div>
-                    <span className="text-sm font-semibold text-text-primary">{formatNPR(report.sources[k])}</span>
-                  </div>
-                ))}
+              <div>
+                <DayMoneyRows data={report} fmt={formatNPR} lab="text-sm text-text-secondary" val="text-sm font-semibold text-text-primary" />
               </div>
             </div>
           </div>

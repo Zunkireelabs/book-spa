@@ -9,6 +9,7 @@ import SetupChecklist from './SetupChecklist';
 import { DashPanels } from './DashboardPanels';
 import { fetchNeeds, updateBookingStatus } from '../../services/api';
 import { supabase } from '../../lib/supabase';
+import { dayProgress, dayProgressText } from '../../lib/dayProgress';
 import { bookingSplit, splitLine, fmtClock, fmtDuration, fmtRange, fmtFreeTotal, freeNow, freeTime } from '../../lib/dashboardFloor';
 import DeskButtons from './DeskButtons';
 import { paidNote } from '../../lib/dashboardMoney';
@@ -50,7 +51,7 @@ const WeekStrip = ({ week }) => (
 const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLabel, staffLabelPlural, highlight, onReload, dataError = false, newTenant = false, setup = null, nowHm = null, onOpenMyDay }) => {
   const [, setSearchParams] = useSearchParams();
   const [panel, setPanel] = useState(null); // { type: 'booking', id } | { type: 'create', slot } | { type: 'collect', booking }
-  const [needs, setNeeds] = useState([]); // every booking that needs someone, tagged with its kind (lib/dashboardNeeds)
+  const [needs, setNeeds] = useState(null); // null = still loading (never shown as 0 / "nothing left") // every booking that needs someone, tagged with its kind (lib/dashboardNeeds)
   const [needsError, setNeedsError] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [closing, setClosing] = useState(false);
@@ -92,6 +93,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
   const floor = data?.floor?.[0];
   const pulse = data?.pulse || {};
   const split = bookingSplit(pulse);
+  const progress = dayProgress(pulse);
   const free = freeTime(floor?.therapists, phase === 'live' ? nowMin : null);
   const share = data?.week?.[0]?.booked_share;
   const bad = dataError; // get_dashboard failed
@@ -120,10 +122,11 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
   const notClosedRow = notClosed.length > 0 && (
     <Row icon="History" tone="text-warning" title={`${plural(notClosed.length, 'booking')} never closed`} sub={`oldest ${shortDay(oldestOpen)}`} actions={<Button size="sm" variant="outline" onClick={() => go('bookings')}>Open</Button>} />
   );
-  const needCount = needs.length; // the one rule: every kind, so Live, Close and Business show the same total
+  const needsLoading = needs === null && !needsError;
+  const needCount = needs ? needs.length : 0; // the one rule: every kind, so Live, Close and Business show the same total
 
   const needsCard = (
-    <Card icon="Inbox" title="Needs action" count={needCount} error={badNeeds} onRetry={refresh}>
+    <Card icon="Inbox" title="Needs action" count={needCount} error={badNeeds} onRetry={refresh} loading={needsLoading}>
       {needCount === 0 && <p className="text-sm text-gray-500">Nothing needs you right now ✓</p>}
       {discounts}
       {unpaidRows}{unconfirmedRows}{unassignedRows}{notClosedRow}
@@ -135,7 +138,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
   );
   const nextSeven = <Card icon="CalendarDays" title="Next 7 days" error={bad} onRetry={refresh} meta={`Booked share of ${(staffLabel || 'staff').toLowerCase()} hours`}><WeekStrip week={data?.week} /></Card>;
   const floorCard = (title, meta) => (
-    <Card icon="Users" title={title} meta={meta} error={bad} onRetry={refresh}>
+    <Card icon="Users" title={title} meta={meta} metaBelow error={bad} onRetry={refresh}>
       <Floor floor={floor} nowMin={phase === 'live' ? nowMin : null} open={hours?.open} close={hours?.close} onOpenBooking={openBooking}
         onBookGap={bookGap} staffPlural={(staffLabelPlural || 'staff').toLowerCase()} />
     </Card>
@@ -154,7 +157,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
           {mineNext ? (mineNext.status === 'In-Progress' ? 'MY DAY · WITH YOU NOW' : mineIn > 0 ? `MY DAY · NEXT CLIENT IN ${fmtDuration(mineIn).replace(/m$/, ' MIN').toUpperCase()}` : 'MY DAY · NEXT CLIENT IS DUE') : mineDay.allClosed ? 'MY DAY · ALL DONE' : 'MY DAY · NO MORE CLIENTS TODAY'}
         </div>
         {mineNext && <div className="text-[15px] font-semibold truncate">{clock12(mineNext.start)} · {mineNext.customer || mineNext.number} · {mineNext.service}</div>}
-        <div className="text-xs opacity-85">{[mineNext?.room, !mineNext && !mineDay.allClosed ? `${mineDay.open} not closed yet` : null, `${mineDay.done} of ${mineList.length} done today`].filter(Boolean).join(' · ')}</div>
+        <div className="text-xs opacity-85">{[mineNext?.room, !mineNext && !mineDay.allClosed ? `${mineDay.open} not closed yet` : null, `${dayProgressText({ finished: mineDay.done, total: mineDay.total, noShow: mineDay.noShow })} today`].filter(Boolean).join(' · ')}</div>
       </div>
       <button type="button" onClick={onOpenMyDay} className="ml-auto bg-white text-primary text-xs font-medium rounded-lg px-3 py-1.5 hover:bg-white/90">Open my day</button>
     </section>
@@ -197,9 +200,9 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
     body = (
       <>
         {brief('Moon', <>
-          <b>{pulse.completed || 0} of {pulse.bookings || 0}</b> done{pulse.no_show > 0 && <> ({pulse.no_show} no-show)</>}
+          <b>{progress.finished} of {progress.total}</b> finished{progress.noShow > 0 && <> · {progress.noShow} no-show</>}
           {canMoney && <>{sep}<b>{npr(taken)}</b> taken</>}
-          {sep}<span className={needCount ? 'text-warning' : ''}>{needCount} loose ends</span>
+          {sep}{needsLoading ? <span className="text-gray-400">loose ends…</span> : <span className={needCount ? 'text-warning' : ''}>{needCount} loose ends</span>}
           {sep}tomorrow {data?.tomorrow?.bookings ?? 0} booked
         </>)}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
@@ -220,7 +223,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
                 {closed ? (
                   <p className="text-sm text-success font-medium mt-2">Closed at {new Date(closed.closed_at).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kathmandu' })}{closed.closer?.full_name ? ` by ${closed.closer.full_name}` : ''} ✓</p>
                 ) : canAct && (
-                  <Button className="mt-3" onClick={() => setClosing((v) => !v)}>{closing ? 'Hide closing' : 'Close the day'}</Button>
+                  <Button className="mt-3 max-md:min-h-11" onClick={() => setClosing((v) => !v)}>{closing ? 'Hide closing' : 'Close the day'}</Button>
                 )}
               </Card>
             )}
@@ -231,7 +234,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
             </Card>
           </div>
           <div className="space-y-3 sm:space-y-4">
-            <Card icon="CheckCheck" title="Loose ends" count={needCount} error={badNeeds} onRetry={refresh}>
+            <Card icon="CheckCheck" title="Loose ends" count={needCount} error={badNeeds} onRetry={refresh} loading={needsLoading}>
               {needCount === 0 && <p className="text-sm text-success font-medium">Nothing left open ✓</p>}
               {discounts}{unpaidRows}{unconfirmedRows}{unassignedRows}{notClosedRow}
             </Card>

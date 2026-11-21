@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import { getRiskIndicators } from '../../../services/api';
@@ -65,7 +66,7 @@ const RiskIndicatorsPanel = ({ branchId }) => {
     const result = await getRiskIndicators({ branchId });
 
     if (result.error) {
-      setError(result.error.message || 'Failed to load risk indicators.');
+      setError(friendlyError(result.error, 'Failed to load risk indicators.'));
       setLoading(false);
       return;
     }

@@ -7,6 +7,17 @@ export function to12h(timeStr) {
   return `${h12}:${String(m).padStart(2, '0')} ${period}`;
 }
 
+// ZNLY-275: a booking for a later day (Nepal time) can't be Started, Completed or marked No Show (DB trigger, migration 403).
+// Returns the plain sentence staff see, or null when the booking is for today or earlier. `action`: 'start' | 'complete' | 'noshow'.
+export const nepalToday = (now = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kathmandu' }).format(now);
+export function futureBookingMessage(date, action = 'start', now = new Date()) {
+  const d = String(date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d <= nepalToday(now)) return null;
+  const label = new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).replace(',', '');
+  const verb = action === 'complete' ? 'complete it now' : action === 'noshow' ? 'mark it as no-show' : 'start it now';
+  return `This booking is for ${label}. Move it to today to ${verb}.`;
+}
+
 export function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
 }
@@ -166,6 +177,8 @@ export function transformBooking(dbBooking) {
     id: dbBooking.booking_number,
     bookingId: dbBooking.id,
     customerId: dbBooking.customer_id || null,
+    isWalkIn: !!dbBooking.is_walk_in, // ZNLY-327
+    walkInLabel: dbBooking.walk_in_label || null,
     customerName: dbBooking.customer_name,
     customerEmail: dbBooking.customer_email || null,
     customerPhone: dbBooking.customer_phone || null,

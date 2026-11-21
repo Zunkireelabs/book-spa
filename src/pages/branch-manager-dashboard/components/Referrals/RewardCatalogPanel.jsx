@@ -28,7 +28,7 @@ const RewardCatalogPanel = () => {
     setError(null);
     const result = await fetchRewardCatalogForManagement();
     if (result.error) {
-      setError(result.error.message || 'Failed to load reward catalog.');
+      setError(friendlyError(result.error, 'Failed to load reward catalog.'));
     } else {
       setItems(result.data || []);
     }

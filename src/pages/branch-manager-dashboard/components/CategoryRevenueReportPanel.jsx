@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import FilterBar from '../../../components/ui/FilterBar';
@@ -53,7 +54,7 @@ const CategoryRevenueReportPanel = ({ branchId }) => {
     setError(null);
     const { data: result, error: err } = await getCategoryRevenueByBranch({ branchId, from: range.from, to: range.to });
     if (err) {
-      setError(err.message || 'Failed to load category revenue.');
+      setError(friendlyError(err, 'Failed to load category revenue.'));
     } else {
       setData(result || EMPTY_DATA);
     }

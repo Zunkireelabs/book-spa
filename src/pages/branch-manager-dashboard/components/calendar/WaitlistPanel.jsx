@@ -1,15 +1,25 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { formatDistanceToNow, format, parseISO } from 'date-fns';
 import Icon from '../../../../components/AppIcon';
 import SidePanel from '../../../../components/ui/SidePanel';
 import ConfirmDialog from '../../../../components/ui/ConfirmDialog';
+import StaffPickRow from '../../../../components/ui/StaffPickRow';
+import ServicePickRow from '../../../../components/ui/ServicePickRow';
+import { useAuth } from '../../../../contexts/AuthContext';
+import { viewerAccess } from '../../../../services/dataMasking';
+import StaffPicker from '../../../../components/ui/StaffPicker';
+import { useDayAvailability } from '../../../../hooks/useDayAvailability';
+import { rangeLabel, pickedRowStatus, staffDayRanges } from '../../../../utils/staffFit';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
-import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
+import { parsePhone } from '../../../../components/ui/CountryCodeSelect';
+import PhoneField, { phoneFieldProblem, phoneFieldValue } from '../../../../components/ui/PhoneField';
 import TimeBoxInput from '../../../../components/ui/TimeBoxInput';
 import { PanelShell, FormBody, Field, TextInput, SelectField, DateField, InlineError, CONTROL } from '../../../../components/ui/PanelFormKit';
 import { fetchWaitlist, addToWaitlist, updateWaitlistEntry, removeFromWaitlist, isOverallBranch } from '../../../../services/api';
 import { to12h } from '../../../../services/bookingTransformers';
+import { nepalNow } from '../../../../utils/customerDirectory';
 import { useIndustry } from '../../../../hooks/useIndustry';
 
 const SORT_OPTIONS = [
@@ -56,7 +66,9 @@ export const useWaitlistEntries = (branchId, refreshToken) => {
   return { entries, loading, error, setError, sort, setSort, reload: load };
 };
 
-const WaitlistEntryForm = ({ initial, services, therapists, branchId, staffLabel, onCancel, onSaved }) => {
+export const WaitlistEntryForm = ({ initial, services, therapists, branchId, staffLabel, onCancel, onSaved }) => {
+  const { profile: viewerProfile } = useAuth();
+  const canViewPrices = viewerAccess(viewerProfile).canViewPrices;
   const [form, setForm] = useState(initial || EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -68,9 +80,11 @@ const WaitlistEntryForm = ({ initial, services, therapists, branchId, staffLabel
 
   const handleSave = async () => {
     if (!form.customerName.trim()) { setError('Customer name is required.'); return; }
+    const phoneIssue = phoneFieldProblem({ dial: form.customerCountryCode, national: form.customerPhone, original: form.originalPhone });
+    if (phoneIssue) { setError(phoneIssue); return; }
     setSaving(true);
     setError(null);
-    const fullPhone = form.customerPhone ? `${form.customerCountryCode}${form.customerPhone}` : '';
+    const fullPhone = phoneFieldValue({ dial: form.customerCountryCode, national: form.customerPhone, original: form.originalPhone }) || '';
     const payload = {
       customerId: form.customerId || null,
       customerName: form.customerName,
@@ -85,11 +99,27 @@ const WaitlistEntryForm = ({ initial, services, therapists, branchId, staffLabel
       ? await updateWaitlistEntry({ id: initial.id, ...payload })
       : await addToWaitlist({ branchId, ...payload });
     setSaving(false);
-    if (result.error) { setError(result.error.message || "Couldn't save. Nothing was changed. Try again."); return; }
+    if (result.error) { setError(friendlyError(result.error, "Couldn't save. Nothing was changed. Try again.")); return; }
     onSaved();
   };
 
   const staffLower = staffLabel.toLowerCase();
+  const { staffLabelPlural } = useIndustry();
+  // ZNLY-310: Free / Busy only when the entry has BOTH a date and a time (otherwise there is nothing to check against: plain list).
+  const timed = !!(form.preferredDate && form.preferredTime);
+  const day = useDayAvailability({ branchId, date: form.preferredDate, enabled: timed });
+  const svc = services.find((x) => x.id === form.serviceId);
+  const slotStart = (() => { const [h, m] = String(form.preferredTime || '').slice(0, 5).split(':').map(Number); return h * 60 + (m || 0); })();
+  const slotEndMin = slotStart + (svc?.duration_minutes || 60);
+  const hhmm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const useFit = timed && day.ready;
+  const staffPeople = therapists || [];
+  const picked = staffPeople.find((t) => t.id === form.preferredTherapistId);
+  const pickInfo = pickedRowStatus(picked, {
+    slot: useFit ? { start: slotStart, end: slotEndMin } : null,
+    rangesById: useFit ? staffDayRanges(day.bookings, { date: form.preferredDate }) : {},
+    offById: useFit ? day.offById : {}, date: form.preferredDate, today: nepalNow().today, busyOk: true,
+  });
   return (
     <PanelShell
       title={isEdit ? 'Edit waitlist entry' : 'Add to waitlist'}
@@ -107,31 +137,22 @@ const WaitlistEntryForm = ({ initial, services, therapists, branchId, staffLabel
             onChange={(val) => setForm((f) => ({ ...f, customerName: val, customerId: '' }))}
             onSelect={(customer) => {
               const { dial, national } = parsePhone(customer.phone || '');
-              setForm((f) => ({ ...f, customerId: customer.id, customerName: customer.full_name, customerPhone: national, customerCountryCode: dial || '+977' }));
+              setForm((f) => ({ ...f, customerId: customer.id, customerName: customer.full_name, customerPhone: national, customerCountryCode: dial || '+977', originalPhone: customer.phone || '' }));
             }}
             placeholder="Search or type a name"
           />
         </Field>
 
         <Field label={<>Phone <span className="text-text-tertiary font-normal">(optional)</span></>}>
-          <div className="flex">
-            <CountryCodeSelect value={form.customerCountryCode} onChange={(dial) => setForm((f) => ({ ...f, customerCountryCode: dial }))} />
-            <input
-              type="tel"
-              value={form.customerPhone}
-              onChange={(e) => setForm((f) => ({ ...f, customerPhone: e.target.value }))}
-              placeholder="98XXXXXXXX"
-              className={`${CONTROL} flex-1 min-w-0 !rounded-l-none border-l-0`}
-            />
-          </div>
+          <PhoneField
+            id="waitlist-phone" original={form.originalPhone}
+            dial={form.customerCountryCode} national={form.customerPhone}
+            onChange={({ dial, national }) => setForm((f) => ({ ...f, customerCountryCode: dial, customerPhone: national }))}
+          />
         </Field>
 
         <Field label="Service">
-          <SelectField
-            value={form.serviceId}
-            onChange={(val) => setForm((f) => ({ ...f, serviceId: val }))}
-            options={[{ value: '', label: 'Any service' }, ...services.map((s) => ({ value: s.id, label: s.name }))]}
-          />
+          <ServicePickRow services={services} value={form.serviceId} onChange={(val) => setForm((f) => ({ ...f, serviceId: val }))} branchId={branchId} canViewPrices={canViewPrices} anyLabel="Any service" title="Service for the waitlist" sub="Optional · leave on “Any service”" ariaLabel="Service" />
         </Field>
 
         <div className="grid grid-cols-2 gap-3">
@@ -159,10 +180,29 @@ const WaitlistEntryForm = ({ initial, services, therapists, branchId, staffLabel
         </div>
 
         <Field label={`Preferred ${staffLower}`}>
-          <SelectField
-            value={form.preferredTherapistId}
-            onChange={(val) => setForm((f) => ({ ...f, preferredTherapistId: val }))}
-            options={[{ value: '', label: `Any ${staffLower}` }, ...therapists.map((t) => ({ value: t.id, label: t.name }))]}
+          <StaffPickRow
+            id={form.preferredTherapistId || null}
+            {...pickInfo}
+            emptyLabel={`Any ${staffLower}`}
+            title={`Preferred ${staffLower}`}
+            renderPicker={(close) => (
+              <StaffPicker
+                people={staffPeople}
+                selectedIds={form.preferredTherapistId ? [form.preferredTherapistId] : []}
+                onChange={(ids) => { setForm((f) => ({ ...f, preferredTherapistId: ids[0] || '' })); close(); }}
+                max={1}
+                header={{ title: `Preferred ${staffLower}${form.customerName.trim() ? ` · ${form.customerName.trim()}` : ''}`, sub: [svc?.name || 'Any service', useFit ? `${rangeLabel(slotStart, slotEndMin)}` : 'any time'].join(' · ') }}
+                note={useFit ? null : <p className="px-4 pb-2 text-[12.5px] text-text-secondary">Pick a time to see who&apos;s free</p>}
+                onNone={() => { setForm((f) => ({ ...f, preferredTherapistId: '' })); close(); }}
+                noneLabel={`Any ${staffLower}`}
+                staffLabel={staffLabel}
+                staffLabelPlural={staffLabelPlural}
+                slot={useFit ? { date: form.preferredDate, start: hhmm(slotStart), end: hhmm(slotEndMin) } : null}
+                serviceId={svc?.id || null}
+                bookings={useFit ? day.bookings : null}
+                offById={useFit ? day.offById : {}}
+              />
+            )}
           />
         </Field>
 
@@ -321,6 +361,7 @@ const WaitlistPanel = ({ wl, branchId, services = [], therapists = [], collapsed
       customerName: entry.customer_name || '',
       customerPhone: national,
       customerCountryCode: dial || '+977',
+      originalPhone: entry.customer_phone || '',
       serviceId: entry.service_id || '',
       preferredDate: entry.preferred_date || '',
       preferredTime: entry.preferred_time ? entry.preferred_time.slice(0, 5) : '',

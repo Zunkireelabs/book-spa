@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { fetchBlockById, updateBlock, deleteBlock } from '../../../../services/api';
@@ -73,7 +74,7 @@ const EditBlockModal = ({
     fetchBlockById(blockId).then(({ data, error: fetchError }) => {
       if (cancelled) return;
       if (fetchError || !data) {
-        setError(fetchError?.message || 'Failed to load block.');
+        setError(friendlyError(fetchError, 'Failed to load block.'));
         setLoading(false);
         return;
       }
@@ -186,7 +187,7 @@ const EditBlockModal = ({
       preventOnlineBooking,
     });
     if (result.error) {
-      setError(result.error.message || 'Failed to save block.');
+      setError(friendlyError(result.error, 'Failed to save block.'));
       setSubmitting(false);
       return;
     }
@@ -199,7 +200,7 @@ const EditBlockModal = ({
     setError(null);
     const result = await deleteBlock({ blockId, scope, occurrenceDate });
     if (result.error) {
-      setError(result.error.message || 'Failed to remove block.');
+      setError(friendlyError(result.error, 'Failed to remove block.'));
       setDeleting(false);
       return;
     }

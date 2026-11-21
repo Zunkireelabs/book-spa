@@ -94,12 +94,31 @@
   html {
     @apply bg-background;
     overscroll-behavior-y: none;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    touch-action: manipulation; /* no double-tap zoom; pinch still works */
   }
 
   body {
     @apply bg-background text-text-primary font-body;
     font-feature-settings: "rlig" 1, "calt" 1;
     overscroll-behavior-y: none;
+    overscroll-behavior-x: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* iOS Safari/Chrome zoom the page into any focused text field whose font-size
+     is under 16px. Touch devices only (desktop unchanged). !important is needed
+     to beat Tailwind text-* utilities (text-sm, text-[13px]) on every field. */
+  @media (hover: none) and (pointer: coarse) {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+    textarea,
+    select,
+    [contenteditable]:not([contenteditable="false"]),
+    .field-text,
+    .field-text span {
+      font-size: 16px !important;
+    }
   }
 
   /* Smooth scrolling, opt-in: the customer booking flow adds `smooth-scroll` to <html>
@@ -286,6 +305,24 @@ aside:has(.sidebar-scroll:focus-within) .sidebar-scroll::-webkit-scrollbar-thumb
   }
 }
 
+/* Floating panels (dropdowns, notification panel, palette...): ONE rule to fit the VISIBLE viewport. 100vh is the large viewport on
+   phones (browser bar not subtracted), so the panel's footer hid behind it; dvh follows the bar (the vh line is the fallback for
+   browsers without dvh). Set --panel-top (where the panel starts) and --panel-gap (space to leave at the bottom).
+   .panel-fit-nav also keeps the panel clear of the floating phone nav + safe area below lg. Desktop: vh == dvh, so unchanged. */
+.panel-fit {
+  max-height: calc(100vh - var(--panel-top, 0px) - var(--panel-gap, 1rem));
+  max-height: calc(100dvh - var(--panel-top, 0px) - var(--panel-gap, 1rem));
+}
+@media (max-width: 1023.98px) {
+  .panel-fit-nav {
+    max-height: calc(100vh - var(--panel-top, 0px) - max(var(--panel-gap, 1rem), 6rem + env(safe-area-inset-bottom)));
+    max-height: calc(100dvh - var(--panel-top, 0px) - max(var(--panel-gap, 1rem), 6rem + env(safe-area-inset-bottom)));
+  }
+}
+
+/* Calendar scroller: never chains scroll to the page. Phone column snapping is done in JS (CalendarGrid axis lock), not CSS snap. */
+.calendar-grid-scroll { overscroll-behavior: contain; }
+
 /* ── Calendar grid scroller — thicker horizontal bar, always visible ── */
 .calendar-grid-scroll {
   scrollbar-width: auto;
@@ -333,6 +370,30 @@ aside:has(.sidebar-scroll:focus-within) .sidebar-scroll::-webkit-scrollbar-thumb
     scrollbar-width: thin;
     scrollbar-color: rgba(14, 13, 12, 0.18) transparent;
   }
+}
+
+/* Toasts / snackbars / undo bars: ONE position rule. Bottom ones clear the floating phone nav (same clearance as .content-scroll),
+   and sit at --toast-lg (default 1.5rem) from lg up, where the nav is gone. Top ones clear the safe area. Always pair with z-toast. */
+.toast-bottom { bottom: calc(6rem + env(safe-area-inset-bottom)); }
+.toast-top { top: calc(4rem + env(safe-area-inset-top)); }
+@media (min-width: 640px) { .toast-top { top: 5rem; } }
+@media (min-width: 1024px) { .toast-bottom { bottom: var(--toast-lg, 1.5rem); } }
+
+/* Phone: the content surface runs to the screen's bottom edge behind the floating pill nav (no band), and every scroller
+   ends with clearance = pill + its offset + safe area (+ the FAB), so the last item scrolls fully clear of both. */
+@media (max-width: 1023.98px) {
+  .app-shell .content-scroll,
+  .app-shell .calendar-grid-scroll {
+    padding-bottom: calc(6rem + env(safe-area-inset-bottom));
+  }
+}
+
+/* While any overlay holds the scroll lock (BottomSheet.jsx lockScroll), the page scrollers inside the app shell freeze too: on phone
+   .content-scroll and the calendar grid scroll, not the body. overflow:hidden keeps scrollTop, so unlocking restores the position. */
+.scroll-locked .content-scroll,
+.scroll-locked .calendar-grid-scroll {
+  overflow: hidden !important;
+  overscroll-behavior: none;
 }
 
 /* Print: let the frame grow to its content so long pages print in full. */

@@ -1,8 +1,10 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import { fetchBranchAdvanceBookingWindow, updateBranchAdvanceBookingWindow } from '../../../../services/api';
 import { wordBranch } from '../../../../utils/industryTerms';
+import SettingsSectionHeading from '../../../../components/ui/SettingsSectionHeading';
 
 const UNIT_OPTIONS = [
   { value: 'day', label: 'Day(s)' },
@@ -35,7 +37,7 @@ const AdvanceBookingWindowPanel = ({ branchId }) => {
     setLoading(true);
     setError(null);
     const { data, error: fetchErr } = await fetchBranchAdvanceBookingWindow(branchId);
-    if (fetchErr) setError(fetchErr.message || 'Failed to load the advance booking window.');
+    if (fetchErr) setError(friendlyError(fetchErr, 'Failed to load the advance booking window.'));
     else {
       setBranch(data);
       setValue(data?.advance_booking_days == null ? '' : String(data.advance_booking_days));
@@ -59,7 +61,7 @@ const AdvanceBookingWindowPanel = ({ branchId }) => {
     setSavedAt(null);
     const { error: saveErr } = await updateBranchAdvanceBookingWindow(branchId, parsedDays);
     if (saveErr) {
-      setError(saveErr.message || 'Failed to save the advance booking window.');
+      setError(friendlyError(saveErr, 'Failed to save the advance booking window.'));
       setSaving(false);
       return;
     }
@@ -71,7 +73,7 @@ const AdvanceBookingWindowPanel = ({ branchId }) => {
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="font-accent text-3xl text-text-primary leading-tight">Advance booking window</h3>
+        <SettingsSectionHeading>Advance booking window</SettingsSectionHeading>
         <p className="font-body text-sm text-text-secondary mt-1 max-w-xl">
           How far ahead can customers book online for{' '}
           {branch?.name ? <span className="font-body-semibold text-text-primary">{branch.name}</span> : `this ${wordBranch()}`}.

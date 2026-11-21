@@ -1,7 +1,7 @@
 import React from 'react';
 import Icon from '../../../../components/AppIcon';
 
-const DOT = { online: '#2D5A27', late: '#F59E0B', assign: '#B45309' };
+const DOT = { online: '#2D5A27', late: '#F59E0B', assign: '#B45309', unpaid: '#D97706' }; // unpaid = the app's warning amber (tailwind `warning`), same as the Unpaid pill
 
 // "✦ Needs you now": the few things a person should act on right now (today only). Each item filters the list (or calls).
 // Items may bring their own `dot` colour and an external `href` (opened in a new tab, e.g. a WhatsApp reminder); Packages uses both.
@@ -14,11 +14,11 @@ const NeedsYouNow = ({ items, active, onPick, quietTail = false, tailText = 'Eve
       const body = (
         <>
           <i className="w-[7px] h-[7px] rounded-full flex-shrink-0" style={{ background: it.dot || DOT[it.id] }} />
-          {it.text}
-          <span className="h-[22px] px-2 rounded-md bg-[#FAFAF9] text-primary text-[12px] font-semibold inline-flex items-center">{it.action}</span>
+          <span className="min-w-0 leading-snug">{it.text}</span>
+          <span className="h-[22px] px-2 flex-shrink-0 rounded-md bg-[#FAFAF9] text-primary text-[12px] font-semibold inline-flex items-center">{it.action}</span>
         </>
       );
-      const cls = `h-[30px] border rounded-lg inline-flex items-center gap-2 pl-2.5 pr-1.5 text-[12.5px] font-medium whitespace-nowrap bg-white hover:bg-[#FAFAF9] ${on ? 'border-primary shadow-[0_0_0_2px_rgba(45,90,39,.12)]' : 'border-border'}`;
+      const cls = `min-h-[30px] py-0.5 max-w-full min-w-0 border rounded-lg inline-flex items-center gap-2 pl-2.5 pr-1.5 text-[12.5px] font-medium text-left bg-white hover:bg-[#FAFAF9] ${on ? 'border-primary shadow-[0_0_0_2px_rgba(45,90,39,.12)]' : 'border-border'}`;
       if (it.href) return <a key={it.id} href={it.href} target="_blank" rel="noopener noreferrer" className={cls} data-need={it.id}>{body}</a>;
       return it.tel
         ? <a key={it.id} href={`tel:${String(it.tel).replace(/[^\d+]/g, '')}`} className={cls} data-need={it.id}>{body}</a>

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import CustomSelect from '../../../../components/ui/CustomSelect';
+import Icon from '../../../../components/AppIcon';
 import { PanelShell, FormBody, Field, SwitchRow, TextInput, InlineError, controlA11y } from '../../../../components/ui/PanelFormKit';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useIndustry } from '../../../../hooks/useIndustry';
@@ -7,7 +8,7 @@ import { grantStaffAccess, updateStaffAccess, grantableRolesFor, directDiscountP
 import { maskCustomerName, maskPhone } from '../../../../services/dataMasking';
 import { friendlyError } from '../../../../utils/friendlyError';
 import {
-  ROLE_LABELS, CALENDAR_OPTIONS, initialAccessForm, branchIdsToSave, showsHideOptions, validateAccessForm, saveErrorCopy,
+  ROLE_LABELS, calendarOptionsFor, isViewOnlyCalendar, VIEW_ONLY_NOTE, initialAccessForm, branchIdsToSave, showsHideOptions, validateAccessForm, saveErrorCopy,
 } from '../../../../services/staffAccessRules';
 
 const SEC = 'text-[11.5px] font-medium uppercase tracking-[.05em] text-[#8A8A90]';
@@ -128,7 +129,8 @@ const AccessEditPanel = ({ therapistId, personName, homeBranchId, branches, acce
         <section className="space-y-3">
           <h3 className={SEC}>{isNew ? `What ${first} can see` : `What ${first} can see`}</h3>
           <Field label="Calendar" id="access-calendar" hint="Own calendar also limits the lists and My day to the same set.">
-            <CustomSelect value={form.calendar} onChange={(v) => set({ calendar: v })} options={CALENDAR_OPTIONS} />
+            <CustomSelect value={form.calendar} onChange={(v) => set({ calendar: v })} options={calendarOptionsFor(form.calendar)} />
+            {isViewOnlyCalendar(form.calendar) && <p className="mt-1.5 flex items-start gap-1.5 text-xs text-amber-800" data-view-only-note><Icon name="AlertTriangle" size={14} className="mt-px flex-shrink-0" />{VIEW_ONLY_NOTE}</p>}
           </Field>
           {showsHideOptions(form.role) && (
             <>

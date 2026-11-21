@@ -1,3 +1,5 @@
+import PhoneField, { usePhoneState } from '../../components/ui/PhoneField';
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useBranch } from '../../contexts/BranchContext';
@@ -47,6 +49,7 @@ const LocationDetailPage = () => {
   const [loadError, setLoadError] = useState(null);
 
   const [formData, setFormData] = useState(EMPTY_FORM);
+  const phone = usePhoneState('', { kind: 'business' }); // a branch line: length check only, landlines pass
   const [hours, setHours] = useState(DEFAULT_HOURS);
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState('');
@@ -84,6 +87,7 @@ const LocationDetailPage = () => {
       phone: branch.phone || '',
       mapsUrl: branch.maps_url || '',
     });
+    phone.reset(branch.phone || '');
     setPhotoPreview(photoResult.data?.photo_url || '');
     if (hoursResult.data) setHours(hoursResult.data);
 
@@ -112,6 +116,8 @@ const LocationDetailPage = () => {
       return;
     }
 
+    if (phone.problem) { setFormError(phone.problem); return; }
+
     // B7: refuse before anything is written (hours used to be checked last, after the location was already saved).
     const badDay = hours.find(closesBeforeOpens);
     if (badDay) {
@@ -125,7 +131,7 @@ const LocationDetailPage = () => {
     const details = {
       name: formData.name.trim(),
       address: formData.address.trim() || null,
-      phone: formData.phone.trim() || null,
+      phone: phone.value || null,
       mapsUrl: formData.mapsUrl.trim() || null,
     };
 
@@ -134,7 +140,7 @@ const LocationDetailPage = () => {
       : await createBranch(details);
 
     if (result.error) {
-      setFormError(result.error.message || 'Operation failed.');
+      setFormError(friendlyError(result.error, 'Operation failed.'));
       setSaving(false);
       return;
     }
@@ -149,7 +155,7 @@ const LocationDetailPage = () => {
       const uploadResult = await uploadBranchPhoto(targetBranchId, photoFile);
       setUploadingPhoto(false);
       if (uploadResult.error) {
-        setFormError(uploadResult.error.message || 'Saved location, but failed to upload photo.');
+        setFormError(friendlyError(uploadResult.error, 'Saved location, but failed to upload photo.'));
         setSaving(false);
         return;
       }
@@ -158,14 +164,14 @@ const LocationDetailPage = () => {
 
     const photoResult = await updateBranchPhoto(targetBranchId, finalPhotoUrl || null);
     if (photoResult.error) {
-      setFormError(photoResult.error.message || 'Saved location, but failed to save photo.');
+      setFormError(friendlyError(photoResult.error, 'Saved location, but failed to save photo.'));
       setSaving(false);
       return;
     }
 
     const hoursResult = await upsertBranchOpeningHours(targetBranchId, hours);
     if (hoursResult.error) {
-      setFormError(hoursResult.error.message || 'Saved location, but failed to save hours.');
+      setFormError(friendlyError(hoursResult.error, 'Saved location, but failed to save hours.'));
       setSaving(false);
       return;
     }
@@ -229,7 +235,7 @@ const LocationDetailPage = () => {
                     <TextInput id="loc-address" value={formData.address} onChange={e => setFormData(f => ({ ...f, address: e.target.value }))} />
                   </Field>
                   <Field label="Phone" id="loc-phone">
-                    <TextInput id="loc-phone" type="tel" inputMode="tel" value={formData.phone} onChange={e => setFormData(f => ({ ...f, phone: e.target.value }))} />
+                    <PhoneField {...phone.field} id="loc-phone" kind="business" />
                   </Field>
                   <Field label="Map link" id="loc-map" hint="Optional. Customers get this on their confirmation.">
                     <TextInput id="loc-map" value={formData.mapsUrl} onChange={e => setFormData(f => ({ ...f, mapsUrl: e.target.value }))} placeholder="https://maps.google.com/..." />

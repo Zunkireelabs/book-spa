@@ -1,3 +1,4 @@
+import PhoneField, { usePhoneState } from '../../../../components/ui/PhoneField';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ConfirmDialog from '../../../../components/ui/ConfirmDialog';
 import { PanelShell, FormBody, Field, TextInput, SwitchRow, InlineError, InfoRows } from '../../../../components/ui/PanelFormKit';
@@ -12,6 +13,7 @@ const SupplierPanel = ({ supplier = null, suppliers, canManage, onClose, onSaved
     name: supplier?.name || '', contactName: supplier?.contactName || '', phone: supplier?.phone || '', email: supplier?.email || '', notes: supplier?.notes || '', isActive: supplier ? supplier.isActive : true,
   }), [supplier]);
   const [form, setForm] = useState(initial);
+  const phone = usePhoneState(initial.phone || '', { kind: 'business' }); // a shop line: length check only, landlines pass
   const [errors, setErrors] = useState({});
   const [serverError, setServerError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -19,7 +21,7 @@ const SupplierPanel = ({ supplier = null, suppliers, canManage, onClose, onSaved
   const nameRef = useRef(null);
   useEffect(() => { const t = setTimeout(() => nameRef.current?.focus({ preventScroll: true }), 260); return () => clearTimeout(t); }, []);
   const set = (k) => (v) => { setForm((f) => ({ ...f, [k]: v })); setErrors((e) => ({ ...e, [k]: undefined })); setServerError(null); };
-  const dirty = JSON.stringify(form) !== JSON.stringify(initial);
+  const dirty = JSON.stringify(form) !== JSON.stringify(initial) || (phone.value || '') !== (initial.phone || '');
   const used = !!supplier && (supplier.products > 0 || !!supplier.lastReceived);
   const others = suppliers.filter((s) => s.id !== supplier?.id);
 
@@ -29,8 +31,10 @@ const SupplierPanel = ({ supplier = null, suppliers, canManage, onClose, onSaved
     const name = form.name.trim();
     if (others.some((s) => s.name.trim().toLowerCase() === name.toLowerCase())) { setErrors({ name: `A supplier called "${name}" already exists.` }); return; }
     if (form.email.trim() && !/^\S+@\S+\.\S+$/.test(form.email.trim())) { setErrors({ email: 'Check the email address.' }); return; }
+    if (phone.problem) { setServerError(phone.problem); return; }
     setSaving(true); setServerError(null);
-    const res = editing ? await updateSupplier({ id: supplier.id, ...form }) : await createSupplier(form);
+    const payload = { ...form, phone: phone.value || '' };
+    const res = editing ? await updateSupplier({ id: supplier.id, ...payload }) : await createSupplier(payload);
     setSaving(false);
     if (res.error) { setServerError(friendlyError(res.error, 'Could not save the supplier.')); return; }
     onSaved(res.data, !editing);
@@ -55,7 +59,7 @@ const SupplierPanel = ({ supplier = null, suppliers, canManage, onClose, onSaved
         </Field>
         <div className="grid grid-cols-2 gap-4">
           <Field label="Contact person" id="sp-contact"><TextInput id="sp-contact" value={form.contactName} disabled={!canManage} onChange={(e) => set('contactName')(e.target.value)} /></Field>
-          <Field label="Phone" id="sp-phone"><TextInput id="sp-phone" type="tel" value={form.phone} disabled={!canManage} onChange={(e) => set('phone')(e.target.value)} /></Field>
+          <Field label="Phone" id="sp-phone"><PhoneField {...phone.field} id="sp-phone" kind="business" disabled={!canManage} /></Field>
         </div>
         <Field label="Email" id="sp-email" error={errors.email}><TextInput id="sp-email" error={errors.email} value={form.email} disabled={!canManage} onChange={(e) => set('email')(e.target.value)} /></Field>
         <Field label="Notes" id="sp-notes">

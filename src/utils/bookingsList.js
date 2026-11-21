@@ -1,5 +1,6 @@
 // Pure helpers for the Bookings list (V15): date ranges, view-chip classification, row signals (late / now line / dimming),
 // search, sorting and day grouping. Everything takes the spa's local (Nepal) `today` / `nowHM` explicitly — never the browser clock.
+import { futureBookingMessage } from '../services/bookingTransformers';
 import { classifyBooking } from './bookingMoney';
 import { phoneSearchDigits } from './customerDirectory';
 import { teamMemberWord } from './industryTerms';
@@ -138,6 +139,7 @@ export const VIEWS = [
   { id: 'done', label: 'Done', color: '#22C55E' },
   { id: 'spa', label: 'In service now', color: '#6366F1' },
   { id: 'come', label: 'To come', color: '#3B82F6' },
+  { id: 'walkin', label: 'Walk-in', color: '#D97706' }, // ZNLY-327: warning amber
   { id: 'unpaid', label: 'Unpaid', color: '#F59E0B' },
   { id: 'void', label: 'Cancelled & no-show', color: '#DC2626' },
 ];
@@ -149,6 +151,7 @@ export function inView(b, view, ctx) {
     case 'done': return s === 'Completed';
     case 'spa': return s === 'In-Progress';
     case 'come': return (s === 'Pending' || s === 'Confirmed') && dateOf(b) >= ctx.today && lateMinutes(b, ctx) == null;
+    case 'walkin': return !!b.isWalkIn;
     case 'unpaid': return moneyOf(b, ctx).due > 0;
     case 'void': return s === 'Cancelled' || s === 'No Show';
     default: return true;
@@ -189,8 +192,9 @@ export function nextAction(b, { readOnly = false } = {}) {
   const s = dbStatus(b);
   const assigned = (b.therapists && b.therapists.length > 0) || !!b.therapist;
   if (s === 'Pending') return assigned ? { id: 'confirm', label: 'Confirm', to: 'confirmed' } : { id: 'assign', label: 'Assign' };
-  if (s === 'Confirmed') return assigned ? { id: 'start', label: 'Start', to: 'in-progress' } : { id: 'assign', label: 'Assign' };
-  if (s === 'In-Progress') return { id: 'complete', label: 'Complete', to: 'completed' };
+  // ZNLY-275: a later-day booking can't be started or completed; `blocked` carries the sentence (button disabled, same text as its title).
+  if (s === 'Confirmed') return assigned ? { id: 'start', label: 'Start', to: 'in-progress', blocked: futureBookingMessage(b.date, 'start') || undefined } : { id: 'assign', label: 'Assign' };
+  if (s === 'In-Progress') return { id: 'complete', label: 'Complete', to: 'completed', blocked: futureBookingMessage(b.date, 'complete') || undefined };
   return null;
 }
 

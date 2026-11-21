@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
@@ -54,7 +55,7 @@ const TemplateEditorPanel = () => {
       fetchOutreachLayouts(),
     ]);
     if (fetchError) {
-      setError(fetchError.message || 'Failed to load templates.');
+      setError(friendlyError(fetchError, 'Failed to load templates.'));
       setLoading(false);
       return;
     }
@@ -119,7 +120,7 @@ const TemplateEditorPanel = () => {
     setSaving(false);
 
     if (saveError) {
-      setFormError(saveError.message || 'Failed to save template.');
+      setFormError(friendlyError(saveError, 'Failed to save template.'));
       return;
     }
 
@@ -132,7 +133,7 @@ const TemplateEditorPanel = () => {
     const { error: deleteError } = await deleteOutreachTemplate(id);
     setDeletingId(null);
     if (deleteError) {
-      setError(deleteError.message || 'Failed to delete template.');
+      setError(friendlyError(deleteError, 'Failed to delete template.'));
       return;
     }
     if (form.id === id) setForm(EMPTY_FORM);
@@ -156,7 +157,7 @@ const TemplateEditorPanel = () => {
       html: newLayout.html,
     });
     setNewLayoutSubmitting(false);
-    if (createErr) { setNewLayoutError(createErr.message || 'Failed to create layout.'); return; }
+    if (createErr) { setNewLayoutError(friendlyError(createErr, 'Failed to create layout.')); return; }
 
     setNewLayout(EMPTY_NEW_LAYOUT);
     setShowNewLayout(false);

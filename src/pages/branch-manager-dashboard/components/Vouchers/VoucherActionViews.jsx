@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
-import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
+import { parsePhone } from '../../../../components/ui/CountryCodeSelect';
+import PhoneField, { phoneFieldProblem, phoneFieldValue } from '../../../../components/ui/PhoneField';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import { PanelShell, FormBody, Field, TextInput, DateField, InfoRows, InlineError, CONTROL, controlA11y } from '../../../../components/ui/PanelFormKit';
 import { useBranch } from '../../../../contexts/BranchContext';
@@ -81,7 +82,7 @@ export const ExtendView = ({ voucher: v, today, onBack, onClose, onDone, width }
 // ── Edit contact (manager/admin) ────────────────────────────────────────────────────────────────
 // For: name (autocomplete links a profile), phone or a note; Bought by: name (autocomplete) and phone. Saved in one call; the
 // voucher's history notes what changed.
-const PersonFields = ({ idPrefix, label, name, setName, linked, setLinked, dial, setDial, phone, setPhone, branchId, extra }) => (
+const PersonFields = ({ idPrefix, label, name, setName, linked, setLinked, dial, setDial, phone, setPhone, original, setOriginal, branchId, extra }) => (
   <div className="space-y-2">
     <Field label={label} id={`${idPrefix}-name`} labelExtra={linked ? (
       <span className="inline-flex items-center gap-1.5 text-xs text-text-secondary">
@@ -94,15 +95,13 @@ const PersonFields = ({ idPrefix, label, name, setName, linked, setLinked, dial,
         onSelect={(c) => {
           setName(c.full_name);
           setLinked({ id: c.id, name: c.full_name });
-          if (c.phone) { const p = parsePhone(c.phone); setDial(p.dial); setPhone(p.national); }
+          if (c.phone) { const p = parsePhone(c.phone); setDial(p.dial); setPhone(p.national); setOriginal(c.phone); }
         }} />
     </Field>
-    <div className="flex">
-      <CountryCodeSelect value={dial} onChange={setDial} />
-      <input {...controlA11y(`${idPrefix}-phone`)} type="tel" inputMode="numeric" aria-label={`${label} phone`} value={phone} placeholder="9841234567"
-        onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 15))}
-        className="flex-1 min-w-0 h-10 px-3 text-[13px] border border-border rounded-r-spa rounded-l-none bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
-    </div>
+    <PhoneField id={`${idPrefix}-phone`} ariaLabel={`${label} phone`} placeholder="9841234567" original={original}
+      dial={dial} national={phone}
+      onChange={({ dial: d, national }) => { if (d !== dial) setDial(d); else setPhone(national.slice(0, 15)); }}
+      inputClassName="flex-1 min-w-0 h-10 px-3 text-[13px] max-md:text-[16px] border border-border rounded-r-spa rounded-l-none bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
     {extra}
   </div>
 );
@@ -127,6 +126,8 @@ export const ContactView = ({ voucher: v, onBack, onClose, onDone, width, focus 
   const [bLinked, setBLinked] = useState(v.buyerCustomerId ? { id: v.buyerCustomerId, name: v.buyerName } : null);
   const [bDial, setBDial] = useState(bp.dial);
   const [bPhone, setBPhone] = useState(bp.national);
+  const [gOrig, setGOrig] = useState(forIsPhone ? v.guestInfo : (v.customerPhone || '')); // stored numbers: not re-checked while untouched
+  const [bOrig, setBOrig] = useState(v.buyerPhone || v.buyerCustomerPhone || '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   useEffect(() => {
@@ -136,10 +137,11 @@ export const ContactView = ({ voucher: v, onBack, onClose, onDone, width, focus 
 
   const phoneDigits = digitsOf(phone);
   const bPhoneDigits = digitsOf(bPhone);
-  const badPhone = (d) => d && (d.length < 7 || d.length > 15);
-  const why = !name.trim() ? 'Enter the guest name' : badPhone(phoneDigits) || badPhone(bPhoneDigits) ? 'Check the phone number' : (bPhoneDigits && !bName.trim()) ? 'Add who bought it' : '';
-  const guestInfo = phoneDigits ? `${dial}${phoneDigits}` : (note.trim() || null);
-  const buyerPhone = bPhoneDigits ? `${bDial}${bPhoneDigits}` : null;
+  const badGuest = phoneDigits && phoneFieldProblem({ dial, national: phone, original: gOrig });
+  const badBuyer = bPhoneDigits && phoneFieldProblem({ dial: bDial, national: bPhone, original: bOrig });
+  const why = !name.trim() ? 'Enter the guest name' : badGuest || badBuyer ? 'Check the phone number' : (bPhoneDigits && !bName.trim()) ? 'Add who bought it' : '';
+  const guestInfo = phoneDigits ? phoneFieldValue({ dial, national: phone, original: gOrig }) : (note.trim() || null);
+  const buyerPhone = bPhoneDigits ? phoneFieldValue({ dial: bDial, national: bPhone, original: bOrig }) : null;
   const dirty = name !== (v.guestName || '') || (linked?.id || null) !== (v.customerId || null) || (guestInfo || null) !== (v.guestInfo || null)
     || bName !== (v.buyerName || '') || (bLinked?.id || null) !== (v.buyerCustomerId || null) || (buyerPhone || null) !== (v.buyerPhone || null);
 
@@ -162,9 +164,9 @@ export const ContactView = ({ voucher: v, onBack, onClose, onDone, width, focus 
       primary={{ label: busy ? 'Saving…' : 'Save', onClick: submit, disabled: !!why || !dirty, loading: busy }}>
       <FormBody>
         <InlineError message={error} />
-        <PersonFields idPrefix="vcf" label="For" name={name} setName={setName} linked={linked} setLinked={setLinked} dial={dial} setDial={setDial} phone={phone} setPhone={setPhone} branchId={branchId}
+        <PersonFields idPrefix="vcf" label="For" name={name} setName={setName} linked={linked} setLinked={setLinked} dial={dial} setDial={setDial} phone={phone} setPhone={setPhone} original={gOrig} setOriginal={setGOrig} branchId={branchId}
           extra={!phoneDigits ? <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="Company or note (optional)" aria-label="Company or note" /> : null} />
-        <PersonFields idPrefix="vcb" label="Bought by" name={bName} setName={setBName} linked={bLinked} setLinked={setBLinked} dial={bDial} setDial={setBDial} phone={bPhone} setPhone={setBPhone} branchId={branchId} />
+        <PersonFields idPrefix="vcb" label="Bought by" name={bName} setName={setBName} linked={bLinked} setLinked={setBLinked} dial={bDial} setDial={setBDial} phone={bPhone} setPhone={setBPhone} original={bOrig} setOriginal={setBOrig} branchId={branchId} />
         <p className="text-[12.5px] text-[#8A8A90]">Leave Bought by empty when the guest bought it for themselves. Changes are saved in the voucher&apos;s history.</p>
       </FormBody>
     </PanelShell>

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
-import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
+import { parsePhone } from '../../../../components/ui/CountryCodeSelect';
+import PhoneField, { phoneFieldProblem, phoneFieldValue } from '../../../../components/ui/PhoneField';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import PaymentMethodSelector from '../../../../components/ui/PaymentMethodSelector';
 import MembershipWalletCard from '../../../../components/ui/MembershipWalletCard';
@@ -27,16 +28,14 @@ const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || '';
 const SPLIT = 'grid grid-cols-1 sm:grid-cols-2 gap-3';
 const DEFAULT_CHIP = '90';
 const MAX_SOLD_DISCOUNT = 99; // a sale must collect something (migration-344); 100% off is "Given free"
-const chipCls = (on) => `h-8 px-3 rounded-full border text-[13px] font-medium tabular-nums ${on ? 'border-primary bg-[#EEF3EC] text-primary shadow-[0_0_0_2px_rgba(45,90,39,.10)]' : 'border-border bg-white text-text-primary hover:bg-[#FAFAF9]'}`;
+const chipCls = (on) => `h-8 max-md:h-11 px-3 rounded-full border text-[13px] font-medium tabular-nums ${on ? 'border-primary bg-[#EEF3EC] text-primary shadow-[0_0_0_2px_rgba(45,90,39,.10)]' : 'border-border bg-white text-text-primary hover:bg-[#FAFAF9]'}`;
 const isCouponType = (t) => t?.percent_off != null;
 
-const PhoneInput = ({ id, label, dial, setDial, value, onChange, error }) => (
-  <div className="flex">
-    <CountryCodeSelect value={dial} onChange={setDial} />
-    <input {...controlA11y(id, error)} type="tel" inputMode="numeric" aria-label={label} value={value} placeholder="9841234567"
-      onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 15))}
-      className={`flex-1 min-w-0 h-10 px-3 text-[13px] border rounded-r-spa rounded-l-none bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary ${error ? 'border-error' : 'border-border'}`} />
-  </div>
+const PhoneInput = ({ id, label, dial, setDial, value, onChange, error, original }) => (
+  <PhoneField id={id} ariaLabel={label} placeholder="9841234567" original={original}
+    dial={dial} national={value}
+    onChange={({ dial: d, national }) => { if (d !== dial) setDial(d); else onChange(national.slice(0, 15)); }}
+    inputClassName={`flex-1 min-w-0 h-10 max-md:h-11 px-3 text-[13px] max-md:text-[16px] border rounded-r-spa rounded-l-none bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary ${error ? 'border-error' : 'border-border'}`} />
 );
 
 // "New voucher" (V23): the right-hand panel (same shell, footer and success receipt as before). Sold | Given free (manager/admin;
@@ -73,6 +72,8 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
   const [buyerLinked, setBuyerLinked] = useState(null);
   const [buyerDial, setBuyerDial] = useState('+977');
   const [buyerPhone, setBuyerPhone] = useState('');
+  const [phoneOrig, setPhoneOrig] = useState(undefined); // a picked customer's stored number: not re-checked while untouched
+  const [buyerPhoneOrig, setBuyerPhoneOrig] = useState(undefined);
   // Money
   const [worth, setWorth] = useState('');
   const [discount, setDiscount] = useState('0');
@@ -175,11 +176,16 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
   const dirty = !!(code || guestName || phone || note || buyerName || buyerPhone || reason || freeNote || tenderTotal > 0 || discountTouched
     || chip !== DEFAULT_CHIP || issuedDate !== today || (type && worth !== String(Number(type.standard_price))));
 
+  // A typed phone must be real (a picked customer's stored number is not re-checked): it is a footer reason in field order, top-down.
+  const phoneIssue = digitsOf(phone) ? phoneFieldProblem({ dial, national: phone, original: phoneOrig }) : '';
+  const buyerPhoneIssue = gift && digitsOf(buyerPhone) ? phoneFieldProblem({ dial: buyerDial, national: buyerPhone, original: buyerPhoneOrig }) : '';
   const why = types === null ? 'Loading voucher types…'
     : !typeId ? 'Pick a voucher type'
       : !code.trim() ? 'Enter the code'
         : !guestName.trim() ? 'Enter who it is for'
+          : phoneIssue ? phoneIssue
           : gift && !buyerName.trim() ? 'Enter who bought it'
+            : gift && buyerPhoneIssue ? buyerPhoneIssue
             : free && !reason ? 'Pick why it is free'
               : !free && !coupon && !(worthNum > 0) ? 'Enter what it is worth'
                 : !free && discountNum >= 100 ? (canGiveFree ? 'Use Given free for a free voucher' : 'A manager can give it free')
@@ -205,13 +211,13 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
     setGuestName(c.full_name);
     setLinked({ id: c.id, name: c.full_name, tierName: c.primaryMembership?.tierName || '' });
     clearError('guest');
-    if (c.phone) { const p = parsePhone(c.phone); setDial(p.dial); setPhone(p.national); phoneFromPick.current = true; }
+    if (c.phone) { const p = parsePhone(c.phone); setDial(p.dial); setPhone(p.national); setPhoneOrig(c.phone); phoneFromPick.current = true; }
     if (!gift) setDiscountTouched(false); // a fresh payer: their rate applies again
   };
   const onBuyerSelect = (c) => {
     setBuyerName(c.full_name);
     setBuyerLinked({ id: c.id, name: c.full_name });
-    if (c.phone) { const p = parsePhone(c.phone); setBuyerDial(p.dial); setBuyerPhone(p.national); }
+    if (c.phone) { const p = parsePhone(c.phone); setBuyerDial(p.dial); setBuyerPhone(p.national); setBuyerPhoneOrig(c.phone); }
     setDiscountTouched(false);
   };
   const onDiscountChange = (raw) => {
@@ -226,8 +232,6 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
     const next = {};
     const pd = digitsOf(phone);
     const bd = digitsOf(buyerPhone);
-    if (pd && (pd.length < 7 || pd.length > 15)) next.phone = 'Enter a valid phone number (7–15 digits).';
-    if (gift && bd && (bd.length < 7 || bd.length > 15)) next.buyerPhone = 'Enter a valid phone number (7–15 digits).';
     if (canBackdate && (!issuedDate || issuedDate > today)) next.issued = "The issued date can't be in the future.";
     if (!expiry || expiry < today) next.expiry = 'Pick today or a later date.';
     if (!free && tenders.some((t) => t.paymentMode === 'Membership' && Number(t.amount) > 0) && !payer) next.pay = 'Pick the payer from the suggestions to pay by Membership.';
@@ -245,7 +249,7 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
       voucherTypeId: typeId,
       voucherCode: code.trim(),
       guestName: guestName.trim(),
-      guestInfo: pd ? `${dial}${pd}` : (note.trim() || null),
+      guestInfo: pd ? phoneFieldValue({ dial, national: phone, original: phoneOrig }) : (note.trim() || null),
       customerId: linked?.id || null,
       discountPercent: discountNum,
       actualPrice: coupon ? priceNum : worthNum,
@@ -255,7 +259,7 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
       freeReason: free ? reason : null,
       freeNote: free ? (freeNote.trim() || null) : null,
       buyerName: gift ? buyerName.trim() : null,
-      buyerPhone: gift && bd ? `${buyerDial}${bd}` : null,
+      buyerPhone: gift && bd ? phoneFieldValue({ dial: buyerDial, national: buyerPhone, original: buyerPhoneOrig }) : null,
       buyerCustomerId: gift ? (buyerLinked?.id || null) : null,
       tenders: free ? [] : tenders.map((t) => ({ amount: round2(Number(t.amount) || 0), paymentMode: t.paymentMode })).filter((t) => t.amount > 0),
     });
@@ -321,8 +325,8 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
       <PanelShell variant="panel" title={title} onClose={() => onIssued(issued)}
         footerOverride={(
           <div className="flex items-center justify-end gap-3">
-            <button type="button" onClick={issueAnother} className="h-9 px-3 text-[13px] font-body font-body-medium text-text-secondary hover:text-text-primary hover:bg-black/[0.04] rounded-spa spa-transition-fast whitespace-nowrap">{wasFree ? 'Give another' : 'Sell another'}</button>
-            <button type="button" onClick={() => onIssued(issued)} className="h-9 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 spa-transition-fast whitespace-nowrap">Done</button>
+            <button type="button" onClick={issueAnother} className="h-9 max-md:h-11 px-3 text-[13px] font-body font-body-medium text-text-secondary hover:text-text-primary hover:bg-black/[0.04] rounded-spa spa-transition-fast whitespace-nowrap">{wasFree ? 'Give another' : 'Sell another'}</button>
+            <button type="button" onClick={() => onIssued(issued)} className="h-9 max-md:h-11 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 spa-transition-fast whitespace-nowrap">Done</button>
           </div>
         )}>
         <div className="px-5 py-10 text-center" role="status" aria-live="polite">
@@ -373,7 +377,7 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
             <div className="grid grid-cols-2 gap-0.5 p-0.5 bg-background border border-border rounded-lg" role="group" aria-label="Sold or given free">
               {[['sold', 'Banknote', 'Sold'], ['free', 'Gift', 'Given free']].map(([k, icon, label]) => (
                 <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKindByUser(k)} data-kind={k}
-                  className={`h-9 rounded-md text-[13px] font-medium inline-flex items-center justify-center gap-2 transition-colors ${kind === k ? 'bg-white text-text-primary shadow-[0_1px_2px_rgba(14,13,12,.08)] border border-border' : 'text-[#515152] hover:text-text-primary'}`}>
+                  className={`h-9 max-md:h-11 rounded-md text-[13px] font-medium inline-flex items-center justify-center gap-2 transition-colors ${kind === k ? 'bg-white text-text-primary shadow-[0_1px_2px_rgba(14,13,12,.08)] border border-border' : 'text-[#515152] hover:text-text-primary'}`}>
                   <Icon name={icon} size={15} />{label}
                 </button>
               ))}
@@ -397,10 +401,9 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
             labelExtra={linked?.tierName ? <span className="inline-flex items-center gap-1.5 text-xs text-text-secondary whitespace-nowrap"><span className="w-1.5 h-1.5 rounded-full bg-[#E7B93E]" />{linked.tierName}</span> : null}>
             <CustomerAutocomplete id="vch-guest" value={guestName} onChange={onGuestNameChange} onSelect={onGuestSelect} branchId={branchId} searchBy="name" placeholder="Full name" inputClassName={CONTROL} />
             <div className={`${SPLIT} mt-2`}>
-              <PhoneInput id="vch-phone" label="Phone" dial={dial} setDial={setDial} value={phone} onChange={(val) => { setPhone(val); phoneFromPick.current = false; clearError('phone'); }} error={errors.phone} />
+              <PhoneInput id="vch-phone" label="Phone" original={phoneOrig} dial={dial} setDial={setDial} value={phone} onChange={(val) => { setPhone(val); phoneFromPick.current = false; clearError('phone'); }} error={errors.phone} />
               <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="Company or note (optional)" aria-label="Company or note" />
             </div>
-            {errors.phone && <p className="mt-1 text-xs text-error">{errors.phone}</p>}
             {digitsOf(phone) && note.trim() && <p className="mt-1 text-xs text-text-secondary">Only the phone is saved when both are given.</p>}
           </Field>
 
@@ -419,8 +422,7 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
                 <Field label="Bought by" required id="vch-buyer">
                   <CustomerAutocomplete id="vch-buyer" value={buyerName} branchId={branchId} searchBy="name" placeholder="Who is paying" inputClassName={CONTROL}
                     onChange={(val) => { setBuyerName(val); if (buyerLinked) { setBuyerLinked(null); setDiscountTouched(false); } }} onSelect={onBuyerSelect} />
-                  <div className="mt-2"><PhoneInput id="vch-buyerPhone" label="Buyer phone" dial={buyerDial} setDial={setBuyerDial} value={buyerPhone} onChange={setBuyerPhone} error={errors.buyerPhone} /></div>
-                  {errors.buyerPhone && <p className="mt-1 text-xs text-error">{errors.buyerPhone}</p>}
+                  <div className="mt-2"><PhoneInput id="vch-buyerPhone" label="Buyer phone" original={buyerPhoneOrig} dial={buyerDial} setDial={setBuyerDial} value={buyerPhone} onChange={setBuyerPhone} error={errors.buyerPhone} /></div>
                 </Field>
               )}
               {memberLine && (
@@ -474,7 +476,7 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
             </div>
           )}
           {!free && discountNum >= 100 && canGiveFree && (
-            <button type="button" onClick={() => { setKindByUser('free'); setDiscount('0'); setDiscountTouched(false); }} className="-mt-2 text-[13px] font-medium text-primary hover:underline">Switch to Given free</button>
+            <button type="button" onClick={() => { setKindByUser('free'); setDiscount('0'); setDiscountTouched(false); }} className="-mt-2 max-md:py-3 text-[13px] font-medium text-primary hover:underline">Switch to Given free</button>
           )}
 
           {canBackdate && (
@@ -504,7 +506,7 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
                       </div>
                       <div className="flex-1 min-w-0"><MoneyInput id={`vch-pay-${i}`} aria-label={`Amount ${i + 1}`} value={t.amount} onChange={(val) => updateTender(i, { amount: val })} /></div>
                       {tenders.length > 1 && (
-                        <button type="button" onClick={() => { autoTender.current = false; removeTenderRow(setTenders, i); }} aria-label="Remove method" className="h-10 w-8 flex items-center justify-center rounded-spa text-text-secondary hover:bg-black/[0.05]"><Icon name="X" size={14} /></button>
+                        <button type="button" onClick={() => { autoTender.current = false; removeTenderRow(setTenders, i); }} aria-label="Remove method" className="h-10 w-8 max-md:h-11 max-md:w-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-black/[0.05]"><Icon name="X" size={14} /></button>
                       )}
                     </div>
                     {isMembership && (
@@ -517,14 +519,14 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, in
               })}
               {errors.pay && <p id="vch-pay-error" role="alert" className="text-xs text-error">{errors.pay}</p>}
               <div className="flex items-center justify-between gap-3">
-                <button type="button" onClick={() => { autoTender.current = false; addTenderRow(setTenders, { amount: '', paymentMode: 'Cash' }); }} className="text-[13px] font-body-medium text-primary hover:underline">+ Add method</button>
+                <button type="button" onClick={() => { autoTender.current = false; addTenderRow(setTenders, { amount: '', paymentMode: 'Cash' }); }} className="max-md:py-3 text-[13px] font-body-medium text-primary hover:underline">+ Add method</button>
                 {tenderRemaining === 0 ? (
                   <p className="flex items-center gap-1.5 text-[13px] text-success" aria-live="polite"><Icon name="Check" size={13} />Fully collected</p>
                 ) : (
                   <p className="text-[13px] text-warning tabular-nums" aria-live="polite">
                     {tenderRemaining > 0 ? `${formatNPR(tenderRemaining)} left to collect · ` : `${formatNPR(-tenderRemaining)} over · `}
                     <button type="button" onClick={() => { const last = tenders.length - 1; const cur = round2(Number(tenders[last].amount) || 0); updateTender(last, { amount: String(Math.max(0, round2(cur + tenderRemaining))) }); }}
-                      className="font-body-medium text-primary hover:underline">Fill</button>
+                      className="font-body-medium text-primary hover:underline max-md:px-2 max-md:py-3">Fill</button>
                   </p>
                 )}
               </div>

@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { useOrg } from '../../../../contexts/OrgContext';
@@ -36,7 +37,7 @@ const CalendarSettingsPanel = () => {
     setError(null);
     const result = await updateOrgProfileSetting(key, value);
     if (result.error) {
-      setError(result.error.message || 'Failed to update setting.');
+      setError(friendlyError(result.error, 'Failed to update setting.'));
     } else {
       await refreshOrg();
     }
@@ -64,7 +65,6 @@ const CalendarSettingsPanel = () => {
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
-        <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Calendar Settings</h3>
         <p className="font-body text-sm text-text-secondary">Controls how the operational calendar displays and what cancellation reasons staff can pick from.</p>
       </div>
 

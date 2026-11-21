@@ -15,6 +15,7 @@ import CustomersSpotlight from './CustomersSpotlight';
 import { useBranch } from '../../../../contexts/BranchContext';
 import { StarIcon, InSpaTag } from './customerBits';
 import { teamMemberWord } from '../../../../utils/industryTerms';
+import ScrollRow from '../../../../components/ui/ScrollRow';
 
 const PAGE_SIZE = 25;
 const LAST_VISIT_OPTIONS = [
@@ -409,7 +410,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
       )}
       <FilterChip label="Last visit" value={filters.last} options={LAST_VISIT_OPTIONS} onChange={setFilter('last')} selectedLabel={LAST_VISIT_OPTIONS.find((o) => o.id === filters.last)?.label} />
       <div className="ml-auto flex items-center gap-2">
-        <Menu trigger={(open, toggle) => (
+        <Menu title="Sort by" trigger={(open, toggle) => (
           <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} className="h-7 px-2 rounded-md text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:bg-[#FAFAF9]">
             Sort <b className="text-text-primary font-medium">{SORTS[sort].label}</b><Icon name="ChevronDown" size={13} />
           </button>)}>
@@ -418,7 +419,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
               {s.label}{sort === id && <Icon name="Check" size={13} />}
             </button>))}
         </Menu>
-        <Menu trigger={(open, toggle) => (
+        <Menu title="Columns" trigger={(open, toggle) => (
           <button type="button" onClick={toggle} aria-label="Columns" aria-haspopup="menu" aria-expanded={open} className="w-[30px] h-[30px] border border-border rounded-md grid place-items-center text-[#515152] hover:bg-[#FAFAF9]"><Icon name="Columns" size={15} /></button>)}>
           {() => ['visits', 'spent', 'balance'].filter((k) => k !== 'spent' || isMgrUp).map((k) => (
             <label key={k} className="flex items-center gap-2 px-3 py-1.5 text-[13px] hover:bg-[#FAFAF9] cursor-pointer capitalize">
@@ -430,7 +431,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
   );
   const toolbar = isSm ? <div className="flex items-center gap-2 py-3.5 flex-wrap">{searchBox}{chips}</div> : <div className="py-2.5">{searchBox}</div>;
   // Below sm only the tabs + search stick; the chips / sort / columns scroll with the page so the pinned block stays compact.
-  const chipsRow = isSm ? null : <div className="flex items-center gap-2 pb-3 flex-wrap">{chips}</div>;
+  const chipsRow = isSm ? null : <ScrollRow className="pb-3">{chips}</ScrollRow>;
 
   const th = { sort, dir, onSort, stuck };
   let body;

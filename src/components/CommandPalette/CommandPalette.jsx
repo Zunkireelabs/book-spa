@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useBodyScrollLock } from '../ui/BottomSheet';
 import { useParams } from 'react-router-dom';
 import { useGuardedNavigate } from '../../contexts/DirtyGuardContext';
 import Icon from 'components/AppIcon';
@@ -18,6 +19,7 @@ const GROUP_LABEL = { recent: 'Recent', page: 'Pages', action: 'Actions', custom
 
 // ⌘K search: find pages, customers and bookings, or run a couple of simple actions.
 const CommandPalette = ({ onClose }) => {
+  useBodyScrollLock(true);
   const navigate = useGuardedNavigate();
   const { orgSlug: urlOrgSlug } = useParams();
   const { profile } = useAuth();
@@ -127,7 +129,7 @@ const CommandPalette = ({ onClose }) => {
         role="dialog"
         aria-modal="true"
         aria-label="Search"
-        className="relative mx-auto mt-[15vh] w-[640px] max-w-[calc(100vw-24px)] max-h-[70vh] flex flex-col bg-surface rounded-spa-lg shadow-spa-elevated border border-border overflow-hidden max-sm:mt-3"
+        className="relative mx-auto mt-[15dvh] [--panel-top:15dvh] [--panel-gap:15dvh] max-sm:[--panel-top:0.75rem] max-sm:[--panel-gap:0.75rem] panel-fit w-[640px] max-w-[calc(100vw-24px)] flex flex-col bg-surface rounded-spa-lg shadow-spa-elevated border border-border overflow-hidden max-sm:mt-3"
       >
         <div className="flex items-center gap-3 px-4 h-12 border-b border-border flex-shrink-0">
           <Icon name="Search" size={16} className="text-text-tertiary flex-shrink-0" />
@@ -146,7 +148,7 @@ const CommandPalette = ({ onClose }) => {
           <kbd className="hidden sm:inline text-[11px] text-text-tertiary border border-border rounded px-1.5 py-0.5">esc</kbd>
         </div>
 
-        <div ref={listRef} id="cmdk-list" role="listbox" className="flex-1 min-h-0 overflow-y-auto sidebar-scroll py-2">
+        <div ref={listRef} id="cmdk-list" role="listbox" className="flex-1 min-h-0 overflow-y-auto overscroll-contain sidebar-scroll py-2">
           {flat.length === 0 && (
             <p className="px-4 py-8 text-center text-sm text-text-secondary">No results for “{query.trim()}”.</p>
           )}

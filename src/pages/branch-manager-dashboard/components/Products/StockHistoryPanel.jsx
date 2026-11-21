@@ -109,7 +109,7 @@ const StockHistoryPanel = ({ catalog, branchId, branchName, isOverall, today, ca
   const anyFilter = !!(reason || productId || who || query);
 
   const monthMenu = (
-    <Menu trigger={(open, toggle) => (
+    <Menu title="Month" trigger={(open, toggle) => (
       <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} data-month
         className="h-[34px] px-3 rounded-[7px] border border-border bg-white text-[13px] font-medium inline-flex items-center gap-2 hover:bg-[#FAFAF9] whitespace-nowrap">
         <Icon name="Calendar" size={14} className="text-[#8A8A90]" />{monthLabel(month)}<Icon name="ChevronDown" size={13} className="text-[#8A8A90]" />

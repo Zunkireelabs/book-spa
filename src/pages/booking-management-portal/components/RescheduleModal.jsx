@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useMemo } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
@@ -55,7 +56,7 @@ const RescheduleModal = ({ isOpen, onClose, booking, onConfirm, staffLabel = 'Th
       });
 
       if (result?.error) {
-        setError(result.error.message || 'Failed to reschedule booking.');
+        setError(friendlyError(result.error, 'Failed to reschedule booking.'));
       } else {
         onClose();
       }

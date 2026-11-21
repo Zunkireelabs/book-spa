@@ -1,19 +1,20 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from 'contexts/AuthContext';
 import { viewerAccess } from 'services/dataMasking';
 import { useBranch } from 'contexts/BranchContext';
 import { useIndustry } from 'hooks/useIndustry';
 import { AreaPage } from './AreaLayout';
-import { getVisibleTabs } from './areaTabsRegistry';
+import { getVisibleTabs, resolveAreaView } from './areaTabsRegistry';
+import ScrollRow from 'components/ui/ScrollRow';
 
 // A small area as tabs: header (title + description), an underline tab row (same style as the Outstanding / Settled tabs), then the
 // panel in `.content-scroll`. Each tab is a `?view=` link. The tab row is hidden when only one tab is visible.
-const AreaTabs = ({ area, view, children }) => {
+const AreaTabs = ({ area, view: rawView, children }) => {
+  const view = resolveAreaView(rawView);
   const { profile } = useAuth();
   const { branchName, isOverall } = useBranch();
   const { staffLabelPlural, productLabel } = useIndustry();
-  const listRef = useRef(null);
 
   const ownOnly = viewerAccess(profile).ownOnly;
   const ctx = { role: profile?.role, ownOnly, hidePrices: !viewerAccess(profile).canViewPrices, isOverall, branchName, staffLabelPlural, productLabel };
@@ -38,7 +39,7 @@ const AreaTabs = ({ area, view, children }) => {
 
   // Arrow keys / Home / End move focus between tabs; Enter or Space opens the focused one (it is a link).
   const onKeyDown = (e) => {
-    const items = Array.from(listRef.current?.querySelectorAll('[role="tab"]') || []);
+    const items = Array.from(e.currentTarget.querySelectorAll('[role="tab"]') || []);
     const i = items.indexOf(document.activeElement);
     if (i < 0) return;
     const next = { ArrowRight: (i + 1) % items.length, ArrowLeft: (i - 1 + items.length) % items.length, Home: 0, End: items.length - 1 }[e.key];
@@ -48,7 +49,7 @@ const AreaTabs = ({ area, view, children }) => {
   };
 
   const tabRow = tabs.length > 1 ? (
-    <div ref={listRef} role="tablist" aria-label={areaTitle} onKeyDown={onKeyDown} className="mt-2 -mb-[13px] flex gap-6 overflow-x-auto whitespace-nowrap">
+    <ScrollRow role="tablist" aria-label={areaTitle} onKeyDown={onKeyDown} desktopWrap={false} gap="gap-6" wrapperClassName="mt-2 -mb-[13px]">
       {tabs.map((t) => {
         const active = t.view === view;
         return (
@@ -66,7 +67,7 @@ const AreaTabs = ({ area, view, children }) => {
           </Link>
         );
       })}
-    </div>
+    </ScrollRow>
   ) : null;
 
   return (

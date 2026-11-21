@@ -211,7 +211,7 @@ const CustomerDetailPage = () => {
       )}
 
       {actionError && confirmAction && (
-        <div className="fixed bottom-4 right-4 z-notification flex items-center gap-2 px-4 py-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm shadow-spa-elevated">
+        <div className="fixed toast-bottom [--toast-lg:1rem] right-4 z-notification flex items-center gap-2 px-4 py-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm shadow-spa-elevated">
           <Icon name="AlertCircle" size={16} />
           <span>{actionError}</span>
         </div>

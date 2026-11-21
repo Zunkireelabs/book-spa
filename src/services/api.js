@@ -7,12 +7,14 @@ import { workedAtNote } from './visitorAttendance';
 import { computeReferralCommission, payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, computeNetPay, splitServiceRevenueByBranch, visitorPayrollHelpLine } from './payrollCalc';
 import { supabase, supabaseCustomer, supabaseProvision } from '../lib/supabase';
 import { isReadingViaSafeViews } from '../lib/restrictedReads';
-import { maskCustomerName, maskPhone, viewerAccess } from './dataMasking';
-import { transformMembership, transformMemberships, toTitleCase, isNoShow } from './bookingTransformers';
+import { maskCustomerName, maskPhone, viewerAccess, calendarColumnsFor } from './dataMasking';
+import { isOwnCalendar } from './staffAccessRules';
+import { transformMembership, transformMemberships, toTitleCase, isNoShow, futureBookingMessage } from './bookingTransformers';
 import { dedupeTransfersByKey, sortTransfersByTime } from './transferDedup';
 import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 import { toE164, samePhone } from '../utils/phone';
+import { isNewCustomerBooking, walkInName } from '../utils/customerPick';
 import { expandBlockOccurrences } from '../utils/blockRecurrence';
 import { leafMethods, qrMethodDiff, validateQrFile } from '../utils/paymentQr';
 import { parseAvailabilityError, createEnforcementCache } from './availability';
@@ -1460,13 +1462,15 @@ async function writeBookingPayment(bookingId, rows, key, notes) {
 // attributed to a free-typed responsible person (dueHolderName).
 //   recordPayment({ bookingId, tenders: [{ amount, paymentMode }], dueHolderName, notes })
 // Backward-compatible single full payment: { bookingId, paymentMode, notes }.
+const WALK_IN_NEEDS_CLIENT_MSG = 'Packages, memberships, vouchers and wallets belong to a client. Add a client to this booking first.';
+const WALK_IN_PAY_IN_FULL_MSG = 'A walk-in with no client has to pay in full. Collect the whole amount, or add a client to leave a balance.';
 export async function recordPayment({ bookingId, tenders, paymentMode, dueHolderName, notes, idempotencyKey }) {
   const attemptKey = idempotencyKey || crypto.randomUUID();
   try {
     // 1. Fetch booking
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, branch_id, status, payment_status, final_amount, is_locked, due_holder_name')
+      .select('id, branch_id, status, payment_status, final_amount, is_locked, due_holder_name, is_walk_in, customer_id')
       .eq('id', bookingId)
       .single();
 
@@ -1475,6 +1479,12 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
         return { data: null, error: { code: 'BOOKING_NOT_FOUND', message: 'Booking not found.' } };
       }
       throw fetchError;
+    }
+
+    // ZNLY-327: a walk-in with no client belongs to nobody, so nothing here may draw on a person's wallet, voucher, package or membership.
+    const walkInNoClient = !!booking.is_walk_in && !booking.customer_id;
+    if (walkInNoClient && (tenders || []).some((t) => ['Membership', 'ReferralWallet', 'ReferralVoucher', 'VoucherWallet', 'SessionPackage'].includes(t.paymentMode))) {
+      return { data: null, error: { code: 'WALK_IN_NEEDS_CLIENT', message: WALK_IN_NEEDS_CLIENT_MSG } };
     }
 
     // 2. (ZNLY-234) A closed day no longer blocks a payment: a balance on a closed-day booking stays collectable and lands on the day it is
@@ -1610,6 +1620,11 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
 
     const leftover = Math.round((remaining - tenderTotal) * 100) / 100;
     const resolvedDueHolder = (dueHolderName || '').trim() || booking.due_holder_name || null;
+
+    // ZNLY-327: no balance can ever be left on nobody.
+    if (walkInNoClient && leftover > 0) {
+      return { data: null, error: { code: 'WALK_IN_PAY_IN_FULL', message: WALK_IN_PAY_IN_FULL_MSG } };
+    }
 
     // 8. If a balance is being left as due, a responsible person is required
     if (leftover > 0 && !resolvedDueHolder) {
@@ -3044,7 +3059,7 @@ export async function updateBookingStatus({ bookingId, newStatus, reason }) {
     // 1. Fetch booking
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, is_locked')
+      .select('id, status, is_locked, date')
       .eq('id', bookingId)
       .single();
 
@@ -3054,6 +3069,10 @@ export async function updateBookingStatus({ bookingId, newStatus, reason }) {
       }
       throw fetchError;
     }
+
+    // 1b. ZNLY-275: no Start / Complete / No-show for a later day (the DB trigger enforces it too; this gives the same sentence without a round trip)
+    const futureMsg = futureBookingMessage(booking.date, { 'In-Progress': 'start', Completed: 'complete', 'No Show': 'noshow' }[newStatus] || null);
+    if (futureMsg && ['In-Progress', 'Completed', 'No Show'].includes(newStatus)) return { data: null, error: { code: 'FUTURE_BOOKING', message: futureMsg } };
 
     // 2. Lifecycle checks
     const mutationError = validateBookingMutation(booking);
@@ -3553,14 +3572,76 @@ export async function resizeSharedBookingTime({ bookingId, startTime, endTime, o
   }
 }
 
-export async function updateBookingDetails({ bookingId, customerName, customerPhone, serviceId, date, startTime, specialRequests, referredBy, overrideReason }) {
+// ZNLY-327: add a client to a walk-in booking that has none. Links bookings.customer_id and sets customer_name / customer_phone; is_walk_in
+// and walk_in_label stay, so the booking is still counted as a walk-in. Same lifecycle guards as any edit (validateBookingMutation:
+// a closed day, Cancelled and No Show refuse; a paid, in-progress or Completed booking still may get a client: it changes no money).
+// Pass { customerId } to pick an existing customer, or { customerName, customerPhone, customerEmail?, customerGender? } for a new one.
+export async function linkWalkInClient({ bookingId, customerId, customerName, customerPhone, customerEmail, customerGender }) {
+  try {
+    const { data: booking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('id, status, is_locked, branch_id, is_walk_in, customer_id')
+      .eq('id', bookingId)
+      .single();
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') return { data: null, error: { code: 'BOOKING_NOT_FOUND', message: 'Booking not found.' } };
+      throw fetchError;
+    }
+    // Own guard, not validateBookingMutation: who the client is does not touch status or money, so Completed may still get one.
+    if (booking.is_locked) return { data: null, error: { code: 'DAY_LOCKED', message: 'This day has been closed. No further modifications allowed.' } };
+    if (booking.status === 'Cancelled' || booking.status === 'No Show') return { data: null, error: { code: 'BOOKING_IMMUTABLE', message: `${booking.status} bookings cannot be modified.` } };
+    if (!booking.is_walk_in) return { data: null, error: { code: 'NOT_WALK_IN', message: 'Only a walk-in booking can get a client added this way.' } };
+    if (booking.customer_id) return { data: null, error: { code: 'ALREADY_HAS_CLIENT', message: 'This booking already has a client.' } };
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    let linkId = customerId || null;
+    let name = null;
+    let phone = null;
+    if (linkId) {
+      const { data: c, error: cErr } = await supabase.from('customers').select('id, full_name, phone').eq('id', linkId).single();
+      if (cErr || !c) return { data: null, error: { code: 'CUSTOMER_NOT_FOUND', message: 'Could not find that customer.' } };
+      name = c.full_name; phone = c.phone;
+    } else {
+      if (!String(customerName || '').trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Enter the client\'s name.' } };
+      if (!String(customerPhone || '').trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Enter the client\'s phone number.' } };
+      const { data: branch, error: branchError } = await supabase.from('branches').select('org_id').eq('id', booking.branch_id).single();
+      if (branchError) throw branchError;
+      const { data: resolved, error: resolveError } = await findOrCreateCustomer({
+        orgId: branch.org_id, branchId: booking.branch_id, fullName: customerName, phone: customerPhone, email: customerEmail, gender: customerGender,
+      });
+      if (resolveError) return { data: null, error: resolveError };
+      linkId = resolved.customerId;
+      name = toTitleCase(customerName);
+      phone = toE164(customerPhone);
+    }
+
+    // The two filters make the link atomic: it only lands while the booking is still a client-less walk-in.
+    const { data: updated, error: updErr } = await supabase
+      .from('bookings')
+      .update({ customer_id: linkId, customer_name: name, customer_phone: phone })
+      .eq('id', bookingId)
+      .eq('is_walk_in', true)
+      .is('customer_id', null)
+      .select('id')
+      .maybeSingle();
+    if (updErr) throw updErr;
+    if (!updated) return { data: null, error: { code: 'ALREADY_HAS_CLIENT', message: 'This booking already has a client.' } };
+    return { data: { bookingId, customerId: linkId, customerName: name, customerPhone: phone }, error: null };
+  } catch (error) {
+    console.error('[API] linkWalkInClient error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateBookingDetails({ bookingId, customerName, customerPhone, walkInLabel, serviceId, date, startTime, specialRequests, referredBy, overrideReason }) {
   try {
     const availabilityOverride = overrideReasonOf(overrideReason);
     customerName = toTitleCase(customerName);
     // 1. Fetch current booking
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, is_locked, payment_status, service_id, date, start_time, branch_id, base_amount, discount_amount, final_amount, customer_name, customer_phone, service:services(duration_minutes)')
+      .select('id, status, is_locked, payment_status, service_id, date, start_time, branch_id, base_amount, discount_amount, final_amount, customer_name, customer_phone, customer_id, is_walk_in, service:services(duration_minutes)')
       .eq('id', bookingId)
       .single();
 
@@ -3581,6 +3662,17 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
 
     // 4. Build update payload with only changed fields
     const updatePayload = {};
+
+    // ZNLY-330: a client-less walk-in has no name or phone of its own, only the optional label ("Walk-in · Ram"); a phone belongs to a client.
+    if (booking.is_walk_in && !booking.customer_id) {
+      customerName = undefined;
+      customerPhone = undefined;
+      if (walkInLabel !== undefined) {
+        const label = String(walkInLabel || '').trim() || null;
+        updatePayload.walk_in_label = label;
+        updatePayload.customer_name = walkInName(label);
+      }
+    }
 
     if (customerName !== undefined && customerName !== null) {
       updatePayload.customer_name = customerName;
@@ -6577,6 +6669,36 @@ export function getBookingDayCounts(branchId, startDate, endDate) {
 }
 
 
+// ZNLY-299: open bookings in [fromDate, toDate] that have no staff yet (no therapist_id, no booking_therapists rows) and whose
+// service needs staff. Feeds the calendar's Assign list (today + the next 7 days). Plain select under RLS; raw rows, same
+// shape the calendar uses, so the list helpers take both.
+export async function fetchUnassignedBookings({ branchId, fromDate, toDate }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const vis = await resolveVisibility(profile);
+    let query = supabase
+      .from('bookings')
+      .select('id, customer_name, customer_phone, status, date, start_time, end_time, created_by, therapist_id, room_id, service_id, service:services(name, duration_minutes, requires_therapist, is_couple), booking_therapists(therapist_id)')
+      .gte('date', fromDate)
+      .lte('date', toDate)
+      .is('therapist_id', null)
+      .not('status', 'in', '("Cancelled","No Show","Completed")')
+      .order('date')
+      .order('start_time')
+      .limit(300);
+    query = withBranch(query, branchId);
+    const { data, error } = await query;
+    if (error) throw error;
+    let rows = (data || []).filter((b) => !(b.booking_therapists || []).length && b.service?.requires_therapist !== false);
+    if (!vis.canViewCustomerDetails) rows = rows.map((b) => ({ ...b, customer_name: maskCustomerName(b.customer_name), customer_phone: maskPhone(b.customer_phone) }));
+    return { data: rows, error: null };
+  } catch (error) {
+    console.error('[API] fetchUnassignedBookings error:', error.message);
+    return { data: null, error: { code: error.code || 'FETCH_FAILED', message: friendlyError(error, 'Could not load the unassigned bookings.') } };
+  }
+}
+
 export async function getCalendarBookings(branchId, startDate, endDate) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);
@@ -6671,7 +6793,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     let bookings = [];
     {
       const bookingFields = [
-        'id', 'booking_number', 'customer_id', 'customer_name',
+        'id', 'booking_number', 'customer_id', 'customer_name', 'is_walk_in', 'walk_in_label', // ZNLY-327
         'customer_phone',   // fetched always; masked below when withheld — see maskPhone
         'status', 'payment_status',
         'date', 'start_time', 'end_time', 'start_datetime', 'end_datetime', 'created_at', 'created_by',
@@ -6684,7 +6806,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         'creator:users!created_by(full_name)',
         'booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name), room:rooms(id, name))',
         'booking_combo_items(id, service_id, therapist_id, room_id, start_time, end_time, display_order, service:services(name, duration_minutes), therapist:therapists(id, name))',
-        vis.canViewPrices && 'payments(amount)',
+        vis.canViewPrices && 'payments(amount, payment_mode)',
       ].filter(Boolean).join(', ');
 
       let bookingsQuery = supabase
@@ -6846,7 +6968,8 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     const [customerNotesByCustomer, previousDueByBooking] = await Promise.all([customerNotesPromise, previousDuePromise]);
     const bookingsWithNewFlag = (bookings || []).map(b => ({
       ...b,
-      isNewCustomer: !b.customer_id || (!historyFailed && firstBookingIdByCustomer[b.customer_id] === b.id),
+      // ZNLY-327: a walk-in is never "New" (no profile, or a client added later whose first visit stays a walk-in).
+      isNewCustomer: isNewCustomerBooking(b, firstBookingIdByCustomer, historyFailed),
       // undefined (not null/0) when the lookup failed, so the UI shows nothing rather than a false "no alerts / no due".
       customerNotes: customerNotesByCustomer ? (customerNotesByCustomer[b.customer_id] || null) : undefined,
       previousDue: previousDueByBooking ? (previousDueByBooking[b.id] || null) : undefined,
@@ -6930,7 +7053,8 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
           closeTime: branch.close_time || '21:00:00',
           timezone: branch.timezone || 'Asia/Kathmandu',
         },
-        therapists: finalTherapists,
+        // ZNLY-278: an own-only login gets only its own team member back: colleagues' columns would look free while they are busy.
+        therapists: calendarColumnsFor(vis.ownBookingsOnly, finalTherapists, vis.therapistId),
         rooms: roomsResult.data || [],
         bookings: bookingsWithNewFlag,
         checkedOutByTherapistAndDate,
@@ -6978,10 +7102,15 @@ export async function createBooking({
   // incident this fixed. Never set this from a value the caller typed; only
   // from a column that's already a real customers.id.
   knownCustomerId,
+  // ZNLY-327: a walk-in who gives no details. No customer profile, no phone: customerName is "Walk-in" or "Walk-in · <label>",
+  // customer_id stays NULL and the row is flagged so counts, reminders and campaigns can leave it out. Never combined with knownCustomerId.
+  isWalkIn = false,
+  walkInLabel = null,
 }) {
   try {
     const availabilityOverride = overrideReasonOf(overrideReason);
-    if ((!customerPhone || !customerPhone.trim()) && !knownCustomerId) {
+    if (isWalkIn) { knownCustomerId = undefined; customerPhone = null; customerEmail = null; }
+    if (!isWalkIn && (!customerPhone || !customerPhone.trim()) && !knownCustomerId) {
       return { data: null, error: { message: 'Phone number is required' } };
     }
 
@@ -7001,7 +7130,7 @@ export async function createBooking({
     // masked text must never land in bookings.customer_name/_phone — that was
     // exactly the Yukta Dhungana-style corruption this closes, made automatic
     // instead of a one-off typo.
-    if (knownCustomerId) {
+    if (knownCustomerId && !isWalkIn) {
       const { data: realCustomer, error: custLookupErr } = await supabase
         .from('customers')
         .select('full_name, phone, email')
@@ -7022,7 +7151,7 @@ export async function createBooking({
       if (!customerPhone && !customerEmail) {
         return { data: null, error: { code: 'NO_CONTACT_INFO', message: 'This customer has no phone or email on file — add one to their profile before booking.' } };
       }
-    } else {
+    } else if (!isWalkIn) {
       customerName = toTitleCase(customerName);
     }
     const resolvedBranchId = resolveBranchId(branchId);
@@ -7216,7 +7345,7 @@ export async function createBooking({
     // for the acting account, and the lookup below unconditionally overwrites
     // full_name/phone/email on a match, which is exactly how masked text would
     // corrupt a real customer record).
-    if (!knownCustomerId) try {
+    if (!knownCustomerId && !isWalkIn) try {
       // Canonical E.164 ("+<countrycode><national>") so the same number always
       // resolves to the same customer regardless of how it was typed, and two
       // different countries' numbers never collide. See src/utils/phone.js.
@@ -7249,37 +7378,28 @@ export async function createBooking({
           })
           .eq('id', customerId);
       } else {
-        // Create new customer record (org-wide identity; branch_id kept as origin)
-        const { data: newCustomer, error: insertCustErr } = await supabase
-          .from('customers')
-          .insert({
-            org_id: orgId,
-            branch_id: resolvedBranchId,
-            full_name: customerName,
-            phone: phone || null,
-            email: email || null,
-            gender: customerGender || null,
-          })
-          .select('id')
-          .single();
-        if (newCustomer) {
-          customerId = newCustomer.id;
+        // Create the customer through the SECURITY DEFINER RPC (migration-402): anon can't read back a raw insert (no SELECT
+        // policy), so a direct .insert().select() left customer_id NULL for online bookings. One path for anon and staff;
+        // the RPC also de-dupes by phone/email and never overwrites an existing profile.
+        const { data: newCustomerId, error: createCustErr } = await supabase.rpc('create_customer_for_booking', {
+          p_org_id: orgId,
+          p_branch_id: resolvedBranchId,
+          p_full_name: customerName,
+          p_phone: phone || null,
+          p_email: email || null,
+          p_gender: customerGender || null,
+        });
+        if (newCustomerId) {
+          customerId = newCustomerId;
           isNewCustomer = true;
-        } else if (insertCustErr?.code === '23505' && orgId && phone) {
-          // Lost a race against customers_org_nphone_uniq — re-fetch the winner
-          const { data } = await supabase
-            .from('customers')
-            .select('id')
-            .eq('org_id', orgId)
-            .eq('phone', phone)
-            .limit(1)
-            .maybeSingle();
-          if (data) customerId = data.id;
+        } else if (createCustErr) {
+          // Still non-blocking (the booking must go through), but loud: a booking without a customer link is a real problem.
+          console.error('[API] create_customer_for_booking failed:', createCustErr.message);
         }
       }
     } catch (custErr) {
       // Non-blocking: booking still proceeds without customer link
-      console.warn('[API] Customer lookup/create failed:', custErr.message);
+      console.error('[API] Customer lookup/create failed:', custErr.message);
     }
 
     // 7a. Resolve therapist IDs (support both single and multi)
@@ -7443,6 +7563,7 @@ export async function createBooking({
       therapist_id: primaryTherapistId,
       customer_id: customerId,
       customer_name: customerName,
+      ...(isWalkIn ? { is_walk_in: true, walk_in_label: walkInLabel?.trim() || null } : {}),
       customer_email: customerEmail || null,
       customer_phone: toE164(customerPhone),
       customer_gender: customerGender || null,
@@ -11477,6 +11598,31 @@ export async function dismissDuplicateCandidate(orgId, customerIdA, customerIdB)
   }
 }
 
+// ZNLY-327: the customers this branch booked most recently (latest booking date/time first, ties by name), for the customer picker's
+// "Recent customers". Returns { data: [customerId...] }; walk-ins have no customer. Reads recent bookings only, never the whole history.
+export async function fetchRecentCustomerIds(branchId, limit = 8) {
+  try {
+    if (!branchId || isOverallBranch(branchId)) return { data: [], error: null };
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('customer_id, customer_name, date, start_time')
+      .eq('branch_id', resolveBranchId(branchId))
+      .not('customer_id', 'is', null)
+      .order('date', { ascending: false })
+      .order('start_time', { ascending: false })
+      .limit(300);
+    if (error) throw error;
+    const latest = new Map();
+    for (const b of data || []) if (!latest.has(b.customer_id)) latest.set(b.customer_id, b);
+    const ids = [...latest.values()]
+      .sort((x, y) => (y.date + y.start_time).localeCompare(x.date + x.start_time) || String(x.customer_name).localeCompare(String(y.customer_name)))
+      .slice(0, limit).map((b) => b.customer_id);
+    return { data: ids, error: null };
+  } catch (error) {
+    return { data: [], error };
+  }
+}
+
 export async function fetchCustomersLightweight(branchId) {
   try {
     if (!branchId) {
@@ -11861,6 +12007,23 @@ export async function updateCustomerProfileDetails(customerId, {
     return { data, error: null };
   } catch (error) {
     console.error('[API] updateCustomerProfileDetails error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Staff-side: one customer's stored date of birth ("YYYY-MM-DD" or null). Plain read under the existing row-level RLS.
+export async function fetchCustomerDateOfBirth(customerId) {
+  try {
+    if (!customerId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID is required.' } };
+    const { data, error } = await supabase
+      .from('customers')
+      .select('date_of_birth')
+      .eq('id', customerId)
+      .maybeSingle();
+    if (error) throw error;
+    return { data: data?.date_of_birth || null, error: null };
+  } catch (error) {
+    console.error('[API] fetchCustomerDateOfBirth error:', error.message);
     return { data: null, error };
   }
 }
@@ -13334,10 +13497,10 @@ export async function getTherapistOverview({ branchId, therapistId, fromDate, to
 
 // Booking details dialog "New" badge: does this customer have any earlier non-Cancelled
 // booking than the one being viewed? No customer_id (walk-in/guest) → always first.
-export async function getCustomerFirstBookingFlag(customerId, bookingId, bookingDate, bookingStartTime = null) {
+export async function getCustomerFirstBookingFlag(customerId, bookingId, bookingDate, bookingStartTime = null, isWalkIn = false) {
   try {
     if (!customerId) {
-      return { data: { isFirstBooking: true }, error: null };
+      return { data: { isFirstBooking: !isWalkIn }, error: null }; // ZNLY-327: a walk-in with no client is never New
     }
 
     let query = supabase
@@ -19269,7 +19432,7 @@ const CUSTOMER_DETAIL_FIELDS = ['customer_email', 'notes', 'customer_notes'];
 async function resolveVisibility(profile) {
   const privileged = profile.role === 'manager' || profile.role === 'admin';
   const vis = {
-    ownBookingsOnly: !privileged && profile.calendar_visibility === 'own',
+    ownBookingsOnly: !privileged && isOwnCalendar(profile.calendar_visibility),
     canViewCustomerDetails: privileged || profile.can_view_customer_details !== false,
     canViewPrices: privileged || profile.can_view_prices !== false,
     therapistId: null,
@@ -20108,6 +20271,47 @@ export async function assignTherapistTier({ therapistId, tierId }) {
   } catch (error) {
     console.error('[API] assignTherapistTier error:', error.message);
     return { data: null, error };
+  }
+}
+
+/** ZNLY-320: last-90-day booking counts per service for one branch (feeds "MOST BOOKED"). Never throws; a failure just means no group. */
+export async function fetchServiceBookingCounts(branchId) {
+  try {
+    if (!branchId) return { data: [], error: null };
+    const { data, error } = await supabase.rpc('service_booking_counts', { p_branch_id: branchId });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.warn('[API] fetchServiceBookingCounts:', error?.message);
+    return { data: [], error };
+  }
+}
+
+/** ZNLY-320: { [serviceId]: [lowest tier price] } for every tiered service in the org; readable by any login that may see prices. */
+export async function fetchServiceMinTierPrices() {
+  try {
+    const { data, error } = await supabase.rpc('service_min_tier_prices');
+    if (error) throw error;
+    const out = {};
+    (data || []).forEach((r) => { out[r.service_id] = [Number(r.min_tier_price)]; });
+    return { data: out, error: null };
+  } catch (error) {
+    console.warn('[API] fetchServiceMinTierPrices:', error?.message);
+    return { data: {}, error };
+  }
+}
+
+/** ZNLY-320: category name -> display_order for the service picker's headers. */
+export async function fetchServiceCategoryOrder() {
+  try {
+    const { data, error } = await supabase.from('service_categories').select('name, display_order').eq('is_active', true).not('display_order', 'is', null);
+    if (error) throw error;
+    const out = {};
+    (data || []).forEach((r) => { if (r.display_order != null) out[r.name] = Number(r.display_order); });
+    return { data: out, error: null };
+  } catch (error) {
+    console.warn('[API] fetchServiceCategoryOrder:', error?.message);
+    return { data: {}, error };
   }
 }
 

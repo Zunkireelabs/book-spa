@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useBodyScrollLock } from '../BottomSheet';
 import Icon from '../../AppIcon';
 import { useAIAssistant } from 'contexts/AIAssistantContext';
 import ChatMessage from './ChatMessage';
@@ -62,6 +63,7 @@ const AIAssistantPanel = () => {
   const [isExpanded, setIsExpanded] = useState(false);
   const messagesEndRef = useRef(null);
 
+  useBodyScrollLock(isOpen);
   const panelWidth = isExpanded ? 600 : 420;
 
   // Scroll to bottom when messages change
@@ -143,7 +145,7 @@ const AIAssistantPanel = () => {
         </div>
 
         {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto py-4 space-y-4">
+        <div className="flex-1 overflow-y-auto overscroll-contain py-4 space-y-4">
           {messages.map(message => (
             <ChatMessage key={message.id} message={message} />
           ))}

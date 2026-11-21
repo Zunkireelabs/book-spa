@@ -14,6 +14,9 @@
 // sides through `toE164()` so a legacy bare-national straggler still matches a
 // freshly-normalised value.
 
+import { parsePhoneNumberFromString } from 'libphonenumber-js/min';
+import { DIAL_CODES, countryByDial } from './countries';
+
 const DEFAULT_DIAL = '+977'; // Nepal — the app's home country
 
 // Bare national numbers up to this length are assumed to be missing their
@@ -72,16 +75,6 @@ export function samePhone(a, b, fallbackDial = DEFAULT_DIAL) {
   return da != null && da === db;
 }
 
-// Country dial codes we recognise, longest first — so `+1` doesn't shadow
-// `+977` style matches. Kept in sync with CountryCodeSelect's COUNTRIES list.
-const DIAL_CODES = [
-  '+977', '+975', '+974', '+973', '+972', '+971', '+968', '+966', '+965', '+960', '+880', '+852', '+353',
-  '+91', '+44', '+61', '+86', '+81', '+82', '+65', '+60', '+66', '+92', '+94', '+95', '+62', '+63', '+84',
-  '+64', '+49', '+33', '+39', '+34', '+31', '+41', '+46', '+47', '+45', '+90', '+27', '+20', '+55', '+52',
-  '+98', '+93',
-  '+7', '+1',
-].sort((a, b) => b.length - a.length);
-
 /**
  * Split a canonical E.164 value into `{ dial, national }` for display or for
  * seeding a country-code picker. Falls back to `{ dial: fallbackDial, national }`
@@ -119,4 +112,51 @@ export function formatPhoneGrouped(value, fallbackDial = DEFAULT_DIAL) {
   const { dial, national } = splitE164(e164, fallbackDial);
   if (dial === '+977' && /^\d{10}$/.test(national)) return `${dial} ${national.slice(0, 3)}-${national.slice(3, 6)}-${national.slice(6)}`;
   return national ? `${dial} ${national}` : dial;
+}
+
+/**
+ * Phone value to save from an edit form that shows `dial` + `national` (ZNLY-324). Saved the way New booking saves
+ * (`dial` + digits); a number the user did not touch is returned exactly as it was stored, so it round-trips unchanged.
+ */
+export function phoneToSave({ dial, national, initialDial, initialNational, original }) {
+  if (dial === initialDial && national === initialNational) return String(original || '').trim() || null;
+  const digits = String(national || '').replace(/\D/g, '');
+  return digits ? `${dial}${digits}` : null;
+}
+
+// ZNLY-327: one validator for a typed phone number, any country. A number is rejected when it is not a valid number for the dial code's country
+// (too short / too long / a pattern no carrier uses: libphonenumber-js, min metadata), when every digit is the same, or when it is a plain
+// run (123456..., 9876543210). Only for numbers someone TYPED: a stored number is never re-checked (see phoneToSave's "untouched" rule).
+const isRun = (d) => {
+  if (d.length < 6) return false;
+  const steps = new Set();
+  for (let i = 1; i < d.length; i += 1) steps.add((Number(d[i]) - Number(d[i - 1]) + 10) % 10);
+  return steps.size === 1 && (steps.has(1) || steps.has(9));
+};
+/** Business phones (a shop or branch line, landlines included): length-only check (isPossible) instead of a carrier-pattern check. */
+export function isPossibleBusinessPhone(dial, national) {
+  const d = String(national || '').replace(/\D/g, '');
+  if (!d) return false;
+  const parsed = parsePhoneNumberFromString(`${dial}${d}`);
+  return !!parsed && parsed.isPossible();
+}
+export function isValidPhone(dial, national) {
+  const d = String(national || '').replace(/\D/g, '');
+  if (!d) return false;
+  if (/^(\d)\1+$/.test(d) || isRun(d)) return false;
+  const parsed = parsePhoneNumberFromString(`${dial}${d}`);
+  return !!parsed && parsed.isValid();
+}
+
+/** The plain-language reason a typed number is rejected, or '' when it is fine (or empty: "required" is the caller's rule). */
+export function phoneProblem(dial, national, { walkInHint = true, kind = 'person' } = {}) {
+  if (!String(national || '').replace(/\D/g, '')) return '';
+  if (kind === 'business' ? isPossibleBusinessPhone(dial, national) : isValidPhone(dial, national)) return '';
+  return `This number isn't valid for ${countryByDial(dial).name}.${walkInHint ? ' Use Walk-in if the customer has no number.' : ''}`;
+}
+
+/** Edit forms: the reason to block a save, only when the number was changed from what was loaded ('' = fine; an untouched number always saves). */
+export function phoneEditProblem({ dial, national, initialDial, initialNational, walkInHint }) {
+  if (dial === initialDial && national === initialNational) return '';
+  return phoneProblem(dial, national, walkInHint === undefined ? undefined : { walkInHint });
 }

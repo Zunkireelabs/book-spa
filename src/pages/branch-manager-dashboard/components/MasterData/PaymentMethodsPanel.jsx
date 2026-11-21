@@ -290,7 +290,7 @@ const PaymentMethodsPanel = () => {
       )}
 
       {toast && (
-        <div role="status" className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-toast px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2 ${
+        <div role="status" className={`fixed toast-top left-1/2 transform -translate-x-1/2 z-toast px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2 ${
           toast.type === 'error' ? 'bg-error text-white' : 'bg-success text-white'
         }`}>
           <Icon name={toast.type === 'error' ? 'AlertCircle' : 'CheckCircle'} size={16} />

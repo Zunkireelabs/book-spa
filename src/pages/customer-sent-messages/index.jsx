@@ -1,3 +1,4 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
@@ -48,12 +49,12 @@ const CustomerSentMessagesPage = () => {
       fetchOutreachMessages({ customerId, limit: 100 }),
     ]);
     if (profileResult.error) {
-      setError(profileResult.error.message || 'Failed to load customer.');
+      setError(friendlyError(profileResult.error, 'Failed to load customer.'));
       setLoading(false);
       return;
     }
     if (messagesResult.error) {
-      setError(messagesResult.error.message || 'Failed to load sent messages.');
+      setError(friendlyError(messagesResult.error, 'Failed to load sent messages.'));
       setLoading(false);
       return;
     }

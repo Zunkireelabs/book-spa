@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import AppShell from '../../components/ui/AppShell';
 import { Field, TextInput, NumberInput } from '../../components/ui/PanelFormKit';
+import { categoryOptions, isCategoryMissing, categoryForSave } from '../../utils/serviceCategory';
 import CustomSelect from '../../components/ui/CustomSelect';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch, OVERALL_BRANCH_ID } from '../../contexts/BranchContext';
@@ -108,6 +109,7 @@ const ServiceDetailPage = () => {
   const [tierPrices, setTierPrices] = useState({});
 
   const [formData, setFormData] = useState(EMPTY_FORM);
+  const [originalCategory, setOriginalCategory] = useState(''); // the stored category when the editor opened (so an untouched one is never rewritten)
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -172,7 +174,7 @@ const ServiceDetailPage = () => {
     ]);
 
     if (servicesResult.error) {
-      setLoadError(servicesResult.error.message || 'Failed to load service.');
+      setLoadError(friendlyError(servicesResult.error, 'Failed to load service.'));
       setPageLoading(false);
       return;
     }
@@ -184,6 +186,7 @@ const ServiceDetailPage = () => {
       return;
     }
 
+    setOriginalCategory(service.category ?? '');
     setFormData({
       name: service.name,
       priceNpr: String(service.price_npr),
@@ -314,7 +317,7 @@ const ServiceDetailPage = () => {
       const uploadResult = await uploadServiceImage(imageFile);
       setUploadingImage(false);
       if (uploadResult.error) {
-        setFormError(uploadResult.error.message || 'Failed to upload image.');
+        setFormError(friendlyError(uploadResult.error, 'Failed to upload image.'));
         setSaving(false);
         return;
       }
@@ -328,7 +331,7 @@ const ServiceDetailPage = () => {
       durationMinutes: duration,
       description: formData.description.trim() || null,
       imageUrl: finalImageUrl,
-      category: formData.category,
+      category: categoryForSave({ isEdit, current: formData.category, original: originalCategory }),
       isCouple: formData.isCouple,
       isCombo: formData.isCombo,
       offerEnabled: formData.offerEnabled,
@@ -463,9 +466,14 @@ const ServiceDetailPage = () => {
                         <CustomSelect
                           value={formData.category}
                           onChange={(val) => setFormData({ ...formData, category: val })}
-                          options={categories.map((cat) => ({ value: cat.name, label: cat.name }))}
+                          options={categoryOptions(categories, formData.category)}
                           size="md"
                         />
+                        {isEdit && isCategoryMissing(categories, formData.category) && (
+                          <p className="mt-1 text-xs text-text-secondary">
+                            Not in your Categories list · <Link to={`/${orgSlug}/dashboard?view=categories`} className="text-primary hover:underline">Add it</Link>
+                          </p>
+                        )}
                       </Field>
                       <Field label="Duration (min)" id="svc-duration">
                         <NumberInput id="svc-duration" value={formData.durationMinutes} onChange={(e) => setFormData({ ...formData, durationMinutes: e.target.value })} placeholder="60" min="1" />

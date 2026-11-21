@@ -1,8 +1,10 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { useIndustry } from '../../../../hooks/useIndustry';
 import { fetchBranchOnlineCapacity, updateBranchOnlineCapacity } from '../../../../services/api';
 import { wordBranch } from '../../../../utils/industryTerms';
+import SettingsSectionHeading from '../../../../components/ui/SettingsSectionHeading';
 
 // Per-branch cap on how many bookings customers can place online without a specific staff
 // member assigned (branches.online_booking_capacity, migration-138). The real enforcement is
@@ -26,7 +28,7 @@ const OnlineBookingCapacityPanel = ({ branchId }) => {
     setLoading(true);
     setError(null);
     const { data, error: fetchErr } = await fetchBranchOnlineCapacity(branchId);
-    if (fetchErr) setError(fetchErr.message || 'Failed to load the online booking limit.');
+    if (fetchErr) setError(friendlyError(fetchErr, 'Failed to load the online booking limit.'));
     else {
       setBranch(data);
       setValue(data?.online_booking_capacity == null ? '' : String(data.online_booking_capacity));
@@ -48,7 +50,7 @@ const OnlineBookingCapacityPanel = ({ branchId }) => {
     setSavedAt(null);
     const { error: saveErr } = await updateBranchOnlineCapacity(branchId, parsed);
     if (saveErr) {
-      setError(saveErr.message || 'Failed to save the online booking limit.');
+      setError(friendlyError(saveErr, 'Failed to save the online booking limit.'));
       setSaving(false);
       return;
     }
@@ -60,7 +62,7 @@ const OnlineBookingCapacityPanel = ({ branchId }) => {
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="font-accent text-3xl text-text-primary leading-tight">Online booking limit</h3>
+        <SettingsSectionHeading>Online booking limit</SettingsSectionHeading>
         <p className="font-body text-sm text-text-secondary mt-1 max-w-xl">
           Caps how many bookings customers can place online at the same time for{' '}
           {branch?.name ? <span className="font-body-semibold text-text-primary">{branch.name}</span> : `this ${wordBranch()}`},

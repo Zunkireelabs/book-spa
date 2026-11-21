@@ -1,14 +1,14 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
 import BranchPending from '../branch-manager-dashboard/components/Area/BranchPending';
 import AreaTabs from '../branch-manager-dashboard/components/Area/AreaTabs';
-import { getAreaForView } from '../branch-manager-dashboard/components/Area/areaTabsRegistry';
+import { getAreaForView, resolveAreaView } from '../branch-manager-dashboard/components/Area/areaTabsRegistry';
 import AppShell from '../../components/ui/AppShell';
 import QuickFilters from './components/QuickFilters';
 import BookingsList from './components/BookingsList';
 import BookingsViewPanel from '../branch-manager-dashboard/components/BookingsViewPanel';
-import StaffBookingForm from './components/StaffBookingForm';
 import DashboardHome from '../dashboard-home';
 import { hasOwnBookingsToday } from '../../lib/dashboardViews';
 import CheckBookingPanel from './components/CheckBookingPanel';
@@ -373,7 +373,7 @@ const BranchStaffDashboard = () => {
     const result = await updateBookingStatus({ bookingId, newStatus: dbStatus, reason });
 
     if (result.error) {
-      showError(result.error.message || 'Failed to update status.');
+      showError(friendlyError(result.error, 'Failed to update status.'));
       return;
     }
 
@@ -467,7 +467,7 @@ const BranchStaffDashboard = () => {
   // Staff also get the Products area (Products + Categories tabs) when the flag is on.
   const bookingsArea = getAreaForView('bookings');
   const productsArea = PRODUCTS_ENABLED ? getAreaForView('products') : null;
-  const areaForView = bookingsArea.tabs.some((t) => t.view === viewMode) ? bookingsArea : (productsArea && productsArea.tabs.some((t) => t.view === viewMode) ? productsArea : null);
+  const areaForView = bookingsArea.tabs.some((t) => t.view === resolveAreaView(viewMode)) ? bookingsArea : (productsArea && productsArea.tabs.some((t) => t.view === viewMode) ? productsArea : null);
   // Bookings, "New membership" and "New voucher" share one tree: the bookings list keeps its key and the panel is the second
   // child, so switching between these tabs doesn't remount the list (which would refetch and flash).
   const withBookingsList = (overlay = null) => (
@@ -481,7 +481,7 @@ const BranchStaffDashboard = () => {
     switch (view) {
       case 'bookings': return withBookingsList();
       case 'collect-payment': return <CollectPaymentPanel onSuccess={showSuccess} />;
-      case 'new-booking': return <StaffBookingForm onBookingCreated={loadData} />;
+      case 'new-booking': return withBookingsList(); // the New booking panel opens over the list (BookingsViewPanel reads ?view=new-booking)
       case 'check-booking': return <CheckBookingPanel branchId={branchId} />;
       case 'new-membership':
         return withBookingsList(MEMBERSHIP_ENABLED ? (
@@ -489,7 +489,7 @@ const BranchStaffDashboard = () => {
             onClose={() => setSearchParams({ view: 'bookings' })}
             onEnrolled={(id, info) => {
               setSearchParams({ view: 'bookings' });
-              showSuccess(info?.message || 'Membership created.');
+              showSuccess(info.message || 'Membership created.');
             }}
           />
         ) : null);
@@ -520,7 +520,7 @@ const BranchStaffDashboard = () => {
         <>
           {/* Toast notifications - Responsive positioning */}
           {actionError && (
-            <div className="fixed top-16 sm:top-20 left-4 right-4 sm:left-1/2 sm:right-auto sm:transform sm:-translate-x-1/2 z-toast bg-error text-white px-4 sm:px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2">
+            <div className="fixed toast-top left-4 right-4 sm:left-1/2 sm:right-auto sm:transform sm:-translate-x-1/2 z-toast bg-error text-white px-4 sm:px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2">
               <span className="font-body font-body-medium text-sm flex-1">{actionError}</span>
               <button onClick={() => setActionError(null)} className="ml-2 hover:opacity-80 text-white p-1">
                 <Icon name="X" size={16} />
@@ -528,12 +528,12 @@ const BranchStaffDashboard = () => {
             </div>
           )}
           {actionSuccess && (
-            <div className="fixed top-16 sm:top-20 left-4 right-4 sm:left-1/2 sm:right-auto sm:transform sm:-translate-x-1/2 z-toast bg-success text-white px-4 sm:px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2">
+            <div className="fixed toast-top left-4 right-4 sm:left-1/2 sm:right-auto sm:transform sm:-translate-x-1/2 z-toast bg-success text-white px-4 sm:px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2">
               <span className="font-body font-body-medium text-sm">{actionSuccess}</span>
             </div>
           )}
           {newBookingNotification && (
-            <div className="fixed top-16 sm:top-20 left-4 right-4 sm:left-auto sm:right-6 z-toast bg-primary text-white px-4 sm:px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in sm:max-w-sm">
+            <div className="fixed toast-top left-4 right-4 sm:left-auto sm:right-6 z-toast bg-primary text-white px-4 sm:px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in sm:max-w-sm">
               <div className="flex items-start space-x-3">
                 <div className="flex-shrink-0 mt-0.5">
                   <Icon name="CalendarPlus" size={20} />
@@ -574,7 +574,7 @@ const BranchStaffDashboard = () => {
       ) : areaForView ? (
         <AreaTabs area={areaForView} view={viewMode}>{renderAreaView(viewMode)}</AreaTabs>
       ) : (
-        <StaffBookingForm onBookingCreated={loadData} />
+        <OperationalCalendar branchId={branchId} />
       )}
     </AppShell>
   );

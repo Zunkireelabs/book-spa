@@ -1,3 +1,4 @@
+import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   DndContext,
@@ -112,7 +113,7 @@ const PriceTiersPanel = ({ readOnly = false }) => {
       fetchTherapistsForTierAssignment(),
     ]);
     if (tiersResult.error) {
-      setError(tiersResult.error.message || 'Failed to load price tiers.');
+      setError(friendlyError(tiersResult.error, 'Failed to load price tiers.'));
     } else {
       setTiers(tiersResult.data || []);
     }
@@ -135,7 +136,7 @@ const PriceTiersPanel = ({ readOnly = false }) => {
     const result = await createPriceTier({ name });
     setCreating(false);
     if (result.error) {
-      setError(result.error.message || 'Could not create tier.');
+      setError(friendlyError(result.error, 'Could not create tier.'));
       return;
     }
     setNewTierName('');
@@ -145,7 +146,7 @@ const PriceTiersPanel = ({ readOnly = false }) => {
   const handleRename = async (tierId, name) => {
     const result = await renamePriceTier({ tierId, name });
     if (result.error) {
-      setError(result.error.message || 'Could not rename tier.');
+      setError(friendlyError(result.error, 'Could not rename tier.'));
       return;
     }
     await load();
@@ -177,7 +178,7 @@ const PriceTiersPanel = ({ readOnly = false }) => {
     setDeleting(false);
     setConfirmDelete(null);
     if (result.error) {
-      setError(result.error.message || 'Could not delete tier.');
+      setError(friendlyError(result.error, 'Could not delete tier.'));
       return;
     }
     await load();
@@ -196,7 +197,7 @@ const PriceTiersPanel = ({ readOnly = false }) => {
     const result = await assignTherapistTier({ therapistId: therapist.id, tierId: newTierId });
     setAssigning(null);
     if (result.error) {
-      setError(result.error.message || 'Could not update staff assignment.');
+      setError(friendlyError(result.error, 'Could not update staff assignment.'));
       return;
     }
     setTherapists((prev) => prev.map((t) => (t.id === therapist.id ? { ...t, price_tier_id: newTierId } : t)));

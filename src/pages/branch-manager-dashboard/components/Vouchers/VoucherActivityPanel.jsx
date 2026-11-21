@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ScrollRow from '../../../../components/ui/ScrollRow';
 import { useSearchParams } from 'react-router-dom';
 import { FilterChip } from '../../../../components/ui/ListToolbarKit';
 import { fetchVoucherActivity } from '../../../../services/api';
@@ -160,7 +161,7 @@ const VoucherActivityPanel = ({ vouchers, today, stickyTop, registerExport, onOp
           {isSm && chips}
         </div>
       </div>
-      {!isSm && <div className="flex items-center gap-2 pb-2 flex-wrap">{chips}</div>}
+      {!isSm && <ScrollRow className="pb-2" wrapperClassName="pb-0">{chips}</ScrollRow>}
 
       {error ? <ErrorBlock error={error} onRetry={load} /> : (
         <table className="w-full border-collapse table-fixed">

@@ -1,4 +1,6 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { buildClientIndex, clientDayInfo } from './sameClient';
+import { viewerAccess } from 'services/dataMasking';
 import UnlinkedLoginNotice from 'components/ui/UnlinkedLoginNotice';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { DndContext, pointerWithin } from '@dnd-kit/core';
@@ -23,13 +25,19 @@ import { useCalendarPanels } from './hooks/useCalendarPanels';
 import { useCalendarShortcuts } from './hooks/useCalendarShortcuts';
 import { useGoTodaySignal } from './calendarSignals';
 import { useBookingActions } from './hooks/useBookingActions';
-import { isOverallBranch } from '../../../../services/api';
+import { isOverallBranch, assignTherapist } from '../../../../services/api';
+import { useAvailabilityGuard } from '../../../../contexts/AvailabilityOverrideContext';
+import AssignFlow from './AssignFlow';
+import { dayAssignCount } from '../../../../utils/unassignedList';
 import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
 import WaitlistPanel, { useWaitlistEntries } from './WaitlistPanel';
 import { todayStr, addDays, addMonths, getStepDays } from './calendarDates';
 import { staffWord } from '../../../../utils/industryTerms';
+import { useViewportWidth, PHONE_MAX } from '../../../../hooks/useViewportWidth';
+import { clampPhoneZoom } from './phoneCalendarLayout';
+import { offStaffReasons } from '../../../../utils/staffFit';
 
 // ── Component ────────────────────────────────────────────────
 
@@ -57,6 +65,7 @@ const OperationalCalendar = ({ branchId }) => {
   const calendarShowFullDay = orgSettings?.calendar_show_full_day === true;
   // Industry-specific labels from auth context
   const industry = profile?.organizations?.industries;
+  const ownOnly = viewerAccess(profile).ownOnly; // ZNLY-278: an own-only login sees only its own column (the data layer already returns just its own team member)
   const staffLabel = industry?.staff_label || 'Therapist';
   const staffLabelPlural = industry?.staff_label_plural || 'Therapists';
   const locationLabel = industry?.location_label || 'Room';
@@ -85,22 +94,35 @@ const OperationalCalendar = ({ branchId }) => {
     writePref('use24h', next ? '1' : '0');
     return next;
   });
-  const [zoomScale, setZoomScaleState] = useState(() => {
+  const isPhoneView = useViewportWidth() <= PHONE_MAX;
+  const [zoomSaved, setZoomScaleState] = useState(() => {
     const raw = parseFloat(readPref('zoom', null));
     return Number.isFinite(raw) ? clampZoom(raw) : 1;
   });
+  // ZNLY-299: on a phone zoom only goes up (100% is the floor); a saved lower value reads as 100% there and is left alone for desktop.
+  const zoomScale = isPhoneView ? clampPhoneZoom(zoomSaved) : zoomSaved;
+  const minZoomNow = isPhoneView ? 1 : MIN_ZOOM;
   const setZoomScale = (updater) => setZoomScaleState((prev) => {
-    const next = clampZoom(typeof updater === 'function' ? updater(prev) : updater);
+    const cur = isPhoneView ? clampPhoneZoom(prev) : prev;
+    const next = Math.max(minZoomNow, clampZoom(typeof updater === 'function' ? updater(cur) : updater));
     writePref('zoom', String(next));
     return next;
   });
   // Default to staff view if rooms are disabled
-  const [columnMode, setColumnMode] = useState('therapist'); // therapist | room
+  // The Group by choice is remembered per device (group_by pref), phone and desktop alike.
+  const [columnMode, setColumnMode] = useState(() => (enableRooms && !viewerAccess(profile).ownOnly && readPref('group_by', null) === 'room' ? 'room' : 'therapist')); // therapist | room
+  const setGroupBy = (mode) => { setColumnMode(mode); writePref('group_by', mode); };
   const [freezeUnassigned, setFreezeUnassigned] = useState(true);
+  const [openTab, setOpenTab] = useState(null); // booking panel tab to open on (phone Unassigned bar -> team tab); cleared when the panel closes
   const [showServiceOnly, setShowServiceOnly] = useState(true);
   const [selectedPositions, setSelectedPositions] = useState([]); // empty = all
+  const [hiddenStaffIds, setHiddenStaffIds] = useState([]); // people UNTICKED in the team filter; empty = everyone; ANDed with positions + service-staff
   const [tipOpen, setTipOpen] = useState(false);
   const [actionToast, setActionToast] = useState(null);
+  const [assignOpen, setAssignOpen] = useState(false); // ZNLY-299: the Assign list / staff step (phone sheet, desktop side panel)
+  const [assignedToast, setAssignedToast] = useState(null); // { msg, undo } — "Assigned to <name> · Undo", 6s
+  const assignedToastTimer = useRef(null);
+  const { guard: assignGuard } = useAvailabilityGuard();
 
   // Ref to the grid body for calculating time from cursor position
   const gridRef = useRef(null);
@@ -111,6 +133,26 @@ const OperationalCalendar = ({ branchId }) => {
   const showToast = (msg, type = 'success') => {
     setActionToast({ msg, type });
     setTimeout(() => setActionToast(null), 3000);
+  };
+
+  const showAssignedToast = (toast) => {
+    clearTimeout(assignedToastTimer.current);
+    setAssignedToast(toast);
+    assignedToastTimer.current = setTimeout(() => setAssignedToast(null), 6000);
+  };
+  useEffect(() => () => clearTimeout(assignedToastTimer.current), []);
+  // Scroll the calendar to a card and flash it (the grid re-renders after the refresh, so retry briefly).
+  const flashBooking = (bookingId) => {
+    let tries = 0;
+    const tick = () => {
+      const el = document.querySelector(`[data-booking-key="${bookingId}"]`);
+      if (el) {
+        el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+        el.classList.add('ring-2', 'ring-primary');
+        setTimeout(() => el.classList.remove('ring-2', 'ring-primary'), 2200);
+      } else if (++tries < 12) setTimeout(tick, 250);
+    };
+    setTimeout(tick, 250);
   };
 
 
@@ -131,6 +173,21 @@ const OperationalCalendar = ({ branchId }) => {
     return Array.from(positions).sort();
   }, [calendarData?.therapists]);
 
+  // People the Team filter can pick: everyone the calendar would show before any position/team narrowing (not absent; service staff per the checkbox).
+  const staffOptions = useMemo(() => {
+    if (!calendarData?.therapists) return [];
+    return calendarData.therapists
+      .filter(t => attendanceMap[t.id] !== 'Absent' && (!showServiceOnly || t.is_service_staff !== false))
+      .map(t => ({ id: t.id, name: t.name }));
+  }, [calendarData?.therapists, attendanceMap, showServiceOnly]);
+
+  // The people the calendar would show before team narrowing: staffOptions, further narrowed by any picked positions. Ticks, the lock and the button count are all measured against this.
+  const teamUniverse = useMemo(() => {
+    if (selectedPositions.length === 0) return staffOptions;
+    const byId = new Map((calendarData?.therapists || []).map(t => [t.id, t]));
+    return staffOptions.filter(p => { const t = byId.get(p.id); return t?.position && t.position.split('/').some(x => selectedPositions.includes(x.trim())); });
+  }, [staffOptions, selectedPositions, calendarData?.therapists]);
+
   // Filter therapists for calendar display (hide absent/leave)
   const filteredTherapists = useMemo(() => {
     if (!calendarData?.therapists) return [];
@@ -144,8 +201,11 @@ const OperationalCalendar = ({ branchId }) => {
     if (selectedPositions.length > 0) {
       list = list.filter(t => t.position && t.position.split('/').some(p => selectedPositions.includes(p.trim())));
     }
+    if (hiddenStaffIds.length > 0) {
+      list = list.filter(t => !hiddenStaffIds.includes(t.id));
+    }
     return list;
-  }, [calendarData?.therapists, showServiceOnly, selectedPositions, attendanceMap, currentDate, focusTherapistId]);
+  }, [calendarData?.therapists, showServiceOnly, selectedPositions, hiddenStaffIds, attendanceMap, currentDate, focusTherapistId]);
 
   // Absent / on-leave therapists (hidden from columns) for the toolbar "N away" summary
   const awayList = useMemo(() => {
@@ -186,6 +246,7 @@ const OperationalCalendar = ({ branchId }) => {
   const autoRefreshPaused = modalOpen || blockPanelOpen || !!activeDragId || isRescheduling || !!quickCreateSlot
     || !!pendingReassign || !!rebookSource || !!choiceMenuSlot || !!addBlockSlot || !!editingBlock || !!blockDeleteRequest
     || !!transferModalTarget || !!editingTransferTherapist;
+  useEffect(() => { if (!modalOpen) setOpenTab(null); }, [modalOpen]);
   useAutoRefresh(refreshCalendar, { intervalMs: 60000, enabled: !!branchId && !autoRefreshPaused });
 
   // ── Navigation ─────────────────────────────────────────────
@@ -202,13 +263,44 @@ const OperationalCalendar = ({ branchId }) => {
   // Gates both onTherapistReorder and onRoomReorder below. Branch-scoped:
   // staff can rearrange columns for their own branch only.
   const canReorderTherapists = ['staff', 'manager', 'admin'].includes(profile?.role);
+  // Own-only and view-only logins (and the all-branches view) cannot assign, so they get no bar and no link.
+  const canAssign = !ownOnly && profile?.role !== 'admin_viewer' && !isOverallBranch(branchId);
+
+  const assignCount = useMemo(() => dayAssignCount(calendarData?.bookings || [], currentDate), [calendarData?.bookings, currentDate]);
+
+  const handleAssigned = ({ bookingId, date, names, prevRoomId, roomChanged }) => {
+    refreshCalendar();
+    if (date && date !== currentDate) setCurrentDate(date);
+    flashBooking(bookingId);
+    const who = names.join(' & ') || staffLabel.toLowerCase();
+    const undo = async () => {
+      setAssignedToast(null);
+      const r = await assignGuard((overrideReason) => assignTherapist({ bookingId, therapistIds: [], roomId: roomChanged ? prevRoomId : undefined, overrideReason }));
+      if (r?.error) { showToast(r.error.message || 'Could not undo. Open the booking to change it.', 'error'); return; }
+      showToast('Back to unassigned');
+      refreshCalendar();
+    };
+    showAssignedToast({ msg: `Assigned to ${who}`, undo });
+  };
 
   // ── Derived data ───────────────────────────────────────────
 
+  // ZNLY-281: "N bookings today for this client" in the open panel / sheet (same index the grid uses).
+  const clientIndexAll = useMemo(() => buildClientIndex(calendarData?.bookings), [calendarData?.bookings]);
+  const selectedClientDay = useMemo(
+    () => (selectedBooking ? clientDayInfo(clientIndexAll, { customerId: selectedBooking.customerId, date: selectedBooking.date }) : null),
+    [clientIndexAll, selectedBooking]
+  );
+  // People who are off / on leave on the shown day (the Staff picker lists them under "Off today", not selectable). Day view only:
+  // the attendance + shift data is for one day, so other views keep the old rule of hiding them.
+  const offStaff = useMemo(
+    () => (calendarData && viewMode === 'day' ? offStaffReasons(calendarData.therapists.filter(t => t.is_service_staff !== false), { attendanceMap, shiftsByTherapist, date: currentDate }) : {}),
+    [calendarData, viewMode, attendanceMap, shiftsByTherapist, currentDate]
+  );
   const therapistsForModal = useMemo(() =>
     calendarData
       ? calendarData.therapists
-          .filter(t => t.is_service_staff !== false && !attendanceMap[t.id])
+          .filter(t => t.is_service_staff !== false && (!attendanceMap[t.id] || offStaff[t.id]))
           .map(t => ({
             id: t.id,
             name: t.name,
@@ -216,7 +308,7 @@ const OperationalCalendar = ({ branchId }) => {
             specialties: t.specialties || [],
           }))
       : [],
-    [calendarData, attendanceMap]
+    [calendarData, attendanceMap, offStaff]
   );
 
   // ── Error state ────────────────────────────────────────────
@@ -259,9 +351,11 @@ const OperationalCalendar = ({ branchId }) => {
             staffLabel={staffLabel}
             staffLabelPlural={staffLabelPlural}
             locationLabel={locationLabel}
-            enableRooms={enableRooms}
+            enableRooms={enableRooms && !ownOnly}
+            ownOnly={ownOnly}
             columnMode={columnMode}
             setColumnMode={setColumnMode}
+            onGroupByChange={setGroupBy}
             awayList={awayList}
             currentDate={currentDate}
             setCurrentDate={setCurrentDate}
@@ -276,6 +370,10 @@ const OperationalCalendar = ({ branchId }) => {
             setShowServiceOnly={setShowServiceOnly}
             selectedPositions={selectedPositions}
             setSelectedPositions={setSelectedPositions}
+            staffOptions={staffOptions}
+            teamUniverse={teamUniverse}
+            hiddenStaffIds={hiddenStaffIds}
+            setHiddenStaffIds={setHiddenStaffIds}
             calendarPositionOptions={calendarPositionOptions}
             onNewBooking={isOverallBranch(branchId) ? undefined : handleNewBooking}
             onOpenWaitlist={() => setWaitlistSheetOpen(true)}
@@ -289,7 +387,7 @@ const OperationalCalendar = ({ branchId }) => {
             onClosedDates={() => navigate(`/${orgSlug}/dashboard?view=closed-dates`)}
             zoomScale={zoomScale}
             onZoomChange={setZoomScale}
-            minZoom={MIN_ZOOM}
+            minZoom={minZoomNow}
             maxZoom={MAX_ZOOM}
             use24h={use24h}
             setUse24h={setUse24h}
@@ -301,6 +399,12 @@ const OperationalCalendar = ({ branchId }) => {
             <div className="flex items-center gap-2 px-4 py-1.5 text-[13px] bg-background border-b border-border" data-calendar-focus>
               <span className="text-text-secondary">Showing only <b className="text-text-primary font-medium">{(calendarData?.therapists || []).find(t => t.id === focusTherapistId)?.name || 'one person'}</b></span>
               <button type="button" onClick={clearFocusTherapist} className="text-primary hover:underline">Show everyone</button>
+            </div>
+          )}
+          {columnMode === 'therapist' && viewMode !== 'month' && !focusTherapistId && calendarData && filteredTherapists.length === 0 && (hiddenStaffIds.length > 0 || selectedPositions.length > 0) && (
+            <div className="flex items-center gap-2 px-4 py-1.5 text-[13px] bg-background border-b border-border" data-calendar-no-match>
+              <span className="text-text-secondary">No {staffLabelPlural.toLowerCase()} match this filter.</span>
+              <button type="button" onClick={() => { setHiddenStaffIds([]); setSelectedPositions([]); }} className="text-primary hover:underline">Clear filter</button>
             </div>
           )}
           {/* Main content area: Grid */}
@@ -331,13 +435,18 @@ const OperationalCalendar = ({ branchId }) => {
                   onBookingClick={handleBookingClick}
                   onBookingResize={handleBookingResize}
                   onMultiDrag={(getter) => { getSelectedBookingsRef.current = getter; }}
-                  onEmptySlotClick={handleEmptySlotClick}
+                  // Phones (ZNLY-285): with the booking sheet open, a tap on the empty grid only closes the sheet (through its dirty guard).
+                  onEmptySlotClick={(slot) => {
+                    if (modalOpen && window.innerWidth < 768) { runThroughPanelGuard(handleModalClose); return; }
+                    handleEmptySlotClick(slot);
+                  }}
                   currentDate={currentDate}
                   viewMode={viewMode}
                   columnMode={columnMode}
                   activeDragId={activeDragId}
                   gridRef={gridRef}
                   freezeUnassigned={freezeUnassigned}
+                  hideUnassigned={ownOnly}
                   onToggleFreezeUnassigned={() => setFreezeUnassigned(prev => !prev)}
                   onTherapistReorder={canReorderTherapists ? handleTherapistReorder : undefined}
                   onRoomReorder={canReorderTherapists ? handleRoomReorder : undefined}
@@ -358,6 +467,9 @@ const OperationalCalendar = ({ branchId }) => {
                   use24h={use24h}
                   zoomScale={zoomScale}
                   onZoomScaleChange={setZoomScale}
+                  onOpenUnassigned={canAssign ? (b) => { if (columnMode === 'room') { setOpenTab('assign'); handleBookingClick(b); } else setAssignOpen(true); } : undefined}
+                  assignCount={columnMode === 'room' ? null : assignCount}
+                  onOpenAssignList={canAssign ? () => setAssignOpen(true) : undefined}
                 />
                 )
               ) : (
@@ -388,7 +500,9 @@ const OperationalCalendar = ({ branchId }) => {
               slotInfo={quickCreateSlot}
               services={servicesCache}
               servicesLoading={servicesLoading}
-              therapists={(calendarData?.therapists || []).filter(t => t.is_service_staff !== false && !attendanceMap[t.id])}
+              therapists={(calendarData?.therapists || []).filter(t => t.is_service_staff !== false && (!attendanceMap[t.id] || offStaff[t.id]))}
+              offStaff={offStaff}
+              offDate={currentDate}
               rooms={calendarData?.rooms || []}
               bookings={calendarData?.bookings || []}
               onClose={handleQuickCreateClose}
@@ -458,13 +572,18 @@ const OperationalCalendar = ({ branchId }) => {
       {/* Booking Action Modal */}
       <BookingActionModal
         variant="panel"
+        liveBackdrop
+        initialTab={openTab}
         isOpen={modalOpen}
         previewBooking={previewBooking}
         onRefreshBooking={refreshOpenBooking}
         guardRef={bookingGuardRef}
         onClose={handleModalClose}
         booking={selectedBooking}
+        clientDay={selectedClientDay}
         therapists={therapistsForModal}
+        dayBookings={viewMode === 'day' ? (calendarData?.bookings || []) : null}
+        offStaff={offStaff}
         rooms={calendarData?.rooms || []}
         services={servicesCache || []}
         onUpdateStatus={handleStatusUpdate}
@@ -493,9 +612,31 @@ const OperationalCalendar = ({ branchId }) => {
         />
       )}
 
+      <AssignFlow
+        isOpen={assignOpen}
+        onClose={() => setAssignOpen(false)}
+        branchId={branchId}
+        currentDate={currentDate}
+        calendarData={calendarData}
+        attendanceMap={attendanceMap}
+        shiftsByTherapist={shiftsByTherapist}
+        staffLabel={staffLabel}
+        staffLabelPlural={staffLabelPlural}
+        locationLabel={locationLabel}
+        onAssigned={handleAssigned}
+      />
+
+      {assignedToast && (
+        <div role="status" className="fixed toast-bottom left-1/2 -translate-x-1/2 z-toast px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center gap-4 bg-success text-white">
+          <Icon name="CheckCircle" size={16} />
+          <span className="font-body font-body-medium text-sm">{assignedToast.msg}</span>
+          <button type="button" onClick={assignedToast.undo} className="min-h-[44px] -my-2 px-2 text-sm font-semibold underline">Undo</button>
+        </div>
+      )}
+
       {/* Toast */}
       {actionToast && (
-        <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-toast px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2 ${
+        <div className={`fixed toast-top left-1/2 transform -translate-x-1/2 z-toast px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2 ${
           actionToast.type === 'error' ? 'bg-error text-white' :
           actionToast.type === 'info' ? 'bg-primary text-white' :
           'bg-success text-white'

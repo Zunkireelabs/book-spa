@@ -1,3 +1,4 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState } from 'react';
 import { Helmet } from 'react-helmet';
 import CustomerHeader from '../../components/ui/CustomerHeader';
@@ -63,7 +64,7 @@ const BookingManagementPortal = () => {
     const result = await updateBookingStatus({ bookingId: booking.bookingId, newStatus: dbStatus });
 
     if (result.error) {
-      showNotification(result.error.message || 'Failed to cancel booking.', 'error');
+      showNotification(friendlyError(result.error, 'Failed to cancel booking.'), 'error');
     } else {
       showNotification('Booking cancelled successfully.', 'success');
       // Refresh by re-searching
@@ -129,7 +130,7 @@ const BookingManagementPortal = () => {
 
         {/* Notification */}
         {notification && (
-          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-notification">
+          <div className="fixed toast-top left-1/2 transform -translate-x-1/2 z-notification">
             <div className={`flex items-center space-x-3 px-4 py-3 rounded-spa border spa-shadow-elevated animate-fade-in ${getNotificationColor(notification.type)}`}>
               <Icon name={getNotificationIcon(notification.type)} size={16} />
               <span className="font-body font-body-normal text-sm">

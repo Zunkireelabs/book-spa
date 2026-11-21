@@ -22,13 +22,14 @@ const LEGEND = [
 const hourLabel = (m) => `${(m / 60) % 12 || 12}${m === 720 ? 'pm' : ''}`;
 const initials = (name) => String(name || '').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 
+const compact = (m) => fmtClock(m).replace(' ', ''); // "11:45 am" -> "11:45am" (the app's compact time), so the status stays on one line
 const subline = (t, nowMin) => {
   if (nowMin == null) return t.blocks[0] ? `first ${t.blocks.find((b) => b.booking_id)?.from || t.shift_from}` : 'free all day';
   const cur = t.blocks.find((b) => b.from_min <= nowMin && nowMin < b.to_min);
-  if (cur?.kind === 'now') return `with client · till ${fmtClock(cur.to_min)}`;
-  if (cur && (cur.kind === 'break' || cur.kind === 'leave')) return `${cur.kind === 'break' ? 'break' : 'off'} till ${fmtClock(cur.to_min)}`;
+  if (cur?.kind === 'now') return `with client till ${compact(cur.to_min)}`;
+  if (cur && (cur.kind === 'break' || cur.kind === 'leave')) return `${cur.kind === 'break' ? 'break' : 'off'} till ${compact(cur.to_min)}`;
   const next = t.blocks.find((b) => b.from_min > nowMin && b.booking_id);
-  return next ? `free till ${fmtClock(next.from_min)}` : 'free';
+  return next ? `free till ${compact(next.from_min)}` : 'free';
 };
 
 /** A free gap: "+ Free 1h 1m" when it fits on one line, else just "Free" (the full text is in the tooltip). */
@@ -62,41 +63,52 @@ const GapBlock = ({ g, onClick, style }) => {
 const Floor = ({ floor, nowMin, open, close, collapsedCount = 6, onOpenBooking, onBookGap, staffPlural = 'people' }) => {
   const [all, setAll] = useState(false);
   const people = floor?.therapists || [];
-  if (!floor) return null;
   const { start, end } = axisBounds(people, open, close);
   const span = end - start;
   const pos = (m) => `${(((m - start) / span) * 100).toFixed(2)}%`;
   const hours = [];
   for (let m = start; m <= end; m += 60) hours.push(m);
   const shown = all ? people : people.slice(0, collapsedCount);
-  const others = Math.max(0, (floor.headcount || 0) - (floor.working || 0));
+  const others = Math.max(0, (floor?.headcount || 0) - (floor?.working || 0));
+  // Phone (< md): the timeline scrolls sideways inside the card at 64px per hour with the staff column pinned; desktop keeps the fluid 190px | 1fr grid.
+  const PHONE_NAME_W = 164; // 16px card gutter + 148px name column
+  const tlPx = Math.round((span / 60) * 64);
+  const scrollRef = useRef(null);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!floor || !el || nowMin == null || nowMin < start || nowMin > end || !window.matchMedia?.('(max-width: 767px)').matches) return;
+    el.scrollLeft = Math.max(0, PHONE_NAME_W + tlPx * ((nowMin - start) / span) - el.clientWidth / 3); // "now" about a third from the left
+  }, [nowMin, start, end, span, tlPx, people.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!floor) return null; // every hook sits above this, so floor going null -> data keeps hook order
 
   return (
     <div>
-      <div>
-        <div className="relative">
-          <div className="grid grid-cols-[190px_1fr] text-[10px] text-gray-400 mb-1">
-            <div />
+      <div ref={scrollRef} className="max-md:overflow-x-auto max-md:-mx-4 max-md:pb-1 md:overflow-hidden" data-floor-scroll>
+        <div className="relative isolate max-md:min-w-max max-md:pr-4 [--nc:164px] md:[--nc:190px]" style={{ '--tl': `${tlPx}px` }}>
+          <div className="grid grid-cols-[var(--nc)_minmax(0,1fr)] max-md:grid-cols-[var(--nc)_var(--tl)] text-[10px] text-gray-400 mb-1">
+            <div className="max-md:sticky max-md:left-0 max-md:z-header max-md:bg-surface" />
             <div className="relative h-4">
               {hours.map((m) => (
-                <span key={m} className="absolute -translate-x-1/2" style={{ left: pos(m) }}>{hourLabel(m)}</span>
+                <span key={m} className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: pos(m) }}><span className="md:hidden">{`${Math.floor(m / 60) % 12 || 12}${Math.floor(m / 60) % 24 >= 12 ? 'pm' : 'am'}`}</span><span className="max-md:hidden">{hourLabel(m)}</span></span>
               ))}
             </div>
           </div>
           <div className="relative">
             {nowMin != null && nowMin >= start && nowMin <= end && (
-              <div className="absolute top-0 bottom-0 w-px bg-error z-10 pointer-events-none" style={{ left: `calc(190px + (100% - 190px) * ${(nowMin - start) / span})` }} />
+              <div className="absolute top-0 bottom-0 pointer-events-none md:right-0 max-md:w-[var(--tl)]" style={{ left: 'var(--nc)' }}>
+                <div className="absolute top-0 bottom-0 w-px bg-error z-sticky-filter" style={{ left: pos(nowMin) }} />
+              </div>
             )}
             {shown.map((t) => (
-              <div key={t.therapist_id} className="grid grid-cols-[190px_1fr] items-center border-t border-gray-100 py-1.5">
-                <div className="flex items-center gap-2 pr-2 min-w-0">
+              <div key={t.therapist_id} className="grid grid-cols-[var(--nc)_minmax(0,1fr)] max-md:grid-cols-[var(--nc)_var(--tl)] items-stretch border-t border-gray-100 max-md:min-h-11">
+                <div className="flex items-center gap-2 pr-2 py-1.5 min-w-0 max-md:sticky max-md:left-0 max-md:z-header max-md:bg-surface max-md:pl-4 max-md:border-r max-md:border-gray-100">
                   <span className="w-7 h-7 rounded-full bg-primary/10 text-primary text-[11px] font-medium flex items-center justify-center flex-shrink-0">{initials(t.name)}</span>
                   <div className="min-w-0">
                     <div className="text-sm text-gray-900 leading-tight line-clamp-2 break-words" title={t.name}>{t.name}</div>
-                    <div className="text-[11px] text-gray-500 leading-tight break-words" title={subline(t, nowMin)}>{subline(t, nowMin)}</div>
+                    <div className="text-[11px] text-gray-500 leading-tight truncate" title={subline(t, nowMin)}>{subline(t, nowMin)}</div>
                   </div>
                 </div>
-                <div className="relative h-9">
+                <div className="relative h-9 my-1.5 self-center">
                   {t.blocks.map((b, i) => {
                     const clickable = !!b.booking_id;
                     const Tag = clickable ? 'button' : 'div';

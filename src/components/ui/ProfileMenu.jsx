@@ -1,8 +1,8 @@
 import React, { useState, useRef, useCallback } from 'react';
+import { useBodyScrollLock } from './BottomSheet';
 import { useGuardedNavigate } from '../../contexts/DirtyGuardContext';
 import Icon from '../AppIcon';
 import { useAuth } from 'contexts/AuthContext';
-import { useBranch } from 'contexts/BranchContext';
 import { useLock } from 'contexts/LockContext';
 import { useMenuNav } from './useMenuNav';
 import { pinHint } from './pinHint';
@@ -42,6 +42,7 @@ const ProfileMenu = () => {
   const menuRef = useRef(null);
   const triggerRef = useRef(null);
   const close = useCallback(() => setOpen(false), []);
+  useBodyScrollLock(open);
   useMenuNav({ open, onClose: close, menuRef, triggerRef });
 
   const role = profile?.role;
@@ -52,9 +53,9 @@ const ProfileMenu = () => {
 
   // "Settings" opens the first Setup page the role can see (Setup is manager/admin/admin_viewer only).
   // Branch-scoped Setup pages are hidden in the Overall view, where only the Audit Log is available.
-  const { isOverall } = useBranch();
   const canSettings = role === 'manager' || role === 'admin' || role === 'admin_viewer';
-  const settingsView = isOverall ? 'audit' : role === 'admin' ? 'booking-settings' : 'services';
+  // One entry point: ?view=settings is the home on a phone and the first menu page on desktop (SettingsLayout decides).
+  const settingsView = 'settings';
 
   const run = (fn) => () => {
     setOpen(false);
@@ -82,7 +83,7 @@ const ProfileMenu = () => {
           ref={menuRef}
           role="menu"
           aria-label="Account"
-          className="absolute right-0 top-[calc(50%+32px)] w-64 bg-surface border border-border rounded-xl shadow-spa-elevated z-dropdown p-1.5"
+          className="absolute right-0 top-[calc(50%+32px)] [--panel-top:4.5rem] [--panel-gap:1rem] panel-fit panel-fit-nav overflow-y-auto overscroll-contain w-64 bg-surface border border-border rounded-xl shadow-spa-elevated z-dropdown p-1.5"
         >
           <div className="p-3 mb-1 rounded-spa-lg bg-background">
             <div className="min-w-0">

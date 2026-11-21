@@ -12,8 +12,10 @@ import MyDayView from './MyDayView';
 import { isNewTenant, setupSteps } from '../../lib/dashboardTenant';
 import { useSearchParams } from 'react-router-dom';
 import { nepalNow } from '../../utils/customerDirectory';
+import { Card } from './dashKit';
 import { VIEWS, availableViews, defaultView, dayPhase, readRememberedView, rememberView } from '../../lib/dashboardViews';
 import { localizeBranch, wordBranch, wordBranches } from '../../utils/industryTerms';
+import ScrollRow from '../../components/ui/ScrollRow';
 
 const PHASES = [
   { key: 'prep', label: 'Prep', icon: 'Sun' },
@@ -101,6 +103,8 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
     if (!error) setDash(data); // a failed refresh keeps the last good data under the error notice
   }, [branchId, isOverall, branches]);
   useEffect(() => { loadDash(); }, [loadDash]);
+  // First load: no data yet and no error. Every view shows placeholders, never zeros or a "nothing left" tick.
+  const dashLoading = !dash && !dashError && (isOverall ? branches.length > 0 : !!branchId);
   useEffect(() => {
     const id = setInterval(loadDash, 60000);
     window.addEventListener('pending-approvals-changed', loadDash);
@@ -154,7 +158,7 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
                 role="tab"
                 aria-selected={view === v}
                 onClick={() => pickView(v)}
-                className={`px-3 py-1.5 text-[12.5px] whitespace-nowrap rounded-md transition-colors ${view === v ? 'bg-white text-gray-900 shadow-sm font-medium' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`px-3 py-1.5 max-md:min-h-[44px] text-[12.5px] whitespace-nowrap rounded-md transition-colors ${view === v ? 'bg-white text-gray-900 shadow-sm font-medium' : 'text-gray-500 hover:text-gray-700'}`}
               >
                 {localizeBranch(VIEWS[v])}
               </button>
@@ -162,25 +166,33 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
           </div>
         )}
         {showPhases && (
-          <div role="tablist" aria-label="Part of the day" className="flex items-center gap-4 sm:ml-auto self-center">
+          <ScrollRow role="tablist" aria-label="Part of the day" gap="gap-4" wrapperClassName="sm:ml-auto self-center">
             {PHASES.map((p) => (
               <button
                 key={p.key}
                 role="tab"
                 aria-selected={phase === p.key}
                 onClick={() => setManualPhase(p.key)}
-                className={`flex items-center gap-1.5 text-sm font-medium py-1 border-b-2 transition-colors ${phase === p.key ? 'border-primary text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                className={`flex items-center gap-1.5 text-sm font-medium py-1 max-md:px-1 border-b-2 transition-colors ${phase === p.key ? 'border-primary text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
               >
                 <Icon name={p.icon} size={15} />{p.label}
                 {phase === p.key && <i className="w-1.5 h-1.5 rounded-full bg-success" />}
               </button>
             ))}
-            <span className="text-[11.5px] text-gray-400">{manualPhase ? 'chosen by you' : 'auto'}</span>
-          </div>
+            <span className="inline-flex items-center text-[11.5px] max-md:text-xs text-gray-400">{manualPhase ? 'chosen by you' : 'auto'}</span>
+          </ScrollRow>
         )}
       </header>
 
-      {view === 'business' && isOverall ? (
+      {dashLoading ? (
+        <div className="space-y-3 sm:space-y-4" aria-busy="true">
+          <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-400 animate-pulse">Loading today…</div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
+            <Card title="Today" loading />
+            <Card title="Needs action" loading />
+          </div>
+        </div>
+      ) : view === 'business' && isOverall ? (
         <BusinessView
           data={dash} dataError={dashError} branchIds={branches.map((b) => b.id)} today={now.today}
           role={role} onOpenBranch={openBranch} onReload={loadDash}

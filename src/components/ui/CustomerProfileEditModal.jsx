@@ -1,5 +1,7 @@
+import { friendlyError } from '../../utils/friendlyError';
 import React, { useState } from 'react';
 import Icon from '../AppIcon';
+import PhoneField, { usePhoneState } from './PhoneField';
 import { useCustomerAuth } from '../../contexts/CustomerAuthContext';
 import EmailChangeOtpStep from './EmailChangeOtpStep';
 
@@ -12,7 +14,7 @@ const CustomerProfileEditModal = ({ onClose }) => {
   const { customerProfile, updateContactInfo, requestEmailChange } = useCustomerAuth();
 
   const [fullName, setFullName] = useState(customerProfile?.full_name || '');
-  const [phone, setPhone] = useState(customerProfile?.phone || '');
+  const phone = usePhoneState(customerProfile?.phone || '');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [saved, setSaved] = useState(false);
@@ -25,18 +27,19 @@ const CustomerProfileEditModal = ({ onClose }) => {
 
   const handleSaveContactInfo = async (e) => {
     e.preventDefault();
+    if (phone.problem) { setSaveError(phone.problem); return; }
     setSaving(true);
     setSaveError(null);
     setSaved(false);
 
     try {
-      await updateContactInfo(fullName, phone);
+      await updateContactInfo(fullName, phone.value || '');
       setSaved(true);
     } catch (err) {
       setSaveError(
         err.code === '23505'
           ? 'This phone number is already in use by another account.'
-          : (err.message || 'Failed to save changes.')
+          : (friendlyError(err, 'Failed to save changes.'))
       );
     } finally {
       setSaving(false);
@@ -52,7 +55,7 @@ const CustomerProfileEditModal = ({ onClose }) => {
       await requestEmailChange(newEmail.trim());
       setEmailStep('verify-email');
     } catch (err) {
-      setEmailError(err.message || 'Failed to send verification code.');
+      setEmailError(friendlyError(err, 'Failed to send verification code.'));
     } finally {
       setEmailSubmitting(false);
     }
@@ -95,11 +98,9 @@ const CustomerProfileEditModal = ({ onClose }) => {
               </div>
               <div>
                 <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Phone</label>
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => { setPhone(e.target.value); setSaved(false); }}
-                  className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-background text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                <PhoneField
+                  {...phone.field} id="profile-phone" placeholder="9841234567"
+                  onChange={(v) => { phone.onChange(v); setSaved(false); }}
                 />
               </div>
 
