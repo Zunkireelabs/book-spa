@@ -1420,12 +1420,12 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             <div className="space-y-3">
               {people.map((p, idx) => (
                 <div key={idx} className="border border-border rounded-[14px] p-3.5 space-y-3 bg-surface">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-sm font-body font-body-semibold text-text-primary">
+                  <div className="flex flex-col gap-0.5 md:flex-row md:items-baseline md:justify-between md:gap-2">
+                    <span className="whitespace-nowrap text-sm font-body font-body-semibold text-text-primary">
                       {idx === 0 ? 'Booking contact' : `Person ${idx + 1}`}
                       {idx === 0 && <span className="text-error"> *</span>}
                     </span>
-                    {idx > 0 && <span className="text-xs text-text-secondary text-right">optional · blank uses the contact's details</span>}
+                    {idx > 0 && <span className="text-xs text-text-secondary md:text-right">optional · blank uses the contact's details</span>}
                   </div>
 
                   <div>
