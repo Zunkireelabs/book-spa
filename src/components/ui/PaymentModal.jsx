@@ -277,6 +277,7 @@ const PaymentModal = ({
   onClose,
   isSubmitting,
   dueHolderSuggestions = [],
+  onAddClient = undefined, // ZNLY-327: walk-in with no client: opens the booking's Add client list (the host closes this modal)
   // ZNLY-233: true ONLY when the host's onConfirm goes through services/checkoutSubmit (so products on the bill are saved). Without it the
   // "Add a product" block is not offered, so a bill can never say "paid" while the product sale, stock and commission were dropped.
   savesProducts = false,
@@ -848,6 +849,10 @@ const PaymentModal = ({
       setError(`Entered amount (${formatNPR(entered)}) exceeds the total due (${formatNPR(grandTotal)}).`);
       return;
     }
+    if (walkInNoClient && leftover > 0) {
+      setError('A walk-in with no client has to pay in full. Collect the whole amount, or add a client to leave a balance.');
+      return;
+    }
     if (leftover > 0 && !dueHolderName.trim()) {
       setError('Enter who the remaining due is under before leaving a balance unpaid.');
       return;
@@ -1188,7 +1193,10 @@ const PaymentModal = ({
     if (tenders.length - 1 <= 1) setRestOn(true);
   };
   const overrideRest = (i) => { setRestOn(false); focusRow(i); };
+  // ZNLY-327: a walk-in with no client belongs to nobody: collect in full; no balance, package, membership or wallet until a client is added.
+  const walkInNoClient = !!(bookingRowInfo ? (bookingRowInfo.is_walk_in && !bookingRowInfo.customer_id) : (booking.isWalkIn && !booking.customerId));
   const startLeaveDue = () => {
+    if (walkInNoClient) return;
     setTouched(true);
     setLeaveDue(true);
     if (!dueHolderName.trim() && guestName) setDueHolderName(guestName);
@@ -1993,6 +2001,13 @@ const PaymentModal = ({
             </div>
           )}
 
+          {walkInNoClient && (
+            <div className="mt-3 rounded-[10px] border border-[#E7E8E6] bg-[#FAFAF9] px-3 py-2.5 text-[12.5px] text-[#515152]" data-testid="walkin-pay-note">
+              <div className="flex items-start gap-2"><Icon name="Info" size={14} className="flex-none mt-0.5" /><span>Walk-in: collect in full today, or add a client to use pay later, packages, memberships or wallet.</span></div>
+              {onAddClient && <button type="button" onClick={onAddClient} className="mt-2 h-8 px-3 rounded-[7px] border border-border bg-white text-[12.5px] font-medium text-primary inline-flex items-center gap-1.5 hover:bg-[#FAFAF9]"><Icon name="Plus" size={13} strokeWidth={2} />Add client</button>}
+            </div>
+          )}
+
           {leftover > 0.001 && productDue.belowProducts && (
             <div className="mt-3 relative rounded-[10px] border border-dashed border-[#E6C46F] bg-[#FEF7E8] px-3 py-2.5" data-testid="checkout-gap" data-products-short>
               <div className="flex items-center gap-2 text-[#92600A]"><Icon name="AlertCircle" size={14} className="flex-none" /><span><b className="font-semibold tabular-nums">NPR {fmt(productDue.shortBy)}</b> short of the products</span></div>
@@ -2008,7 +2023,9 @@ const PaymentModal = ({
                   <div className="flex items-center gap-2 text-[#92600A]"><Icon name="AlertCircle" size={14} className="flex-none" /><span><b className="font-semibold tabular-nums">NPR {fmt(leftover)}</b> not covered yet</span></div>
                   <div className="mt-2 flex items-center gap-2">
                     <button type="button" onClick={addSplit} className="h-8 px-3 rounded-[7px] border border-[#E6C46F] bg-white text-[12.5px] font-medium text-[#0E0D0C] inline-flex items-center gap-1.5 hover:bg-[#FFFDF7]"><Icon name="Plus" size={13} strokeWidth={2} />Pay it with another method</button>
-                    <button type="button" onClick={startLeaveDue} className="h-8 px-3 rounded-[7px] text-[12.5px] font-medium text-[#92600A] hover:bg-[#FBEFD0]">Leave as due</button>
+                    {walkInNoClient
+                      ? <span className="text-[12px] text-[#92600A]" data-walkin-no-due>Add a client to leave a balance</span>
+                      : <button type="button" onClick={startLeaveDue} className="h-8 px-3 rounded-[7px] text-[12.5px] font-medium text-[#92600A] hover:bg-[#FBEFD0]">Leave as due</button>}
                   </div>
                 </>
               ) : (

@@ -68,6 +68,7 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
           {unread && <i className="w-2 h-2 rounded-full bg-[#22A04B] flex-shrink-0" aria-label="New online booking, not opened yet" title="New online booking · not opened yet" />}
           <span className="truncate">{nameForList(b.customerName, b.customerPhone)}</span>
           {b.specialRequests && <span title={b.specialRequests} aria-label={`Note: ${b.specialRequests}`} className="text-[#8A8A90] flex-shrink-0"><Icon name="MessageSquare" size={13} /></span>}
+          {b.isWalkIn && <span className="h-5 rounded-full px-[7px] text-[11.5px] font-medium inline-flex items-center bg-warning/15 text-warning flex-shrink-0">Walk-in</span>}
           {isOnline && <span className="h-5 rounded-full px-[7px] text-[11.5px] font-medium inline-flex items-center bg-[#EEF0FF] text-[#4F46E5] flex-shrink-0">Online</span>}
         </div>
         <div className="text-[12.5px] text-[#8A8A90] mt-0.5 truncate">{formatPhoneGrouped(b.customerPhone)}</div>

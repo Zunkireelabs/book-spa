@@ -59,3 +59,9 @@ export function customerMissing({ kind, name = '', phone = '', countryCode = '+9
   if (kind === 'new') return phoneProblem(countryCode, phone);
   return '';
 }
+
+/** The calendar's "New customer" tag. A walk-in with NO client is never New; once a client is linked it counts like any client booking (New if it is that client's first). */
+export function isNewCustomerBooking(b, firstBookingIdByCustomer = {}, historyFailed = false) {
+  if (b.is_walk_in && !b.customer_id) return false;
+  return !b.customer_id || (!historyFailed && firstBookingIdByCustomer[b.customer_id] === b.id);
+}

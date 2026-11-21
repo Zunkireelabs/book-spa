@@ -60,3 +60,18 @@ describe('search helpers', () => {
     expect(searchCustomers(list, '')).toEqual([]);
   });
 });
+
+import { isNewCustomerBooking } from './customerPick';
+describe('isNewCustomerBooking (ZNLY-327)', () => {
+  it('a walk-in with no client is never New; once linked it counts like any client booking', () => {
+    expect(isNewCustomerBooking({ id: 'b1', is_walk_in: true, customer_id: null })).toBe(false);
+    expect(isNewCustomerBooking({ id: 'b1', is_walk_in: true, customer_id: 'c1' }, { c1: 'b1' })).toBe(true);
+    expect(isNewCustomerBooking({ id: 'b2', is_walk_in: true, customer_id: 'c1' }, { c1: 'b1' })).toBe(false);
+  });
+  it('unchanged for everyone else: a guest is New, a customer is New only on their first booking', () => {
+    expect(isNewCustomerBooking({ id: 'b1', customer_id: null })).toBe(true);
+    expect(isNewCustomerBooking({ id: 'b1', customer_id: 'c1' }, { c1: 'b1' })).toBe(true);
+    expect(isNewCustomerBooking({ id: 'b2', customer_id: 'c1' }, { c1: 'b1' })).toBe(false);
+    expect(isNewCustomerBooking({ id: 'b1', customer_id: 'c1' }, { c1: 'b1' }, true)).toBe(false);
+  });
+});

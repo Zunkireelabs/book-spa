@@ -75,7 +75,12 @@ describe('view chips', () => {
     mk({ status: 'no show', time: '11:30' }),
   ];
   it('classifies', () => {
-    expect(viewCounts(rows, ctx)).toEqual({ all: 8, done: 2, spa: 1, come: 2, unpaid: 2, void: 2 });
+    expect(viewCounts(rows, ctx)).toEqual({ all: 8, done: 2, spa: 1, come: 2, walkin: 0, unpaid: 2, void: 2 });
+  });
+  it('Walk-in chip counts walk-ins only (ZNLY-327), linked ones too', () => {
+    const w = [mk({ status: 'confirmed', isWalkIn: true }), mk({ status: 'confirmed', isWalkIn: true, customerId: 'c1' }), mk({ status: 'confirmed' })];
+    expect(viewCounts(w, ctx).walkin).toBe(2);
+    expect(inView(w[2], 'walkin', ctx)).toBe(false);
   });
   it('late bookings are not "To come"', () => {
     expect(inView(rows[3], 'come', ctx)).toBe(false);

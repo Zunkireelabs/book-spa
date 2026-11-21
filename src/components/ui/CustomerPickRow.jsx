@@ -21,7 +21,7 @@ const grouped = (p) => (p ? formatPhoneGrouped(p) : '');
 // `kind` = what is picked now (null = nothing yet). Walk-in = no profile at all; the caller shows its optional Name field.
 const SHOWN = 8;
 
-const CustomerPickRow = ({ kind = null, name = '', phone = '', branchId = null, customers: preloaded = null, onPick, invalid = false, required = true, disabled = false, title = 'Customer for the booking', sub = '' }) => {
+const CustomerPickRow = ({ kind = null, name = '', phone = '', branchId = null, customers: preloaded = null, onPick, invalid = false, required = true, disabled = false, title = 'Customer for the booking', sub = '', showWalkIn = true, renderTrigger = null, openSignal = 0 }) => {
   const [fetched, setFetched] = useState([]);
   const customers = preloaded || fetched;
   useEffect(() => {
@@ -50,10 +50,10 @@ const CustomerPickRow = ({ kind = null, name = '', phone = '', branchId = null, 
   const empty = !kind;
   const tone = invalid && empty ? 'border-error ring-2 ring-error/20 bg-surface' : empty && !required ? 'border-dashed border-border bg-surface' : 'border-border bg-surface';
   const renderPicker = (close) => (
-    <CustomerList kind={kind} customers={customers} recent={recent} title={title} sub={sub} onPick={(c) => { onPick(c); close(); }} />
+    <CustomerList kind={kind} customers={customers} recent={recent} title={title} sub={sub} showWalkIn={showWalkIn} onPick={(c) => { onPick(c); close(); }} />
   );
   return (
-    <PickShell tone={tone} title={title} renderPicker={renderPicker} disabled={disabled}
+    <PickShell tone={tone} title={title} renderPicker={renderPicker} disabled={disabled} renderTrigger={renderTrigger} openSignal={openSignal}
       belowRow={invalid && empty ? <p className="mt-1.5 px-0.5 text-xs text-error" role="alert">{PICK_REASON}</p> : null}>
       {empty ? <span className={`flex-1 text-sm ${required ? 'text-text-primary' : 'text-text-secondary'}`}>＋ Pick a customer or Walk-in</span>
         : kind === 'walkin' ? (
@@ -85,15 +85,8 @@ const CustomerPickRow = ({ kind = null, name = '', phone = '', branchId = null, 
   );
 };
 
-const CustomerList = ({ kind, customers, recent, title, sub, onPick }) => {
-  const [q, setQ] = useState('');
-  const isPhone = useMediaQuery('(max-width: 767.98px)');
-  const inputRef = useRef(null);
-  useEffect(() => { if (!isPhone) inputRef.current?.focus(); }, [isPhone]); // never auto-focus on a phone: the keyboard would cover the list
-  const searching = q.trim().length > 0;
-  const hits = useMemo(() => (searching ? searchCustomers(customers, q, SHOWN) : recent), [searching, recent, customers, q]);
   // Mockup rows: avatar · name / sub · ✓ on the picked row (tinted background). A button, not a radio: no selection circle.
-  const Row = ({ id, label, sub, checked, onChange, avatar }) => (
+const Row = ({ id, label, sub, checked, onChange, avatar }) => (
     <button type="button" data-pick-none data-pick-id={id} aria-label={typeof label === 'string' ? label : id} aria-pressed={checked} onClick={onChange}
       className={`w-full flex items-center gap-2.5 px-4 py-2 min-h-[54px] border-t border-[#EEF0F1] text-left ${checked ? 'bg-primary/5' : 'hover:bg-background'}`}>
       {avatar}
@@ -104,6 +97,14 @@ const CustomerList = ({ kind, customers, recent, title, sub, onPick }) => {
       {checked && <Icon name="Check" size={16} className="flex-shrink-0 text-primary" />}
     </button>
   );
+
+const CustomerList = ({ kind, customers, recent, title, sub, showWalkIn, onPick }) => {
+  const [q, setQ] = useState('');
+  const isPhone = useMediaQuery('(max-width: 767.98px)');
+  const inputRef = useRef(null);
+  useEffect(() => { if (!isPhone) inputRef.current?.focus(); }, [isPhone]); // never auto-focus on a phone: the keyboard would cover the list
+  const searching = q.trim().length > 0;
+  const hits = useMemo(() => (searching ? searchCustomers(customers, q, SHOWN) : recent), [searching, recent, customers, q]);
   return (
     <div>
       <div className="px-4 pt-4 pb-3 pr-14 md:pr-4">
@@ -115,7 +116,7 @@ const CustomerList = ({ kind, customers, recent, title, sub, onPick }) => {
           className="w-full h-10 px-3 border border-border rounded-spa text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" />
       </div>
       <Row id="new" avatar={<Avatar type="new" />} label="New customer" sub={searching ? `Add “${q.trim()}” as a new customer` : 'Name and phone'} checked={kind === 'new'} onChange={() => onPick({ kind: 'new', seed: q.trim() })} />
-      <Row id="walkin" avatar={<Avatar type="walkin" />} label="Walk-in" sub="No customer profile" checked={kind === 'walkin'} onChange={() => onPick({ kind: 'walkin' })} />
+      {showWalkIn && <Row id="walkin" avatar={<Avatar type="walkin" />} label="Walk-in" sub="No customer profile" checked={kind === 'walkin'} onChange={() => onPick({ kind: 'walkin' })} />}
       <div className="px-4 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-text-secondary">{searching ? 'Matches' : 'Recent customers'}</div>
       {hits.length === 0
         ? <p className="px-4 py-6 text-sm text-text-secondary text-center">{searching ? `No customer matches “${q.trim()}”.` : 'No recent customers yet. Search to find one.'}</p>

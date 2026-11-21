@@ -31,6 +31,7 @@ import { DetentSheet, SheetExpandButton, useMediaQuery, releaseSheetEntry } from
 import ClientDayLine from '../../pages/branch-manager-dashboard/components/calendar/ClientDayLine';
 import { compactRange } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
 import BookingCustomerLine from './BookingCustomerLine';
+import WalkInClientLine from './WalkInClientLine';
 import { useNavigate } from 'react-router-dom';
 import AvailabilityNoteLine from './AvailabilityNoteLine';
 import { AlertsBlock } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
@@ -338,6 +339,7 @@ const BookingActionModal = ({
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [addClientSignal, setAddClientSignal] = useState(0); // ZNLY-327: the Payment tab's "＋ Add client" opens the header's client list
   // Products added to this visit (V26, product_sales.booking_id): read-only lines on the Payment tab; a manager/admin can refund one.
   const [visitProducts, setVisitProducts] = useState([]);
   const [visitProductRefund, setVisitProductRefund] = useState(null); // the sale awaiting a refund confirmation
@@ -509,7 +511,7 @@ const BookingActionModal = ({
       setIsFirstBooking(false);
       return;
     }
-    getCustomerFirstBookingFlag(booking.customerId, booking.bookingId, booking.date, booking.startTime).then((result) => {
+    getCustomerFirstBookingFlag(booking.customerId, booking.bookingId, booking.date, booking.startTime, booking.isWalkIn).then((result) => {
       if (!cancelled) setIsFirstBooking(!!result.data?.isFirstBooking);
     });
     return () => { cancelled = true; };
@@ -1658,6 +1660,14 @@ const BookingActionModal = ({
   );
   // Panel header: name + status + pencil + ×, then the customer subline (phone · View profile · birthday). Restricted staff: name + status only.
   const canEditDetails = !restricted && !isMutationBlocked && !!onEditBooking;
+  // ZNLY-327: a walk-in with no client gets "＋ Add client" instead of View profile / phone / birthday; a walk-in that has one keeps a small tag.
+  const walkInNoClient = !!booking.isWalkIn && !booking.customerId;
+  // Add client changes no money, so it follows the API's own lifecycle rule (a closed day, Cancelled and No Show refuse); a paid, in-progress or Completed booking may still get one.
+  const canAddClient = !restricted && !isViewer && !isLocked && booking.status !== 'Cancelled' && booking.status !== 'No Show';
+  const walkInTag = booking.isWalkIn ? <span className="px-2 py-0.5 rounded-full text-[11px] font-medium flex-shrink-0 inline-flex items-center gap-1 bg-warning/15 text-warning" data-walkin-tag><span aria-hidden="true">🚶</span>Walk-in</span> : null;
+  const customerLine = walkInNoClient
+    ? <WalkInClientLine booking={booking} canAdd={canAddClient} openSignal={addClientSignal} onLinked={() => onRefreshBooking?.(booking.bookingId)} />
+    : <BookingCustomerLine booking={booking} restricted={restricted} canEdit={!isViewer} onSaved={() => onRefreshBooking?.(booking.bookingId)} />;
   const desktopPanelHeader = (
     <div className="border-b border-border">
       <div className="min-h-14 flex items-center justify-between gap-2 px-5 py-2">
@@ -1667,6 +1677,7 @@ const BookingActionModal = ({
           <span className="px-2 py-0.5 rounded-full text-[11px] font-medium flex-shrink-0 first-letter:uppercase" style={{ backgroundColor: statusColors.fill, color: statusColors.text }}>
             {booking.status.replace('-', ' ')}
           </span>
+          {walkInTag}
         </h3>
         {!restricted && booking.customerId && (
           <button type="button" onClick={() => requestPanelCloseThen(() => { releaseSheetEntry(); navigate(`/${orgForNav?.slug}/customers/${booking.customerId}`); })}
@@ -1689,12 +1700,7 @@ const BookingActionModal = ({
           </button>
         </div>
       </div>
-      <BookingCustomerLine
-        booking={booking}
-        restricted={restricted}
-        canEdit={!isViewer}
-        onSaved={() => onRefreshBooking?.(booking.bookingId)}
-      />
+      {customerLine}
     </div>
   );
 
@@ -1721,6 +1727,7 @@ const BookingActionModal = ({
         <span className="px-2 py-0.5 rounded-full text-[11px] font-medium flex-shrink-0 first-letter:uppercase" style={{ backgroundColor: statusColors.fill, color: statusColors.text }}>
           {booking.status.replace('-', ' ')}
         </span>
+        {walkInTag}
         {!restricted && booking.customerId && (
           <button type="button" onClick={() => requestPanelCloseThen(() => { releaseSheetEntry(); navigate(`/${orgForNav?.slug}/customers/${booking.customerId}`); })}
             className="relative flex-shrink-0 whitespace-nowrap text-[13px] font-medium text-primary hover:underline before:content-[''] before:absolute before:-inset-x-2 before:-inset-y-3">
@@ -1728,12 +1735,7 @@ const BookingActionModal = ({
           </button>
         )}
       </div>
-      <BookingCustomerLine
-        booking={booking}
-        restricted={restricted}
-        canEdit={!isViewer}
-        onSaved={() => onRefreshBooking?.(booking.bookingId)}
-      />
+      {customerLine}
     </div>
   );
   const panelHeader = useSheet ? sheetHeader : desktopPanelHeader;
@@ -4233,6 +4235,7 @@ const BookingActionModal = ({
             ...previousDueBookings.filter(pb => selectedPreviousDueIds.has(pb.bookingId)),
           ]}
           dueHolderSuggestions={dueHolderSuggestions}
+          onAddClient={walkInNoClient && canAddClient ? () => { setShowPaymentModal(false); setAddClientSignal((n) => n + 1); } : undefined}
           onConfirm={handlePaymentConfirm}
           onClose={(res) => {
             setShowPaymentModal(false);

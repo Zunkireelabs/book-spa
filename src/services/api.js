@@ -14,6 +14,7 @@ import { dedupeTransfersByKey, sortTransfersByTime } from './transferDedup';
 import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 import { toE164, samePhone } from '../utils/phone';
+import { isNewCustomerBooking } from '../utils/customerPick';
 import { expandBlockOccurrences } from '../utils/blockRecurrence';
 import { leafMethods, qrMethodDiff, validateQrFile } from '../utils/paymentQr';
 import { parseAvailabilityError, createEnforcementCache } from './availability';
@@ -1461,13 +1462,15 @@ async function writeBookingPayment(bookingId, rows, key, notes) {
 // attributed to a free-typed responsible person (dueHolderName).
 //   recordPayment({ bookingId, tenders: [{ amount, paymentMode }], dueHolderName, notes })
 // Backward-compatible single full payment: { bookingId, paymentMode, notes }.
+const WALK_IN_NEEDS_CLIENT_MSG = 'Packages, memberships, vouchers and wallets belong to a client. Add a client to this booking first.';
+const WALK_IN_PAY_IN_FULL_MSG = 'A walk-in with no client has to pay in full. Collect the whole amount, or add a client to leave a balance.';
 export async function recordPayment({ bookingId, tenders, paymentMode, dueHolderName, notes, idempotencyKey }) {
   const attemptKey = idempotencyKey || crypto.randomUUID();
   try {
     // 1. Fetch booking
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, branch_id, status, payment_status, final_amount, is_locked, due_holder_name')
+      .select('id, branch_id, status, payment_status, final_amount, is_locked, due_holder_name, is_walk_in, customer_id')
       .eq('id', bookingId)
       .single();
 
@@ -1476,6 +1479,12 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
         return { data: null, error: { code: 'BOOKING_NOT_FOUND', message: 'Booking not found.' } };
       }
       throw fetchError;
+    }
+
+    // ZNLY-327: a walk-in with no client belongs to nobody, so nothing here may draw on a person's wallet, voucher, package or membership.
+    const walkInNoClient = !!booking.is_walk_in && !booking.customer_id;
+    if (walkInNoClient && (tenders || []).some((t) => ['Membership', 'ReferralWallet', 'ReferralVoucher', 'VoucherWallet', 'SessionPackage'].includes(t.paymentMode))) {
+      return { data: null, error: { code: 'WALK_IN_NEEDS_CLIENT', message: WALK_IN_NEEDS_CLIENT_MSG } };
     }
 
     // 2. (ZNLY-234) A closed day no longer blocks a payment: a balance on a closed-day booking stays collectable and lands on the day it is
@@ -1611,6 +1620,11 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
 
     const leftover = Math.round((remaining - tenderTotal) * 100) / 100;
     const resolvedDueHolder = (dueHolderName || '').trim() || booking.due_holder_name || null;
+
+    // ZNLY-327: no balance can ever be left on nobody.
+    if (walkInNoClient && leftover > 0) {
+      return { data: null, error: { code: 'WALK_IN_PAY_IN_FULL', message: WALK_IN_PAY_IN_FULL_MSG } };
+    }
 
     // 8. If a balance is being left as due, a responsible person is required
     if (leftover > 0 && !resolvedDueHolder) {
@@ -3554,6 +3568,68 @@ export async function resizeSharedBookingTime({ bookingId, startTime, endTime, o
     return { data: { success: true }, error: null };
   } catch (error) {
     console.error('[API] resizeSharedBookingTime error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ZNLY-327: add a client to a walk-in booking that has none. Links bookings.customer_id and sets customer_name / customer_phone; is_walk_in
+// and walk_in_label stay, so the booking is still counted as a walk-in. Same lifecycle guards as any edit (validateBookingMutation:
+// a closed day, Cancelled and No Show refuse; a paid, in-progress or Completed booking still may get a client: it changes no money).
+// Pass { customerId } to pick an existing customer, or { customerName, customerPhone, customerEmail?, customerGender? } for a new one.
+export async function linkWalkInClient({ bookingId, customerId, customerName, customerPhone, customerEmail, customerGender }) {
+  try {
+    const { data: booking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('id, status, is_locked, branch_id, is_walk_in, customer_id')
+      .eq('id', bookingId)
+      .single();
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') return { data: null, error: { code: 'BOOKING_NOT_FOUND', message: 'Booking not found.' } };
+      throw fetchError;
+    }
+    // Own guard, not validateBookingMutation: who the client is does not touch status or money, so Completed may still get one.
+    if (booking.is_locked) return { data: null, error: { code: 'DAY_LOCKED', message: 'This day has been closed. No further modifications allowed.' } };
+    if (booking.status === 'Cancelled' || booking.status === 'No Show') return { data: null, error: { code: 'BOOKING_IMMUTABLE', message: `${booking.status} bookings cannot be modified.` } };
+    if (!booking.is_walk_in) return { data: null, error: { code: 'NOT_WALK_IN', message: 'Only a walk-in booking can get a client added this way.' } };
+    if (booking.customer_id) return { data: null, error: { code: 'ALREADY_HAS_CLIENT', message: 'This booking already has a client.' } };
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    let linkId = customerId || null;
+    let name = null;
+    let phone = null;
+    if (linkId) {
+      const { data: c, error: cErr } = await supabase.from('customers').select('id, full_name, phone').eq('id', linkId).single();
+      if (cErr || !c) return { data: null, error: { code: 'CUSTOMER_NOT_FOUND', message: 'Could not find that customer.' } };
+      name = c.full_name; phone = c.phone;
+    } else {
+      if (!String(customerName || '').trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Enter the client\'s name.' } };
+      if (!String(customerPhone || '').trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Enter the client\'s phone number.' } };
+      const { data: branch, error: branchError } = await supabase.from('branches').select('org_id').eq('id', booking.branch_id).single();
+      if (branchError) throw branchError;
+      const { data: resolved, error: resolveError } = await findOrCreateCustomer({
+        orgId: branch.org_id, branchId: booking.branch_id, fullName: customerName, phone: customerPhone, email: customerEmail, gender: customerGender,
+      });
+      if (resolveError) return { data: null, error: resolveError };
+      linkId = resolved.customerId;
+      name = toTitleCase(customerName);
+      phone = toE164(customerPhone);
+    }
+
+    // The two filters make the link atomic: it only lands while the booking is still a client-less walk-in.
+    const { data: updated, error: updErr } = await supabase
+      .from('bookings')
+      .update({ customer_id: linkId, customer_name: name, customer_phone: phone })
+      .eq('id', bookingId)
+      .eq('is_walk_in', true)
+      .is('customer_id', null)
+      .select('id')
+      .maybeSingle();
+    if (updErr) throw updErr;
+    if (!updated) return { data: null, error: { code: 'ALREADY_HAS_CLIENT', message: 'This booking already has a client.' } };
+    return { data: { bookingId, customerId: linkId, customerName: name, customerPhone: phone }, error: null };
+  } catch (error) {
+    console.error('[API] linkWalkInClient error:', error.message);
     return { data: null, error };
   }
 }
@@ -6706,7 +6782,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     let bookings = [];
     {
       const bookingFields = [
-        'id', 'booking_number', 'customer_id', 'customer_name',
+        'id', 'booking_number', 'customer_id', 'customer_name', 'is_walk_in', 'walk_in_label', // ZNLY-327
         'customer_phone',   // fetched always; masked below when withheld — see maskPhone
         'status', 'payment_status',
         'date', 'start_time', 'end_time', 'start_datetime', 'end_datetime', 'created_at', 'created_by',
@@ -6881,7 +6957,8 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     const [customerNotesByCustomer, previousDueByBooking] = await Promise.all([customerNotesPromise, previousDuePromise]);
     const bookingsWithNewFlag = (bookings || []).map(b => ({
       ...b,
-      isNewCustomer: !b.customer_id || (!historyFailed && firstBookingIdByCustomer[b.customer_id] === b.id),
+      // ZNLY-327: a walk-in is never "New" (no profile, or a client added later whose first visit stays a walk-in).
+      isNewCustomer: isNewCustomerBooking(b, firstBookingIdByCustomer, historyFailed),
       // undefined (not null/0) when the lookup failed, so the UI shows nothing rather than a false "no alerts / no due".
       customerNotes: customerNotesByCustomer ? (customerNotesByCustomer[b.customer_id] || null) : undefined,
       previousDue: previousDueByBooking ? (previousDueByBooking[b.id] || null) : undefined,
@@ -13409,10 +13486,10 @@ export async function getTherapistOverview({ branchId, therapistId, fromDate, to
 
 // Booking details dialog "New" badge: does this customer have any earlier non-Cancelled
 // booking than the one being viewed? No customer_id (walk-in/guest) → always first.
-export async function getCustomerFirstBookingFlag(customerId, bookingId, bookingDate, bookingStartTime = null) {
+export async function getCustomerFirstBookingFlag(customerId, bookingId, bookingDate, bookingStartTime = null, isWalkIn = false) {
   try {
     if (!customerId) {
-      return { data: { isFirstBooking: true }, error: null };
+      return { data: { isFirstBooking: !isWalkIn }, error: null }; // ZNLY-327: a walk-in with no client is never New
     }
 
     let query = supabase

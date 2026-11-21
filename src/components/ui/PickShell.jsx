@@ -6,8 +6,11 @@ import BottomSheet, { useMediaQuery } from './BottomSheet';
 // The row is a full-width button (`children` inside, then a ›). Tapping opens `renderPicker(close)`: a bottom sheet on phone,
 // a popover anchored under the row on desktop (↑/↓ move between radios/checkboxes, Enter picks, Esc closes, outside click closes).
 // `onOpenPhone`: phone only, the caller shows the list itself instead of this shell's own bottom sheet.
-const PickShell = ({ tone = 'border-border bg-surface', title = 'Pick', renderPicker, onOpenPhone = null, disabled = false, sheetFooter, belowRow = null, children }) => {
+// `renderTrigger({ open, toggle, btnRef })` replaces the default full-width row button (e.g. a header "＋ Add client" link); `openSignal` opens the picker
+// from outside whenever it changes to a new positive number.
+const PickShell = ({ tone = 'border-border bg-surface', title = 'Pick', renderPicker, onOpenPhone = null, disabled = false, sheetFooter, belowRow = null, renderTrigger = null, openSignal = 0, children }) => {
   const [open, setOpen] = useState(false);
+  useEffect(() => { if (openSignal > 0) setOpen(true); }, [openSignal]);
   const wrapRef = useRef(null);
   const btnRef = useRef(null);
   const popRef = useRef(null);
@@ -43,9 +46,12 @@ const PickShell = ({ tone = 'border-border bg-surface', title = 'Pick', renderPi
     if (!open || isPhone || !wrapRef.current || !popRef.current) { setFitH(null); setNarrow(null); return; }
     let sc = wrapRef.current.parentElement;
     while (sc && !/(auto|scroll)/.test(getComputedStyle(sc).overflowY)) sc = sc.parentElement;
-    const MIN_W = 320;
+    const MIN_W = 360;
     const rowR = wrapRef.current.getBoundingClientRect();
-    const box = (sc || wrapRef.current.parentElement).getBoundingClientRect();
+    // The box the list must fit in: the scrolling ancestor, else the enclosing panel / dialog, else the viewport. (A small trigger such as a
+    // header link has no scroll ancestor and a tiny parent: sizing against that gave an ~80px list.)
+    const host = sc || wrapRef.current.closest('[role="dialog"]');
+    const box = host ? host.getBoundingClientRect() : { left: 0, width: window.innerWidth };
     if (rowR.width < MIN_W) {
       const w = Math.min(MIN_W, Math.max(rowR.width, box.width - 16));
       setNarrow({ right: (rowR.left + rowR.width / 2) > (box.left + box.width / 2), w });
@@ -63,11 +69,12 @@ const PickShell = ({ tone = 'border-border bg-surface', title = 'Pick', renderPi
   return (
     <div>
     <div ref={wrapRef} className="relative">
+      {renderTrigger ? renderTrigger({ open, toggle: () => setOpen((o) => !o), btnRef }) : (
       <button ref={btnRef} type="button" disabled={disabled} aria-haspopup="dialog" aria-expanded={open} onClick={() => (isPhone && onOpenPhone ? onOpenPhone() : setOpen((o) => !o))}
         className={`w-full min-h-[44px] flex items-center gap-2.5 px-3 py-1.5 border rounded-spa text-left spa-transition-fast disabled:opacity-50 ${tone}`}>
         {children}
         <Icon name="ChevronRight" size={16} className="flex-shrink-0 text-text-secondary" />
-      </button>
+      </button>)}
       {open && !isPhone && (
         <div ref={popRef} role="dialog" aria-label={title} style={{ ...(fitH ? { maxHeight: fitH } : {}), ...(narrow ? { width: narrow.w } : {}) }} className={`absolute ${narrow ? (narrow.right ? 'right-0' : 'left-0') : 'left-0 right-0'} top-full mt-1 z-dropdown panel-fit [--panel-gap:6rem] bg-surface border border-border rounded-spa-lg shadow-spa-elevated overflow-y-auto overscroll-contain`}>
           {renderPicker(close)}

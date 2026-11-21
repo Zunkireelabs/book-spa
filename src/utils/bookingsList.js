@@ -139,6 +139,7 @@ export const VIEWS = [
   { id: 'done', label: 'Done', color: '#22C55E' },
   { id: 'spa', label: 'In service now', color: '#6366F1' },
   { id: 'come', label: 'To come', color: '#3B82F6' },
+  { id: 'walkin', label: 'Walk-in', color: '#D97706' }, // ZNLY-327: warning amber
   { id: 'unpaid', label: 'Unpaid', color: '#F59E0B' },
   { id: 'void', label: 'Cancelled & no-show', color: '#DC2626' },
 ];
@@ -150,6 +151,7 @@ export function inView(b, view, ctx) {
     case 'done': return s === 'Completed';
     case 'spa': return s === 'In-Progress';
     case 'come': return (s === 'Pending' || s === 'Confirmed') && dateOf(b) >= ctx.today && lateMinutes(b, ctx) == null;
+    case 'walkin': return !!b.isWalkIn;
     case 'unpaid': return moneyOf(b, ctx).due > 0;
     case 'void': return s === 'Cancelled' || s === 'No Show';
     default: return true;
