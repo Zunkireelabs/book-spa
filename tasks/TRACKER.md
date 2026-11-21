@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-21** by Project Manager · 308 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-21** by Project Manager · 312 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -13,11 +13,13 @@ Last synced: **2026-11-21** by Project Manager · 308 open tickets (epics exclud
 ## In progress
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
+| ZNLY-219 | Sadin | urgent | P0 security (production today): PINs stored as plain text and verify_pin() callable by anyone, so a 4-digit PIN can be guessed; check the pin-login Edge Function before shipping mig 384 |
 | ZNLY-238 | Sadin | urgent | PLAN: integrate Zennly Marketplace (customer-facing booking) with the Zennly business app |
-| ZNLY-282 | Sadin | urgent | "Own calendar (view only)" logins can read every colleague's bookings: the own-bookings RLS (migration 322) only checks 'own' |
 | ZNLY-332 | Sadin | urgent | Marketplace booking, bookX side: create-booking + lookup + email sync as migrations 409–412, server safety checks, marketplace source tag, tracked edge functions |
 | ZNLY-333 | Sadin | urgent | Marketplace booking, marketplace side (zennly-marketplace integrate-zennly): real opening hours + closed days, honest change/cancel wording, success screen with booking number + studio phone |
+| ZNLY-334 | Sadin | urgent | Marketplace booking go-live: staging end-to-end test, then prod (bookX stage→main incl. bundle, edge fns + secret on prod, enable mapped businesses, marketplace deploy with flag on) |
 | ZNLY-338 | Sadin | urgent | Marketplace: native booking pages on zennly.io (location → services → time → confirm), same tab, look = app.zennly.io/:org customer flow, one service |
+| ZNLY-351 | Sadin | urgent | PROD: no double-booking guard for therapists. excl_therapist_overlap (and combo-item therapist/room overlap) exist only in schema.sql, never in a migration; Nuad prod already has 182 overlapping pairs (2 in the future) |
 | ZNLY-66 | Sadin | high | UI/UX Upgrade (feat/ui-port-from-clinicmd) |
 | ZNLY-159 | Sadin | high | Reports redesign: 17 reports in 5 groups, Start here row, headline vs last period, ✦ flags |
 | ZNLY-182 | Anish | high | Online combo-service bookings never split into per-component booking_combo_items |
@@ -27,11 +29,9 @@ Last synced: **2026-11-21** by Project Manager · 308 open tickets (epics exclud
 | ZNLY-191 | Anish | high | Customer "Log" tab errors on production — audit_logs missing FKs to users/branches |
 | ZNLY-195 | Sadin | high | Fresha audit + Zennly gap map (feature list, UX, flows, logic, outreach/automation) |
 | ZNLY-265 | Sadin | high | Mobile QC: every screen responsive and polished at phone width (start: checkout dialog overlaps when keyboard opens) |
-| ZNLY-267 | Sadin | high | Calendar Settings: "Show whole hours of a day" fails with "update_org_profile_settings: unknown setting key calendar_show_full_day" |
 | ZNLY-268 | Sadin | high | No broken saves or raw errors: guard every app→DB call/setting key, plain-language error messages, Calendar Settings double title |
 | ZNLY-269 | Sadin | high | Booking panel: customer in the header with View profile + add date of birth inline (Fresha-style) |
 | ZNLY-272 | Sadin | high | Dashboard shows a false "0 of 0 done · Nothing left open ✓ · Tomorrow 0 bookings" for ~3s while loading |
-| ZNLY-274 | Sadin | high | Online bookings by NEW customers never create or link a customer record (no profile, no history, no DOB, missed by campaigns) |
 | ZNLY-275 | Sadin | high | A booking for a later day can be Started, Completed or marked No-show today (its money lands in today's takings and Day close) |
 | ZNLY-277 | Sadin | high | Closed-day Payment Breakdown: uneven row spacing (tall method rows, cramped totals and section headings) |
 | ZNLY-278 | Sadin | high | "Own bookings only" login: calendar shows every colleague's column empty, so busy colleagues look free |
@@ -44,6 +44,7 @@ Last synced: **2026-11-21** by Project Manager · 308 open tickets (epics exclud
 | ZNLY-347 | Sadin | high | Marketplace create-booking accepts a service the chosen location does not offer (no branch_service_links / excluded-category check in public_create_booking, migration 409) |
 | ZNLY-348 | Sadin | high | Marketplace: no blank sections. Empty rails/moods hidden, designed empty cards for filter and search, one "studios joining soon" block when nothing is listed |
 | ZNLY-349 | Sadin | high | Marketplace: studios with no reviews show "★ 0.0" on cards (reads as a terrible rating); show no rating or "New" until there are reviews |
+| ZNLY-352 | Sadin | high | Schema drift prod vs migrations: NOT NULL columns on prod that local lacks (customers.phone, therapist_attendance.marked_by/status, bookings snapshots, audit_logs.record_id); check every writer before release |
 | ZNLY-136 | Anish | medium | Group booking (Fresha-style): book multiple people, one shared slot, one checkout |
 | ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
 | ZNLY-175 | Sadin | medium | Therapist inner page: outcomes bar total counts upcoming bookings that sit in no bucket |
@@ -60,6 +61,7 @@ Last synced: **2026-11-21** by Project Manager · 308 open tickets (epics exclud
 | ZNLY-273 | Sadin | medium | Bookings "Needs you now" says "Everything's on track" while finished bookings are still unpaid |
 | ZNLY-276 | Sadin | medium | Dashboard strip "50 of 54 done (1 no-show)" reads as 4 left when 3 are open |
 | ZNLY-281 | Sadin | medium | Calendar: hover/open a booking lights up every booking of the same client on screen (Fresha-style), no link lines |
+| ZNLY-350 | Sadin | medium | Marketplace account: status pill reads "Waiting For The Studio To Confirm" (CSS capitalize on a sentence) and the booking card has no booking number |
 
 ## In review / on stage
 | Ticket | Owner | Priority | State | What |
@@ -81,6 +83,7 @@ Last synced: **2026-11-21** by Project Manager · 308 open tickets (epics exclud
 | ZNLY-234 | Sadin | urgent | QC Accepted | Day close traps money and unfinished bookings: balances can't be collected after close, unfinished bookings get frozen, card payments are filed as Fonepay |
 | ZNLY-235 | Sadin | urgent | QC Accepted | Restricted staff access not enforced: names, phones and prices show on most screens and through the API (customers, payments) |
 | ZNLY-261 | Sadin | urgent | On Stage | Stage deploy blocked: 4 RLS policies call helpers unwrapped (attendance_changes, attendance_punches, insight_feedback x2) — migration 400 |
+| ZNLY-282 | Sadin | urgent | On Stage | "Own calendar (view only)" logins can read every colleague's bookings: the own-bookings RLS (migration 322) only checks 'own' |
 | ZNLY-287 | Sadin | urgent | On Stage | QC: Bookings (phone) — page is wider than the screen, left side cut off |
 | ZNLY-294 | Sadin | urgent | On Stage | QC: All inputs (phone) — page zooms in when you tap a text box, search or time field |
 | ZNLY-14 | — | high | In Review | PR #30: move PIN login service-role usage to Edge Function |
@@ -126,6 +129,8 @@ Last synced: **2026-11-21** by Project Manager · 308 open tickets (epics exclud
 | ZNLY-248 | Sadin | high | QC Accepted | Payment mode spelling: Business Health report (mig 371) and other readers match 'Cash' exactly, so 'cash' payments count as "other" |
 | ZNLY-250 | Sadin | high | QC Accepted | Customer detail page numbers use old rules: Amount owing counts upcoming/cancelled bookings; Last Visit can be a future booking (disagrees with Customers list + panel) |
 | ZNLY-263 | Sadin | high | On Stage | Login pages redesign (/login org finder and /:org/login): split layout, our current stack |
+| ZNLY-267 | Sadin | high | On Stage | Calendar Settings: "Show whole hours of a day" fails with "update_org_profile_settings: unknown setting key calendar_show_full_day" |
+| ZNLY-274 | Sadin | high | On Stage | Online bookings by NEW customers never create or link a customer record (no profile, no history, no DOB, missed by campaigns) |
 | ZNLY-288 | Sadin | high | On Stage | QC: Dashboard Live floor (phone) — pinned names column lets bookings and the now-line show through, rows uneven |
 | ZNLY-289 | Sadin | high | On Stage | QC: Phone shell bottom — grey band behind the nav on some screens, last content cropped or hidden under the nav |
 | ZNLY-290 | Sadin | high | On Stage | QC: Notification panel (phone) — scrolling inside it scrolls the page behind |
@@ -192,8 +197,9 @@ Last synced: **2026-11-21** by Project Manager · 308 open tickets (epics exclud
 ## Todo
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
-| ZNLY-334 | Sadin | urgent | Marketplace booking go-live: staging end-to-end test, then prod (bookX stage→main incl. bundle, edge fns + secret on prod, enable mapped businesses, marketplace deploy with flag on) |
 | ZNLY-339 | Anish | urgent | Live zennly.io Book hand-off goes to dev-app.zennly.io (bookX STAGING): real bookings invisible to studios (marketplace main 8dbfee5) |
+| ZNLY-353 | Sadin | urgent | CI schema-drift guard: before every prod release, compare prod's public schema with a DB built only from migrations; fail on any difference (constraints, NOT NULL, defaults, triggers, functions, RLS) |
+| ZNLY-354 | Sadin | urgent | Safe tenant onboarding: onboard-tenant.sql gives every new business the same safe defaults (all industries incl. beauty), readiness must show "no blockers" before go-live, and no safety rule depends on an optional per-org switch |
 | ZNLY-13 | — | high | Renumber colliding migration-289 (PR #413 vs PR #415) |
 | ZNLY-26 | — | high | Verify 503 "Reconnecting" screen + login banner against a real failure (PR #344) |
 | ZNLY-135 | Sadin | high | Notification pop-ups + sound for new bookings and things that need attention (discuss first) |
@@ -206,7 +212,6 @@ Last synced: **2026-11-21** by Project Manager · 308 open tickets (epics exclud
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-180 | — | medium | Attendance worked time rounded to 0.1 h before display (1 h 32 min shows as 1 h 30 min) |
-| ZNLY-350 | Sadin | medium | Marketplace account: status pill reads "Waiting For The Studio To Confirm" (CSS capitalize on a sentence) and the booking card has no booking number |
 
 ## Waiting on owner
 | Ticket | Owner | Priority | What |
@@ -233,7 +238,6 @@ Last synced: **2026-11-21** by Project Manager · 308 open tickets (epics exclud
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
 | ZNLY-203 | Sadin | urgent | Client data still in public git history of book-spa: make the repo private and/or purge history |
-| ZNLY-219 | Sadin | urgent | P0 security (production today): PINs stored as plain text and verify_pin() callable by anyone, so a 4-digit PIN can be guessed; check the pin-login Edge Function before shipping mig 384 |
 | ZNLY-15 | — | high | Rotate/remove accounts exposed by deleted public/dev-info.html |
 | ZNLY-18 | — | high | Supabase Auth URL config / allowlists for new domain (both projects) |
 | ZNLY-82 | Sadin | high | UI-16: Release prep — regression pass, stage re-merge, PR to stage |
