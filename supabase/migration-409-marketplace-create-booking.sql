@@ -177,6 +177,23 @@ BEGIN
       'message', 'Selected service is not available for this business.');
   END IF;
 
+  -- The service must be offered at the chosen location: same rule as the customer flow (fetchServices) and
+  -- marketplace_readiness_blockers (migration 413). branch_service_links: no rows = every branch, rows = only
+  -- those branches; and not in the branch's excluded_service_categories (uncategorised counts as offered).
+  -- Runs before any customer or booking row is written.
+  IF EXISTS (SELECT 1 FROM public.branch_service_links l WHERE l.service_id = p_service_id)
+     AND NOT EXISTS (SELECT 1 FROM public.branch_service_links l
+                     WHERE l.service_id = p_service_id AND l.branch_id = p_branch_id) THEN
+    RETURN jsonb_build_object('success', false, 'error_code', 'SERVICE_NOT_AT_LOCATION',
+      'message', 'That service isn''t offered at this location. Please choose another location or service.');
+  END IF;
+  IF v_service.category IS NOT NULL AND EXISTS (
+       SELECT 1 FROM public.branches b
+       WHERE b.id = p_branch_id AND v_service.category = ANY (COALESCE(b.excluded_service_categories, '{}'))) THEN
+    RETURN jsonb_build_object('success', false, 'error_code', 'SERVICE_NOT_AT_LOCATION',
+      'message', 'That service isn''t offered at this location. Please choose another location or service.');
+  END IF;
+
   v_end_time := p_start_time + (v_service.duration_minutes * interval '1 minute');
 
   SELECT i.enable_rooms INTO v_enable_rooms

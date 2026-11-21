@@ -107,6 +107,29 @@ BEGIN
   r := public_create_booking(v_slug, v_branch, v_svc, v_mon, '11:00', 'QC Marketplace One', 'qc.one@example.test', v_phone1, 'Female', 'qc note', 'no-preference',
                              CASE WHEN v_a IS NOT NULL THEN ARRAY[v_a] END, NULL, NULL, k);
   PERFORM pg_temp.rec('happy: booking accepted', 'ok', pg_temp.code(r));
+  -- ZNLY-347: a service the location does not offer is refused, before any customer/booking row exists
+  DECLARE
+    v_other uuid; v_cat text; v_nb0 int; v_nc0 int; v_nb1 int; v_nc1 int;
+  BEGIN
+    SELECT id INTO v_other FROM branches WHERE org_id = v_org AND id <> v_branch ORDER BY name LIMIT 1;
+    IF v_other IS NULL THEN
+      INSERT INTO branches (org_id, name, is_active) VALUES (v_org, 'QC Branch Other', true) RETURNING id INTO v_other;
+    END IF;
+    SELECT count(*) INTO v_nb0 FROM bookings; SELECT count(*) INTO v_nc0 FROM customers;
+    INSERT INTO branch_service_links (branch_id, service_id) VALUES (v_other, v_svc);
+    r2 := public_create_booking(v_slug, v_branch, v_svc, v_tue + 7, '11:00', 'QC Scoped', 'qc.scoped@example.test', '+9779800332771', NULL, NULL, 'no-preference', NULL, NULL, NULL, gen_random_uuid());
+    PERFORM pg_temp.rec('347: service linked only to another branch = refused', 'SERVICE_NOT_AT_LOCATION', pg_temp.code(r2));
+    PERFORM pg_temp.rec('347: refusal message is plain', 'true', (r2->>'message' LIKE 'That service isn%offered at this location.%')::text);
+    DELETE FROM branch_service_links WHERE service_id = v_svc;
+    SELECT category INTO v_cat FROM services WHERE id = v_svc;
+    UPDATE branches SET excluded_service_categories = ARRAY[v_cat] WHERE id = v_branch;
+    r2 := public_create_booking(v_slug, v_branch, v_svc, v_tue + 7, '11:00', 'QC Excluded', 'qc.excl@example.test', '+9779800332772', NULL, NULL, 'no-preference', NULL, NULL, NULL, gen_random_uuid());
+    PERFORM pg_temp.rec('347: category excluded at the branch = refused', 'SERVICE_NOT_AT_LOCATION', pg_temp.code(r2));
+    UPDATE branches SET excluded_service_categories = '{}' WHERE id = v_branch;
+    SELECT count(*) INTO v_nb1 FROM bookings; SELECT count(*) INTO v_nc1 FROM customers;
+    PERFORM pg_temp.rec('347: refused bookings leave no booking and no customer', '0/0', (v_nb1 - v_nb0) || '/' || (v_nc1 - v_nc0));
+    -- unlinked + not excluded = accepted is the happy path above (this service has no links, no exclusion)
+  END;
   PERFORM pg_temp.rec('happy: response has id and booking_number', 'true', ((r->'booking'->>'id') IS NOT NULL AND (r->'booking'->>'booking_number') IS NOT NULL)::text);
   SELECT * INTO bk FROM bookings WHERE client_request_id = k;
   SELECT effective_price_npr INTO v_expected_price FROM services_with_offer_pricing WHERE id = v_svc;
