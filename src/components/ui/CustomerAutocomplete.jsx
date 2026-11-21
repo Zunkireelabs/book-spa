@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, useLayoutEffect } from 'react';
 import Icon from '../AppIcon';
+import usePopoverIntoView from '../../hooks/usePopoverIntoView';
 import { fetchCustomersLightweight } from 'services/api';
 
 // Color tokens for the inline membership pill (mirrors MembershipsPanel).
@@ -101,6 +102,7 @@ const CustomerAutocomplete = ({
     setShowSuggestions(typedRef.current && suggestions.length > 0);
     setFocusedIndex(-1);
   }, [suggestions]);
+  const listIntoView = usePopoverIntoView(showSuggestions, suggestions.length); // ZNLY-325: keep the list clear of a panel's sticky footer
 
   // Close on click outside
   useEffect(() => {
@@ -181,7 +183,7 @@ const CustomerAutocomplete = ({
 
       {showSuggestions && (
         <div
-          ref={listRef}
+          ref={(n) => { listRef.current = n; listIntoView(n); }}
           className={`absolute top-full mt-1 w-full min-w-[280px] max-w-[calc(100vw-2rem)] bg-white border border-gray-200 rounded-md shadow-lg z-dropdown py-1 max-h-48 overflow-y-auto ${searchBy === 'phone' ? 'right-0' : 'left-0'}`}
         >
           {suggestions.map((customer, index) => {

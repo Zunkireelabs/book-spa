@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../AppIcon';
+import usePopoverIntoView from '../../hooks/usePopoverIntoView';
 import MiniMonthCalendar from '../../pages/branch-manager-dashboard/components/calendar/MiniMonthCalendar';
 import { todayStr } from '../../pages/branch-manager-dashboard/components/calendar/calendarDates';
 import { format12h, parseTimeInput, buildTimeOptions, formatDateChip } from '../../utils/timeInput';
@@ -9,10 +10,12 @@ import { format12h, parseTimeInput, buildTimeOptions, formatDateChip } from '../
 // `time` is "HH:MM" ('' while the typed text is incomplete); the typed text lives here and re-syncs when `time` changes from outside.
 const DateTimeRow = ({ date, time, onDateChange, onTimeChange, branchHours, timeRingClass = '', timeFieldAttr }) => {
   const [dateOpen, setDateOpen] = useState(false);
+  const dateIntoView = usePopoverIntoView(dateOpen);
   const dateRef = useRef(null);
   const [timeOpen, setTimeOpen] = useState(false);
   const timeRef = useRef(null);
   const listRef = useRef(null);
+  const timeIntoView = usePopoverIntoView(timeOpen);
   const [timeText, setTimeText] = useState(time ? format12h(time) : '');
 
   useEffect(() => {
@@ -56,7 +59,7 @@ const DateTimeRow = ({ date, time, onDateChange, onTimeChange, branchHours, time
           <span className="truncate">{formatDateChip(date)}</span>
         </button>
         {dateOpen && (
-          <div className="absolute left-0 top-full mt-1 bg-surface border border-border rounded-spa-lg shadow-spa-elevated z-dropdown p-3">
+          <div ref={dateIntoView} className="absolute left-0 top-full mt-1 bg-surface border border-border rounded-spa-lg shadow-spa-elevated z-dropdown p-3">
             <MiniMonthCalendar
               selectedDate={date || todayStr()}
               onDateSelect={(d) => { onDateChange(d); setDateOpen(false); }}
@@ -83,7 +86,7 @@ const DateTimeRow = ({ date, time, onDateChange, onTimeChange, branchHours, time
           className="w-full h-9 pl-8 pr-2 text-[13px] font-body text-text-primary bg-surface border border-border rounded-spa focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
         />
         {timeOpen && (
-          <div ref={listRef} className="absolute top-full left-0 mt-1 w-28 max-h-48 overflow-y-auto bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown">
+          <div ref={(n) => { listRef.current = n; timeIntoView(n); }} className="absolute top-full left-0 mt-1 w-28 max-h-48 overflow-y-auto bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown">
             {options.map((t) => (
               <button
                 key={t}

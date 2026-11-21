@@ -174,7 +174,7 @@ const MethodMenu = ({ rect, tree, usedValues, activeValue, onPick, onClose }) =>
     <div ref={ref} role="listbox" tabIndex={-1} aria-label="Payment method" data-checkout-menu aria-activedescendant={hi >= 0 ? `mm-opt-${hi}` : undefined}
       onKeyDown={onKeyDown}
       style={{ position: 'fixed', left, width, ...(flipUp ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }) }}
-      className="z-notification bg-white border border-[#E7E8E6] rounded-[10px] p-1 shadow-[0_12px_32px_-8px_rgba(14,13,12,.25)] max-h-[320px] overflow-y-auto text-[13px] outline-none">
+      className="z-popover bg-white border border-[#E7E8E6] rounded-[10px] p-1 shadow-[0_12px_32px_-8px_rgba(14,13,12,.25)] max-h-[320px] overflow-y-auto text-[13px] outline-none">
       {groups.map((g, gi) => (
         <div key={gi}>
           {g.title && <div className="px-2.5 pt-2 pb-1 text-[11px] font-medium uppercase tracking-[.04em] text-[#8A8A90]">{g.title}</div>}
@@ -2193,7 +2193,7 @@ const PopoverList = ({ rect, groups, activeValue, onPick, onClose }) => {
         }
       }}
       style={{ position: 'fixed', left, width, ...(flipUp ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }) }}
-      className="z-notification bg-white border border-[#E7E8E6] rounded-[10px] p-1 shadow-[0_12px_32px_-8px_rgba(14,13,12,.25)] max-h-64 overflow-y-auto text-[13px]">
+      className="z-popover bg-white border border-[#E7E8E6] rounded-[10px] p-1 shadow-[0_12px_32px_-8px_rgba(14,13,12,.25)] max-h-64 overflow-y-auto text-[13px]">
       {groups.map((g, gi) => (
         <div key={gi}>
           {g.title && <div className="px-2.5 pt-2 pb-1 text-[11px] font-medium uppercase tracking-[.04em] text-[#8A8A90]">{g.title}</div>}

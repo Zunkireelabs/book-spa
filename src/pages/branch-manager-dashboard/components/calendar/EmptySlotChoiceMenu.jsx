@@ -38,7 +38,7 @@ const EmptySlotChoiceMenu = ({ x, y, options, onClose, header = null }) => {
     <div
       ref={ref}
       role="menu"
-      className="fixed z-dropdown bg-surface rounded-spa-lg border border-border shadow-spa-elevated py-1"
+      className="fixed z-popover bg-surface rounded-spa-lg border border-border shadow-spa-elevated py-1"
       style={{ left, top, width: MENU_WIDTH }}
     >
       {header && (

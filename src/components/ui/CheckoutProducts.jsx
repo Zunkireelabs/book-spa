@@ -119,7 +119,7 @@ const Floating = ({ rect, width = 320, onClose, children, label, flip = true }) 
   const up = flip && rect.bottom + 320 > window.innerHeight && rect.top > 320;
   return createPortal(
     <div ref={ref} aria-label={label} data-checkout-menu style={{ position: 'fixed', left, width: w, ...(up ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }) }}
-      className="z-notification bg-white border border-[#E7E8E6] rounded-[10px] shadow-[0_12px_32px_-8px_rgba(14,13,12,.25)] text-[13px]">
+      className="z-popover bg-white border border-[#E7E8E6] rounded-[10px] shadow-[0_12px_32px_-8px_rgba(14,13,12,.25)] text-[13px]">
       {children}
     </div>,
     document.body

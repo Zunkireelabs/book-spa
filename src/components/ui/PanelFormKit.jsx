@@ -3,6 +3,7 @@ import Icon from '../AppIcon';
 import SidePanel from './SidePanel';
 import { useMenuNav } from './useMenuNav';
 import CustomSelect from './CustomSelect';
+import usePopoverIntoView from '../../hooks/usePopoverIntoView';
 import MiniMonthCalendar from '../../pages/branch-manager-dashboard/components/calendar/MiniMonthCalendar';
 
 // Shared building blocks for the calendar's block / transfer forms so they look and behave like quick-create:
@@ -293,6 +294,7 @@ export const InlineWarning = ({ message, icon = 'AlertTriangle' }) => (message ?
 // "Mon 12 Oct" button + mini-month popover.
 export const DateField = ({ value, onChange, label, required, disabled, hint, min, max, id, error }) => {
   const [open, setOpen] = useState(false);
+  const popIntoView = usePopoverIntoView(open);
   const ref = useRef(null);
   useEffect(() => {
     if (!open) return undefined;
@@ -322,7 +324,7 @@ export const DateField = ({ value, onChange, label, required, disabled, hint, mi
           <span className="truncate">{value ? formatShortDate(value) : 'Pick a date'}</span>
         </button>
         {open && (
-          <div className="absolute left-0 top-full mt-1 bg-surface border border-border rounded-spa-lg shadow-spa-elevated z-dropdown p-3">
+          <div ref={popIntoView} className="absolute left-0 top-full mt-1 bg-surface border border-border rounded-spa-lg shadow-spa-elevated z-dropdown p-3">
             <MiniMonthCalendar
               selectedDate={value || min || todayYmd}
               onDateSelect={(d) => { if ((!min || d >= min) && (!max || d <= max)) { onChange(d); setOpen(false); } }}
@@ -338,6 +340,7 @@ export const DateField = ({ value, onChange, label, required, disabled, hint, mi
 export const TimeField = ({ value, onChange, label, required, disabled, hint, step = 10, fromTime = '06:00', toTime = '23:50', formatTime = format12h }) => {
   const [text, setText] = useState(value ? formatTime(value) : '');
   const [open, setOpen] = useState(false);
+  const timeIntoView = usePopoverIntoView(open);
   const ref = useRef(null);
   const listRef = useRef(null);
   useEffect(() => { setText(value ? formatTime(value) : ''); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -379,7 +382,7 @@ export const TimeField = ({ value, onChange, label, required, disabled, hint, st
           className={`${CONTROL} pl-9`}
         />
         {open && (
-          <div ref={listRef} className="absolute top-full left-0 mt-1 w-32 max-h-48 overflow-y-auto bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown">
+          <div ref={(n) => { listRef.current = n; timeIntoView(n); }} className="absolute top-full left-0 mt-1 w-32 max-h-48 overflow-y-auto bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown">
             {options.map((t) => (
               <button
                 key={t}

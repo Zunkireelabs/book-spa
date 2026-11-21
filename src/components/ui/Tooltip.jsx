@@ -51,7 +51,7 @@ export default function Tooltip({ label, children, className = 'inline-flex' }) 
       {children}
       {open && createPortal(
         <div ref={tipRef} id={id} role="tooltip"
-          className="fixed z-notification pointer-events-none px-2 py-1 rounded-md bg-text-primary text-white text-[12px] leading-tight font-body whitespace-nowrap shadow-spa-elevated"
+          className="fixed z-popover pointer-events-none px-2 py-1 rounded-md bg-text-primary text-white text-[12px] leading-tight font-body whitespace-nowrap shadow-spa-elevated"
           style={{ left: pos ? pos.left : -9999, top: pos ? pos.top : -9999 }}>
           {label}
         </div>,
