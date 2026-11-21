@@ -55,6 +55,10 @@
 -- (already staff-only via RLS, not reached around here), and guest_name/guest_info on
 -- packages and vouchers (could name a different person than the one asking).
 --
+-- Payment + staff word (ZNLY-345): each booking carries payment_status and paid_amount (sum of the real
+-- payment records, never base/final price), and the response carries the org's own staff word
+-- (industries.staff_label / _plural, e.g. Therapist, Stylist, Staff) so the marketplace never hard-codes one.
+--
 -- Idempotent: ADD COLUMN IF NOT EXISTS, CREATE OR REPLACE FUNCTION.
 -- Reversible (manual):
 --   DROP FUNCTION IF EXISTS public.marketplace_lookup_customer(text, text, text);
@@ -84,6 +88,8 @@ AS $$
 DECLARE
   v_org_id uuid;
   v_org_enabled boolean;
+  v_staff_label text;
+  v_staff_label_plural text;
   v_customer_id uuid;
   v_bookings jsonb;
   v_membership jsonb;
@@ -102,11 +108,13 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
-  SELECT id, (marketplace_lookup_enabled = true OR marketplace_booking_enabled = true)
-  INTO v_org_id, v_org_enabled
-  FROM public.organizations
-  WHERE slug = p_org_slug
-    AND is_active = true;
+  SELECT o.id, (o.marketplace_lookup_enabled = true OR o.marketplace_booking_enabled = true),
+         COALESCE(i.staff_label, 'Staff'), COALESCE(i.staff_label_plural, 'Staff')
+  INTO v_org_id, v_org_enabled, v_staff_label, v_staff_label_plural
+  FROM public.organizations o
+  LEFT JOIN public.industries i ON i.id = o.industry_type
+  WHERE o.slug = p_org_slug
+    AND o.is_active = true;
 
   IF v_org_id IS NULL THEN
     RAISE EXCEPTION 'org not found or not marketplace-enabled: %', p_org_slug
@@ -135,6 +143,8 @@ BEGIN
   IF v_customer_id IS NULL THEN
     RETURN jsonb_build_object(
       'found', false,
+      'staff_label', v_staff_label,
+      'staff_label_plural', v_staff_label_plural,
       'bookings', '[]'::jsonb,
       'membership', NULL,
       'packages', '[]'::jsonb,
@@ -163,7 +173,12 @@ BEGIN
       bk.final_amount,
       bk.discount_amount,
       bk.special_requests,
-      bk.customer_gender
+      bk.customer_gender,
+      bk.payment_status::text AS payment_status,
+      -- what was really paid: payment records minus refunds (migration 099), never below 0, never the base/final price
+      GREATEST(0,
+        (SELECT COALESCE(SUM(pay.amount), 0) FROM public.payments pay WHERE pay.booking_id = bk.id)
+        - (SELECT COALESCE(SUM(rf.amount), 0) FROM public.payment_refunds rf WHERE rf.booking_id = bk.id)) AS paid_amount
     FROM public.bookings bk
     WHERE bk.customer_id = v_customer_id
       AND bk.branch_id IN (SELECT id FROM public.branches WHERE org_id = v_org_id)
@@ -262,6 +277,8 @@ BEGIN
 
   RETURN jsonb_build_object(
     'found', true,
+    'staff_label', v_staff_label,
+    'staff_label_plural', v_staff_label_plural,
     'bookings', v_bookings,
     'membership', v_membership,
     'packages', v_packages,

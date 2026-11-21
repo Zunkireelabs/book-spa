@@ -14,7 +14,10 @@ import { isAuthorized } from '../_shared/marketplace.ts';
 
 interface LookupRequest {
   org_slug: string;
-  email: string;
+  email?: string;
+  // 'status' = is this studio live on the marketplace? (ZNLY-345). Same secret, same function: one deploy,
+  // one env var, and the marketplace already knows this URL. go_live is deliberately NOT reachable from here.
+  action?: 'lookup' | 'status';
 }
 
 function json(body: unknown, status: number): Response {
@@ -46,8 +49,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ found: false, error_code: 'INVALID_JSON', message: 'Invalid JSON body' }, 400);
   }
 
-  if (!body?.org_slug || !body?.email) {
-    return json({ found: false, error_code: 'MISSING_FIELD', message: 'org_slug and email are required' }, 400);
+  const isStatus = body?.action === 'status';
+  if (body?.action !== undefined && body.action !== 'lookup' && !isStatus) {
+    return json({ found: false, error_code: 'INVALID_ACTION', message: 'Unknown action' }, 400);
+  }
+  if (!body?.org_slug || (!isStatus && !body?.email)) {
+    return json({ found: false, error_code: 'MISSING_FIELD', message: isStatus ? 'org_slug is required' : 'org_slug and email are required' }, 400);
   }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -57,6 +64,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ found: false, error_code: 'SERVER_MISCONFIGURED', message: 'Server misconfigured' }, 500);
   }
   const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+
+  if (isStatus) {
+    try {
+      const { data, error } = await supabase.rpc('marketplace_status', { p_org_slug: body.org_slug });
+      if (error) {
+        console.error('marketplace_status RPC error:', error.message);
+        return json({ status: 'error', error_code: 'UNEXPECTED_ERROR', message: 'Something went wrong checking the studio.' }, 500);
+      }
+      return json(data, 200);
+    } catch (err) {
+      console.error('marketplace-customer-lookup status error:', err instanceof Error ? err.message : String(err));
+      return json({ status: 'error', error_code: 'UNEXPECTED_ERROR', message: 'Something went wrong checking the studio.' }, 500);
+    }
+  }
 
   try {
     const { data, error } = await supabase.rpc('marketplace_lookup_customer', {

@@ -308,6 +308,155 @@ BEGIN
 END
 $qc$;
 
+-- ================================================================ ZNLY-345: status, guarded go-live, lookup payment + staff word (migrations 410, 413)
+DO $qc2$
+DECLARE
+  v_slug text := current_setting('qc.org_slug');
+  v_org uuid; v_branch uuid; v_cust uuid; v_bk uuid; v_user uuid; v_txt text; v_r jsonb; v_slug2 text;
+  v_fn text; v_branch_b uuid;
+  v_label text; v_exp_label text; v_paid numeric; v_row jsonb;
+BEGIN
+  SELECT id INTO v_org FROM organizations WHERE slug = v_slug;
+  SELECT b.id INTO v_branch FROM branches b WHERE b.org_id = v_org AND b.is_active
+    ORDER BY (SELECT count(*) FROM therapists t WHERE t.branch_id = b.id AND t.is_active) DESC, b.name LIMIT 1;
+
+  -- baseline: ONE ready branch, everything else off, so each blocker can be flipped alone (all rolled back)
+  UPDATE organizations SET is_active = true, marketplace_booking_enabled = true WHERE id = v_org;
+  UPDATE branches SET is_active = (id = v_branch) WHERE org_id = v_org;
+  UPDATE branches SET open_time = '09:00', close_time = '21:00' WHERE id = v_branch;
+  DELETE FROM branch_working_hours WHERE branch_id = v_branch;
+  UPDATE therapists SET is_active = true WHERE branch_id = v_branch;
+  UPDATE services SET is_active = true, bookable_online = true WHERE org_id = v_org;
+  UPDATE rooms SET is_active = true WHERE branch_id = v_branch;
+  v_r := public.marketplace_status(v_slug);
+  PERFORM pg_temp.rec('status: ready + flag on = live', 'live', v_r->>'status');
+  PERFORM pg_temp.rec('status: output has only status + phone (no blocker reasons)', 'phone,status', (SELECT string_agg(k, ',' ORDER BY k) FROM jsonb_object_keys(v_r) k));
+  PERFORM pg_temp.rec('status: ready org has zero blockers', '0', cardinality(public.marketplace_readiness_blockers(v_org))::text);
+
+  UPDATE organizations SET marketplace_booking_enabled = false WHERE id = v_org;
+  PERFORM pg_temp.rec('status: flag off = not_live', 'not_live', public.marketplace_status(v_slug)->>'status');
+  UPDATE organizations SET marketplace_booking_enabled = true WHERE id = v_org;
+
+  UPDATE organizations SET is_active = false WHERE id = v_org;
+  PERFORM pg_temp.rec('status: blocker org inactive = not_live', 'not_live', public.marketplace_status(v_slug)->>'status');
+  UPDATE organizations SET is_active = true WHERE id = v_org;
+
+  UPDATE branches SET open_time = NULL WHERE id = v_branch;
+  PERFORM pg_temp.rec('status: blocker no opening hours = not_live', 'not_live', public.marketplace_status(v_slug)->>'status');
+  INSERT INTO branch_working_hours (branch_id, day_of_week, is_day_off) SELECT v_branch, d, true FROM generate_series(0, 6) d;
+  PERFORM pg_temp.rec('status: blocker all days off = not_live', 'not_live', public.marketplace_status(v_slug)->>'status');
+  DELETE FROM branch_working_hours WHERE branch_id = v_branch;
+  UPDATE branches SET open_time = '09:00' WHERE id = v_branch;
+
+  UPDATE therapists SET is_active = false WHERE branch_id = v_branch;
+  PERFORM pg_temp.rec('status: blocker no active staff = not_live', 'not_live', public.marketplace_status(v_slug)->>'status');
+  UPDATE therapists SET is_active = true WHERE branch_id = v_branch;
+
+  UPDATE services SET bookable_online = false WHERE org_id = v_org;
+  PERFORM pg_temp.rec('status: blocker no online service = not_live', 'not_live', public.marketplace_status(v_slug)->>'status');
+  UPDATE services SET bookable_online = true WHERE org_id = v_org;
+
+  IF COALESCE((SELECT i.enable_rooms FROM organizations o LEFT JOIN industries i ON i.id = o.industry_type WHERE o.id = v_org), true) THEN
+    UPDATE rooms SET is_active = false WHERE branch_id = v_branch;
+    PERFORM pg_temp.rec('status: blocker no room (rooms tenant) = not_live', 'not_live', public.marketplace_status(v_slug)->>'status');
+    UPDATE rooms SET is_active = true WHERE branch_id = v_branch;
+  ELSE
+    PERFORM pg_temp.skip('status: no-room blocker', 'room-less tenant: rooms are not a blocker');
+    UPDATE rooms SET is_active = false WHERE branch_id = v_branch;
+    PERFORM pg_temp.rec('status: room-less tenant live without rooms', 'live', public.marketplace_status(v_slug)->>'status');
+    UPDATE rooms SET is_active = true WHERE branch_id = v_branch;
+  END IF;
+
+  -- one-branch rule: hours at A + staff only at B = nobody can book
+  SELECT id INTO v_branch_b FROM branches WHERE org_id = v_org AND id <> v_branch ORDER BY name LIMIT 1;
+  IF v_branch_b IS NULL THEN
+    INSERT INTO branches (org_id, name, is_active) VALUES (v_org, 'QC Branch B', true) RETURNING id INTO v_branch_b;
+  END IF;
+  UPDATE branches SET is_active = true, open_time = NULL, close_time = NULL WHERE id = v_branch_b;
+  DELETE FROM branch_working_hours WHERE branch_id = v_branch_b;
+  UPDATE therapists SET is_active = false WHERE branch_id = v_branch;      -- A: hours, no staff
+  UPDATE therapists SET is_active = false WHERE branch_id = v_branch_b;
+  INSERT INTO therapists (org_id, branch_id, name, gender, is_active) VALUES (v_org, v_branch_b, 'QC Staff B', (SELECT gender FROM therapists LIMIT 1), true);  -- B: staff, no hours
+  PERFORM pg_temp.rec('status: hours at A + staff only at B = not_live', 'not_live', public.marketplace_status(v_slug)->>'status');
+  PERFORM pg_temp.rec('status: ...and says no single location has everything', 'true',
+    (array_to_string(public.marketplace_readiness_blockers(v_org), ' ') LIKE '%No single location%')::text);
+  UPDATE branches SET is_active = false WHERE id = v_branch_b;
+  UPDATE therapists SET is_active = true WHERE branch_id = v_branch;
+  PERFORM pg_temp.rec('status: restored single ready branch = live', 'live', public.marketplace_status(v_slug)->>'status');
+  -- service scoped away from the only ready branch (link to branch B only) = not_live; excluded category too
+  INSERT INTO branch_service_links (branch_id, service_id) SELECT v_branch_b, id FROM services WHERE org_id = v_org;
+  PERFORM pg_temp.rec('status: services scoped away from the only ready branch = not_live', 'not_live', public.marketplace_status(v_slug)->>'status');
+  DELETE FROM branch_service_links WHERE branch_id = v_branch_b;
+  UPDATE branches SET excluded_service_categories = (SELECT array_agg(DISTINCT category) FROM services WHERE org_id = v_org) WHERE id = v_branch;
+  PERFORM pg_temp.rec('status: every category excluded at the only ready branch = not_live', 'not_live', public.marketplace_status(v_slug)->>'status');
+  -- uncategorised service at a branch that excludes a category: still offered (fetchServices treats NULL as offered)
+  BEGIN
+    UPDATE services SET category = NULL WHERE org_id = v_org;
+    UPDATE branches SET excluded_service_categories = ARRAY['qc-excluded'] WHERE id = v_branch;
+    PERFORM pg_temp.rec('status: uncategorised service at a branch with an exclusion = live', 'live', public.marketplace_status(v_slug)->>'status');
+  EXCEPTION WHEN not_null_violation THEN
+    PERFORM pg_temp.skip('uncategorised service with an exclusion', 'services.category is NOT NULL here');
+  END;
+  UPDATE branches SET excluded_service_categories = '{}' WHERE id = v_branch;
+  PERFORM pg_temp.rec('status: scope restored = live', 'live', public.marketplace_status(v_slug)->>'status');
+  PERFORM pg_temp.rec('status: unknown slug = not_found', 'not_found', public.marketplace_status('qc-no-such-org')->>'status');
+
+  -- go-live: refused while blockers exist, flag unchanged, plain error lists them
+  UPDATE organizations SET marketplace_booking_enabled = false WHERE id = v_org;
+  UPDATE therapists SET is_active = false WHERE branch_id = v_branch;
+  v_txt := 'no error';
+  BEGIN PERFORM public.marketplace_go_live(v_slug, true); EXCEPTION WHEN OTHERS THEN v_txt := SQLERRM; END;
+  PERFORM pg_temp.rec('go-live: refused while blockers exist and names them', 'true', (v_txt LIKE '%No active staff member%')::text);
+  PERFORM pg_temp.rec('go-live: refusal leaves the flag unchanged', 'false', (SELECT marketplace_booking_enabled::text FROM organizations WHERE id = v_org));
+  UPDATE therapists SET is_active = true WHERE branch_id = v_branch;
+  v_r := public.marketplace_go_live(v_slug, true);
+  PERFORM pg_temp.rec('go-live: allowed when ready, returns live', 'live', v_r->>'status');
+  PERFORM pg_temp.rec('go-live: flag is now on', 'true', (SELECT marketplace_booking_enabled::text FROM organizations WHERE id = v_org));
+  UPDATE therapists SET is_active = false WHERE branch_id = v_branch;
+  v_r := public.marketplace_go_live(v_slug, false);
+  PERFORM pg_temp.rec('go-live: switch off allowed even with blockers', 'not_live', v_r->>'status');
+  PERFORM pg_temp.rec('go-live: flag is now off', 'false', (SELECT marketplace_booking_enabled::text FROM organizations WHERE id = v_org));
+  UPDATE therapists SET is_active = true WHERE branch_id = v_branch;
+
+  -- grants: nobody but service_role
+  FOREACH v_fn IN ARRAY ARRAY['public.marketplace_readiness_blockers(uuid)', 'public.marketplace_status(text)', 'public.marketplace_go_live(text, boolean)'] LOOP
+    PERFORM pg_temp.rec('perm: ' || v_fn || ' service_role only', 'false/false/true',
+      has_function_privilege('anon', v_fn, 'EXECUTE')::text || '/' || has_function_privilege('authenticated', v_fn, 'EXECUTE')::text || '/' || has_function_privilege('service_role', v_fn, 'EXECUTE')::text);
+  END LOOP;
+
+  -- lookup: payment_status + paid_amount (from the payment records) + the org's own staff word, a spa org AND a beauty org
+  SELECT id INTO v_user FROM users LIMIT 1;
+  FOREACH v_slug2 IN ARRAY ARRAY['nuad-thai-spa', 'samis-qc'] LOOP
+    v_org := NULL; v_cust := NULL;
+    SELECT id INTO v_org FROM organizations WHERE slug = v_slug2;
+    IF v_org IS NOT NULL THEN
+      SELECT c.id INTO v_cust FROM customers c WHERE c.org_id = v_org AND c.email IS NOT NULL
+        AND EXISTS (SELECT 1 FROM bookings bk WHERE bk.customer_id = c.id) LIMIT 1;
+    END IF;
+    IF v_cust IS NULL THEN
+      PERFORM pg_temp.skip('lookup payment/staff word: ' || v_slug2, 'org or customer with a booking not present');
+    ELSE
+      UPDATE organizations SET marketplace_lookup_enabled = true WHERE id = v_org;
+      SELECT bk.id INTO v_bk FROM bookings bk WHERE bk.customer_id = v_cust AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.booking_id = bk.id) LIMIT 1;
+      IF v_bk IS NOT NULL AND v_user IS NOT NULL THEN
+        INSERT INTO payments (booking_id, amount, payment_mode, recorded_by) VALUES (v_bk, 123, 'cash', v_user);
+        INSERT INTO payment_refunds (booking_id, org_id, amount) VALUES (v_bk, v_org, 23);
+      END IF;
+      v_r := public.marketplace_lookup_customer(v_slug2, 'email', (SELECT email FROM customers WHERE id = v_cust));
+      SELECT COALESCE(i.staff_label, 'Staff') INTO v_exp_label FROM organizations o LEFT JOIN industries i ON i.id = o.industry_type WHERE o.id = v_org;
+      PERFORM pg_temp.rec('lookup ' || v_slug2 || ': staff word is the org''s own', v_exp_label, v_r->>'staff_label');
+      PERFORM pg_temp.rec('lookup ' || v_slug2 || ': every booking has payment_status + paid_amount', 'true',
+        (SELECT bool_and((b ? 'payment_status') AND (b ? 'paid_amount') AND (b->>'payment_status') IS NOT NULL) FROM jsonb_array_elements(v_r->'bookings') b)::text);
+      IF v_bk IS NOT NULL AND v_user IS NOT NULL THEN
+        SELECT b INTO v_row FROM jsonb_array_elements(v_r->'bookings') b WHERE false;
+        SELECT (SELECT b FROM jsonb_array_elements(v_r->'bookings') b WHERE b->>'booking_number' = (SELECT booking_number FROM bookings WHERE id = v_bk)) INTO v_row;
+        PERFORM pg_temp.rec('lookup ' || v_slug2 || ': paid_amount = payments 123 minus refund 23 (not the price)', '100', round((v_row->>'paid_amount')::numeric)::int::text);
+      END IF;
+    END IF;
+  END LOOP;
+END
+$qc2$;
+
 SELECT n, result, name, expected, got FROM qc ORDER BY n;
 SELECT count(*) FILTER (WHERE result = 'PASS') AS pass, count(*) FILTER (WHERE result = 'FAIL') AS fail,
        count(*) FILTER (WHERE result = 'SKIP') AS skip, count(*) AS total,
