@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-21** by Project Manager · 284 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-21** by Project Manager · 287 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -56,8 +56,8 @@ Last synced: **2026-11-21** by Project Manager · 284 open tickets (epics exclud
 | ZNLY-318 | Sadin | high | One staff control everywhere: a closed staff row that opens the list (dropdown on desktop, sheet on phone) in New booking Individual, the booking panel Staff tab and Assign |
 | ZNLY-320 | Sadin | high | One service control everywhere: a closed service row that opens the list (dropdown on desktop/tablet, sheet on phone), with clean rows, category headers and "Most booked" |
 | ZNLY-322 | Sadin | high | New booking → Group: the required service row gets lost (no own label, looks optional, "Fill free staff" box shows before a service) |
-| ZNLY-323 | Sadin | high | Phone country picker: every country (Nepal default) with search, in the shared CountryCodeSelect |
 | ZNLY-324 | Sadin | high | Booking panel → Edit details: redesign to match New booking (no layout gap, shared phone field, shared date/time controls) |
+| ZNLY-327 | Sadin | high | Walk-in customers: book without name/phone ("Walk-in" in the customer field), keep the record, add the client later; stop fake walk-in names and numbers |
 | ZNLY-136 | Anish | medium | Group booking (Fresha-style): book multiple people, one shared slot, one checkout |
 | ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
 | ZNLY-175 | Sadin | medium | Therapist inner page: outcomes bar total counts upcoming bookings that sit in no bucket |
@@ -147,6 +147,7 @@ Last synced: **2026-11-21** by Project Manager · 284 open tickets (epics exclud
 | ZNLY-250 | Sadin | high | QC Accepted | Customer detail page numbers use old rules: Amount owing counts upcoming/cancelled bookings; Last Visit can be a future booking (disagrees with Customers list + panel) |
 | ZNLY-263 | Sadin | high | In Review | Login pages redesign (/login org finder and /:org/login): split layout, our current stack |
 | ZNLY-302 | Sadin | high | QC Accepted | QC: Calendar (phone + desktop) — the grid pans diagonally; should lock to one direction per swipe (sideways OR up/down), like Fresha and Google Calendar |
+| ZNLY-323 | Sadin | high | QC Accepted | Phone country picker: every country (Nepal default) with search, in the shared CountryCodeSelect |
 | ZNLY-67 | Sadin | medium | In Review | UI-1: Calendar exact-match port + app shell from ClinicMD (pre-V5) |
 | ZNLY-68 | Sadin | medium | In Review | UI-2 (V5–V9): Panel unification — forms, details, settings, campaigns → right-hand panels |
 | ZNLY-69 | Sadin | medium | In Review | UI-3 (V11–V13): Customers redesign — list, lifecycle strip, panel, collect, Spotlight, one-scroll header |
@@ -189,6 +190,7 @@ Last synced: **2026-11-21** by Project Manager · 284 open tickets (epics exclud
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-180 | — | medium | Attendance worked time rounded to 0.1 h before display (1 h 32 min shows as 1 h 30 min) |
 | ZNLY-325 | Sadin | medium | Portalled popovers may render behind side panels/modals (z-dropdown 300 < z-modal 1000): BookingHoverCard, PaymentModal, BookingActionModal |
+| ZNLY-329 | Sadin | medium | Dashboard Live floor: right after a side panel closes, timeline rows render wider than the card (bars spill past its left edge and over Needs action) |
 
 ## Waiting on owner
 | Ticket | Owner | Priority | What |
@@ -224,6 +226,7 @@ Last synced: **2026-11-21** by Project Manager · 284 open tickets (epics exclud
 | ZNLY-266 | Sadin | high | Confirm booking fails silently when the room is at capacity (HTTP 500 ROOM_AT_CAPACITY, no message shown) |
 | ZNLY-270 | Sadin | high | Padding & Processing time is saved on the service but every booking ignores it (setting promises staff are freed; they aren't) |
 | ZNLY-283 | Sadin | high | "View only" calendar access (own_view / all_view) is not enforced: those logins can still create, edit, start and collect |
+| ZNLY-328 | Sadin | high | Prod data clean-up: ~1,000 "walk in N" bookings and placeholder phone numbers (97797000, 977123456, 9770000000000…) that merge hundreds of real people into fake profiles (Nuad) |
 | ZNLY-16 | — | medium | RLS access harness (6 principals x 64 tables) — confirm merged |
 | ZNLY-20 | — | medium | Legacy-domain redirect (zenly.zunkireelabs.com → app.zennly.io) + retire old domains |
 | ZNLY-21 | — | medium | Auth email via Resend SMTP (no-reply@mail.zennly.io) + DKIM/SPF/DMARC + templates |
