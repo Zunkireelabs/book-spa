@@ -7014,10 +7014,15 @@ export async function createBooking({
   // incident this fixed. Never set this from a value the caller typed; only
   // from a column that's already a real customers.id.
   knownCustomerId,
+  // ZNLY-327: a walk-in who gives no details. No customer profile, no phone: customerName is "Walk-in" or "Walk-in · <label>",
+  // customer_id stays NULL and the row is flagged so counts, reminders and campaigns can leave it out. Never combined with knownCustomerId.
+  isWalkIn = false,
+  walkInLabel = null,
 }) {
   try {
     const availabilityOverride = overrideReasonOf(overrideReason);
-    if ((!customerPhone || !customerPhone.trim()) && !knownCustomerId) {
+    if (isWalkIn) { knownCustomerId = undefined; customerPhone = null; customerEmail = null; }
+    if (!isWalkIn && (!customerPhone || !customerPhone.trim()) && !knownCustomerId) {
       return { data: null, error: { message: 'Phone number is required' } };
     }
 
@@ -7037,7 +7042,7 @@ export async function createBooking({
     // masked text must never land in bookings.customer_name/_phone — that was
     // exactly the Yukta Dhungana-style corruption this closes, made automatic
     // instead of a one-off typo.
-    if (knownCustomerId) {
+    if (knownCustomerId && !isWalkIn) {
       const { data: realCustomer, error: custLookupErr } = await supabase
         .from('customers')
         .select('full_name, phone, email')
@@ -7058,7 +7063,7 @@ export async function createBooking({
       if (!customerPhone && !customerEmail) {
         return { data: null, error: { code: 'NO_CONTACT_INFO', message: 'This customer has no phone or email on file — add one to their profile before booking.' } };
       }
-    } else {
+    } else if (!isWalkIn) {
       customerName = toTitleCase(customerName);
     }
     const resolvedBranchId = resolveBranchId(branchId);
@@ -7252,7 +7257,7 @@ export async function createBooking({
     // for the acting account, and the lookup below unconditionally overwrites
     // full_name/phone/email on a match, which is exactly how masked text would
     // corrupt a real customer record).
-    if (!knownCustomerId) try {
+    if (!knownCustomerId && !isWalkIn) try {
       // Canonical E.164 ("+<countrycode><national>") so the same number always
       // resolves to the same customer regardless of how it was typed, and two
       // different countries' numbers never collide. See src/utils/phone.js.
@@ -7470,6 +7475,7 @@ export async function createBooking({
       therapist_id: primaryTherapistId,
       customer_id: customerId,
       customer_name: customerName,
+      ...(isWalkIn ? { is_walk_in: true, walk_in_label: walkInLabel?.trim() || null } : {}),
       customer_email: customerEmail || null,
       customer_phone: toE164(customerPhone),
       customer_gender: customerGender || null,
@@ -11501,6 +11507,31 @@ export async function dismissDuplicateCandidate(orgId, customerIdA, customerIdB)
   } catch (error) {
     console.error('[API] dismissDuplicateCandidate error:', error.message);
     return { data: null, error };
+  }
+}
+
+// ZNLY-327: the customers this branch booked most recently (latest booking date/time first, ties by name), for the customer picker's
+// "Recent customers". Returns { data: [customerId...] }; walk-ins have no customer. Reads recent bookings only, never the whole history.
+export async function fetchRecentCustomerIds(branchId, limit = 8) {
+  try {
+    if (!branchId || isOverallBranch(branchId)) return { data: [], error: null };
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('customer_id, customer_name, date, start_time')
+      .eq('branch_id', resolveBranchId(branchId))
+      .not('customer_id', 'is', null)
+      .order('date', { ascending: false })
+      .order('start_time', { ascending: false })
+      .limit(300);
+    if (error) throw error;
+    const latest = new Map();
+    for (const b of data || []) if (!latest.has(b.customer_id)) latest.set(b.customer_id, b);
+    const ids = [...latest.values()]
+      .sort((x, y) => (y.date + y.start_time).localeCompare(x.date + x.start_time) || String(x.customer_name).localeCompare(String(y.customer_name)))
+      .slice(0, limit).map((b) => b.customer_id);
+    return { data: ids, error: null };
+  } catch (error) {
+    return { data: [], error };
   }
 }
 

@@ -30,6 +30,8 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
         customerEmail: person.customerEmail,
         customerGender: person.customerGender,
         knownCustomerId: person.knownCustomerId || undefined, // ZNLY-303: a guest picked from customer search links to that customer
+        isWalkIn: person.isWalkIn || undefined, // ZNLY-327
+        walkInLabel: person.walkInLabel || undefined,
         specialRequests: formData.specialRequests,
         therapistIds: person.therapistIds,
         roomId: person.roomId || undefined,
@@ -66,6 +68,8 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
     referringRewardType: formData.referringRewardType,
     referringRewardAmount: formData.referringRewardAmount,
     knownCustomerId: formData.knownCustomerId || undefined,
+    isWalkIn: formData.isWalkIn || undefined, // ZNLY-327: no customer profile
+    walkInLabel: formData.walkInLabel || undefined,
     overrideReason,
   }));
   if (result.error) return { error: friendlyError(result.error, 'Failed to create booking.'), code: result.error.code };

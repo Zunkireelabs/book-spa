@@ -36,7 +36,7 @@ import AvailabilityNoteLine from './AvailabilityNoteLine';
 import { AlertsBlock } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
 import { getBookingStatusColors } from '../../utils/bookingStatusColors';
 import { editFormChanged } from '../../utils/editDetails';
-import { formatPhoneGrouped, phoneToSave } from '../../utils/phone';
+import { formatPhoneGrouped, phoneToSave, phoneEditProblem } from '../../utils/phone';
 import CountryCodeSelect, { parsePhone } from './CountryCodeSelect';
 import DateTimeRow from './DateTimeRow';
 import { useBlockOverlap } from '../../hooks/useBlockOverlap';
@@ -821,6 +821,8 @@ const BookingActionModal = ({
     setEditError(null);
   };
 
+  // ZNLY-327: a phone typed in Edit details must be a real number for its country; a number left untouched always saves as stored.
+  const editPhoneProblem = phoneEditProblem({ dial: editForm.phoneDial, national: editForm.phoneNational, initialDial: editForm.phoneDialInitial, initialNational: editForm.phoneNationalInitial });
   const handleSaveEdit = async () => {
     if (!booking || !onEditBooking) return;
     setEditError(null);
@@ -830,6 +832,7 @@ const BookingActionModal = ({
       return;
     }
     if (editBlockMsg) return;
+    if (editPhoneProblem) { setEditError(editPhoneProblem); return; }
 
     // Same stored format as New booking (dial + digits); an untouched number is sent back exactly as stored.
     const savedPhone = phoneToSave({ dial: editForm.phoneDial, national: editForm.phoneNational, initialDial: editForm.phoneDialInitial, initialNational: editForm.phoneNationalInitial, original: editForm.customerPhone });
@@ -2238,6 +2241,7 @@ const BookingActionModal = ({
                           className="flex-1 min-w-0 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                         />
                       </div>
+                      {editPhoneProblem && <p className="mt-1.5 text-xs text-error" role="alert">{editPhoneProblem}</p>}
                     </div>
                   </div>
                 ) : (

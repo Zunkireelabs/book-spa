@@ -14,7 +14,8 @@
 // sides through `toE164()` so a legacy bare-national straggler still matches a
 // freshly-normalised value.
 
-import { DIAL_CODES } from './countries';
+import { parsePhoneNumberFromString } from 'libphonenumber-js/min';
+import { DIAL_CODES, countryByDial } from './countries';
 
 const DEFAULT_DIAL = '+977'; // Nepal — the app's home country
 
@@ -121,4 +122,34 @@ export function phoneToSave({ dial, national, initialDial, initialNational, orig
   if (dial === initialDial && national === initialNational) return String(original || '').trim() || null;
   const digits = String(national || '').replace(/\D/g, '');
   return digits ? `${dial}${digits}` : null;
+}
+
+// ZNLY-327: one validator for a typed phone number, any country. A number is rejected when it is not a valid number for the dial code's country
+// (too short / too long / a pattern no carrier uses: libphonenumber-js, min metadata), when every digit is the same, or when it is a plain
+// run (123456..., 9876543210). Only for numbers someone TYPED: a stored number is never re-checked (see phoneToSave's "untouched" rule).
+const isRun = (d) => {
+  if (d.length < 6) return false;
+  const steps = new Set();
+  for (let i = 1; i < d.length; i += 1) steps.add((Number(d[i]) - Number(d[i - 1]) + 10) % 10);
+  return steps.size === 1 && (steps.has(1) || steps.has(9));
+};
+export function isValidPhone(dial, national) {
+  const d = String(national || '').replace(/\D/g, '');
+  if (!d) return false;
+  if (/^(\d)\1+$/.test(d) || isRun(d)) return false;
+  const parsed = parsePhoneNumberFromString(`${dial}${d}`);
+  return !!parsed && parsed.isValid();
+}
+
+/** The plain-language reason a typed number is rejected, or '' when it is fine (or empty: "required" is the caller's rule). */
+export function phoneProblem(dial, national) {
+  if (!String(national || '').replace(/\D/g, '')) return '';
+  if (isValidPhone(dial, national)) return '';
+  return `This number isn't valid for ${countryByDial(dial).name}. Use Walk-in if the customer has no number.`;
+}
+
+/** Edit forms: the reason to block a save, only when the number was changed from what was loaded ('' = fine; an untouched number always saves). */
+export function phoneEditProblem({ dial, national, initialDial, initialNational }) {
+  if (dial === initialDial && national === initialNational) return '';
+  return phoneProblem(dial, national);
 }

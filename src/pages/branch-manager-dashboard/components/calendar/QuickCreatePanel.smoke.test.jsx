@@ -52,10 +52,10 @@ describe('QuickCreatePanel smoke', () => {
       prefill: { fullName: 'Hema Devi', phone: '+9779841000000', email: 'hema@example.com', gender: 'Female', serviceId: 's1' },
     });
     render(<QuickCreatePanel {...props} slotInfo={slot} />);
-    expect(document.querySelector('input[value="Hema Devi"]')).toBeTruthy();
-    expect(document.querySelector('input[value="9841000000"]')).toBeTruthy();
-    expect(document.querySelector('input[value="hema@example.com"]')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Female' }).className).toMatch(/primary|bg-/);
+    // ZNLY-327: a known customer is an "existing" pick: the customer row shows name + phone (the typed fields only show for a new customer).
+    expect(screen.getByText('Hema Devi')).toBeTruthy();
+    expect(screen.getByText('+977 984-100-0000')).toBeTruthy();
+    expect(screen.getByText('Existing customer')).toBeTruthy();
     expect(screen.getByText(/Massage/)).toBeTruthy();
     expect(screen.getByDisplayValue('5:30pm')).toBeTruthy();
   });

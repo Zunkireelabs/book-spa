@@ -646,6 +646,7 @@ const CalendarGrid = ({
         customerName: b.customer_name,
         customerPhone: b.customer_phone || null,
         companionName: b.companion_name || null, // couple: the second guest's name
+        isWalkIn: !!b.is_walk_in, // ZNLY-327: customerName already reads "Walk-in · <label>"
         customerId: b.customer_id || null, // ZNLY-281: same-client highlight matches on this id only
         serviceName: b.service?.name || 'Service',
         serviceDuration: b.service?.duration_minutes || null,

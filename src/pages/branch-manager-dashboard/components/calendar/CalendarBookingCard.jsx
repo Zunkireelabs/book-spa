@@ -176,6 +176,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
   }, [tier, booking.serviceName, tag, outsideHours]);
   const serviceBits = (
     <>
+      {booking.isWalkIn && <span className="font-bold text-[10px] uppercase tracking-wide text-warning">Walk-in · </span>}
       {tag && <span className="font-medium text-[11px]" style={{ color: tagColor }}>· {tag}{booking.serviceName ? ' · ' : ''}</span>}
       {outsideHours && <span className="font-medium text-[11px]" style={{ color: OUTSIDE_HOURS_OUTLINE }}>· {outsideHours}{booking.serviceName ? ' · ' : ''}</span>}
       {booking.serviceName}
@@ -230,7 +231,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       }}
       className={`absolute left-1 right-1 rounded-spa overflow-visible outline-none focus-visible:ring-2 focus-visible:ring-primary/60 transition-colors duration-150 ease-out hover:z-dropdown hover:brightness-[0.97] ${
         isDraggable && !isResizing ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
-      } ${isSelected ? 'ring-2 ring-primary ring-offset-1' : ''} ${isPanelSelected ? 'ring-2 ring-primary z-[3] shadow-spa-elevated' : ''}`}
+      } ${isSelected ? 'ring-2 ring-primary ring-offset-1' : ''} ${isPanelSelected ? 'ring-2 ring-primary z-[3] shadow-spa-elevated' : ''} ${booking.isWalkIn && !isPanelSelected ? 'shadow-[inset_4px_0_0_0_theme(colors.warning/40%)]' : ''}`}
       data-booking-card="true"
       data-booking-key={booking.bookingId || booking.id}
       data-outside-hours={outsideHours ? 'true' : undefined}

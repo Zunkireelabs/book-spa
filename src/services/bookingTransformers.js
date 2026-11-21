@@ -177,6 +177,8 @@ export function transformBooking(dbBooking) {
     id: dbBooking.booking_number,
     bookingId: dbBooking.id,
     customerId: dbBooking.customer_id || null,
+    isWalkIn: !!dbBooking.is_walk_in, // ZNLY-327
+    walkInLabel: dbBooking.walk_in_label || null,
     customerName: dbBooking.customer_name,
     customerEmail: dbBooking.customer_email || null,
     customerPhone: dbBooking.customer_phone || null,

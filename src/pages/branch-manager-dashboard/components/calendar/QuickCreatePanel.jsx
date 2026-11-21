@@ -10,6 +10,9 @@ import AvailabilityNotice from '../../../../components/ui/AvailabilityNotice';
 import { useAvailabilityPrecheck } from '../../../../hooks/useAvailabilityPrecheck';
 import { useIndustry } from '../../../../hooks/useIndustry';
 import ServicePickRow from '../../../../components/ui/ServicePickRow';
+import CustomerPickRow from '../../../../components/ui/CustomerPickRow';
+import { phoneProblem } from '../../../../utils/phone';
+import { customerSavePayload, customerMissing, seedFromSearch, PICK_REASON } from '../../../../utils/customerPick';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
@@ -46,6 +49,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [knownCustomerId, setKnownCustomerId] = useState(null);
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerGender, setCustomerGender] = useState('');
+  // ZNLY-327: how the customer was chosen: 'new' (typed details) | 'existing' (picked) | 'walkin' (no profile) | null (nothing picked yet).
+  const [customerKind, setCustomerKind] = useState(null);
+  const [profileMissing, setProfileMissing] = useState({ email: false, gender: false }); // an existing customer's profile lacks these: show the fields to fill them
+  const [walkInLabel, setWalkInLabel] = useState(''); // optional first name for a walk-in
   const [specialRequests, setSpecialRequests] = useState('');
   const [dragMinutes, setDragMinutes] = useState(0); // length of the range dragged on the grid; used until a service is picked
   const [selectedTherapistIds, setSelectedTherapistIds] = useState([]);
@@ -128,6 +135,26 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     checkPreviousDue(customer.phone);
   }, [checkPreviousDue]);
 
+  const handleCustomerPick = (choice) => {
+    if (choice.kind === 'walkin') {
+      setCustomerKind('walkin');
+      setCustomerName(''); setCustomerPhone(''); setCustomerEmail(''); setCustomerGender('');
+      setKnownCustomerId(null); setIsExistingCustomer(false); setPreviousDue(null);
+      setReferringCustomerId(''); setReferringCustomerPhone(''); setReferringCustomerName(''); setReferringRewardAmount('');
+    } else if (choice.kind === 'existing') {
+      handleCustomerSelect(choice.customer);
+      setKnownCustomerId(null); // saved by phone as before, so an email / gender typed below reaches the profile
+      setProfileMissing({ email: !choice.customer.email, gender: !choice.customer.gender });
+      setCustomerKind('existing');
+    } else {
+      const seed = seedFromSearch(choice.seed);
+      if (customerKind === 'new' && !choice.seed) return;
+      setCustomerKind('new');
+      setKnownCustomerId(null); setIsExistingCustomer(false); setPreviousDue(null);
+      setCustomerName(seed.name); setCustomerPhone(seed.phone); setCustomerEmail(''); setCustomerGender('');
+    }
+  };
+
   const handleCustomerNameChange = useCallback((v) => {
     setCustomerName(v);
     setIsExistingCustomer(false);
@@ -165,6 +192,12 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setKnownCustomerId(slotInfo?.defaultCustomerId || null);
     setCustomerEmail(slotInfo?.defaultCustomerEmail || '');
     setCustomerGender(slotInfo?.defaultCustomerGender ? String(slotInfo.defaultCustomerGender).toLowerCase() : '');
+    // The dashboard Walk-in button opens with Walk-in preselected; a known customer (Book from Customers / waitlist) starts as an existing pick.
+    setCustomerKind(slotInfo?.walkIn ? 'walkin'
+      : slotInfo?.defaultCustomerId || (slotInfo?.defaultCustomerExisting && slotInfo?.defaultCustomerPhone) ? 'existing'
+        : (slotInfo?.defaultCustomerName || slotInfo?.defaultCustomerPhone) ? 'new' : null);
+    setWalkInLabel('');
+    setProfileMissing({ email: !slotInfo?.defaultCustomerEmail, gender: !slotInfo?.defaultCustomerGender });
     setSpecialRequests('');
     setIsExistingCustomer(false);
     setReferringCustomerId('');
@@ -263,7 +296,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   }, [dayBlocks, bookingDate, bookingTime, bookingMode, people, groupType, groupRoomId, serviceMode, groupServiceId, selectedTherapistIds, roomId, selectedService, services, dragMinutes]);
 
   // Everything a rejection could depend on. A saved rejection stays (and Create stays off) only while this is unchanged.
-  const formKey = JSON.stringify([bookingMode, bookingDate, bookingTime, serviceId, selectedTherapistIds, roomId, customerName, customerPhone, knownCustomerId,
+  const formKey = JSON.stringify([bookingMode, bookingDate, bookingTime, serviceId, selectedTherapistIds, roomId, customerName, customerPhone, knownCustomerId, customerKind, walkInLabel,
     people, groupServiceId, groupRoomId, serviceMode, groupType, therapistRoomOverrides, comboTherapistOverrides, comboRoomOverrides]);
 
   // Parse room capacity from amenities (e.g., "3 Room" → 3, "1 Bed" → 1)
@@ -356,7 +389,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setPeople((prev) => {
       const next = prev.slice(0, peopleCount);
       while (next.length < peopleCount) {
-        next.push({ name: '', phone: '', countryCode: '+977', email: '', gender: '', therapistId: '', serviceId: '', roomId: '' });
+        next.push({ name: '', phone: '', countryCode: '+977', email: '', gender: '', therapistId: '', serviceId: '', roomId: '', kind: next.length === 0 && slotInfo?.walkIn ? 'walkin' : null, label: '' });
       }
       return next;
     });
@@ -485,6 +518,18 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     }
   };
 
+  // ZNLY-327: the booking contact's customer row (same three choices as the single booking).
+  const handleContactPick = (choice) => {
+    const blank = { name: '', phone: '', email: '', gender: '', customerId: null, previousDue: null };
+    if (choice.kind === 'walkin') setPerson(0, { ...blank, kind: 'walkin', label: '' });
+    else if (choice.kind === 'existing') { handleGuestCustomerSelect(0, choice.customer); setPerson(0, { kind: 'existing', label: '' }); }
+    else {
+      if (people[0]?.kind === 'new' && !choice.seed) return;
+      const seed = seedFromSearch(choice.seed);
+      setPerson(0, { ...blank, kind: 'new', label: '', name: seed.name, phone: seed.phone });
+    }
+  };
+
   const ordinal = (n) => {
     const s = ['th', 'st', 'nd', 'rd'];
     const v = n % 100;
@@ -527,11 +572,12 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   };
 
   // Same mode → one shared service; Different mode → every person must pick one.
+  const contactPhoneProblem = phoneProblem(people[0]?.countryCode || '+977', people[0]?.phone);
   const groupServiceValid = serviceMode === 'same'
     ? !!groupServiceId
     : (people.length > 0 && people.every((p) => !!p.serviceId));
   const groupValid = bookingMode !== 'group'
-    || (people[0]?.name?.trim() && people[0]?.phone?.replace(/\D/g, '') && groupServiceValid);
+    || (people[0]?.kind === 'walkin' ? groupServiceValid : (people[0]?.kind && people[0]?.name?.trim() && people[0]?.phone?.replace(/\D/g, '') && !(people[0].kind === 'new' && contactPhoneProblem) && groupServiceValid));
 
   const buildGroupPeople = () => {
     // Blank "other" persons inherit the booking contact's credentials.
@@ -541,7 +587,12 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       ? (lead.countryCode || '+977') + lead.phone.replace(/\D/g, '')
       : null;
     const leadEmail = lead.email?.trim();
-    return people.map((p, idx) => ({
+    const leadWalkIn = lead.kind === 'walkin';
+    return people.map((p, idx) => {
+      const blankGuest = idx > 0 && !p.name?.trim() && !p.phone?.replace(/\D/g, '') && !p.email?.trim();
+      // ZNLY-327: a walk-in contact is a walk-in with no profile; a guest left fully blank shares that, never a made-up customer.
+      const walkIn = leadWalkIn && (idx === 0 || blankGuest) ? customerSavePayload({ kind: 'walkin', walkInLabel: lead.label }) : null;
+      return {
       customerName: p.name?.trim() || (idx === 0 ? null : leadName) || null,
       customerPhone: p.phone?.replace(/\D/g, '')
         ? (p.countryCode || '+977') + p.phone.replace(/\D/g, '')
@@ -553,7 +604,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       roomId: groupType === 'couple' ? (groupRoomId || null) : (p.roomId || null),
       // ZNLY-303: a picked customer links the booking; a guest left fully blank is the contact, so shares their link.
       knownCustomerId: p.customerId || (idx > 0 && !p.name?.trim() && !p.phone?.replace(/\D/g, '') && !p.email?.trim() ? lead.customerId : null) || null,
-    }));
+      ...(walkIn || {}),
+      };
+    });
   };
 
   // Which field a rejection is about (null = the whole booking, e.g. a network failure).
@@ -564,9 +617,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     if (/slot|time|booked|closed|date|day|hours|window|advance|past/i.test(text)) return 'time';
     return null;
   };
+  const customerFields = { kind: customerKind, name: customerName, phone: customerPhone, countryCode: customerCountryCode, email: customerEmail, gender: customerGender, knownCustomerId, walkInLabel };
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || (!customerPhone.replace(/\D/g, '') && !knownCustomerId))) return;
+    if (bookingMode === 'group' ? !groupValid : (!serviceId || customerMissing(customerFields))) return;
     if (blockOverlapMsg) return;
     // Synchronous re-entry guard: the `submitting` state disables the button
     // only after a re-render, so a fast double-click can fire two submits and
@@ -585,13 +639,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         }
       : {
           serviceId,
-          customerName: customerName.trim(),
-          knownCustomerId: knownCustomerId || undefined,
-          customerPhone: customerPhone.replace(/\D/g, '')
-            ? customerCountryCode + customerPhone.replace(/\D/g, '')
-            : null,
-          customerEmail: customerEmail.trim() || null,
-          customerGender: customerGender || null,
+          ...customerSavePayload(customerFields),
           specialRequests: specialRequests.trim() || null,
           therapistIds: selectedTherapistIds.length > 0 ? selectedTherapistIds : null,
           roomId: roomId || null,
@@ -644,13 +692,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   }, [isOpen]);
 
   // ── Dirty-draft guard ─────────────────────────────────────────────────────────────────
-  const peopleEdited = people.some((p) => p.name || p.phone || p.email || p.gender || p.therapistId || p.serviceId || p.roomId);
+  const peopleEdited = people.some((p, i) => p.name || p.phone || p.email || p.gender || p.therapistId || p.serviceId || p.roomId || p.label || (i === 0 && p.kind && p.kind !== (slotInfo?.walkIn ? 'walkin' : null)));
   // "Dirty" = the user edited something that is NOT the slot itself. Date, time and column come from the slot (and are
   // moved silently by retargeting); service, customer, contact, notes, group members, referral, and a therapist/room
   // choice that differs from what the slot set all count as an edit.
   const isDirty = isOpen && (
     !!(serviceId || customerName.trim() || customerPhone.trim() || customerEmail.trim() || customerGender || specialRequests.trim()
-      || groupServiceId || peopleEdited || referringCustomerName)
+      || (customerKind === 'walkin' && !slotInfo?.walkIn) || walkInLabel.trim() || groupServiceId || peopleEdited || referringCustomerName)
     || selectedTherapistIds.join(',') !== (initialDraftRef.current.therapist ? initialDraftRef.current.therapist : '')
     || (roomId || '') !== initialDraftRef.current.room
   );
@@ -720,17 +768,21 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const groupServiceMissing = serviceMode === 'same' ? !groupServiceId : people.some((q) => !q.serviceId);
   const groupInvalidReason = groupServiceMissing
     ? (serviceMode === 'same' ? 'Pick a service' : `Pick a service for ${people.findIndex((q) => !q.serviceId) === 0 ? 'the booking contact' : `Person ${people.findIndex((q) => !q.serviceId) + 1}`}`)
-    : 'Add the booking contact';
+    : !people[0]?.kind ? PICK_REASON : (people[0].kind === 'new' && people[0].name?.trim() && contactPhoneProblem) ? contactPhoneProblem : 'Add the booking contact';
   // ZNLY-322: tapping the "Pick a service" footer reason scrolls to the first empty service row and rings it for 3 s.
   const [flashSvc, setFlashSvc] = useState(null);
   const firstEmptySvcField = bookingMode === 'individual' ? (serviceId ? null : 'service')
     : serviceMode === 'same' ? (groupServiceId ? null : 'service')
       : (() => { const k = people.findIndex((q) => !q.serviceId); return k < 0 ? null : `service-${k}`; })();
   useEffect(() => { if (!flashSvc) return undefined; const t = setTimeout(() => setFlashSvc(null), 3000); return () => clearTimeout(t); }, [flashSvc]);
+  // ZNLY-327: the customer reason works the same way, after the service (form order).
+  const customerUnpicked = bookingMode === 'individual' ? !customerKind : !people[0]?.kind;
+  const phoneBad = bookingMode === 'individual' ? customerKind === 'new' && !!customerName.trim() && !!phoneProblem(customerCountryCode, customerPhone) : people[0]?.kind === 'new' && !!contactPhoneProblem;
+  const firstEmptyField = firstEmptySvcField || (customerUnpicked ? 'customer' : phoneBad ? 'phone' : null);
   const tapPickService = () => {
-    if (!firstEmptySvcField) return;
-    setFlashSvc(firstEmptySvcField);
-    requestAnimationFrame(() => document.querySelector(`[data-qc-field="${firstEmptySvcField}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+    if (!firstEmptyField) return;
+    setFlashSvc(firstEmptyField);
+    requestAnimationFrame(() => document.querySelector(`[data-qc-field="${firstEmptyField}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
   };
   // Neutral note while Create is enabled (mockup step 3-7): what happens on tap.
   const groupReadyNote = bookingMode === 'group' && groupValid && !groupProblemFooter && !groupStaffIncomplete && bookingTime
@@ -746,8 +798,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     ? (/^Overlaps '(Transferred|Visiting)/.test(blockOverlapMsg) ? `${staffLabel} unavailable` : 'Overlaps a block')
     : bookingMode === 'group'
       ? (!groupValid ? groupInvalidReason : groupProblemFooter || (groupStaffIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : ''))
-      : !serviceId ? 'Pick a service' : couplePickIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : !customerName.trim() ? 'Enter the customer name' : (!customerPhone.replace(/\D/g, '') && !knownCustomerId) ? 'Enter the customer phone' : '';
-  const createDisabled = submitting || !!activeError || !!blockOverlapMsg || precheck.blocked || couplePickIncomplete || (bookingMode === 'group' && (!!groupProblemFooter || groupStaffIncomplete)) || (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || (!customerPhone.replace(/\D/g, '') && !knownCustomerId)));
+      : !serviceId ? 'Pick a service' : couplePickIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : customerMissing(customerFields);
+  const createDisabled = submitting || !!activeError || !!blockOverlapMsg || precheck.blocked || couplePickIncomplete || (bookingMode === 'group' && (!!groupProblemFooter || groupStaffIncomplete)) || (bookingMode === 'group' ? !groupValid : (!serviceId || !!customerMissing(customerFields)));
   const confirmSlotLabel = confirm?.type === 'move'
     ? [therapists.find((d) => d.id === confirm.slot.colId)?.name || rooms.find((c) => c.id === confirm.slot.colId)?.name || confirm.slot.colName,
        confirm.slot.day,
@@ -783,7 +835,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   ) : (
     <div key="actions" className="flex flex-wrap sm:flex-nowrap items-center justify-end gap-x-3 gap-y-2">
       {/* Phone: the reason gets its own full-width line (max 2 lines) above the buttons; from sm it sits beside them as before. */}
-      <p className={`min-w-0 text-xs ${activeError || precheck.blocked || blockOverlapMsg ? 'text-error font-medium' : 'text-text-secondary'} basis-full line-clamp-2 sm:basis-auto sm:flex-1 sm:line-clamp-3 ${(createDisabled && disabledReason) || groupReadyNote ? '' : 'hidden sm:block'}`} role={activeError ? 'alert' : undefined} aria-live="polite">{createDisabled && firstEmptySvcField && /^Pick a service/.test(disabledReason || '') && !activeError
+      <p className={`min-w-0 text-xs ${activeError || precheck.blocked || blockOverlapMsg ? 'text-error font-medium' : 'text-text-secondary'} basis-full line-clamp-2 sm:basis-auto sm:flex-1 sm:line-clamp-3 ${(createDisabled && disabledReason) || groupReadyNote ? '' : 'hidden sm:block'}`} role={activeError ? 'alert' : undefined} aria-live="polite">{createDisabled && firstEmptyField && /^(Pick a (service|customer)|This number)/.test(disabledReason || '') && !activeError
         ? <button type="button" onClick={tapPickService} className="text-left text-error font-medium underline underline-offset-2">{disabledReason}</button>
         : (createDisabled ? disabledReason : groupReadyNote)}</p>
       <button
@@ -1078,11 +1130,34 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               </div>
             )}
 
-            {/* Customer name */}
+            {/* Customer: one closed row (ZNLY-327), like Service and Staff */}
             <div data-qc-field="customer" className={fieldRing('customer')}>
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                Customer Name <span className="text-error">*</span>
-                {isExistingCustomer && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
+                Customer <span className="text-error">*</span>
+                {customerKind === 'existing' && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
+              </label>
+              <CustomerPickRow invalid={flashSvc === 'customer' && !customerKind} kind={customerKind} name={customerName} phone={customerPhone ? `${customerCountryCode}${customerPhone}` : ''} sub={svcSubLine} branchId={branchId} onPick={handleCustomerPick} />
+            </div>
+
+            {customerKind === 'walkin' && (
+              <div>
+                <label className="flex items-baseline justify-between font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                  <span>Name</span><span className="text-xs font-normal text-text-secondary">optional</span>
+                </label>
+                <input type="text" value={walkInLabel} onChange={(e) => setWalkInLabel(e.target.value)} placeholder="First name, e.g. Ram" maxLength={40}
+                  className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                <p className="mt-1.5 text-xs text-text-secondary">No customer profile is created. You can add the client later from the booking.</p>
+              </div>
+            )}
+
+            {customerKind === 'existing' && canViewPrices && <EarlierBalanceNotice name={customerName} due={previousDue} />}
+
+            {customerKind === 'new' && (
+            <>
+            {/* Customer name */}
+            <div>
+              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                Name <span className="text-error">*</span>
               </label>
               <CustomerAutocomplete
                 value={customerName}
@@ -1095,7 +1170,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             </div>
 
             {/* Phone */}
-            <div>
+            <div data-qc-field="phone" className={flashSvc === 'phone' ? 'rounded-spa ring-2 ring-error' : ''}>
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                 Phone <span className="text-error">*</span>
               </label>
@@ -1112,11 +1187,16 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   inputClassName="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                 />
               </div>
+              {phoneProblem(customerCountryCode, customerPhone) && <p className="mt-1.5 text-xs text-error" role="alert">{phoneProblem(customerCountryCode, customerPhone)}</p>}
             </div>
 
             {canViewPrices && <EarlierBalanceNotice name={customerName} due={previousDue} />}
 
-            {/* Email */}
+            </>
+            )}
+
+            {/* Email (an existing customer's profile that has none) */}
+            {(customerKind === 'new' || (customerKind === 'existing' && profileMissing.email)) && (
             <div>
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                 Email
@@ -1129,8 +1209,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
               />
             </div>
+            )}
 
             {/* Gender */}
+            {(customerKind === 'new' || (customerKind === 'existing' && profileMissing.gender)) && (
             <div>
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                 Gender
@@ -1152,6 +1234,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 ))}
               </div>
             </div>
+            )}
             </>
             )}
 
@@ -1285,6 +1368,29 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     {idx > 0 && <span className="text-xs text-text-secondary md:text-right">optional · blank uses the contact's details</span>}
                   </div>
 
+                  {idx === 0 && (
+                    <div data-qc-field="customer" className={fieldRing('customer')}>
+                      <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                        Customer <span className="text-error">*</span>
+                        {p.kind === 'existing' && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
+                      </label>
+                      <CustomerPickRow invalid={flashSvc === 'customer' && !p.kind} kind={p.kind} name={p.name} phone={p.phone ? `${p.countryCode || '+977'}${p.phone}` : ''} sub={svcSubLine} branchId={branchId} onPick={handleContactPick} />
+                    </div>
+                  )}
+                  {idx === 0 && p.kind === 'walkin' && (
+                    <div>
+                      <label className="flex items-baseline justify-between font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                        <span>Name</span><span className="text-xs font-normal text-text-secondary">optional</span>
+                      </label>
+                      <input type="text" value={p.label || ''} onChange={(e) => setPerson(0, { label: e.target.value })} placeholder="First name, e.g. Ram" maxLength={40}
+                        className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                      <p className="mt-1.5 text-xs text-text-secondary">No customer profile is created. Guests left blank are walk-ins too.</p>
+                    </div>
+                  )}
+                  {idx === 0 && p.kind === 'existing' && canViewPrices && <EarlierBalanceNotice name={p.name} due={p.previousDue} />}
+
+                  {(idx > 0 || p.kind === 'new') && (
+                  <>
                   <div>
                     <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                       Name {idx === 0 && <span className="text-error">*</span>}
@@ -1300,7 +1406,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     />
                   </div>
 
-                  <div>
+                  <div {...(idx === 0 ? { 'data-qc-field': 'phone' } : {})} className={idx === 0 && flashSvc === 'phone' ? 'rounded-spa ring-2 ring-error' : ''}>
                     <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Phone {idx === 0 && <span className="text-error">*</span>}</label>
                     <div className="flex">
                       <CountryCodeSelect
@@ -1315,6 +1421,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                         className="flex-1 min-w-0 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                       />
                     </div>
+                    {idx === 0 && p.kind === 'new' && contactPhoneProblem && <p className="mt-1.5 text-xs text-error" role="alert">{contactPhoneProblem}</p>}
                   </div>
 
                   {canViewPrices && <EarlierBalanceNotice name={p.name} due={p.previousDue} />}
@@ -1349,6 +1456,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                       ))}
                     </div>
                   </div>
+                  </>
+                  )}
 
                   {serviceMode === 'different' && (
                     <div data-qc-field={`service-${idx}`}>
