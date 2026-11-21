@@ -82,7 +82,7 @@ const StaffPickRow = ({ id = null, name = '', statusLine = '', pill = null, prob
         </div>
       )}
       {isPhone && (
-        <BottomSheet isOpen={open} title="" onClose={close}>
+        <BottomSheet isOpen={open} title={title} floatingClose onClose={close}>
           <div className="pb-4">{renderPicker(close)}</div>
         </BottomSheet>
       )}

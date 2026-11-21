@@ -150,7 +150,7 @@ const StaffPicker = ({
     <div>
       <div className={people.length >= STICKY_SEARCH_MIN ? stickyClass : ''}>
         {header && (
-          <div className="px-4 pt-4 pb-3">
+          <div className="px-4 pt-4 pb-3 pr-14 md:pr-4">
             <h3 className="font-heading font-heading-semibold text-[17px] leading-snug text-text-primary">{header.title}</h3>
             {header.sub && <p className="text-[13.5px] text-text-secondary">{header.sub}</p>}
           </div>

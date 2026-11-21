@@ -252,7 +252,7 @@ export function releaseSheetEntry() {
   entryPushed = false;
 }
 
-const BottomSheet = ({ isOpen, title, onClose, onBack, children, footer, headerExtra }) => {
+const BottomSheet = ({ isOpen, title, onClose, onBack, children, footer, headerExtra, floatingClose = false }) => {
   const id = useId();
   const titleId = `bottom-sheet-title-${id}`;
   const panelRef = useRef(null);
@@ -351,7 +351,7 @@ const BottomSheet = ({ isOpen, title, onClose, onBack, children, footer, headerE
           ref={panelRef}
           role="dialog"
           aria-modal="true"
-          aria-labelledby={titleId}
+          {...(floatingClose ? { 'aria-label': title } : { 'aria-labelledby': titleId })}
           tabIndex={-1}
           data-bottom-sheet="true"
           className="pointer-events-auto w-full md:max-w-md bg-surface flex flex-col max-h-[90dvh] rounded-t-[16px] md:rounded-spa-lg shadow-spa-modal outline-none transition-transform duration-200 ease-out motion-reduce:transition-none"
@@ -362,13 +362,19 @@ const BottomSheet = ({ isOpen, title, onClose, onBack, children, footer, headerE
           }}
         >
           <div
-            className="flex-shrink-0 touch-none select-none"
+            className="relative flex-shrink-0 touch-none select-none"
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={(e) => endDrag(e, false)}
             onPointerCancel={(e) => endDrag(e, true)}
           >
             <div className="md:hidden flex justify-center pt-2"><span className="block w-9 h-1 rounded-full bg-border" aria-hidden="true" /></div>
+            {floatingClose ? (
+              // No title bar: the body draws its own header, so ✕ floats on that line (right of the handle).
+              <button type="button" onClick={onClose} aria-label="Close" className="absolute top-5 right-2 z-header bg-surface w-11 h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background spa-transition-fast">
+                <Icon name="X" size={20} />
+              </button>
+            ) : (
             <div className="h-14 flex items-center justify-between gap-2 px-4 border-b border-border">
               <div className="flex items-center gap-1 min-w-0">
                 {onBack && (
@@ -385,6 +391,7 @@ const BottomSheet = ({ isOpen, title, onClose, onBack, children, footer, headerE
                 </button>
               </div>
             </div>
+            )}
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">{children}</div>
           {footer && <div className="flex-shrink-0 border-t border-border bg-surface p-4">{footer}</div>}
