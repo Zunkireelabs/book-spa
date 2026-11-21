@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-21** by Project Manager · 276 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-21** by Project Manager · 277 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -183,6 +183,7 @@ Last synced: **2026-11-21** by Project Manager · 276 open tickets (epics exclud
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-180 | — | medium | Attendance worked time rounded to 0.1 h before display (1 h 32 min shows as 1 h 30 min) |
+| ZNLY-319 | Sadin | medium | QC: New booking → Group (phone): the guest card heading "Person 2" wraps onto two lines, squeezed by the "optional · blank uses the contact's details" hint |
 
 ## Waiting on owner
 | Ticket | Owner | Priority | What |
