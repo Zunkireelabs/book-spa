@@ -26,6 +26,7 @@ import { useDayAvailability } from '../../../../hooks/useDayAvailability';
 import StaffPickRow from '../../../../components/ui/StaffPickRow';
 import { staffPickIncomplete, staffDayRanges, arrangeByTime, staffHeldByOthers, pickProblems, fillFreeStaff, undoFill, rangeLabel, rangeClock, pillRange, clockShort, pickedRowStatus, pickedRowStatusMulti, clockToMin } from '../../../../utils/staffFit';
 import { friendlyError } from '../../../../utils/friendlyError';
+import { shouldShowFillFree } from '../../../../utils/serviceCatalog';
 import { fieldForErrorCode } from '../../../../utils/quickCreateErrorField';
 
 
@@ -461,6 +462,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const groupStaffIncomplete = bookingMode === 'group' && groupType === 'couple'
     && staffPickIncomplete({ isCouple: true, count: people.filter((p) => p.therapistId).length, zeroOk: true });
   const emptyGuests = guestSlots.filter((g) => !g.staffId).length;
+  const hasAnyService = shouldShowFillFree({ serviceMode, groupServiceId, people });
   const fillFree = () => {
     const { picks } = fillFreeStaff(guestSlots, { people: pickerPeople, rangesById: groupRanges, offById: groupOff, eligibleByService: groupEligibility });
     if (!Object.keys(picks).length) return;
@@ -782,9 +784,22 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   // ── Footer: why Create is disabled, or the inline confirm ──────────────────────────────
   // Couple rule (same helper as the booking panel): 0 picks saves unassigned, 2 is fine, 1 is not.
-  const groupInvalidReason = !(people[0]?.name?.trim() && people[0]?.phone?.replace(/\D/g, '')) ? 'Add the booking contact'
-    : serviceMode === 'same' ? 'Pick a service'
-      : `Pick a service for ${people.findIndex((q) => !q.serviceId) === 0 ? 'the booking contact' : `Person ${people.findIndex((q) => !q.serviceId) + 1}`}`;
+  // Reasons follow form order (ZNLY-322): the service row sits above the contact card, so a missing service is named first.
+  const groupServiceMissing = serviceMode === 'same' ? !groupServiceId : people.some((q) => !q.serviceId);
+  const groupInvalidReason = groupServiceMissing
+    ? (serviceMode === 'same' ? 'Pick a service' : `Pick a service for ${people.findIndex((q) => !q.serviceId) === 0 ? 'the booking contact' : `Person ${people.findIndex((q) => !q.serviceId) + 1}`}`)
+    : 'Add the booking contact';
+  // ZNLY-322: tapping the "Pick a service" footer reason scrolls to the first empty service row and rings it for 3 s.
+  const [flashSvc, setFlashSvc] = useState(null);
+  const firstEmptySvcField = bookingMode === 'individual' ? (serviceId ? null : 'service')
+    : serviceMode === 'same' ? (groupServiceId ? null : 'service')
+      : (() => { const k = people.findIndex((q) => !q.serviceId); return k < 0 ? null : `service-${k}`; })();
+  useEffect(() => { if (!flashSvc) return undefined; const t = setTimeout(() => setFlashSvc(null), 3000); return () => clearTimeout(t); }, [flashSvc]);
+  const tapPickService = () => {
+    if (!firstEmptySvcField) return;
+    setFlashSvc(firstEmptySvcField);
+    requestAnimationFrame(() => document.querySelector(`[data-qc-field="${firstEmptySvcField}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+  };
   // Neutral note while Create is enabled (mockup step 3-7): what happens on tap.
   const groupReadyNote = bookingMode === 'group' && groupValid && !groupProblemFooter && !groupStaffIncomplete && bookingTime
     ? (people.some((q) => !q.therapistId) ? `${staffLabel} is optional`
@@ -836,7 +851,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   ) : (
     <div key="actions" className="flex flex-wrap sm:flex-nowrap items-center justify-end gap-x-3 gap-y-2">
       {/* Phone: the reason gets its own full-width line (max 2 lines) above the buttons; from sm it sits beside them as before. */}
-      <p className={`min-w-0 text-xs ${activeError || precheck.blocked || blockOverlapMsg ? 'text-error font-medium' : 'text-text-secondary'} basis-full line-clamp-2 sm:basis-auto sm:flex-1 sm:line-clamp-3 ${(createDisabled && disabledReason) || groupReadyNote ? '' : 'hidden sm:block'}`} role={activeError ? 'alert' : undefined} aria-live="polite">{createDisabled ? disabledReason : groupReadyNote}</p>
+      <p className={`min-w-0 text-xs ${activeError || precheck.blocked || blockOverlapMsg ? 'text-error font-medium' : 'text-text-secondary'} basis-full line-clamp-2 sm:basis-auto sm:flex-1 sm:line-clamp-3 ${(createDisabled && disabledReason) || groupReadyNote ? '' : 'hidden sm:block'}`} role={activeError ? 'alert' : undefined} aria-live="polite">{createDisabled && firstEmptySvcField && /^Pick a service/.test(disabledReason || '') && !activeError
+        ? <button type="button" onClick={tapPickService} className="text-left text-error font-medium underline underline-offset-2">{disabledReason}</button>
+        : (createDisabled ? disabledReason : groupReadyNote)}</p>
       <button
         type="button"
         onClick={requestClose}
@@ -955,7 +972,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                 Service <span className="text-error">*</span>
               </label>
-              <ServicePickRow services={pickerServices} value={serviceId} onChange={setServiceId} branchId={branchId} canViewPrices={canViewPrices} loading={servicesLoading} title="Service for the booking" sub={svcSubLine} ariaLabel="Service" />
+              <div data-qc-field="service"><ServicePickRow required invalid={flashSvc === 'service' && !serviceId} services={pickerServices} value={serviceId} onChange={setServiceId} branchId={branchId} canViewPrices={canViewPrices} loading={servicesLoading} title="Service for the booking" sub={svcSubLine} ariaLabel="Service" /></div>
               {visitorTherapist && visitorServiceNames && (
                 <p className="mt-1.5 text-xs text-text-secondary" data-visitor-services-help>
                   Showing the {pickerServices.length} service{pickerServices.length === 1 ? '' : 's'} {visitorTherapist.name} does at the home {(locationLabel || 'branch').toLowerCase()} that this one also offers.
@@ -1317,13 +1334,15 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             {/* Same | Different service */}
             <div>
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                Service for the group
-                <span className="text-error"> *</span>
+                Group service
               </label>
               <Segmented options={[['same', 'Same for everyone'], ['different', 'Different per guest']]} value={serviceMode} onChange={setServiceMode} />
               {serviceMode === 'same' && (
-                <div className="mt-2">
-                  <ServicePickRow services={groupServices} value={groupServiceId} onChange={setGroupServiceId} branchId={branchId} canViewPrices={canViewPrices} title="Service for the group" sub={svcSubLine} ariaLabel="Service" />
+                <div className="mt-2" data-qc-field="service">
+                  <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                    Service <span className="text-error">*</span>
+                  </label>
+                  <ServicePickRow required invalid={flashSvc === 'service' && !groupServiceId} services={groupServices} value={groupServiceId} onChange={setGroupServiceId} branchId={branchId} canViewPrices={canViewPrices} title="Service for the group" sub={svcSubLine} ariaLabel="Service" />
                 </div>
               )}
             </div>
@@ -1363,13 +1382,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             )}
 
             {/* Fill free staff (ZNLY-303): only while some guest has no staff; afterwards a one-line result with Undo */}
-            {bookingDate && bookingTime && dayChecking && emptyGuests > 0 && (
+            {bookingDate && bookingTime && dayChecking && emptyGuests > 0 && hasAnyService && (
               <div className="flex items-center gap-3 px-3.5 py-2.5 border border-primary/20 rounded-[11px] bg-primary/5">
                 <p className="flex-1 min-w-0 text-[13px] text-text-secondary">{emptyGuests} of {people.length} guests have no {staffLabel.toLowerCase()}</p>
                 <button type="button" disabled className="min-h-[36px] text-[13px] font-body font-bold text-text-secondary whitespace-nowrap cursor-wait">Checking who&apos;s free…</button>
               </div>
             )}
-            {bookingDate && bookingTime && dayKnown && (emptyGuests > 0 || fillUndo) && (
+            {bookingDate && bookingTime && dayKnown && ((emptyGuests > 0 && hasAnyService) || fillUndo) && (
               <div className="flex items-center gap-3 px-3.5 py-2.5 border border-primary/20 rounded-[11px] bg-primary/5">
                 {emptyGuests > 0 ? (
                   <>
@@ -1463,11 +1482,11 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   </div>
 
                   {serviceMode === 'different' && (
-                    <div>
+                    <div data-qc-field={`service-${idx}`}>
                       <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                         Service <span className="text-error">*</span>
                       </label>
-                      <ServicePickRow services={groupServices} value={p.serviceId} onChange={(val) => setPerson(idx, { serviceId: val })} branchId={branchId} canViewPrices={canViewPrices} title={`Service for ${idx === 0 ? 'the booking contact' : `Person ${idx + 1}`}`} sub={svcSubLine} ariaLabel="Service" />
+                      <ServicePickRow required invalid={flashSvc === `service-${idx}` && !p.serviceId} services={groupServices} value={p.serviceId} onChange={(val) => setPerson(idx, { serviceId: val })} branchId={branchId} canViewPrices={canViewPrices} title={`Service for ${idx === 0 ? 'the booking contact' : `Person ${idx + 1}`}`} sub={svcSubLine} ariaLabel="Service" />
                     </div>
                   )}
 

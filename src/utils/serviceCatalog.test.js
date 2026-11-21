@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mostBooked, categoryGroups, showCategoryHeaders, priceLine, searchServices } from './serviceCatalog';
+import { shouldShowFillFree, mostBooked, categoryGroups, showCategoryHeaders, priceLine, searchServices } from './serviceCatalog';
 
 const svc = (id, name, extra = {}) => ({ id, name, duration_minutes: 60, price_npr: 3499, category: 'Hair', ...extra });
 const list = [svc('a', 'Alpha'), svc('b', 'Beta'), svc('c', 'Gamma'), svc('d', 'Delta'), svc('e', 'Eps')];
@@ -56,5 +56,16 @@ describe('category order, mixed', () => {
   it('a category missing from the order map is not treated as ordered', () => {
     const s = [svc('1', 'x', { category: 'Beta' }), svc('2', 'y', { category: 'Alpha' }), svc('3', 'z', { category: 'Zero' })];
     expect(categoryGroups(s, { Zero: 0 }).map((g) => g.name)).toEqual(['Zero', 'Alpha', 'Beta']);
+  });
+});
+
+describe('shouldShowFillFree (ZNLY-322)', () => {
+  it('Same: only once the group service is set', () => {
+    expect(shouldShowFillFree({ serviceMode: 'same', groupServiceId: '', people: [{ serviceId: 'a' }] })).toBe(false);
+    expect(shouldShowFillFree({ serviceMode: 'same', groupServiceId: 'a', people: [{}] })).toBe(true);
+  });
+  it('Different: once at least one guest has a service', () => {
+    expect(shouldShowFillFree({ serviceMode: 'different', groupServiceId: 'a', people: [{ serviceId: '' }, { serviceId: '' }] })).toBe(false);
+    expect(shouldShowFillFree({ serviceMode: 'different', groupServiceId: '', people: [{ serviceId: '' }, { serviceId: 'b' }] })).toBe(true);
   });
 });

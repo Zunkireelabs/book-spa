@@ -87,7 +87,7 @@ const PackageTypePanel = ({ type = null, onClose, onSaved }) => {
           <TextInput ref={nameRef} id="pt-name" value={form.name} onChange={(e) => set('name')(e.target.value)} placeholder="e.g. Swedish · 6 sessions" error={errors.name} {...controlA11y('pt-name', errors.name)} />
         </Field>
         <Field label="Service" required id="pt-service" error={errors.serviceId}>
-          <ServicePickRow services={services || []} value={form.serviceId} onChange={set('serviceId')} branchId={pickerBranchId} loading={services === null} title="Service for the package" ariaLabel="Service" />
+          <ServicePickRow required services={services || []} value={form.serviceId} onChange={set('serviceId')} branchId={pickerBranchId} loading={services === null} title="Service for the package" ariaLabel="Service" />
         </Field>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Sessions" id="pt-sessions" error={errors.sessions} hint="Leave empty to set it when selling.">

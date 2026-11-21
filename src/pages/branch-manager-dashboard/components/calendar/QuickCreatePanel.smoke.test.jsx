@@ -74,14 +74,26 @@ describe('QuickCreatePanel smoke', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Separate' }));
       return r;
     };
+    const pickGroupService = () => {
+      fireEvent.click(screen.getAllByRole('button', { name: /Pick a service/ })[0]); // [0] = the row; the footer reason is the same words
+      fireEvent.click(screen.getByRole('radio', { name: 'Massage' }));
+    };
+    it('no Fill bar until a service exists (ZNLY-322)', () => {
+      openSeparate();
+      expect(screen.queryByText(/guests have no therapist/)).toBeNull();
+      pickGroupService();
+      expect(screen.getByText('3 of 3 guests have no therapist')).toBeTruthy();
+    });
     it('renders 3 guests, each with an empty "Pick staff" row, a Fill bar and "Create 3 bookings"', () => {
       openSeparate();
+      pickGroupService();
       expect(screen.getAllByRole('button', { name: /Pick therapist/ })).toHaveLength(3);
       expect(screen.getByText('3 of 3 guests have no therapist')).toBeTruthy();
       expect(screen.getByRole('button', { name: /create 3 bookings/i })).toBeTruthy();
     });
     it('Fill free staff gives each guest a different person, then Undo restores the empty rows', () => {
       openSeparate();
+      pickGroupService();
       fireEvent.click(screen.getByRole('button', { name: /Fill free therapists/ }));
       expect(screen.getByText('All 3 guests have therapists · 3 filled')).toBeTruthy();
       const names = ['Tara Gurung', 'Mina Rai', 'Sita Lama'].filter((n) => screen.queryByText(n));

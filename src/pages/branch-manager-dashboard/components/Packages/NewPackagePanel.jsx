@@ -425,7 +425,7 @@ const NewPackagePanel = ({ userRole, onClose, onIssued, initialCustomer = null, 
                 <TextInput {...controlA11y('pkg-nt-name', newTypeErrors.name)} error={newTypeErrors.name} placeholder="e.g. Annual Package - 60 min" value={newType.name} onChange={(e) => { setNewType((p) => ({ ...p, name: e.target.value })); setNewTypeErrors((x) => ({ ...x, name: undefined })); }} />
               </Field>
               <Field label="Service" required id="pkg-nt-service" error={newTypeErrors.serviceId}>
-                <ServicePickRow services={services} value={newType.serviceId} onChange={(v) => { setNewType((p) => ({ ...p, serviceId: v })); setNewTypeErrors((x) => ({ ...x, serviceId: undefined })); }} branchId={pickerBranchId} title="Service for the package" ariaLabel="Service" />
+                <ServicePickRow required services={services} value={newType.serviceId} onChange={(v) => { setNewType((p) => ({ ...p, serviceId: v })); setNewTypeErrors((x) => ({ ...x, serviceId: undefined })); }} branchId={pickerBranchId} title="Service for the package" ariaLabel="Service" />
               </Field>
               <div className={SPLIT}>
                 <Field label="Sessions" required id="pkg-nt-sessions" error={newTypeErrors.defaultSessions}>

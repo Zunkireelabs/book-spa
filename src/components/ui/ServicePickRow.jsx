@@ -10,7 +10,7 @@ import { mostBooked, categoryGroups, showCategoryHeaders, priceLine, searchServi
 // `anyLabel` (Waitlist): "no service" is a real answer, so the empty state and the first list row read that label.
 const Chip = ({ children }) => <span className="ml-1.5 px-1.5 py-px rounded-[5px] bg-indigo-50 text-indigo-700 text-[10px] font-bold align-middle">{children}</span>;
 
-const ServicePickRow = ({ services, value, onChange, branchId = null, canViewPrices = true, title = 'Pick a service', sub = '', emptyLabel = 'Pick a service', anyLabel = '', disabled = false, loading = false, ariaLabel }) => {
+const ServicePickRow = ({ services, value, onChange, branchId = null, canViewPrices = true, title = 'Pick a service', sub = '', emptyLabel = 'Pick a service', anyLabel = '', disabled = false, loading = false, ariaLabel, required = false, invalid = false }) => {
   const { counts, categoryOrder, tiers } = useServicePickerData(branchId);
   const list = services || [];
   const selected = list.find((s) => s.id === value) || null;
@@ -22,7 +22,8 @@ const ServicePickRow = ({ services, value, onChange, branchId = null, canViewPri
 
   const empty = !selected;
   const anyPicked = empty && !!anyLabel;
-  const tone = empty && !anyPicked ? 'border-dashed border-border bg-surface' : 'border-border bg-surface';
+  // ZNLY-322: an empty REQUIRED row is solid with primary text; an empty OPTIONAL row stays dashed with secondary text. `invalid` = red ring + reason line.
+  const tone = invalid && empty ? 'border-error ring-2 ring-error/20 bg-surface' : empty && !anyPicked && !required ? 'border-dashed border-border bg-surface' : 'border-border bg-surface';
 
   const renderPicker = (close) => (
     <ServiceList list={list} value={value} anyLabel={anyLabel} title={title} sub={sub} top={top} categoryOrder={categoryOrder} line={line}
@@ -30,7 +31,8 @@ const ServicePickRow = ({ services, value, onChange, branchId = null, canViewPri
   );
 
   return (
-    <PickShell tone={tone} title={title} renderPicker={renderPicker} disabled={disabled || loading}>
+    <PickShell tone={tone} title={title} renderPicker={renderPicker} disabled={disabled || loading}
+      belowRow={invalid && empty ? <p className="mt-1.5 px-0.5 text-xs text-error" role="alert">Pick a service</p> : null}>
       {loading ? <span className="flex-1 text-sm text-text-secondary">Loading services…</span>
         : selected ? (
           <span className="flex-1 min-w-0" aria-label={ariaLabel}>
@@ -38,7 +40,7 @@ const ServicePickRow = ({ services, value, onChange, branchId = null, canViewPri
             <span className="block truncate text-xs text-text-secondary">{line(selected)}{selected.is_combo && <Chip>Combo</Chip>}</span>
           </span>
         ) : anyPicked ? <span className="flex-1 text-sm text-text-primary">{anyLabel}</span>
-          : <span className="flex-1 text-sm text-text-secondary">＋ {emptyLabel}</span>}
+          : <span className={`flex-1 text-sm ${required ? 'text-text-primary' : 'text-text-secondary'}`}>＋ {emptyLabel}</span>}
     </PickShell>
   );
 };

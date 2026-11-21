@@ -2263,7 +2263,7 @@ const BookingActionModal = ({
                         <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Service</label>
                         {isEditing && services?.length > 0 ? (
                           <>
-                            <div className="mt-1"><ServicePickRow services={services} value={editForm.serviceId} onChange={(val) => setEditForm(f => ({ ...f, serviceId: val }))} branchId={booking?.branchId || branchId} canViewPrices={canViewPrices} title="Service for this booking" sub={booking.customerName || ''} ariaLabel="Service" /></div>
+                            <div className="mt-1"><ServicePickRow required services={services} value={editForm.serviceId} onChange={(val) => setEditForm(f => ({ ...f, serviceId: val }))} branchId={booking?.branchId || branchId} canViewPrices={canViewPrices} title="Service for this booking" sub={booking.customerName || ''} ariaLabel="Service" /></div>
                           </>
                         ) : (
                           <p className="font-body font-body-normal text-sm text-text-primary">{booking.service}</p>
@@ -3838,7 +3838,7 @@ const BookingActionModal = ({
                   {newBookingMode === 'add-service' && (
                     <div className="sm:col-span-2">
                       <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Service *</label>
-                      <ServicePickRow services={services} value={newBookingForm.serviceId} onChange={(val) => setNewBookingForm(f => ({ ...f, serviceId: val }))} branchId={booking?.branchId || branchId} canViewPrices={canViewPrices} title="Service to add" sub={booking.customerName || ''} ariaLabel="Service" />
+                      <ServicePickRow required services={services} value={newBookingForm.serviceId} onChange={(val) => setNewBookingForm(f => ({ ...f, serviceId: val }))} branchId={booking?.branchId || branchId} canViewPrices={canViewPrices} title="Service to add" sub={booking.customerName || ''} ariaLabel="Service" />
                     </div>
                   )}
 

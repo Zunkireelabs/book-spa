@@ -55,3 +55,7 @@ export const searchServices = (services, q) => {
   const t = String(q || '').trim().toLowerCase();
   return t ? services.filter((s) => String(s.name).toLowerCase().includes(t)) : services;
 };
+
+// ZNLY-322: "Fill free staff" only makes sense once a service (so a length) exists: Same = the group service; Different = at least one guest has one.
+export const shouldShowFillFree = ({ serviceMode, groupServiceId, people }) =>
+  serviceMode === 'same' ? !!groupServiceId : (people || []).some((p) => !!p.serviceId);
