@@ -15057,7 +15057,10 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
       return { data: { customerId: existing.id, isNew: false }, error: null };
     }
 
-    // 2. Create a fresh customer.
+    // 2. Create a fresh customer. A customer profile needs a phone number (customers.phone is required).
+    if (!normalizedPhone) {
+      return { data: null, error: { code: 'PHONE_REQUIRED', message: 'A phone number is required to add a customer.' } };
+    }
     const { data: created, error: insertErr } = await supabase
       .from('customers')
       .insert({

@@ -349,7 +349,7 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public._get_dashboard_unmasked(uuid[], date) FROM PUBLIC, anon, authenticated;
 
-CREATE OR REPLACE FUNCTION public.get_dashboard(p_branch_ids uuid[], p_date date) RETURNS jsonb
+CREATE OR REPLACE FUNCTION public.get_dashboard(p_branch_ids uuid[], p_date date DEFAULT NULL::date) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
   SELECT public.restrict_dashboard_json(public._get_dashboard_unmasked(p_branch_ids, p_date));
 $$;
