@@ -2,18 +2,22 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-21** by Project Manager · 289 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-21** by Project Manager · 304 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
 ## Flags from the last sync
 - **Open PRs without `ZNLY-` in the title:** #425, #415, #30 (3 open PRs).
-- **Urgent/high with no owner:** ZNLY-258, ZNLY-256, ZNLY-220, ZNLY-218, ZNLY-216, ZNLY-213, ZNLY-210, ZNLY-209, ZNLY-208, ZNLY-207, ZNLY-206, ZNLY-199, ZNLY-197, ZNLY-196, ZNLY-183, ZNLY-179, ZNLY-26, ZNLY-18, ZNLY-15, ZNLY-14, ZNLY-13, ZNLY-12.
+- **Urgent/high with no owner:** ZNLY-336, ZNLY-335, ZNLY-258, ZNLY-256, ZNLY-220, ZNLY-218, ZNLY-216, ZNLY-213, ZNLY-210, ZNLY-209, ZNLY-208, ZNLY-207, ZNLY-206, ZNLY-199, ZNLY-197, ZNLY-196, ZNLY-183, ZNLY-179, ZNLY-26, ZNLY-18, ZNLY-15, ZNLY-14, ZNLY-13, ZNLY-12.
 
 ## In progress
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
+| ZNLY-238 | Sadin | urgent | PLAN: integrate Zennly Marketplace (customer-facing booking) with the Zennly business app |
 | ZNLY-282 | Sadin | urgent | "Own calendar (view only)" logins can read every colleague's bookings: the own-bookings RLS (migration 322) only checks 'own' |
+| ZNLY-332 | Sadin | urgent | Marketplace booking, bookX side: create-booking + lookup + email sync as migrations 409–412, server safety checks, marketplace source tag, tracked edge functions |
+| ZNLY-333 | Sadin | urgent | Marketplace booking, marketplace side (zennly-marketplace integrate-zennly): real opening hours + closed days, honest change/cancel wording, success screen with booking number + studio phone |
+| ZNLY-338 | Sadin | urgent | Marketplace: native booking pages on zennly.io (location → services → time → confirm), same tab, look = app.zennly.io/:org customer flow, one service |
 | ZNLY-66 | Sadin | high | UI/UX Upgrade (feat/ui-port-from-clinicmd) |
 | ZNLY-159 | Sadin | high | Reports redesign: 17 reports in 5 groups, Start here row, headline vs last period, ✦ flags |
 | ZNLY-182 | Anish | high | Online combo-service bookings never split into per-component booking_combo_items |
@@ -183,6 +187,8 @@ Last synced: **2026-11-21** by Project Manager · 289 open tickets (epics exclud
 ## Todo
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
+| ZNLY-334 | Sadin | urgent | Marketplace booking go-live: staging end-to-end test, then prod (bookX stage→main incl. bundle, edge fns + secret on prod, enable mapped businesses, marketplace deploy with flag on) |
+| ZNLY-339 | Anish | urgent | Live zennly.io Book hand-off goes to dev-app.zennly.io (bookX STAGING): real bookings invisible to studios (marketplace main 8dbfee5) |
 | ZNLY-13 | — | high | Renumber colliding migration-289 (PR #413 vs PR #415) |
 | ZNLY-26 | — | high | Verify 503 "Reconnecting" screen + login banner against a real failure (PR #344) |
 | ZNLY-135 | Sadin | high | Notification pop-ups + sound for new bookings and things that need attention (discuss first) |
@@ -191,6 +197,9 @@ Last synced: **2026-11-21** by Project Manager · 289 open tickets (epics exclud
 | ZNLY-197 | — | high | Remove zenly.zunkireelabs.com from prod Traefik router rule in docker-compose.yml |
 | ZNLY-245 | Sadin | high | Sami's onboarding: import the Fresha export (staff, customers, services, products) into production, rehearsed and reconciled |
 | ZNLY-284 | Sadin | high | Interim: Staff › Access stops offering "(view only)" calendar options until ZNLY-283 enforces them; existing view-only logins get an honest note |
+| ZNLY-341 | Sadin | high | Marketplace data readiness: Sami's hours 09:00–20:00 (staging + prod), missing branch phones, Nuad branches with no staff/rooms, run readiness report on staging + prod |
+| ZNLY-345 | Sadin | high | bookX: marketplace status per business (live / not_live / demo) + guarded go-live; migration 413 |
+| ZNLY-346 | Sadin | high | Marketplace: booking only for live studios (not live → phone only; demo hidden in prod; status failure → not available), checked server-side on the booking routes |
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-180 | — | medium | Attendance worked time rounded to 0.1 h before display (1 h 32 min shows as 1 h 30 min) |
@@ -202,12 +211,14 @@ Last synced: **2026-11-21** by Project Manager · 289 open tickets (epics exclud
 | ZNLY-214 | Sadin | high | DECIDE: confirm with the accountant how VAT treats tips and product sales on a Nepal tax invoice (before 19 Nov) |
 | ZNLY-252 | Sadin | high | DECIDE: 747 old completed Nuad bookings with no payment (NPR 2,855,386.81, May-Nov) will appear as money to collect after release. Settle, cut off, or leave? |
 | ZNLY-311 | Sadin | high | DECIDE: Design system sit-down: final mockups of every component and spacing (like Zone POS), so every screen is built from the same parts |
+| ZNLY-340 | Sadin | high | DECIDE: which services are bookable online (Nuad Lazimpat offers all 196 incl. Products, VIP Room Charge, vouchers on the marketplace) |
 | ZNLY-30 | — | medium | Decide on required_linear_history for main/stage |
 | ZNLY-84 | Sadin | medium | DECIDE A-2: admin_viewer sees write actions on customer-detail (Anish's page) — hand to Anish or fix here? |
 | ZNLY-85 | Sadin | medium | DECIDE V-4: staff voucher limits (100% discount, price edit, back-dating) — match booking limits? |
 | ZNLY-89 | Sadin | medium | DECIDE V-9: Outreach win_back emails guests who are already booked — align with Customers At-risk rule? |
 | ZNLY-125 | Sadin | medium | DECIDE: who pays bookings done before a PERMANENT transfer in the same month? |
 | ZNLY-257 | — | medium | DECIDE: should Nuad refuse double-booking a staff member (enforce_staff_availability is false)? |
+| ZNLY-342 | — | medium | DECIDE: marketplace studio page shows US demo studios under "More like this" (Portland, Austin, Denver) |
 | ZNLY-25 | — | low | Decide on generic Package (bundle) booking system — may be superseded |
 | ZNLY-86 | Sadin | low | DECIDE V-6: staff issuing vouchers get no member tier discount / wallet tender (RLS hides memberships) |
 | ZNLY-87 | Sadin | low | DECIDE V-7: let admins edit existing membership tiers? (API supports it, UI doesn't) |
@@ -230,6 +241,8 @@ Last synced: **2026-11-21** by Project Manager · 289 open tickets (epics exclud
 | ZNLY-270 | Sadin | high | Padding & Processing time is saved on the service but every booking ignores it (setting promises staff are freed; they aren't) |
 | ZNLY-283 | Sadin | high | "View only" calendar access (own_view / all_view) is not enforced: those logins can still create, edit, start and collect |
 | ZNLY-328 | Sadin | high | Prod data clean-up: ~1,000 "walk in N" bookings and placeholder phone numbers (97797000, 977123456, 9770000000000…) that merge hundreds of real people into fake profiles (Nuad) |
+| ZNLY-335 | — | high | Marketplace: customer can cancel / reschedule their booking (after go-live) |
+| ZNLY-336 | — | high | Marketplace: one availability rule: server-side slot RPC in bookX used by the marketplace drawer and the app (retire the marketplace's copied slot math) |
 | ZNLY-16 | — | medium | RLS access harness (6 principals x 64 tables) — confirm merged |
 | ZNLY-20 | — | medium | Legacy-domain redirect (zenly.zunkireelabs.com → app.zennly.io) + retire old domains |
 | ZNLY-21 | — | medium | Auth email via Resend SMTP (no-reply@mail.zennly.io) + DKIM/SPF/DMARC + templates |
@@ -262,7 +275,6 @@ Last synced: **2026-11-21** by Project Manager · 289 open tickets (epics exclud
 | ZNLY-167 | Sadin | medium | Dashboard "revenue" counts advance payments on not-yet-completed bookings; align with Reports "Sales (earned)" or relabel "Takings" |
 | ZNLY-200 | — | medium | Fresh local DB bootstrap fails: rls.sql references therapist_working_hours before mig 275; bookings.client_request_id has no creating migration |
 | ZNLY-211 | — | medium | Move access and money rules into the DB: terminal statuses (Cancelled / No Show), discount role limits, notifications search filter |
-| ZNLY-238 | — | medium | PLAN: integrate Zennly Marketplace (customer-facing booking) with the Zennly business app |
 | ZNLY-240 | — | medium | Platform admin: create a new org from the UI, then manage its access and billing (onboard-tenant.sql has no 'beauty') |
 | ZNLY-242 | — | medium | New org first run: dashboard with 0 locations misbehaves, and location open/close defaults (09–21) disagree with per-day hours |
 | ZNLY-246 | — | medium | Insight: flag tiered services missing tier prices, and team members with no price tier |
@@ -270,6 +282,8 @@ Last synced: **2026-11-21** by Project Manager · 289 open tickets (epics exclud
 | ZNLY-313 | Sadin | medium | Staff picker Best fit: prefer the customer's last staff member when free (follow-up from ZNLY-303) |
 | ZNLY-314 | Sadin | medium | Staff picker: "Change the time" link when the wanted person is busy (follow-up from ZNLY-303) |
 | ZNLY-315 | Sadin | medium | Own-bookings-only logins: Staff list can't show who is busy (RLS hides colleagues' bookings); needs a busy-times-only source |
+| ZNLY-337 | — | medium | Marketplace follow-ups: booking confirmation to the customer (email/SMS), multi-service + group + staff choice, link marketplace user id, track login_with_pin + users grant (Anish 337/338) as migrations |
+| ZNLY-344 | — | medium | Marketplace customer history: match by phone too (customers saved without email don't see their bookX history, membership, vouchers) |
 | ZNLY-19 | — | low | Remaining "Zenly" strings (PlatformNav, docs, favicon, skill footer) |
 | ZNLY-22 | — | low | Booking confirmation + day-before reminder emails; wire 2 stub "Send Email" buttons |
 | ZNLY-29 | — | low | Supabase dashboard cleanup: Postgres ERROR logging off, name the original 25P02 trigger |
@@ -318,3 +332,4 @@ Last synced: **2026-11-21** by Project Manager · 289 open tickets (epics exclud
 | ZNLY-264 | Sadin | low | Evaluate Astryx design system (Meta, beta): React 18 to 19 upgrade + StyleX vs our Tailwind stack. After go-live |
 | ZNLY-316 | — | low | Tech debt: AssignFlow's useDayContext duplicates the new useDayAvailability hook; use one |
 | ZNLY-321 | Sadin | low | Idea: "Booked last time" in the service list for a returning customer (where the customer is known before the service) |
+| ZNLY-343 | — | low | Marketplace tech follow-ups: separate lookup secret on the marketplace side, email-sync 22023 → 400, listing-card prices/search refreshed from bookX |
