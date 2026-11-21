@@ -14,7 +14,7 @@ import { dedupeTransfersByKey, sortTransfersByTime } from './transferDedup';
 import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 import { toE164, samePhone } from '../utils/phone';
-import { isNewCustomerBooking } from '../utils/customerPick';
+import { isNewCustomerBooking, walkInName } from '../utils/customerPick';
 import { expandBlockOccurrences } from '../utils/blockRecurrence';
 import { leafMethods, qrMethodDiff, validateQrFile } from '../utils/paymentQr';
 import { parseAvailabilityError, createEnforcementCache } from './availability';
@@ -3634,14 +3634,14 @@ export async function linkWalkInClient({ bookingId, customerId, customerName, cu
   }
 }
 
-export async function updateBookingDetails({ bookingId, customerName, customerPhone, serviceId, date, startTime, specialRequests, referredBy, overrideReason }) {
+export async function updateBookingDetails({ bookingId, customerName, customerPhone, walkInLabel, serviceId, date, startTime, specialRequests, referredBy, overrideReason }) {
   try {
     const availabilityOverride = overrideReasonOf(overrideReason);
     customerName = toTitleCase(customerName);
     // 1. Fetch current booking
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, is_locked, payment_status, service_id, date, start_time, branch_id, base_amount, discount_amount, final_amount, customer_name, customer_phone, service:services(duration_minutes)')
+      .select('id, status, is_locked, payment_status, service_id, date, start_time, branch_id, base_amount, discount_amount, final_amount, customer_name, customer_phone, customer_id, is_walk_in, service:services(duration_minutes)')
       .eq('id', bookingId)
       .single();
 
@@ -3662,6 +3662,17 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
 
     // 4. Build update payload with only changed fields
     const updatePayload = {};
+
+    // ZNLY-330: a client-less walk-in has no name or phone of its own, only the optional label ("Walk-in · Ram"); a phone belongs to a client.
+    if (booking.is_walk_in && !booking.customer_id) {
+      customerName = undefined;
+      customerPhone = undefined;
+      if (walkInLabel !== undefined) {
+        const label = String(walkInLabel || '').trim() || null;
+        updatePayload.walk_in_label = label;
+        updatePayload.customer_name = walkInName(label);
+      }
+    }
 
     if (customerName !== undefined && customerName !== null) {
       updatePayload.customer_name = customerName;

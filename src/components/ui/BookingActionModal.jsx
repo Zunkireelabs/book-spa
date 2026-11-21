@@ -36,7 +36,7 @@ import { useNavigate } from 'react-router-dom';
 import AvailabilityNoteLine from './AvailabilityNoteLine';
 import { AlertsBlock } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
 import { getBookingStatusColors } from '../../utils/bookingStatusColors';
-import { editFormChanged, editFormSeed, newBookingFormChanged } from '../../utils/editDetails';
+import { editFormChanged, editFormSeed, editChanges, isClientlessWalkIn, newBookingFormChanged } from '../../utils/editDetails';
 import { formatPhoneGrouped } from '../../utils/phone';
 import { parsePhone } from './CountryCodeSelect';
 import PhoneField, { usePhoneState, phoneFieldProblem, phoneFieldValue } from './PhoneField';
@@ -819,27 +819,21 @@ const BookingActionModal = ({
     if (!booking || !onEditBooking) return;
     setEditError(null);
 
-    if (!editForm.customerName.trim()) {
+    const walkInEdit = isClientlessWalkIn(booking);
+    if (!walkInEdit && !editForm.customerName.trim()) {
       setEditError('Customer name is required.');
       return;
     }
     if (editBlockMsg) return;
-    if (editPhoneProblem) { setEditError(editPhoneProblem); return; }
+    if (!walkInEdit && editPhoneProblem) { setEditError(editPhoneProblem); return; }
 
-    // Same stored format as New booking (dial + digits); an untouched number is sent back exactly as stored.
-    const savedPhone = phoneFieldValue({ dial: editForm.phoneDial, national: editForm.phoneNational, original: editForm.customerPhone });
+    // Only what the user changed is sent (ZNLY-330); nothing changed just closes the form.
+    const updates = editChanges(editForm, booking, phoneFieldValue({ dial: editForm.phoneDial, national: editForm.phoneNational, original: editForm.customerPhone }));
+    if (Object.keys(updates).length === 0) { setIsEditing(false); return; }
 
     setIsLoading(true);
     try {
-      const result = await onEditBooking(booking.bookingId, {
-        customerName: editForm.customerName.trim(),
-        customerPhone: savedPhone,
-        serviceId: editForm.serviceId || undefined,
-        date: editForm.date || undefined,
-        startTime: editForm.startTime ? editForm.startTime + ':00' : undefined,
-        specialRequests: editForm.specialRequests.trim() || null,
-        referredBy: (editForm.referredBy || '').trim() || null,
-      });
+      const result = await onEditBooking(booking.bookingId, updates);
       if (result?.error) {
         setEditError(friendlyError(result.error, 'Failed to update booking.'));
       } else {
@@ -2227,14 +2221,25 @@ const BookingActionModal = ({
                     )}
                     <h3 className="font-body font-medium text-xs uppercase tracking-wider text-text-tertiary pt-1">Customer</h3>
                     <div>
-                      <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Name <span className="text-error">*</span></label>
-                      <input type="text" value={editForm.customerName} onChange={(e) => setEditForm(f => ({ ...f, customerName: e.target.value }))} className={inputClasses} />
+                      {walkInNoClient ? (
+                        <label className="flex items-baseline justify-between font-body font-body-medium text-[13px] text-text-primary mb-1.5"><span>Name</span><span className="text-xs font-normal text-text-secondary">optional</span></label>
+                      ) : (
+                        <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Name <span className="text-error">*</span></label>
+                      )}
+                      <input type="text" value={editForm.customerName} onChange={(e) => setEditForm(f => ({ ...f, customerName: e.target.value }))} className={inputClasses}
+                        {...(walkInNoClient ? { placeholder: 'First name, e.g. Ram', maxLength: 40 } : {})} />
                     </div>
-                    <PhoneField
-                      label="Phone" id="edit-booking-phone" walkInHint placeholder="Phone number"
-                      dial={editForm.phoneDial} national={editForm.phoneNational} original={editForm.customerPhone}
-                      onChange={({ dial, national }) => setEditForm(f => ({ ...f, phoneDial: dial, phoneNational: national }))}
-                    />
+                    {walkInNoClient ? (
+                      canAddClient ? (
+                        <button type="button" onClick={() => setAddClientSignal((n) => n + 1)} className="text-sm font-body-medium text-primary hover:underline">＋ Add client</button>
+                      ) : null
+                    ) : (
+                      <PhoneField
+                        label="Phone" id="edit-booking-phone" walkInHint placeholder="Phone number"
+                        dial={editForm.phoneDial} national={editForm.phoneNational} original={editForm.customerPhone}
+                        onChange={({ dial, national }) => setEditForm(f => ({ ...f, phoneDial: dial, phoneNational: national }))}
+                      />
+                    )}
                   </div>
                 ) : (
                 <div className={isPanel ? `grid gap-6 ${wideBody ? 'grid-cols-2' : 'grid-cols-1'}` : 'grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6'}>
@@ -2274,6 +2279,7 @@ const BookingActionModal = ({
                             value={editForm.customerName}
                             onChange={(e) => setEditForm(f => ({ ...f, customerName: e.target.value }))}
                             className={inputClasses}
+                            {...(walkInNoClient ? { placeholder: 'First name, e.g. Ram (optional)', maxLength: 40 } : {})}
                           />
                         ) : (
                           <p className="font-body font-body-normal text-sm text-text-primary">{booking.customerName}</p>
@@ -2298,6 +2304,10 @@ const BookingActionModal = ({
                             dial={correctionFields._phone.dial} national={correctionFields._phone.national} original={correctionInitialFields?.customer_phone}
                             onChange={({ dial, national }) => setCorrectionFields((prev) => ({ ...prev, _phone: { dial, national }, customer_phone: phoneFieldValue({ dial, national, original: correctionInitialFields?.customer_phone }) || '' }))}
                           />
+                        ) : isEditing && walkInNoClient ? (
+                          canAddClient ? (
+                            <button type="button" onClick={() => setAddClientSignal((n) => n + 1)} className="text-sm font-body-medium text-primary hover:underline">＋ Add client</button>
+                          ) : <p className="font-body text-sm text-text-secondary italic">Not provided</p>
                         ) : isEditing ? (
                           <PhoneField
                             id="edit-booking-phone-modal" walkInHint placeholder="Phone number"

@@ -38,3 +38,26 @@ describe('startEditing seed is never "changed"', () => {
     expect(editFormChanged({ ...editFormSeed(b), phoneNational: '1' }, b)).toBe(true);
   });
 });
+
+import { editChanges } from './editDetails';
+describe('editChanges: only changed fields are sent (ZNLY-330)', () => {
+  const real = { customerName: 'Puja Qc', customerPhone: '+9779841234567', customerId: 'c1', serviceId: 's1', date: '2026-11-24', startTime: '14:00:00', specialRequests: null, referredBy: null };
+  const walk = { customerName: 'Walk-in', customerPhone: null, customerId: null, isWalkIn: true, walkInLabel: null, serviceId: 's1', date: '2026-11-24', startTime: '14:00:00', specialRequests: null, referredBy: null };
+  it('time-only edit sends only startTime', () => {
+    expect(editChanges({ ...editFormSeed(real), startTime: '14:15' }, real, '+9779841234567')).toEqual({ startTime: '14:15:00' });
+    expect(editChanges({ ...editFormSeed(walk), startTime: '14:15' }, walk, null)).toEqual({ startTime: '14:15:00' });
+  });
+  it('an unchanged name or phone is never sent', () => {
+    const out = editChanges({ ...editFormSeed(real), specialRequests: 'hi' }, real, '+9779841234567');
+    expect(out).toEqual({ specialRequests: 'hi' });
+  });
+  it('a changed name / phone is sent', () => {
+    expect(editChanges({ ...editFormSeed(real), customerName: 'Puja Q', phoneNational: '9800000000' }, real, '+9779800000000'))
+      .toEqual({ customerName: 'Puja Q', customerPhone: '+9779800000000' });
+  });
+  it('client-less walk-in edits its label, never name or phone', () => {
+    expect(editChanges({ ...editFormSeed(walk), customerName: ' Ram ' }, walk, null)).toEqual({ walkInLabel: 'Ram' });
+    expect(editChanges({ ...editFormSeed(walk), phoneNational: '98' }, walk, '+97798')).toEqual({});
+    expect(editFormChanged({ ...editFormSeed(walk), phoneNational: '98' }, walk)).toBe(false);
+  });
+});

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import Icon from '../AppIcon';
 import { fetchAuditLogs } from '../../services/api';
 import { humanizePaymentMethod } from '../../services/paymentMethods';
+import { describeClientAdded, describeDetailsChanged } from '../../utils/bookingHistoryText';
 
 // Booking history (managers/admins; audit_logs is not readable by staff). Shows the staff-availability override rows
 // written by migration-353's guard: what was skipped, the reason the manager gave, who and when (panel C, right).
@@ -27,6 +28,10 @@ const describe = (log) => {
       return { icon: 'PenLine', title: 'Corrected by admin', reason: log.reason };
     case 'STATUS_CHANGE':
       return { icon: 'Repeat', title: `Status ${log.old_data?.status || '?'} → ${d.status || '?'}` };
+    case 'CLIENT_ADDED':
+      return { icon: 'UserPlus', title: describeClientAdded(d) };
+    case 'DETAILS_CHANGED':
+      return { icon: 'PenLine', title: describeDetailsChanged(log.old_data, d) };
     default:
       return null;
   }
