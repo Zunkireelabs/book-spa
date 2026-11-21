@@ -1,5 +1,6 @@
 -- ZNLY-332 QC harness: marketplace booking (public_create_booking, migrations 409-411).
 -- One transaction that ROLLS BACK: leaves no data. Safe on local and staging. Exits non-zero on any FAIL.
+-- NEVER run on PROD: it briefly locks branches (ALTER TABLE inside the rolled-back transaction) and runs real triggers.
 --   psql "$DB_URL" -v ON_ERROR_STOP=1 -v org_slug=nuad-thai-spa -f scripts/qc/marketplace-booking-qc.sql   # rooms tenant
 --   psql "$DB_URL" -v ON_ERROR_STOP=1 -v org_slug=samis-qc      -f scripts/qc/marketplace-booking-qc.sql   # room-less tenant
 -- Discovers its own branch / service / staff by org slug (no hard-coded ids). Dates are 45+ days ahead, so it never
@@ -188,8 +189,13 @@ BEGIN
     PERFORM pg_temp.rec('desk booking: booking_source stays NULL', 'NULL', COALESCE(bk.booking_source, 'NULL'));
   END IF;
   PERFORM pg_temp.rec('no marketplace tag on anything but marketplace bookings', '0', (SELECT count(*)::text FROM bookings WHERE booking_source IS NOT NULL AND booking_source <> 'marketplace'));
-  PERFORM pg_temp.rec('hours: branches.open_time/close_time are NOT NULL (a branch with no hours cannot exist; server also refuses it as BRANCH_CLOSED)', 'NO/NO',
-    (SELECT string_agg(is_nullable, '/' ORDER BY column_name DESC) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'branches' AND column_name IN ('open_time', 'close_time')));
+  -- a branch with NO weekly row for the day and NULL open/close (staging's Sami's Lazimpat) must refuse, not accept any time.
+  -- Locally the columns are NOT NULL (migration 079); dropped here for this case only, inside the rolled-back transaction.
+  ALTER TABLE branches ALTER COLUMN open_time DROP NOT NULL, ALTER COLUMN close_time DROP NOT NULL;
+  UPDATE branches SET open_time = NULL, close_time = NULL WHERE id = v_branch;
+  r := public_create_booking(v_slug, v_branch, v_svc, v_mon, '11:00', 'QC X', NULL, '+9779800332003', NULL, NULL, 'no-preference', NULL, NULL, NULL, NULL);
+  PERFORM pg_temp.rec('no weekly row and NULL open/close hours: refused', 'BRANCH_CLOSED', pg_temp.code(r));
+  UPDATE branches SET open_time = v_open, close_time = v_close WHERE id = v_branch;
 
   -- ---------------------------------------------------------------- closed / hours / date / past
   r := public_create_booking(v_slug, v_branch, v_svc, v_tue, '11:00', 'QC X', NULL, '+9779800332003', NULL, NULL, 'no-preference', NULL, NULL, NULL, NULL);
