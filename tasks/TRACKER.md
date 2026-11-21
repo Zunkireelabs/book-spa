@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-21** by Project Manager · 312 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-21** by Project Manager · 313 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -21,6 +21,8 @@ Last synced: **2026-11-21** by Project Manager · 312 open tickets (epics exclud
 | ZNLY-338 | Sadin | urgent | Marketplace: native booking pages on zennly.io (location → services → time → confirm), same tab, look = app.zennly.io/:org customer flow, one service |
 | ZNLY-351 | Sadin | urgent | PROD: no double-booking guard for therapists. excl_therapist_overlap (and combo-item therapist/room overlap) exist only in schema.sql, never in a migration; Nuad prod already has 182 overlapping pairs (2 in the future) |
 | ZNLY-353 | Sadin | urgent | CI schema-drift guard: before every prod release, compare prod's public schema with a DB built only from migrations; fail on any difference (constraints, NOT NULL, defaults, triggers, functions, RLS) |
+| ZNLY-354 | Sadin | urgent | Safe tenant onboarding: onboard-tenant.sql gives every new business the same safe defaults (all industries incl. beauty), readiness must show "no blockers" before go-live, and no safety rule depends on an optional per-org switch |
+| ZNLY-355 | Sadin | urgent | PROD security + behaviour drift (migration 417): admin policies without an org check let any admin read/write other businesses' data; old attendance day-lock and unpaid-before-close triggers; prod-only create_public_booking open to anon |
 | ZNLY-66 | Sadin | high | UI/UX Upgrade (feat/ui-port-from-clinicmd) |
 | ZNLY-159 | Sadin | high | Reports redesign: 17 reports in 5 groups, Start here row, headline vs last period, ✦ flags |
 | ZNLY-182 | Anish | high | Online combo-service bookings never split into per-component booking_combo_items |
@@ -200,7 +202,6 @@ Last synced: **2026-11-21** by Project Manager · 312 open tickets (epics exclud
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
 | ZNLY-339 | Anish | urgent | Live zennly.io Book hand-off goes to dev-app.zennly.io (bookX STAGING): real bookings invisible to studios (marketplace main 8dbfee5) |
-| ZNLY-354 | Sadin | urgent | Safe tenant onboarding: onboard-tenant.sql gives every new business the same safe defaults (all industries incl. beauty), readiness must show "no blockers" before go-live, and no safety rule depends on an optional per-org switch |
 | ZNLY-13 | — | high | Renumber colliding migration-289 (PR #413 vs PR #415) |
 | ZNLY-26 | — | high | Verify 503 "Reconnecting" screen + login banner against a real failure (PR #344) |
 | ZNLY-135 | Sadin | high | Notification pop-ups + sound for new bookings and things that need attention (discuss first) |
