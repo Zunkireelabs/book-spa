@@ -32,6 +32,9 @@ const KNOWN = [
   [/P0275|FUTURE_BOOKING/, (raw) => String(raw).replace(/^[\s\S]*?(This booking is for [^.]+\. Move it to today to [^.]+\.)[\s\S]*$/, '$1')],
   [/excl_therapist_overlap|conflicting key value violates exclusion constraint/i,
     () => localizeTerms('This therapist already has a booking at that time. Pick another time or person.')],
+  // set_user_pin (migration-416): a refused PIN save, in plain words.
+  [/set_user_pin: (?:not allowed|no such user)/i, () => "You can't set this person's PIN. Ask an admin."],
+  [/PIN must be exactly 4 digits/i, () => 'PIN must be 4 digits.'],
   [/customers_org_nphone_uniq|duplicate key[\s\S]*phone|phone[\s\S]*duplicate key/i,
     () => 'A customer with this phone number already exists.'],
 ];

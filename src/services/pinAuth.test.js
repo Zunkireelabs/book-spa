@@ -36,6 +36,19 @@ describe('loginWithPin', () => {
     vi.restoreAllMocks();
   });
 
+  it('a lockout refusal is shown as written and is not counted as a wrong PIN (kind: locked)', async () => {
+    global.fetch.mockResolvedValue({ status: 401, json: async () => ({ success: false, error: 'Too many attempts, try again in 15 minutes' }) });
+    const result = await loginWithPin('staff@zenly.app', '1234', 'nuad-thai-spa');
+    expect(result).toEqual({ success: false, error: 'Too many attempts, try again in 15 minutes', kind: 'locked' });
+    expect(verifyOtpMock).not.toHaveBeenCalled();
+  });
+
+  it('an ordinary wrong PIN is still kind: wrong_pin', async () => {
+    global.fetch.mockResolvedValue({ status: 401, json: async () => ({ success: false, error: 'Invalid email or PIN' }) });
+    const result = await loginWithPin('staff@zenly.app', '1234', 'nuad-thai-spa');
+    expect(result.kind).toBe('wrong_pin');
+  });
+
   it('accepts the current email_otp response shape', async () => {
     global.fetch.mockResolvedValue({
       json: async () => ({ success: true, email_otp: '123456' }),

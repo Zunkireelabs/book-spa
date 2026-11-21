@@ -1,6 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { friendlyError, GENERIC_SAVE_ERROR_COPY, isNetworkError, NETWORK_ERROR_COPY, NETWORK_CHECK_CALENDAR_COPY } from './friendlyError';
 
+describe('friendlyError: PIN save refusals (set_user_pin, migration-416)', () => {
+  it('maps not-allowed and bad-shape to plain sentences, no function name on screen', () => {
+    expect(friendlyError({ message: "set_user_pin: not allowed" })).toBe("You can't set this person's PIN. Ask an admin.");
+    expect(friendlyError({ message: 'set_user_pin: no such user' })).toBe("You can't set this person's PIN. Ask an admin.");
+    expect(friendlyError({ message: 'PIN must be exactly 4 digits' })).toBe('PIN must be 4 digits.');
+    expect(friendlyError({ message: 'A PIN can only be set with set_user_pin()' })).not.toMatch(/set_user_pin/);
+  });
+});
+
 describe('friendlyError', () => {
   it('strips the SQL function prefix and capitalises', () => {
     expect(friendlyError({ message: 'reschedule_booking: slot no longer available' })).toBe('Slot no longer available');

@@ -19693,7 +19693,7 @@ async function provisionStaffLogin({ email, fullName, orgId, branchId, role, log
       is_active: true,
       login_access: loginAccess,
       calendar_visibility: calendarVisibility || 'all',
-      pin: pin || null,
+      // No pin here: a PIN is only ever stored hashed, through set_user_pin() (migration-416). grantStaffAccess sets it right after.
     })
     .select('id, org_id')
     .single();
@@ -19817,7 +19817,7 @@ export async function grantStaffAccess({ therapistId, email, loginAccess, role, 
     // Only touch the PIN when one was actually given — an empty value here
     // must mean "leave it alone", never "clear it", especially on the
     // existing-account path where provisionStaffLogin never ran.
-    if (pin) settingsUpdate.pin = pin;
+    // (the PIN itself is saved below through set_user_pin(), which hashes it: migration-416)
     const { error: settingsErr } = await supabase
       .from('users')
       .update(settingsUpdate)
@@ -19827,6 +19827,13 @@ export async function grantStaffAccess({ therapistId, email, loginAccess, role, 
       // account whose settings never landed.
       await supabase.from('therapists').update({ user_id: null }).eq('id', therapistId);
       throw settingsErr;
+    }
+    if (pin) {
+      const { error: pinErr } = await supabase.rpc('set_user_pin', { p_user_id: account.id, p_pin: pin });
+      if (pinErr) {
+        await supabase.from('therapists').update({ user_id: null }).eq('id', therapistId);
+        throw pinErr;
+      }
     }
 
     // Branch access is ticked manually — write exactly what was given, no
@@ -19981,7 +19988,7 @@ export async function updateStaffAccess({ userId, role, loginAccess, calendarVis
 
     // A blank PIN here means "leave it alone", never "clear it" — same as
     // grantStaffAccess.
-    if (pin) updatePayload.pin = pin;
+    // The PIN itself is saved below through set_user_pin(), which hashes it (migration-416).
 
     if (Object.keys(updatePayload).length > 0) {
       const { error: updateErr } = await supabase
@@ -19989,6 +19996,11 @@ export async function updateStaffAccess({ userId, role, loginAccess, calendarVis
         .update(updatePayload)
         .eq('id', userId);
       if (updateErr) throw updateErr;
+    }
+
+    if (pin) {
+      const { error: pinErr } = await supabase.rpc('set_user_pin', { p_user_id: userId, p_pin: pin });
+      if (pinErr) throw pinErr;
     }
 
     if (branchIds !== undefined) {
