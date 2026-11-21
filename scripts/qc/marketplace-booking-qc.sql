@@ -53,7 +53,7 @@ BEGIN
   SELECT s.id, s.duration_minutes, (s.price_type = 'tiered') INTO v_svc, v_dur, v_tiered
   FROM services_with_offer_pricing s
   WHERE s.org_id = v_org AND s.is_active AND COALESCE(s.bookable_online, true) AND NOT COALESCE(s.is_couple, false)
-    AND NOT COALESCE(s.is_addon, false) AND s.duration_minutes BETWEEN 15 AND 120
+    AND NOT COALESCE(s.is_addon, false) AND s.duration_minutes BETWEEN 30 AND 120
   ORDER BY (s.price_type = 'tiered') DESC, s.duration_minutes LIMIT 1;
   IF v_svc IS NULL THEN RAISE EXCEPTION 'QC: org % has no bookable service', v_slug; END IF;
   SELECT count(*) INTO v_nstaff FROM therapists WHERE branch_id = v_branch AND is_active;
@@ -80,7 +80,7 @@ BEGIN
     INSERT INTO service_therapists (service_id, therapist_id) VALUES (v_svc, v_a);
     IF v_b IS NOT NULL THEN INSERT INTO service_therapists (service_id, therapist_id) VALUES (v_svc, v_b); END IF;
     DELETE FROM therapist_attendance WHERE therapist_id IN (v_a, v_b) AND date BETWEEN v_mon AND v_mon2 + 7;
-    INSERT INTO therapist_attendance (branch_id, therapist_id, date, status) VALUES (v_branch, v_a, v_fri, 'Absent');
+    INSERT INTO therapist_attendance (branch_id, therapist_id, date, status, marked_by) VALUES (v_branch, v_a, v_fri, 'Absent', (SELECT id FROM users LIMIT 1));  -- marked_by is NOT NULL on prod
   END IF;
 
   -- ---------------------------------------------------------------- permissions
@@ -116,6 +116,7 @@ BEGIN
       INSERT INTO branches (org_id, name, is_active) VALUES (v_org, 'QC Branch Other', true) RETURNING id INTO v_other;
     END IF;
     SELECT count(*) INTO v_nb0 FROM bookings; SELECT count(*) INTO v_nc0 FROM customers;
+    DELETE FROM branch_service_links WHERE service_id = v_svc;   -- real tenants may already scope it (rolled back)
     INSERT INTO branch_service_links (branch_id, service_id) VALUES (v_other, v_svc);
     r2 := public_create_booking(v_slug, v_branch, v_svc, v_tue + 7, '11:00', 'QC Scoped', 'qc.scoped@example.test', '+9779800332771', NULL, NULL, 'no-preference', NULL, NULL, NULL, gen_random_uuid());
     PERFORM pg_temp.rec('347: service linked only to another branch = refused', 'SERVICE_NOT_AT_LOCATION', pg_temp.code(r2));
@@ -407,6 +408,7 @@ BEGIN
   UPDATE therapists SET is_active = true WHERE branch_id = v_branch;
   PERFORM pg_temp.rec('status: restored single ready branch = live', 'live', public.marketplace_status(v_slug)->>'status');
   -- service scoped away from the only ready branch (link to branch B only) = not_live; excluded category too
+  DELETE FROM branch_service_links WHERE service_id IN (SELECT id FROM services WHERE org_id = v_org);   -- real tenants may already scope services (rolled back)
   INSERT INTO branch_service_links (branch_id, service_id) SELECT v_branch_b, id FROM services WHERE org_id = v_org;
   PERFORM pg_temp.rec('status: services scoped away from the only ready branch = not_live', 'not_live', public.marketplace_status(v_slug)->>'status');
   DELETE FROM branch_service_links WHERE branch_id = v_branch_b;

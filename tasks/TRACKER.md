@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-21** by Project Manager · 306 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-21** by Project Manager · 308 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -43,6 +43,7 @@ Last synced: **2026-11-21** by Project Manager · 306 open tickets (epics exclud
 | ZNLY-346 | Sadin | high | Marketplace: booking only for live studios (not live → phone only; demo hidden in prod; status failure → not available), checked server-side on the booking routes |
 | ZNLY-347 | Sadin | high | Marketplace create-booking accepts a service the chosen location does not offer (no branch_service_links / excluded-category check in public_create_booking, migration 409) |
 | ZNLY-348 | Sadin | high | Marketplace: no blank sections. Empty rails/moods hidden, designed empty cards for filter and search, one "studios joining soon" block when nothing is listed |
+| ZNLY-349 | Sadin | high | Marketplace: studios with no reviews show "★ 0.0" on cards (reads as a terrible rating); show no rating or "New" until there are reviews |
 | ZNLY-136 | Anish | medium | Group booking (Fresha-style): book multiple people, one shared slot, one checkout |
 | ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
 | ZNLY-175 | Sadin | medium | Therapist inner page: outcomes bar total counts upcoming bookings that sit in no bucket |
@@ -205,6 +206,7 @@ Last synced: **2026-11-21** by Project Manager · 306 open tickets (epics exclud
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-180 | — | medium | Attendance worked time rounded to 0.1 h before display (1 h 32 min shows as 1 h 30 min) |
+| ZNLY-350 | Sadin | medium | Marketplace account: status pill reads "Waiting For The Studio To Confirm" (CSS capitalize on a sentence) and the booking card has no booking number |
 
 ## Waiting on owner
 | Ticket | Owner | Priority | What |
