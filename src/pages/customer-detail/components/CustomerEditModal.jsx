@@ -3,7 +3,8 @@ import Icon from '../../../components/AppIcon';
 import Input from '../../../components/ui/Input';
 import Select from '../../../components/ui/Select';
 import Button from '../../../components/ui/Button';
-import CountryCodeSelect, { parsePhone } from '../../../components/ui/CountryCodeSelect';
+import { parsePhone } from '../../../components/ui/CountryCodeSelect';
+import PhoneField, { usePhoneState, phoneFieldProblem, phoneFieldValue } from '../../../components/ui/PhoneField';
 import CustomerPhotosTab from './CustomerPhotosTab';
 import { updateCustomerContact, updateCustomerProfileDetails } from '../../../services/api';
 
@@ -26,7 +27,6 @@ const MORE_INFO_FIELDS = [
   { key: 'country', label: 'Country' },
   { key: 'occupation', label: 'Occupation' },
   { key: 'additionalEmail', label: 'Additional Email' },
-  { key: 'additionalPhone', label: 'Additional Phone' },
 ];
 
 const SUB_TABS = [
@@ -40,9 +40,21 @@ const SUB_TABS = [
 // with one Save button across the form sub-tabs. Photo uploads immediately
 // via CustomerPhotosTab (not part of the Save/Cancel form state), same as
 // every other gallery upload in this app.
+// A stored value may differ in case from the option ('female' vs 'Female') or not be an option at all: show it as the matching option,
+// or add it, so the select never reads "Select gender" for a stored value (and a save never blanks it).
+const optionFor = (options, stored) => {
+  const v = String(stored || '').trim();
+  if (!v) return { options, value: '' };
+  const hit = options.find((o) => o.value.toLowerCase() === v.toLowerCase());
+  return hit ? { options, value: hit.value } : { options: [...options, { value: v, label: v }], value: v };
+};
+
 const CustomerEditModal = ({ customer, onClose, onSaved }) => {
+  const genderOpt = optionFor(GENDER_OPTIONS, customer.gender);
+  const pronounOpt = optionFor(PRONOUN_OPTIONS, customer.pronouns);
   const [subTab, setSubTab] = useState('details');
   const initialPhone = parsePhone(customer.phone);
+  const additionalPhone = usePhoneState(customer.additionalPhone || '');
   const [form, setForm] = useState({
     fullName: customer.fullName || '',
     phone: initialPhone.national,
@@ -54,9 +66,8 @@ const CustomerEditModal = ({ customer, onClose, onSaved }) => {
     country: customer.country || '',
     occupation: customer.occupation || '',
     additionalEmail: customer.additionalEmail || '',
-    additionalPhone: customer.additionalPhone || '',
-    gender: customer.gender || '',
-    pronouns: customer.pronouns || '',
+    gender: genderOpt.value,
+    pronouns: pronounOpt.value,
     dateOfBirth: customer.dateOfBirth || '',
     tags: customer.tags || [],
   });
@@ -76,11 +87,14 @@ const CustomerEditModal = ({ customer, onClose, onSaved }) => {
   };
 
   const handleSave = async () => {
+    const phoneIssue = phoneFieldProblem({ dial: form.countryCode, national: form.phone, original: customer.phone || '' });
+    if (phoneIssue) { setSubTab('details'); return; } // the reason is already under the field (the banner is for non-field errors)
+    if (additionalPhone.problem) { setSubTab('moreInfo'); return; }
     setSaving(true);
     setError(null);
 
     const trimmedName = form.fullName.trim();
-    const trimmedPhone = form.phone.trim() ? `${form.countryCode}${form.phone.trim().replace(/\D/g, '')}` : '';
+    const trimmedPhone = phoneFieldValue({ dial: form.countryCode, national: form.phone, original: customer.phone || '' }) || '';
     const trimmedEmail = form.email.trim();
 
     const [contactResult, detailsResult] = await Promise.all([
@@ -96,9 +110,10 @@ const CustomerEditModal = ({ customer, onClose, onSaved }) => {
         country: form.country,
         occupation: form.occupation,
         additionalEmail: form.additionalEmail,
-        additionalPhone: form.additionalPhone,
-        gender: form.gender,
-        pronouns: form.pronouns,
+        additionalPhone: additionalPhone.value || '',
+        // only what was changed: an untouched stored value (whatever its spelling) is never rewritten or blanked
+        gender: form.gender !== genderOpt.value ? form.gender : undefined,
+        pronouns: form.pronouns !== pronounOpt.value ? form.pronouns : undefined,
         dateOfBirth: form.dateOfBirth,
         tags: form.tags,
       }),
@@ -160,19 +175,11 @@ const CustomerEditModal = ({ customer, onClose, onSaved }) => {
                 </div>
                 <div className="space-y-1">
                   <label className="block font-body font-body-medium text-sm text-text-primary">Telephone</label>
-                  <div className="flex">
-                    <CountryCodeSelect
-                      value={form.countryCode}
-                      onChange={(dial) => setForm(f => ({ ...f, countryCode: dial }))}
-                    />
-                    <input
-                      type="tel"
-                      value={form.phone}
-                      onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))}
-                      placeholder="98XXXXXXXX"
-                      className="flex-1 min-w-0 h-10 px-3 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                    />
-                  </div>
+                  <PhoneField
+                    id="edit-customer-phone" original={customer.phone || ''}
+                    dial={form.countryCode} national={form.phone}
+                    onChange={({ dial, national }) => setForm(f => ({ ...f, countryCode: dial, phone: national }))}
+                  />
                 </div>
                 <div className="space-y-1">
                   <label className="block font-body font-body-medium text-sm text-text-primary">Email</label>
@@ -180,14 +187,14 @@ const CustomerEditModal = ({ customer, onClose, onSaved }) => {
                 </div>
                 <Select
                   label="Gender"
-                  options={GENDER_OPTIONS}
+                  options={genderOpt.options}
                   value={form.gender}
                   onChange={(val) => setForm(f => ({ ...f, gender: val }))}
                   placeholder="Select gender"
                 />
                 <Select
                   label="Pronouns"
-                  options={PRONOUN_OPTIONS}
+                  options={pronounOpt.options}
                   value={form.pronouns}
                   onChange={(val) => setForm(f => ({ ...f, pronouns: val }))}
                   placeholder="Select pronouns"
@@ -208,6 +215,7 @@ const CustomerEditModal = ({ customer, onClose, onSaved }) => {
                       />
                     </div>
                   ))}
+                  <PhoneField {...additionalPhone.field} id="edit-customer-additional-phone" label="Additional Phone" className="space-y-1" />
                   <div className="space-y-1">
                     <label className="block font-body font-body-medium text-sm text-text-primary">Date of Birth</label>
                     <input

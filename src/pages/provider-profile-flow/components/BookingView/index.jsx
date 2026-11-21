@@ -9,6 +9,7 @@ import ConfirmStep from './ConfirmStep';
 import DiscardDialog from './DiscardDialog';
 import { useTenant } from '../../../../contexts/TenantContext';
 import { scrollToTopInstant } from '../../../../utils/scroll';
+import { isValidPhone } from '../../../../utils/phone';
 
 // Full-page booking view (Fresha-style), replacing the earlier 460px slide-over: the
 // drawer left two thirds of the screen empty while cramming every step into a narrow
@@ -100,10 +101,7 @@ const BookingView = ({
     if (!customerInfo.firstName.trim()) return false;
     if (customerInfo.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerInfo.email)) return false;
     if (customerInfo.phone.trim()) {
-      const isNepal = (customerInfo.phoneCountryCode || '+977') === '+977';
-      const digits = customerInfo.phone.replace(/\D/g, '');
-      const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
-      if (!phoneValid) return false;
+      if (!isValidPhone(customerInfo.phoneCountryCode || '+977', customerInfo.phone)) return false; // the shared validator (ZNLY-331)
     }
     return true;
   };

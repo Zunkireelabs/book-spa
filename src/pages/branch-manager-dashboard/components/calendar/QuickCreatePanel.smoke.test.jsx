@@ -101,6 +101,21 @@ describe('QuickCreatePanel smoke', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
       expect(screen.getAllByRole('button', { name: /Pick therapist/ })).toHaveLength(3);
     });
+    it('ZNLY-331: an invalid typed guest number blocks Create with the reason; an empty guest number is still allowed', () => {
+      openSeparate();
+      pickGroupService();
+      fireEvent.click(screen.getAllByRole('button', { name: /Pick a customer/ })[0]);
+      fireEvent.click(screen.getByLabelText('Walk-in'));
+      const create = () => screen.getByRole('button', { name: /create 3 bookings/i });
+      expect(create().disabled).toBe(false); // guests left empty are fine (they share the contact)
+      const guestPhone = document.getElementById('qc-person-1-phone');
+      expect(guestPhone).toBeTruthy();
+      fireEvent.change(guestPhone, { target: { value: '98000' } });
+      expect(screen.getAllByText(/isn't valid for Nepal/).length).toBeGreaterThan(0);
+      expect(create().disabled).toBe(true);
+      fireEvent.change(guestPhone, { target: { value: '' } });
+      expect(create().disabled).toBe(false);
+    });
     it('a pick that is busy at the group time turns the row amber and gives the footer reason', () => {
       const busy = [{ id: 'bk', date: '2026-11-20', start_time: '14:00:00', end_time: '15:00:00', status: 'Confirmed', therapist_id: 't1' }];
       openSeparate({ bookings: busy });

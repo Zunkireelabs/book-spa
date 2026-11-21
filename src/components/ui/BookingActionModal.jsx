@@ -37,8 +37,9 @@ import AvailabilityNoteLine from './AvailabilityNoteLine';
 import { AlertsBlock } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
 import { getBookingStatusColors } from '../../utils/bookingStatusColors';
 import { editFormChanged } from '../../utils/editDetails';
-import { formatPhoneGrouped, phoneToSave, phoneEditProblem } from '../../utils/phone';
-import CountryCodeSelect, { parsePhone } from './CountryCodeSelect';
+import { formatPhoneGrouped } from '../../utils/phone';
+import { parsePhone } from './CountryCodeSelect';
+import PhoneField, { usePhoneState, phoneFieldProblem, phoneFieldValue } from './PhoneField';
 import DateTimeRow from './DateTimeRow';
 import { useBlockOverlap } from '../../hooks/useBlockOverlap';
 import { Segmented } from './PanelFormKit';
@@ -224,6 +225,8 @@ function correctionFieldsFromBooking(booking) {
     start_time: booking?.startTime ? booking.startTime.slice(0, 5) : '',
     customer_name: booking?.customerName || '',
     customer_phone: booking?.customerPhone || '',
+    // ZNLY-331: how the phone is shown in PhoneField; customer_phone (above) stays the value that is diffed and saved.
+    _phone: parsePhone(booking?.customerPhone || ''),
   };
 }
 
@@ -335,7 +338,7 @@ const BookingActionModal = ({
   // of selectedTherapists) always uses selectedRoom above.
   const [therapistRoomOverrides, setTherapistRoomOverrides] = useState({});
   const [companionName, setCompanionName] = useState('');
-  const [companionPhone, setCompanionPhone] = useState('');
+  const companionPhone = usePhoneState('');
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -483,7 +486,7 @@ const BookingActionModal = ({
       });
       setTherapistRoomOverrides(overrides);
       setCompanionName(booking.companionName || '');
-      setCompanionPhone(booking.companionPhone || '');
+      companionPhone.reset(booking.companionPhone || '');
     }
   }, [booking?.bookingId]);
 
@@ -806,8 +809,6 @@ const BookingActionModal = ({
       customerPhone: booking.customerPhone || '',
       phoneDial,
       phoneNational,
-      phoneDialInitial: phoneDial,
-      phoneNationalInitial: phoneNational,
       serviceId: booking.serviceId || '',
       date: booking.date || '',
       startTime: booking.startTime ? booking.startTime.slice(0, 5) : booking.time || '',
@@ -824,7 +825,7 @@ const BookingActionModal = ({
   };
 
   // ZNLY-327: a phone typed in Edit details must be a real number for its country; a number left untouched always saves as stored.
-  const editPhoneProblem = phoneEditProblem({ dial: editForm.phoneDial, national: editForm.phoneNational, initialDial: editForm.phoneDialInitial, initialNational: editForm.phoneNationalInitial });
+  const editPhoneProblem = phoneFieldProblem({ dial: editForm.phoneDial, national: editForm.phoneNational, original: editForm.customerPhone, walkInHint: true });
   const handleSaveEdit = async () => {
     if (!booking || !onEditBooking) return;
     setEditError(null);
@@ -837,7 +838,7 @@ const BookingActionModal = ({
     if (editPhoneProblem) { setEditError(editPhoneProblem); return; }
 
     // Same stored format as New booking (dial + digits); an untouched number is sent back exactly as stored.
-    const savedPhone = phoneToSave({ dial: editForm.phoneDial, national: editForm.phoneNational, initialDial: editForm.phoneDialInitial, initialNational: editForm.phoneNationalInitial, original: editForm.customerPhone });
+    const savedPhone = phoneFieldValue({ dial: editForm.phoneDial, national: editForm.phoneNational, original: editForm.customerPhone });
 
     setIsLoading(true);
     try {
@@ -1085,6 +1086,10 @@ const BookingActionModal = ({
       setCorrectionError('Change at least one field before saving.');
       return;
     }
+    if (correctionFields?._phone) {
+      const phoneIssue = phoneFieldProblem({ ...correctionFields._phone, original: correctionInitialFields?.customer_phone });
+      if (phoneIssue) { setCorrectionError(phoneIssue); return; }
+    }
     // Reason is collected in the confirm dialog itself, right before submit —
     // not required to already be filled in while still editing.
     setCorrectionConfirming('save');
@@ -1183,6 +1188,7 @@ const BookingActionModal = ({
   const handleAssignTherapist = async () => {
     if (!booking) return;
 
+    if (selectedTherapists.length > 1 && currentServiceObj?.is_couple && companionPhone.problem) { setActionError(companionPhone.problem); return; }
     setIsLoading(true);
     setActionError(null);
     try {
@@ -1204,7 +1210,7 @@ const BookingActionModal = ({
           selectedRoom || null,
           overridesToSend,
           isCoupleAssignment ? (companionName.trim() || null) : undefined,
-          isCoupleAssignment ? (companionPhone.trim() || null) : undefined
+          isCoupleAssignment ? (companionPhone.value || null) : undefined
         );
       }
       // The panel stays open on the updated booking (like status changes); the modal closes as before.
@@ -2229,22 +2235,11 @@ const BookingActionModal = ({
                       <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Name <span className="text-error">*</span></label>
                       <input type="text" value={editForm.customerName} onChange={(e) => setEditForm(f => ({ ...f, customerName: e.target.value }))} className={inputClasses} />
                     </div>
-                    <div>
-                      <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Phone</label>
-                      <div className="flex">
-                        <CountryCodeSelect value={editForm.phoneDial} onChange={(dial) => setEditForm(f => ({ ...f, phoneDial: dial }))} />
-                        <input
-                          type="tel"
-                          inputMode="numeric"
-                          value={editForm.phoneNational}
-                          onChange={(e) => setEditForm(f => ({ ...f, phoneNational: e.target.value.replace(/\D/g, '') }))}
-                          placeholder="Phone number"
-                          aria-label="Phone number"
-                          className="flex-1 min-w-0 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                        />
-                      </div>
-                      {editPhoneProblem && <p className="mt-1.5 text-xs text-error" role="alert">{editPhoneProblem}</p>}
-                    </div>
+                    <PhoneField
+                      label="Phone" id="edit-booking-phone" walkInHint placeholder="Phone number"
+                      dial={editForm.phoneDial} national={editForm.phoneNational} original={editForm.customerPhone}
+                      onChange={({ dial, national }) => setEditForm(f => ({ ...f, phoneDial: dial, phoneNational: national }))}
+                    />
                   </div>
                 ) : (
                 <div className={isPanel ? `grid gap-6 ${wideBody ? 'grid-cols-2' : 'grid-cols-1'}` : 'grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6'}>
@@ -2303,20 +2298,16 @@ const BookingActionModal = ({
                           )}
                         </label>
                         {showAdminCorrection ? (
-                          <input
-                            type="tel"
-                            value={correctionFields.customer_phone}
-                            onChange={(e) => setCorrectionField('customer_phone', e.target.value)}
-                            className={inputClasses}
-                            placeholder="Phone number"
+                          <PhoneField
+                            id="correction-phone" placeholder="Phone number"
+                            dial={correctionFields._phone.dial} national={correctionFields._phone.national} original={correctionInitialFields?.customer_phone}
+                            onChange={({ dial, national }) => setCorrectionFields((prev) => ({ ...prev, _phone: { dial, national }, customer_phone: phoneFieldValue({ dial, national, original: correctionInitialFields?.customer_phone }) || '' }))}
                           />
                         ) : isEditing ? (
-                          <input
-                            type="tel"
-                            value={editForm.customerPhone}
-                            onChange={(e) => setEditForm(f => ({ ...f, customerPhone: e.target.value }))}
-                            className={inputClasses}
-                            placeholder="Phone number"
+                          <PhoneField
+                            id="edit-booking-phone-modal" walkInHint placeholder="Phone number"
+                            dial={editForm.phoneDial} national={editForm.phoneNational} original={editForm.customerPhone}
+                            onChange={({ dial, national }) => setEditForm(f => ({ ...f, phoneDial: dial, phoneNational: national }))}
                           />
                         ) : (
                           booking.customerPhone ? (
@@ -2808,13 +2799,7 @@ const BookingActionModal = ({
                         placeholder="Companion's name (optional)"
                         className="w-full px-3 py-2 bg-background border border-border rounded-spa text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                       />
-                      <input
-                        type="tel"
-                        value={companionPhone}
-                        onChange={(e) => setCompanionPhone(e.target.value)}
-                        placeholder="Companion's phone (optional)"
-                        className="w-full px-3 py-2 bg-background border border-border rounded-spa text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
-                      />
+                      <PhoneField {...companionPhone.field} id="assign-companion-phone" placeholder="Companion's phone (optional)" />
                     </div>
                   </div>
                 )}

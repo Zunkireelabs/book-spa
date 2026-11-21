@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import CustomerPickRow from './CustomerPickRow';
-import CountryCodeSelect from './CountryCodeSelect';
+import PhoneField from './PhoneField';
 import Icon from '../AppIcon';
 import { linkWalkInClient } from '../../services/api';
 import { friendlyError } from '../../utils/friendlyError';
@@ -36,7 +36,7 @@ const WalkInClientLine = ({ booking, canAdd, openSignal = 0, onLinked }) => {
     if (!form.name.trim()) { setError("Enter the client's name."); return; }
     if (!form.phone.replace(/\D/g, '')) { setError("Enter the client's phone number."); return; }
     const bad = phoneProblem(form.dial, form.phone);
-    if (bad) { setError(bad); return; }
+    if (bad) { setError(''); return; } // the message is already under the field
     link({ customerName: form.name.trim(), customerPhone: form.dial + form.phone.replace(/\D/g, '') });
   };
 
@@ -57,12 +57,11 @@ const WalkInClientLine = ({ booking, canAdd, openSignal = 0, onLinked }) => {
         <div className="mt-2.5 p-2.5 rounded-lg border border-border bg-background space-y-2">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary">New client</p>
           <input type="text" aria-label="Client name" placeholder="Name" value={form.name} onChange={(e) => { setForm((f) => ({ ...f, name: e.target.value })); setError(''); }} className={FIELD} />
-          <div className="flex">
-            <CountryCodeSelect value={form.dial} onChange={(dial) => { setForm((f) => ({ ...f, dial })); setError(''); }} />
-            <input type="tel" inputMode="numeric" aria-label="Client phone" placeholder="Phone number" value={form.phone}
-              onChange={(e) => { setForm((f) => ({ ...f, phone: e.target.value.replace(/\D/g, '') })); setError(''); }}
-              className="flex-1 min-w-0 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
-          </div>
+          <PhoneField
+            id="walkin-client-phone" ariaLabel="Client phone" walkInHint
+            dial={form.dial} national={form.phone}
+            onChange={({ dial, national }) => { setForm((f) => ({ ...f, dial, phone: national })); setError(''); }}
+          />
           <div className="flex gap-2">
             <button type="button" onClick={submitNew} disabled={saving} className="h-9 px-3 rounded-spa text-[13px] font-medium bg-primary text-white disabled:opacity-60">{saving ? 'Saving…' : 'Add client'}</button>
             <button type="button" onClick={() => { setForm(null); setError(''); }} disabled={saving} className="h-9 px-3 rounded-spa text-[13px] font-medium border border-border bg-surface text-text-primary">Cancel</button>

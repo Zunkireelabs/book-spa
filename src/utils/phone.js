@@ -133,6 +133,13 @@ const isRun = (d) => {
   for (let i = 1; i < d.length; i += 1) steps.add((Number(d[i]) - Number(d[i - 1]) + 10) % 10);
   return steps.size === 1 && (steps.has(1) || steps.has(9));
 };
+/** Business phones (a shop or branch line, landlines included): length-only check (isPossible) instead of a carrier-pattern check. */
+export function isPossibleBusinessPhone(dial, national) {
+  const d = String(national || '').replace(/\D/g, '');
+  if (!d) return false;
+  const parsed = parsePhoneNumberFromString(`${dial}${d}`);
+  return !!parsed && parsed.isPossible();
+}
 export function isValidPhone(dial, national) {
   const d = String(national || '').replace(/\D/g, '');
   if (!d) return false;
@@ -142,14 +149,14 @@ export function isValidPhone(dial, national) {
 }
 
 /** The plain-language reason a typed number is rejected, or '' when it is fine (or empty: "required" is the caller's rule). */
-export function phoneProblem(dial, national) {
+export function phoneProblem(dial, national, { walkInHint = true, kind = 'person' } = {}) {
   if (!String(national || '').replace(/\D/g, '')) return '';
-  if (isValidPhone(dial, national)) return '';
-  return `This number isn't valid for ${countryByDial(dial).name}. Use Walk-in if the customer has no number.`;
+  if (kind === 'business' ? isPossibleBusinessPhone(dial, national) : isValidPhone(dial, national)) return '';
+  return `This number isn't valid for ${countryByDial(dial).name}.${walkInHint ? ' Use Walk-in if the customer has no number.' : ''}`;
 }
 
 /** Edit forms: the reason to block a save, only when the number was changed from what was loaded ('' = fine; an untouched number always saves). */
-export function phoneEditProblem({ dial, national, initialDial, initialNational }) {
+export function phoneEditProblem({ dial, national, initialDial, initialNational, walkInHint }) {
   if (dial === initialDial && national === initialNational) return '';
-  return phoneProblem(dial, national);
+  return phoneProblem(dial, national, walkInHint === undefined ? undefined : { walkInHint });
 }

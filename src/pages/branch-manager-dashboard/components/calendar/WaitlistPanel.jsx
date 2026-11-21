@@ -13,7 +13,8 @@ import { useDayAvailability } from '../../../../hooks/useDayAvailability';
 import { rangeLabel, pickedRowStatus, staffDayRanges } from '../../../../utils/staffFit';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
-import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
+import { parsePhone } from '../../../../components/ui/CountryCodeSelect';
+import PhoneField, { phoneFieldProblem, phoneFieldValue } from '../../../../components/ui/PhoneField';
 import TimeBoxInput from '../../../../components/ui/TimeBoxInput';
 import { PanelShell, FormBody, Field, TextInput, SelectField, DateField, InlineError, CONTROL } from '../../../../components/ui/PanelFormKit';
 import { fetchWaitlist, addToWaitlist, updateWaitlistEntry, removeFromWaitlist, isOverallBranch } from '../../../../services/api';
@@ -65,7 +66,7 @@ export const useWaitlistEntries = (branchId, refreshToken) => {
   return { entries, loading, error, setError, sort, setSort, reload: load };
 };
 
-const WaitlistEntryForm = ({ initial, services, therapists, branchId, staffLabel, onCancel, onSaved }) => {
+export const WaitlistEntryForm = ({ initial, services, therapists, branchId, staffLabel, onCancel, onSaved }) => {
   const { profile: viewerProfile } = useAuth();
   const canViewPrices = viewerAccess(viewerProfile).canViewPrices;
   const [form, setForm] = useState(initial || EMPTY_FORM);
@@ -79,9 +80,11 @@ const WaitlistEntryForm = ({ initial, services, therapists, branchId, staffLabel
 
   const handleSave = async () => {
     if (!form.customerName.trim()) { setError('Customer name is required.'); return; }
+    const phoneIssue = phoneFieldProblem({ dial: form.customerCountryCode, national: form.customerPhone, original: form.originalPhone });
+    if (phoneIssue) { setError(phoneIssue); return; }
     setSaving(true);
     setError(null);
-    const fullPhone = form.customerPhone ? `${form.customerCountryCode}${form.customerPhone}` : '';
+    const fullPhone = phoneFieldValue({ dial: form.customerCountryCode, national: form.customerPhone, original: form.originalPhone }) || '';
     const payload = {
       customerId: form.customerId || null,
       customerName: form.customerName,
@@ -134,23 +137,18 @@ const WaitlistEntryForm = ({ initial, services, therapists, branchId, staffLabel
             onChange={(val) => setForm((f) => ({ ...f, customerName: val, customerId: '' }))}
             onSelect={(customer) => {
               const { dial, national } = parsePhone(customer.phone || '');
-              setForm((f) => ({ ...f, customerId: customer.id, customerName: customer.full_name, customerPhone: national, customerCountryCode: dial || '+977' }));
+              setForm((f) => ({ ...f, customerId: customer.id, customerName: customer.full_name, customerPhone: national, customerCountryCode: dial || '+977', originalPhone: customer.phone || '' }));
             }}
             placeholder="Search or type a name"
           />
         </Field>
 
         <Field label={<>Phone <span className="text-text-tertiary font-normal">(optional)</span></>}>
-          <div className="flex">
-            <CountryCodeSelect value={form.customerCountryCode} onChange={(dial) => setForm((f) => ({ ...f, customerCountryCode: dial }))} />
-            <input
-              type="tel"
-              value={form.customerPhone}
-              onChange={(e) => setForm((f) => ({ ...f, customerPhone: e.target.value }))}
-              placeholder="98XXXXXXXX"
-              className={`${CONTROL} flex-1 min-w-0 !rounded-l-none border-l-0`}
-            />
-          </div>
+          <PhoneField
+            id="waitlist-phone" original={form.originalPhone}
+            dial={form.customerCountryCode} national={form.customerPhone}
+            onChange={({ dial, national }) => setForm((f) => ({ ...f, customerCountryCode: dial, customerPhone: national }))}
+          />
         </Field>
 
         <Field label="Service">
@@ -363,6 +361,7 @@ const WaitlistPanel = ({ wl, branchId, services = [], therapists = [], collapsed
       customerName: entry.customer_name || '',
       customerPhone: national,
       customerCountryCode: dial || '+977',
+      originalPhone: entry.customer_phone || '',
       serviceId: entry.service_id || '',
       preferredDate: entry.preferred_date || '',
       preferredTime: entry.preferred_time ? entry.preferred_time.slice(0, 5) : '',

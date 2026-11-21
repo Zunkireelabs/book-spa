@@ -14,7 +14,8 @@ import CustomerPickRow from '../../../../components/ui/CustomerPickRow';
 import { phoneProblem } from '../../../../utils/phone';
 import { customerSavePayload, customerMissing, seedFromSearch, PICK_REASON } from '../../../../utils/customerPick';
 import CustomSelect from '../../../../components/ui/CustomSelect';
-import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
+import { parsePhone } from '../../../../components/ui/CountryCodeSelect'
+import PhoneField, { usePhoneState } from '../../../../components/ui/PhoneField';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import { useDayBlocks } from '../../../../hooks/useBlockOverlap';
 import { findBlockOverlap, describeBlockOverlap } from '../../../../utils/blockOverlap';
@@ -67,7 +68,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [comboComponentsLoading, setComboComponentsLoading] = useState(false);
   const [comboTherapistOverrides, setComboTherapistOverrides] = useState({}); // serviceId -> therapistId
   const [comboRoomOverrides, setComboRoomOverrides] = useState({}); // serviceId -> roomId
-  const [companionPhone, setCompanionPhone] = useState('');
+  const companionPhone = usePhoneState('');
   const [bookingDate, setBookingDate] = useState('');
   const [bookingTime, setBookingTime] = useState('');
   // Group booking state (Individual = default, behaves exactly as before)
@@ -209,7 +210,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
     setTherapistRoomOverrides({});
     setCompanionName('');
-    setCompanionPhone('');
+    companionPhone.reset('');
     setComboComponents([]);
     setComboTherapistOverrides({});
     setComboRoomOverrides({});
@@ -573,11 +574,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   // Same mode → one shared service; Different mode → every person must pick one.
   const contactPhoneProblem = phoneProblem(people[0]?.countryCode || '+977', people[0]?.phone);
+  // A typed guest number must be real too (a picked customer's stored number is not re-checked; blank = the contact's).
+  const guestPhoneProblem = people.slice(1).map((q) => (q.customerId ? '' : phoneProblem(q.countryCode || '+977', q.phone))).find(Boolean) || '';
   const groupServiceValid = serviceMode === 'same'
     ? !!groupServiceId
     : (people.length > 0 && people.every((p) => !!p.serviceId));
   const groupValid = bookingMode !== 'group'
-    || (people[0]?.kind === 'walkin' ? groupServiceValid : (people[0]?.kind && people[0]?.name?.trim() && people[0]?.phone?.replace(/\D/g, '') && !(people[0].kind === 'new' && contactPhoneProblem) && groupServiceValid));
+    || (!guestPhoneProblem && (people[0]?.kind === 'walkin' ? groupServiceValid : (people[0]?.kind && people[0]?.name?.trim() && people[0]?.phone?.replace(/\D/g, '') && !(people[0].kind === 'new' && contactPhoneProblem) && groupServiceValid)));
 
   const buildGroupPeople = () => {
     // Blank "other" persons inherit the booking contact's credentials.
@@ -647,7 +650,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             ? Object.fromEntries(selectedTherapistIds.slice(1).map((tid) => [tid, therapistRoomOverrides[tid] || roomId || null]))
             : undefined,
           companionName: isCoupleBooking ? (companionName.trim() || null) : undefined,
-          companionPhone: isCoupleBooking ? (companionPhone.trim() || null) : undefined,
+          companionPhone: isCoupleBooking ? (companionPhone.value || null) : undefined,
           // Combo bundle: each component's own service/timing/staff, so the caller can insert booking_combo_items.
           comboAssignments: isComboService && comboComponents.length > 0
             ? comboComponents.map((c) => ({
@@ -768,7 +771,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const groupServiceMissing = serviceMode === 'same' ? !groupServiceId : people.some((q) => !q.serviceId);
   const groupInvalidReason = groupServiceMissing
     ? (serviceMode === 'same' ? 'Pick a service' : `Pick a service for ${people.findIndex((q) => !q.serviceId) === 0 ? 'the booking contact' : `Person ${people.findIndex((q) => !q.serviceId) + 1}`}`)
-    : !people[0]?.kind ? PICK_REASON : (people[0].kind === 'new' && people[0].name?.trim() && contactPhoneProblem) ? contactPhoneProblem : 'Add the booking contact';
+    : !people[0]?.kind ? PICK_REASON : (people[0].kind === 'new' && people[0].name?.trim() && contactPhoneProblem) ? contactPhoneProblem : guestPhoneProblem ? guestPhoneProblem : 'Add the booking contact';
   // ZNLY-322: tapping the "Pick a service" footer reason scrolls to the first empty service row and rings it for 3 s.
   const [flashSvc, setFlashSvc] = useState(null);
   const firstEmptySvcField = bookingMode === 'individual' ? (serviceId ? null : 'service')
@@ -798,8 +801,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     ? (/^Overlaps '(Transferred|Visiting)/.test(blockOverlapMsg) ? `${staffLabel} unavailable` : 'Overlaps a block')
     : bookingMode === 'group'
       ? (!groupValid ? groupInvalidReason : groupProblemFooter || (groupStaffIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : ''))
-      : !serviceId ? 'Pick a service' : couplePickIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : customerMissing(customerFields);
-  const createDisabled = submitting || !!activeError || !!blockOverlapMsg || precheck.blocked || couplePickIncomplete || (bookingMode === 'group' && (!!groupProblemFooter || groupStaffIncomplete)) || (bookingMode === 'group' ? !groupValid : (!serviceId || !!customerMissing(customerFields)));
+      : !serviceId ? 'Pick a service' : (isCoupleBooking && companionPhone.problem) ? `Companion's phone: ${companionPhone.problem}` : couplePickIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : customerMissing(customerFields);
+  const createDisabled = submitting || !!activeError || !!blockOverlapMsg || precheck.blocked || couplePickIncomplete || (isCoupleBooking && !!companionPhone.problem) || (bookingMode === 'group' && (!!groupProblemFooter || groupStaffIncomplete)) || (bookingMode === 'group' ? !groupValid : (!serviceId || !!customerMissing(customerFields)));
   const confirmSlotLabel = confirm?.type === 'move'
     ? [therapists.find((d) => d.id === confirm.slot.colId)?.name || rooms.find((c) => c.id === confirm.slot.colId)?.name || confirm.slot.colName,
        confirm.slot.day,
@@ -1031,8 +1034,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <input type="text" value={companionName} onChange={(e) => setCompanionName(e.target.value)} placeholder="Companion's name (optional)"
                     className="w-full h-10 px-3 text-[13px] border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
-                  <input type="tel" value={companionPhone} onChange={(e) => setCompanionPhone(e.target.value)} placeholder="Companion's phone (optional)"
-                    className="w-full h-10 px-3 text-[13px] border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                  <PhoneField {...companionPhone.field} id="qc-companion-phone" placeholder="Companion's phone (optional)" />
                 </div>
               </div>
             )}
@@ -1171,23 +1173,25 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
             {/* Phone */}
             <div data-qc-field="phone" className={flashSvc === 'phone' ? 'rounded-spa ring-2 ring-error' : ''}>
-              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                Phone <span className="text-error">*</span>
-              </label>
-              <div className="flex">
-                <CountryCodeSelect value={customerCountryCode} onChange={setCustomerCountryCode} />
-                <CustomerAutocomplete
-                  value={customerPhone}
-                  onChange={handleCustomerPhoneChange}
-                  onSelect={handleCustomerSelect}
-                  onBlur={() => checkPreviousDue(`${customerCountryCode}${customerPhone.replace(/\D/g, '')}`)}
-                  branchId={branchId}
-                  searchBy="phone"
-                  required
-                  inputClassName="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                />
-              </div>
-              {phoneProblem(customerCountryCode, customerPhone) && <p className="mt-1.5 text-xs text-error" role="alert">{phoneProblem(customerCountryCode, customerPhone)}</p>}
+              <PhoneField
+                label="Phone" required id="qc-phone" walkInHint
+                dial={customerCountryCode} national={customerPhone}
+                onChange={({ dial, national }) => { if (dial !== customerCountryCode) setCustomerCountryCode(dial); if (national !== customerPhone) handleCustomerPhoneChange(national); }}
+                renderInput={(r) => (
+                  <CustomerAutocomplete
+                    id={r.id}
+                    value={r.value}
+                    onChange={r.onValueChange}
+                    onSelect={handleCustomerSelect}
+                    onBlur={() => checkPreviousDue(`${customerCountryCode}${customerPhone.replace(/\D/g, '')}`)}
+                    branchId={branchId}
+                    searchBy="phone"
+                    required
+                    inputMode={r.inputMode}
+                    inputClassName={r.className}
+                  />
+                )}
+              />
             </div>
 
             {canViewPrices && <EarlierBalanceNotice name={customerName} due={previousDue} />}
@@ -1407,21 +1411,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   </div>
 
                   <div {...(idx === 0 ? { 'data-qc-field': 'phone' } : {})} className={idx === 0 && flashSvc === 'phone' ? 'rounded-spa ring-2 ring-error' : ''}>
-                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Phone {idx === 0 && <span className="text-error">*</span>}</label>
-                    <div className="flex">
-                      <CountryCodeSelect
-                        value={p.countryCode || '+977'}
-                        onChange={(code) => setPerson(idx, { countryCode: code })}
-                      />
-                      <input
-                        type="tel"
-                        value={p.phone}
-                        onChange={(e) => setPerson(idx, { phone: e.target.value, customerId: null, previousDue: null })}
-                        placeholder={idx === 0 ? '98XXXXXXXX' : `Blank = ${contactFirst}'s`}
-                        className="flex-1 min-w-0 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                      />
-                    </div>
-                    {idx === 0 && p.kind === 'new' && contactPhoneProblem && <p className="mt-1.5 text-xs text-error" role="alert">{contactPhoneProblem}</p>}
+                    <PhoneField
+                      label="Phone" required={idx === 0} id={`qc-person-${idx}-phone`} walkInHint
+                      dial={p.countryCode || '+977'} national={p.phone || ''}
+                      placeholder={idx === 0 ? '98XXXXXXXX' : `Blank = ${contactFirst}'s`}
+                      showProblem={idx === 0 ? p.kind === 'new' : !p.customerId}
+                      onChange={({ dial, national }) => (dial !== (p.countryCode || '+977') ? setPerson(idx, { countryCode: dial }) : setPerson(idx, { phone: national, customerId: null, previousDue: null }))}
+                    />
                   </div>
 
                   {canViewPrices && <EarlierBalanceNotice name={p.name} due={p.previousDue} />}
@@ -1538,22 +1534,23 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     placeholder="Referrer's name"
                   />
                 </div>
-                <div>
-                  <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                    Phone
-                  </label>
-                  <div className="flex">
-                    <CountryCodeSelect value={referringCustomerCountryCode} onChange={setReferringCustomerCountryCode} />
+                <PhoneField
+                  label="Phone" id="qc-referrer-phone" showProblem={false}
+                  dial={referringCustomerCountryCode} national={referringCustomerPhone}
+                  onChange={({ dial, national }) => { if (dial !== referringCustomerCountryCode) setReferringCustomerCountryCode(dial); if (national !== referringCustomerPhone) handleReferringPhoneChange(national); }}
+                  renderInput={(r) => (
                     <CustomerAutocomplete
-                      value={referringCustomerPhone}
-                      onChange={handleReferringPhoneChange}
+                      id={r.id}
+                      value={r.value}
+                      onChange={r.onValueChange}
                       onSelect={handleReferringCustomerSelect}
                       branchId={branchId}
                       searchBy="phone"
-                      inputClassName="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                      inputMode={r.inputMode}
+                      inputClassName={r.className}
                     />
-                  </div>
-                </div>
+                  )}
+                />
 
                 {referringCustomerId && (
                   <div>

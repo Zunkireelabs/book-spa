@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import Input from '../../../../components/ui/Input';
-import CountryCodeSelect from '../../../../components/ui/CountryCodeSelect';
+import PhoneField from '../../../../components/ui/PhoneField';
+import { isValidPhone } from '../../../../utils/phone';
 import CustomerForm from '../../../customer-booking-flow/components/CustomerForm';
 import { useResolvedServicePricing } from '../../../../hooks/useCustomerServicePricing';
 
@@ -38,10 +39,7 @@ export const isLeadContactValid = (leadContact) => {
   if (!leadContact.firstName.trim()) return false;
   if (leadContact.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(leadContact.email)) return false;
   if (!leadContact.phone.trim()) return false;
-  const isNepal = (leadContact.phoneCountryCode || '+977') === '+977';
-  const digits = leadContact.phone.replace(/\D/g, '');
-  const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
-  return phoneValid;
+  return isValidPhone(leadContact.phoneCountryCode || '+977', leadContact.phone); // the shared validator (ZNLY-331)
 };
 
 // A guest row with every field still blank is valid as-is — submitGroupBooking
@@ -60,10 +58,7 @@ export const isGuestContactValid = (person) => {
   if (!person.firstName?.trim()) return false;
   if (person.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(person.email)) return false;
   if (!person.phone?.trim()) return false;
-  const isNepal = (person.phoneCountryCode || '+977') === '+977';
-  const digits = person.phone.replace(/\D/g, '');
-  const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
-  return phoneValid;
+  return isValidPhone(person.phoneCountryCode || '+977', person.phone);
 };
 
 const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBranch, selectedDateTime, orgSlug, genderPreference, customerAccountId, onGuestFieldChange, onSubmit, submitting, submitError }) => {
@@ -172,21 +167,11 @@ const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBr
                       onChange={(e) => onGuestFieldChange(person.id, 'email', e.target.value)}
                       className="text-sm"
                     />
-                    <div className="flex">
-                      <CountryCodeSelect
-                        value={person.phoneCountryCode || '+977'}
-                        onChange={(dial) => onGuestFieldChange(person.id, 'phoneCountryCode', dial)}
-                      />
-                      <div className="flex-1">
-                        <Input
-                          type="tel"
-                          value={person.phone || ''}
-                          placeholder="Phone number"
-                          onChange={(e) => onGuestFieldChange(person.id, 'phone', e.target.value)}
-                          className="w-full rounded-l-none text-sm"
-                        />
-                      </div>
-                    </div>
+                    <PhoneField
+                      id={`guest-${person.id}-phone`} placeholder="Phone number" dataPhMask
+                      dial={person.phoneCountryCode || '+977'} national={person.phone || ''}
+                      onChange={({ dial, national }) => onGuestFieldChange(person.id, dial !== (person.phoneCountryCode || '+977') ? 'phoneCountryCode' : 'phone', dial !== (person.phoneCountryCode || '+977') ? dial : national)}
+                    />
                     <div className="grid grid-cols-3 gap-2">
                       {GUEST_GENDER_OPTIONS.map((option) => (
                         <button

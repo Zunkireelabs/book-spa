@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
-import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
+import { parsePhone } from '../../../../components/ui/CountryCodeSelect';
+import PhoneField, { phoneFieldProblem } from '../../../../components/ui/PhoneField';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import PaymentMethodSelector from '../../../../components/ui/PaymentMethodSelector';
 import {
@@ -127,8 +128,10 @@ const EnrollMemberPanel = ({ onClose, onEnrolled, onRenewExisting, initialTierId
 
   const dirty = !!(name || phone || email || gender || dobText || deposit || notes || activationDate);
 
+  const phoneIssue = digitsOf(phone) ? phoneFieldProblem({ dial: countryCode, national: phone, original: picked?.phone }) : '';
   const reason = !name.trim() ? 'Enter the customer name'
     : !digitsOf(phone) ? 'Enter the phone'
+    : phoneIssue ? phoneIssue
     : blockingMembership ? 'Already a member'
     : phoneOwner ? 'Phone already on file'
     : !selectedTier ? 'Pick a plan'
@@ -169,7 +172,8 @@ const EnrollMemberPanel = ({ onClose, onEnrolled, onRenewExisting, initialTierId
     // Field-level validation: show every problem, then focus the first invalid field.
     const next = {};
     const digits = digitsOf(phone);
-    if (digits.length < 7 || digits.length > 15) next.phone = 'Enter a valid phone number (7–15 digits).';
+    // A picked customer's stored number is not re-checked; a typed one must be real (the shared validator).
+    if (!digits) next.phone = 'Enter a valid phone number.';
     if (!picked && email.trim() && !EMAIL_RE.test(email.trim())) next.email = 'Enter a valid email address.';
     const dob = picked ? { iso: '', error: null } : parseDob(dobText);
     if (dob.error) next.dob = dob.error;
@@ -283,21 +287,26 @@ const EnrollMemberPanel = ({ onClose, onEnrolled, onRenewExisting, initialTierId
         </Field>
 
         <Field label="Phone" required id="enr-phone" error={errors.phone}>
-          <div className="flex">
-            <CountryCodeSelect value={countryCode} onChange={(v) => { setCountryCode(v); unpick(); }} />
-            <CustomerAutocomplete
-              id="enr-phone"
-              ariaInvalid={!!errors.phone}
-              ariaDescribedBy={errors.phone ? 'enr-phone-error' : undefined}
-              value={phone}
-              onChange={onPhoneChange}
-              onSelect={handleSelect}
-              branchId={branchId}
-              customers={customers || undefined}
-              searchBy="phone"
-              inputClassName={phoneInputClass}
-            />
-          </div>
+          <PhoneField
+            id="enr-phone"
+            dial={countryCode} national={phone}
+            onChange={({ dial, national }) => { if (dial !== countryCode) { setCountryCode(dial); unpick(); } else onPhoneChange(national); }}
+            renderInput={(r) => (
+              <CustomerAutocomplete
+                id="enr-phone"
+                ariaInvalid={!!errors.phone || !!phoneIssue}
+                ariaDescribedBy={errors.phone ? 'enr-phone-error' : (phoneIssue ? 'enr-phone-problem' : undefined)}
+                value={r.value}
+                onChange={r.onValueChange}
+                onSelect={handleSelect}
+                branchId={branchId}
+                customers={customers || undefined}
+                searchBy="phone"
+                inputMode={r.inputMode}
+                inputClassName={phoneInputClass}
+              />
+            )}
+          />
         </Field>
 
         {phoneOwner && (

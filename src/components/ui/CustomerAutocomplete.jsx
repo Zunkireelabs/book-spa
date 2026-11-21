@@ -21,6 +21,7 @@ const CustomerAutocomplete = ({
     : searchBy === 'any' ? 'Search by name, phone or email…'
     : 'Enter customer name',
   inputClassName,
+  inputMode,
   inputRef: externalRef,
   onBlur,
   required = false,
@@ -162,6 +163,7 @@ const CustomerAutocomplete = ({
         aria-invalid={ariaInvalid || undefined}
         aria-describedby={ariaDescribedBy}
         type="text"
+        inputMode={inputMode}
         value={value}
         onChange={(e) => {
           typedRef.current = true;

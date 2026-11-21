@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import Input from '../../../components/ui/Input';
 import Select from '../../../components/ui/Select';
-import CountryCodeSelect from '../../../components/ui/CountryCodeSelect';
+import PhoneField from '../../../components/ui/PhoneField';
 import StaffTypeToggle from '../components/StaffTypeToggle';
 import PositionSpecialtiesFields from '../components/PositionSpecialtiesFields';
 import { FormRow, Changed, Note, KV, Tag } from './ui';
@@ -107,13 +107,11 @@ const ProfileEdit = ({
           <fieldset disabled={readOnly} className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
             <Changed on={ch('phone') || ch('countryCode')} field="phone">
               <Label>Phone</Label>
-              <div className="flex">
-                <CountryCodeSelect value={form.countryCode || '+977'} onChange={(dial) => set({ countryCode: dial })} />
-                <input
-                  type="tel" value={form.phone} onChange={(e) => set({ phone: e.target.value })} placeholder="98XXXXXXXX"
-                  className="flex-1 min-w-0 h-10 px-3 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                />
-              </div>
+              <PhoneField
+                id="staff-phone" original={form.originalPhone} disabled={readOnly}
+                dial={form.countryCode || '+977'} national={form.phone}
+                onChange={({ dial, national }) => set({ countryCode: dial, phone: national })}
+              />
             </Changed>
             <Changed on={ch('email')} field="email">
               <Label>Email</Label>

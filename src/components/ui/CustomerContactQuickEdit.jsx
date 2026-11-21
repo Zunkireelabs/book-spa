@@ -1,6 +1,7 @@
 import { friendlyError } from '../../utils/friendlyError';
 import React, { useState } from 'react';
 import Icon from '../AppIcon';
+import PhoneField, { usePhoneState } from './PhoneField';
 import { updateCustomerContact } from '../../services/api';
 
 // Inline "add/edit email or phone" affordance dropped into the Membership /
@@ -13,7 +14,7 @@ import { updateCustomerContact } from '../../services/api';
 const CustomerContactQuickEdit = ({ customerId, email, phone, onSaved }) => {
   const [editing, setEditing] = useState(false);
   const [emailInput, setEmailInput] = useState(email || '');
-  const [phoneInput, setPhoneInput] = useState(phone || '');
+  const phoneField = usePhoneState(phone || '');
   // Snapshot of what the fields were when this edit session started — used
   // to send only the field the user actually touched. staff_update_customer_contact
   // (migration-173) treats a non-null value as authoritative (COALESCE), not
@@ -28,7 +29,7 @@ const CustomerContactQuickEdit = ({ customerId, email, phone, onSaved }) => {
 
   const startEditing = () => {
     setEmailInput(email || '');
-    setPhoneInput(phone || '');
+    phoneField.reset(phone || '');
     setInitialEmail(email || '');
     setInitialPhone(phone || '');
     setError(null);
@@ -36,11 +37,12 @@ const CustomerContactQuickEdit = ({ customerId, email, phone, onSaved }) => {
   };
 
   const handleSave = async () => {
+    if (phoneField.problem) return; // the message is already under the field
     setSaving(true);
     setError(null);
 
     const trimmedEmail = emailInput.trim();
-    const trimmedPhone = phoneInput.trim();
+    const trimmedPhone = phoneField.value || '';
 
     const { data, error: saveError } = await updateCustomerContact(customerId, {
       email: trimmedEmail !== initialEmail ? (trimmedEmail || null) : null,
@@ -87,13 +89,7 @@ const CustomerContactQuickEdit = ({ customerId, email, phone, onSaved }) => {
       </div>
       <div>
         <label className="block font-caption text-[11px] text-text-tertiary uppercase tracking-wide mb-1">Phone</label>
-        <input
-          type="tel"
-          value={phoneInput}
-          onChange={(e) => setPhoneInput(e.target.value)}
-          placeholder="98XXXXXXXX"
-          className="w-full h-9 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-        />
+        <PhoneField {...phoneField.field} id="quick-edit-phone" />
       </div>
 
       {error && (
