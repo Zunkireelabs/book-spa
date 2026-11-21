@@ -77,6 +77,7 @@ Last synced: **2026-11-21** by Project Manager · 277 open tickets (epics exclud
 | ZNLY-310 | Sadin | medium | Consistency: three remaining single-staff pickers still use a plain dropdown instead of the shared StaffPicker / StaffPickRow |
 | ZNLY-312 | Sadin | medium | Consistency: booking Staff tab opened from Bookings or Inbox shows no Free / Busy / Off (only the calendar day view passes that day's bookings) |
 | ZNLY-317 | Sadin | medium | Phone staff list sheet: empty title bar with only an ✕ above the "Staff for …" header (mockup has the header right under the grab handle) |
+| ZNLY-319 | Sadin | medium | QC: New booking → Group (phone): the guest card heading "Person 2" wraps onto two lines, squeezed by the "optional · blank uses the contact's details" hint |
 
 ## In review / on stage
 | Ticket | Owner | Priority | State | What |
@@ -183,7 +184,6 @@ Last synced: **2026-11-21** by Project Manager · 277 open tickets (epics exclud
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-180 | — | medium | Attendance worked time rounded to 0.1 h before display (1 h 32 min shows as 1 h 30 min) |
-| ZNLY-319 | Sadin | medium | QC: New booking → Group (phone): the guest card heading "Person 2" wraps onto two lines, squeezed by the "optional · blank uses the contact's details" hint |
 
 ## Waiting on owner
 | Ticket | Owner | Priority | What |
