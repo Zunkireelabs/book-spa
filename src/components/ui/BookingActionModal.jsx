@@ -8,6 +8,7 @@ import BookingHistory from './BookingHistory';
 import { createPortal } from 'react-dom';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
+import ServicePickRow from './ServicePickRow';
 import PaymentModal from './PaymentModal';
 import { submitCheckout } from '../../services/checkoutSubmit';
 import ConfirmDialog, { CANCEL_REASON_OPTIONS } from './ConfirmDialog';
@@ -2262,19 +2263,7 @@ const BookingActionModal = ({
                         <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Service</label>
                         {isEditing && services?.length > 0 ? (
                           <>
-                            <CustomSelect
-                              value={editForm.serviceId}
-                              onChange={(val) => setEditForm(f => ({ ...f, serviceId: val }))}
-                              options={services.map(s => ({ value: s.id, label: s.name }))}
-                              placeholder="Select service"
-                              searchable
-                              size="sm"
-                            />
-                            {selectedService && (
-                              <p className="font-caption text-xs text-text-secondary mt-1">
-                                {selectedService.duration_minutes} min — NPR {selectedService.price_npr?.toLocaleString('en-IN')}
-                              </p>
-                            )}
+                            <div className="mt-1"><ServicePickRow services={services} value={editForm.serviceId} onChange={(val) => setEditForm(f => ({ ...f, serviceId: val }))} branchId={booking?.branchId || branchId} canViewPrices={canViewPrices} title="Service for this booking" sub={booking.customerName || ''} ariaLabel="Service" /></div>
                           </>
                         ) : (
                           <p className="font-body font-body-normal text-sm text-text-primary">{booking.service}</p>
@@ -3849,14 +3838,7 @@ const BookingActionModal = ({
                   {newBookingMode === 'add-service' && (
                     <div className="sm:col-span-2">
                       <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Service *</label>
-                      <CustomSelect
-                        value={newBookingForm.serviceId}
-                        onChange={(val) => setNewBookingForm(f => ({ ...f, serviceId: val }))}
-                        options={services.map(s => ({ value: s.id, label: `${s.name} — ${s.duration_minutes}min — NPR ${s.price_npr}` }))}
-                        placeholder="Select service..."
-                        searchable
-                        size="sm"
-                      />
+                      <ServicePickRow services={services} value={newBookingForm.serviceId} onChange={(val) => setNewBookingForm(f => ({ ...f, serviceId: val }))} branchId={booking?.branchId || branchId} canViewPrices={canViewPrices} title="Service to add" sub={booking.customerName || ''} ariaLabel="Service" />
                     </div>
                   )}
 

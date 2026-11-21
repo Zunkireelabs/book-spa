@@ -20155,6 +20155,47 @@ export async function assignTherapistTier({ therapistId, tierId }) {
   }
 }
 
+/** ZNLY-320: last-90-day booking counts per service for one branch (feeds "MOST BOOKED"). Never throws; a failure just means no group. */
+export async function fetchServiceBookingCounts(branchId) {
+  try {
+    if (!branchId) return { data: [], error: null };
+    const { data, error } = await supabase.rpc('service_booking_counts', { p_branch_id: branchId });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.warn('[API] fetchServiceBookingCounts:', error?.message);
+    return { data: [], error };
+  }
+}
+
+/** ZNLY-320: { [serviceId]: [lowest tier price] } for every tiered service in the org; readable by any login that may see prices. */
+export async function fetchServiceMinTierPrices() {
+  try {
+    const { data, error } = await supabase.rpc('service_min_tier_prices');
+    if (error) throw error;
+    const out = {};
+    (data || []).forEach((r) => { out[r.service_id] = [Number(r.min_tier_price)]; });
+    return { data: out, error: null };
+  } catch (error) {
+    console.warn('[API] fetchServiceMinTierPrices:', error?.message);
+    return { data: {}, error };
+  }
+}
+
+/** ZNLY-320: category name -> display_order for the service picker's headers. */
+export async function fetchServiceCategoryOrder() {
+  try {
+    const { data, error } = await supabase.from('service_categories').select('name, display_order').eq('is_active', true).not('display_order', 'is', null);
+    if (error) throw error;
+    const out = {};
+    (data || []).forEach((r) => { if (r.display_order != null) out[r.name] = Number(r.display_order); });
+    return { data: out, error: null };
+  } catch (error) {
+    console.warn('[API] fetchServiceCategoryOrder:', error?.message);
+    return { data: {}, error };
+  }
+}
+
 /** Tier prices of every tiered service at once, for the Services list: { [serviceId]: [price_npr, ...] }. Manager/admin only (RLS scopes it to the org). */
 export async function fetchTierPricesByService() {
   try {

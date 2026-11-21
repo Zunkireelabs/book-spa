@@ -3,6 +3,8 @@ import {
   PanelShell, FormBody, Field, SelectField, TextInput, MoneyInput, SwitchRow, InlineError, InfoRows, controlA11y,
 } from '../../../../components/ui/PanelFormKit';
 import { useOrg } from '../../../../contexts/OrgContext';
+import ServicePickRow from '../../../../components/ui/ServicePickRow';
+import { useBranch } from '../../../../contexts/BranchContext';
 import { createPackageType, updatePackageType, fetchServicesForManagement } from '../../../../services/api';
 import { perSession, validityLabel } from '../../../../services/packagesView';
 import { friendlyError } from '../../../../utils/friendlyError';
@@ -14,6 +16,8 @@ const str = (v) => (v == null ? '' : String(v));
 // Admin create / edit of a package type (V20, Package types tab). Empty sessions = open (set when selling), empty price = set at
 // sale. Packages already sold copy their sessions, price and expiry at sale, so editing a type never changes them.
 const PackageTypePanel = ({ type = null, onClose, onSaved }) => {
+  const { branchId: curBranch, isOverall } = useBranch();
+  const pickerBranchId = isOverall ? null : curBranch;
   const { orgId } = useOrg();
   const editing = !!type;
   const initial = useMemo(() => ({
@@ -83,8 +87,7 @@ const PackageTypePanel = ({ type = null, onClose, onSaved }) => {
           <TextInput ref={nameRef} id="pt-name" value={form.name} onChange={(e) => set('name')(e.target.value)} placeholder="e.g. Swedish · 6 sessions" error={errors.name} {...controlA11y('pt-name', errors.name)} />
         </Field>
         <Field label="Service" required id="pt-service" error={errors.serviceId}>
-          <SelectField value={form.serviceId} onChange={set('serviceId')} placeholder={services === null ? 'Loading services…' : 'Pick a service'} disabled={services === null}
-            options={(services || []).map((s) => ({ value: s.id, label: `${s.name}${s.duration_minutes ? ` · ${s.duration_minutes} min` : ''}` }))} />
+          <ServicePickRow services={services || []} value={form.serviceId} onChange={set('serviceId')} branchId={pickerBranchId} loading={services === null} title="Service for the package" ariaLabel="Service" />
         </Field>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Sessions" id="pt-sessions" error={errors.sessions} hint="Leave empty to set it when selling.">

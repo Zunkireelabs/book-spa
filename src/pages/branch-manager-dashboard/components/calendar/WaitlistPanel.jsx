@@ -5,6 +5,9 @@ import Icon from '../../../../components/AppIcon';
 import SidePanel from '../../../../components/ui/SidePanel';
 import ConfirmDialog from '../../../../components/ui/ConfirmDialog';
 import StaffPickRow from '../../../../components/ui/StaffPickRow';
+import ServicePickRow from '../../../../components/ui/ServicePickRow';
+import { useAuth } from '../../../../contexts/AuthContext';
+import { viewerAccess } from '../../../../services/dataMasking';
 import StaffPicker from '../../../../components/ui/StaffPicker';
 import { useDayAvailability } from '../../../../hooks/useDayAvailability';
 import { rangeLabel, pickedRowStatus, staffDayRanges } from '../../../../utils/staffFit';
@@ -63,6 +66,8 @@ export const useWaitlistEntries = (branchId, refreshToken) => {
 };
 
 const WaitlistEntryForm = ({ initial, services, therapists, branchId, staffLabel, onCancel, onSaved }) => {
+  const { profile: viewerProfile } = useAuth();
+  const canViewPrices = viewerAccess(viewerProfile).canViewPrices;
   const [form, setForm] = useState(initial || EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -149,11 +154,7 @@ const WaitlistEntryForm = ({ initial, services, therapists, branchId, staffLabel
         </Field>
 
         <Field label="Service">
-          <SelectField
-            value={form.serviceId}
-            onChange={(val) => setForm((f) => ({ ...f, serviceId: val }))}
-            options={[{ value: '', label: 'Any service' }, ...services.map((s) => ({ value: s.id, label: s.name }))]}
-          />
+          <ServicePickRow services={services} value={form.serviceId} onChange={(val) => setForm((f) => ({ ...f, serviceId: val }))} branchId={branchId} canViewPrices={canViewPrices} anyLabel="Any service" title="Service for the waitlist" sub="Optional · leave on “Any service”" ariaLabel="Service" />
         </Field>
 
         <div className="grid grid-cols-2 gap-3">

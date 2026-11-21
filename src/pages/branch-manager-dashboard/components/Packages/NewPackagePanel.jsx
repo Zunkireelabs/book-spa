@@ -7,6 +7,7 @@ import {
   PanelShell, FormBody, Field, SelectField, TextInput, MoneyInput, DateField, InfoRows, InlineError,
   CONTROL, CONTROL_ERROR, controlA11y,
 } from '../../../../components/ui/PanelFormKit';
+import ServicePickRow from '../../../../components/ui/ServicePickRow';
 import { useBranch } from '../../../../contexts/BranchContext';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
@@ -37,6 +38,7 @@ const intOnly = (v) => String(v).replace(/\D/g, '').slice(0, 4);
 // Optional prefill (Packages page): `initialCustomer` ({ id?, full_name, phone }) for Renew, `initialPackageTypeId` for Renew / Sell.
 const NewPackagePanel = ({ userRole, onClose, onIssued, initialCustomer = null, initialPackageTypeId = null }) => {
   const { branchId, branchName, isOverall } = useBranch();
+  const pickerBranchId = isOverall ? null : branchId;
   const { profile } = useAuth();
   const { orgId, paymentMethods } = useOrg();
   const isAdmin = (userRole || profile?.role) === 'admin';
@@ -423,7 +425,7 @@ const NewPackagePanel = ({ userRole, onClose, onIssued, initialCustomer = null, 
                 <TextInput {...controlA11y('pkg-nt-name', newTypeErrors.name)} error={newTypeErrors.name} placeholder="e.g. Annual Package - 60 min" value={newType.name} onChange={(e) => { setNewType((p) => ({ ...p, name: e.target.value })); setNewTypeErrors((x) => ({ ...x, name: undefined })); }} />
               </Field>
               <Field label="Service" required id="pkg-nt-service" error={newTypeErrors.serviceId}>
-                <SelectField value={newType.serviceId} onChange={(v) => { setNewType((p) => ({ ...p, serviceId: v })); setNewTypeErrors((x) => ({ ...x, serviceId: undefined })); }} options={services.map((s) => ({ value: s.id, label: s.name }))} placeholder="Select service" />
+                <ServicePickRow services={services} value={newType.serviceId} onChange={(v) => { setNewType((p) => ({ ...p, serviceId: v })); setNewTypeErrors((x) => ({ ...x, serviceId: undefined })); }} branchId={pickerBranchId} title="Service for the package" ariaLabel="Service" />
               </Field>
               <div className={SPLIT}>
                 <Field label="Sessions" required id="pkg-nt-sessions" error={newTypeErrors.defaultSessions}>

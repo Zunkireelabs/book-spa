@@ -7,6 +7,7 @@ import {
   PanelShell, FormBody, Field, TextInput, MoneyInput, DateField, InfoRows, InlineError, OverflowMenu, controlA11y,
 } from '../../../../components/ui/PanelFormKit';
 import { useAuth } from '../../../../contexts/AuthContext';
+import ServicePickRow from '../../../../components/ui/ServicePickRow';
 import { useBranch } from '../../../../contexts/BranchContext';
 import { useOrg } from '../../../../contexts/OrgContext';
 import {
@@ -105,7 +106,7 @@ const ClaimView = ({ voucher, branches, services, onBack, onClose, onDone, width
           <TextInput id="vc-guest" value={guest} onChange={(e) => setGuest(e.target.value)} placeholder="Who's using it" />
         </Field>
         <Field label="Service">
-          <CustomSelect value={service} onChange={setService} options={services.map((s) => ({ value: s.name, label: s.name }))} placeholder="Select service" searchable />
+          <ServicePickRow services={services} value={services.find((s) => s.name === service)?.id || ''} onChange={(id) => setService(services.find((s) => s.id === id)?.name || '')} branchId={branchId || null} title="Service claimed" ariaLabel="Service" />
         </Field>
         {showNotes ? (
           <Field label="Notes" id="vc-notes">

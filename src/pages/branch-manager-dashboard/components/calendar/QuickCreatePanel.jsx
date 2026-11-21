@@ -8,6 +8,7 @@ import BlockOverlapWarning from '../../../../components/ui/BlockOverlapWarning';
 import AvailabilityNotice from '../../../../components/ui/AvailabilityNotice';
 import { useAvailabilityPrecheck } from '../../../../hooks/useAvailabilityPrecheck';
 import { useIndustry } from '../../../../hooks/useIndustry';
+import ServicePickRow from '../../../../components/ui/ServicePickRow';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
@@ -532,6 +533,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
     return `${h12}:${String(m).padStart(2, '0')}${suffix}`;
   };
+  const svcSubLine = [bookingDate ? new Date(`${bookingDate}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '', bookingTime ? format12h(bookingTime) : ''].filter(Boolean).join(' · ');
 
   // Parse free-typed time (e.g. "9", "9:30", "9:30am", "21:15") into "HH:MM".
   // Returns null while the text is incomplete/invalid so the field can keep it.
@@ -953,27 +955,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                 Service <span className="text-error">*</span>
               </label>
-              {servicesLoading ? (
-                <div className="flex items-center gap-2 py-2">
-                  <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
-                  <span className="text-sm text-text-secondary">Loading services...</span>
-                </div>
-              ) : (
-                <CustomSelect
-                  value={serviceId}
-                  onChange={(val) => setServiceId(val)}
-                  options={[
-                    { value: '', label: 'Select a service' },
-                    ...pickerServices.map((s) => ({
-                      value: s.id,
-                      label: `${s.name} — ${s.duration_minutes}min ${canViewPrices ? ` — Rs.${s.effective_price_npr ?? s.price_npr}` : ''}`,
-                    })),
-                  ]}
-                  placeholder="Select a service"
-                  size="md"
-                  searchable
-                />
-              )}
+              <ServicePickRow services={pickerServices} value={serviceId} onChange={setServiceId} branchId={branchId} canViewPrices={canViewPrices} loading={servicesLoading} title="Service for the booking" sub={svcSubLine} ariaLabel="Service" />
               {visitorTherapist && visitorServiceNames && (
                 <p className="mt-1.5 text-xs text-text-secondary" data-visitor-services-help>
                   Showing the {pickerServices.length} service{pickerServices.length === 1 ? '' : 's'} {visitorTherapist.name} does at the home {(locationLabel || 'branch').toLowerCase()} that this one also offers.
@@ -1341,20 +1323,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               <Segmented options={[['same', 'Same for everyone'], ['different', 'Different per guest']]} value={serviceMode} onChange={setServiceMode} />
               {serviceMode === 'same' && (
                 <div className="mt-2">
-                  <CustomSelect
-                    value={groupServiceId}
-                    onChange={(val) => setGroupServiceId(val)}
-                    options={[
-                      { value: '', label: <>Select a service <span className="text-error">*</span></>, searchLabel: 'Select a service' },
-                      ...groupServices.map((s) => ({
-                        value: s.id,
-                        label: `${s.name} — ${s.duration_minutes}min ${canViewPrices ? ` — Rs.${s.effective_price_npr ?? s.price_npr}` : ''}`,
-                      })),
-                    ]}
-                    placeholder={<>Select a service <span className="text-error">*</span></>}
-                    size="md"
-                    searchable
-                  />
+                  <ServicePickRow services={groupServices} value={groupServiceId} onChange={setGroupServiceId} branchId={branchId} canViewPrices={canViewPrices} title="Service for the group" sub={svcSubLine} ariaLabel="Service" />
                 </div>
               )}
             </div>
@@ -1498,20 +1467,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                       <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                         Service <span className="text-error">*</span>
                       </label>
-                      <CustomSelect
-                        value={p.serviceId}
-                        onChange={(val) => setPerson(idx, { serviceId: val })}
-                        options={[
-                          { value: '', label: <>Select a service <span className="text-error">*</span></>, searchLabel: 'Select a service' },
-                          ...groupServices.map((s) => ({
-                            value: s.id,
-                            label: `${s.name} — ${s.duration_minutes}min ${canViewPrices ? ` — Rs.${s.effective_price_npr ?? s.price_npr}` : ''}`,
-                          })),
-                        ]}
-                        placeholder={<>Select a service <span className="text-error">*</span></>}
-                        size="md"
-                        searchable
-                      />
+                      <ServicePickRow services={groupServices} value={p.serviceId} onChange={(val) => setPerson(idx, { serviceId: val })} branchId={branchId} canViewPrices={canViewPrices} title={`Service for ${idx === 0 ? 'the booking contact' : `Person ${idx + 1}`}`} sub={svcSubLine} ariaLabel="Service" />
                     </div>
                   )}
 
