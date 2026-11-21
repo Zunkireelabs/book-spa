@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-21** by Project Manager · 280 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-21** by Project Manager · 283 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -56,6 +56,8 @@ Last synced: **2026-11-21** by Project Manager · 280 open tickets (epics exclud
 | ZNLY-318 | Sadin | high | One staff control everywhere: a closed staff row that opens the list (dropdown on desktop, sheet on phone) in New booking Individual, the booking panel Staff tab and Assign |
 | ZNLY-320 | Sadin | high | One service control everywhere: a closed service row that opens the list (dropdown on desktop/tablet, sheet on phone), with clean rows, category headers and "Most booked" |
 | ZNLY-322 | Sadin | high | New booking → Group: the required service row gets lost (no own label, looks optional, "Fill free staff" box shows before a service) |
+| ZNLY-323 | Sadin | high | Phone country picker: every country (Nepal default) with search, in the shared CountryCodeSelect |
+| ZNLY-324 | Sadin | high | Booking panel → Edit details: redesign to match New booking (no layout gap, shared phone field, shared date/time controls) |
 | ZNLY-136 | Anish | medium | Group booking (Fresha-style): book multiple people, one shared slot, one checkout |
 | ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
 | ZNLY-175 | Sadin | medium | Therapist inner page: outcomes bar total counts upcoming bookings that sit in no bucket |
@@ -186,6 +188,7 @@ Last synced: **2026-11-21** by Project Manager · 280 open tickets (epics exclud
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-180 | — | medium | Attendance worked time rounded to 0.1 h before display (1 h 32 min shows as 1 h 30 min) |
+| ZNLY-325 | Sadin | medium | Portalled popovers may render behind side panels/modals (z-dropdown 300 < z-modal 1000): BookingHoverCard, PaymentModal, BookingActionModal |
 
 ## Waiting on owner
 | Ticket | Owner | Priority | What |
