@@ -23,7 +23,7 @@ import { ExistingCustomerTag, EarlierBalanceNotice } from '../../../../component
 import { nepalNow } from '../../../../utils/customerDirectory';
 import { useDayAvailability } from '../../../../hooks/useDayAvailability';
 import StaffPickRow from '../../../../components/ui/StaffPickRow';
-import { staffPickIncomplete, staffDayRanges, arrangeByTime, staffHeldByOthers, pickProblems, fillFreeStaff, undoFill, rangeLabel, rangeClock, pillRange, clockShort, pickedRowStatus } from '../../../../utils/staffFit';
+import { staffPickIncomplete, staffDayRanges, arrangeByTime, staffHeldByOthers, pickProblems, fillFreeStaff, undoFill, rangeLabel, rangeClock, pillRange, clockShort, pickedRowStatus, pickedRowStatusMulti, clockToMin } from '../../../../utils/staffFit';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { fieldForErrorCode } from '../../../../utils/quickCreateErrorField';
 
@@ -1040,19 +1040,48 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             {/* Therapist(s): hidden for a combo whose every component needs its own staff, and for self-service amenities */}
             {!comboAllDifferentStaff && serviceRequiresTherapist && (
             <div data-qc-field="staff" className={fieldRing('staff')}>
-            <StaffPicker
-              people={pickerPeople}
-              selectedIds={selectedTherapistIds}
-              onChange={setSelectedTherapistIds}
-              max={selectedService?.is_couple ? 2 : (selectedTherapistIds.length > 1 ? Infinity : 1)}
-              heading={selectedTherapistIds.length > 1 ? staffLabelPlural : staffLabel}
-              staffLabel={staffLabel}
-              staffLabelPlural={staffLabelPlural}
-              slot={bookingDate && bookingTime ? { date: bookingDate, start: bookingTime, end: pickerSlotEnd } : null}
-              serviceId={selectedService?.id || null}
-              bookings={dayBookings}
-              offById={dayOff}
-            />
+            {(() => {
+              const s0 = clockToMin(bookingTime); const e0 = clockToMin(pickerSlotEnd);
+              const maxPick = selectedService?.is_couple ? 2 : (selectedTherapistIds.length > 1 ? Infinity : 1);
+              const picked = selectedTherapistIds.map((tid) => pickerPeople.find((t) => t.id === tid) || { id: tid, name: staffNameOf(tid) });
+              const info = pickedRowStatusMulti(picked, {
+                slot: dayBookings && s0 != null ? { start: s0, end: e0 > s0 ? e0 : s0 + 60 } : null,
+                rangesById: dayBookings && bookingDate ? staffDayRanges(dayBookings, { date: bookingDate }) : {},
+                offById: dayOff, date: bookingDate, today: nepalNow().today,
+              });
+              const lbl = selectedTherapistIds.length > 1 ? staffLabelPlural : staffLabel;
+              return (
+                <div>
+                  <p className="flex items-baseline justify-between mb-1.5 font-body font-body-medium text-[13px] text-text-primary">{lbl} <span className="text-xs font-normal text-text-secondary">optional</span></p>
+                  <StaffPickRow
+                    people={picked}
+                    max={maxPick}
+                    statusLine={info.statusLine}
+                    pill={info.pill}
+                    problem={info.problem}
+                    emptyLabel={`Pick ${staffLabel.toLowerCase()}`}
+                    title={`${lbl} for the booking`}
+                    renderPicker={(close) => (
+                      <StaffPicker
+                        people={pickerPeople}
+                        selectedIds={selectedTherapistIds}
+                        onChange={(ids) => { setSelectedTherapistIds(ids); if (maxPick === 1) close(); }}
+                        max={maxPick}
+                        header={{ title: `${lbl} for the booking${maxPick === 2 ? ' · pick 2' : ''}`, sub: [selectedService?.name, s0 != null && e0 != null ? rangeLabel(s0, e0) : ''].filter(Boolean).join(' · ') }}
+                        onNone={() => { setSelectedTherapistIds([]); close(); }}
+                        noneLabel={`No ${staffLabel.toLowerCase()} · assign later`}
+                        staffLabel={staffLabel}
+                        staffLabelPlural={staffLabelPlural}
+                        slot={bookingDate && bookingTime ? { date: bookingDate, start: bookingTime, end: pickerSlotEnd } : null}
+                        serviceId={selectedService?.id || null}
+                        bookings={dayBookings}
+                        offById={dayOff}
+                      />
+                    )}
+                  />
+                </div>
+              );
+            })()}
             </div>
             )}
 

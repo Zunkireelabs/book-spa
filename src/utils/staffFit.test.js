@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { staffPickIncomplete, arrangeByTime, staffDayRanges, rangeLabel, pillRange, offStaffReasons, offDayLabel, offReasonFor, staffHeldByOthers, pickedRowStatus } from './staffFit';
+import { staffPickIncomplete, arrangeByTime, staffDayRanges, rangeLabel, pillRange, offStaffReasons, offDayLabel, offReasonFor, staffHeldByOthers, pickedRowStatus, pickedRowStatusMulti, clockToMin } from './staffFit';
 
 const P = (id, name) => ({ id, name });
 const people = [P('a', 'Asha'), P('b', 'Bishnu'), P('c', 'Chhori'), P('d', 'Dil')];
@@ -211,5 +211,34 @@ describe('ZNLY-310 pickedRowStatus', () => {
     expect(pickedRowStatus(k, { slot: null, offById: { k: 'Off today' } })).toEqual({ name: 'Kebisha S.', statusLine: '', pill: null, problem: '' });
     expect(pickedRowStatus(k, { slot: { start: NaN, end: 900 } }).statusLine).toBe('');
     expect(pickedRowStatus(null).name).toBe('');
+  });
+});
+
+describe('ZNLY-318 pickedRowStatusMulti', () => {
+  const T0 = '2026-11-22';
+  const a = { id: 'a', name: 'Asha' }; const b = { id: 'b', name: 'Bina' };
+  const slot = { start: 14 * 60, end: 15 * 60 };
+  it('nobody picked: empty', () => {
+    expect(pickedRowStatusMulti([], { slot, date: T0, today: T0 })).toEqual({ names: [], statusLine: '', pill: null, problem: '' });
+  });
+  it('both free: Free, no problem', () => {
+    const r = pickedRowStatusMulti([a, b], { slot, date: T0, today: T0 });
+    expect(r.names).toEqual(['Asha', 'Bina']);
+    expect(r.pill).toBe('free'); expect(r.problem).toBe(''); expect(r.statusLine).toMatch(/^Free/);
+  });
+  it('one off: that problem wins', () => {
+    const r = pickedRowStatusMulti([a, b], { slot, offById: { b: 'Off today' }, date: T0, today: T0 });
+    expect(r.problem).toMatch(/Bina is off today/);
+    expect(r.pill).toBeNull();
+  });
+});
+
+describe('ZNLY-318 clockToMin', () => {
+  it('parses HH:MM and HH:MM:SS, null-safe', () => {
+    expect(clockToMin('13:45:00')).toBe(825);
+    expect(clockToMin('09:05')).toBe(545);
+    expect(clockToMin('')).toBeNull();
+    expect(clockToMin(null)).toBeNull();
+    expect(clockToMin('xx')).toBeNull();
   });
 });

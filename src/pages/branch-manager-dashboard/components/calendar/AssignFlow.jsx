@@ -2,13 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import BottomSheet, { useMediaQuery } from '../../../../components/ui/BottomSheet';
 import SidePanel, { PANEL_WIDTH_BOOKING } from '../../../../components/ui/SidePanel';
 import StaffPicker from '../../../../components/ui/StaffPicker';
+import StaffPickRow from '../../../../components/ui/StaffPickRow';
 import Icon from '../../../../components/AppIcon';
 import { fetchUnassignedBookings, getCalendarBookings, fetchAttendance, fetchShiftsForRange, assignTherapist, LEAVE_LIKE_ATTENDANCE_STATUSES } from '../../../../services/api';
 import { indexShifts } from '../../../../services/availabilityShading';
 import { useAvailabilityGuard } from '../../../../contexts/AvailabilityOverrideContext';
 import { nepalNow } from '../../../../utils/customerDirectory';
 import { addDays } from '../../../../utils/reportPeriod';
-import { offStaffReasons, staffPickIncomplete } from '../../../../utils/staffFit';
+import { offStaffReasons, staffPickIncomplete, pickedRowStatusMulti, staffDayRanges, rangeLabel, clockToMin } from '../../../../utils/staffFit';
 import { buildAssignList, clock12, durationLabel, listSummary, dayTag, firstGroupLabel } from '../../../../utils/unassignedList';
 
 // ZNLY-299 step 3: the calendar's Assign flow. List (today + next 7 days) -> Staff (shared StaffPicker, time-aware for the
@@ -63,6 +64,7 @@ const AssignFlow = ({
   const [item, setItem] = useState(null);
   const [step, setStep] = useState('list');
   const [picked, setPicked] = useState([]);
+  const [pickOpen, setPickOpen] = useState(false); // phone: the staff list replaces the sheet body in place (ZNLY-318)
   const [roomId, setRoomId] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
@@ -76,7 +78,7 @@ const AssignFlow = ({
 
   // Load on open; reset on close.
   useEffect(() => {
-    if (!isOpen) { setRows(null); setItem(null); setStep('list'); setPicked([]); setRoomId(''); setSaveError(null); setLoadError(null); return undefined; }
+    if (!isOpen) { setRows(null); setItem(null); setStep('list'); setPicked([]); setPickOpen(false); setRoomId(''); setSaveError(null); setLoadError(null); return undefined; }
     let live = true;
     fetchUnassignedBookings({ branchId, fromDate: day, toDate: addDays(day, 7) }).then((r) => {
       if (!live) return;
@@ -85,7 +87,7 @@ const AssignFlow = ({
     return () => { live = false; };
   }, [isOpen, branchId, day]);
 
-  const choose = (it) => { setItem(it); setPicked([]); setRoomId(it.roomId || ''); setSaveError(null); setStep('staff'); };
+  const choose = (it) => { setItem(it); setPicked([]); setRoomId(it.roomId || ''); setSaveError(null); setPickOpen(false); setStep('staff'); };
 
   // Exactly one unassigned today (or the bar's interim target) goes straight to the Staff step; "‹" still shows the list.
   const [autoDone, setAutoDone] = useState(false);
@@ -149,7 +151,7 @@ const AssignFlow = ({
     </button>
   );
 
-  let body; let footer = null; let title = 'Unassigned'; let sub = '';
+  let body; let footer = null; let title = 'Unassigned'; let sub = ''; let listNode = null; let onBack;
   if (step === 'list') {
     sub = rows ? listSummary(list, firstLabel) : '';
     body = loadError ? <p className="p-4 text-sm text-error">{loadError}</p>
@@ -174,25 +176,58 @@ const AssignFlow = ({
         </div>
         {ctx.failed ? <p className="py-6 text-sm text-error">Could not load that day. Go back and try again.</p>
           : !ctx.ready ? <p className="py-6 text-sm text-text-secondary">Loading…</p>
-          : (
-            <StaffPicker
-              key={item.id}
-              people={ctx.people}
-              selectedIds={picked}
-              onChange={setPicked}
-              max={item.isCouple ? 2 : 1}
-              staffLabel={staffLabel}
-              staffLabelPlural={staffLabelPlural}
-              slot={{ date: item.date, start: item.start, end: item.end }}
-              serviceId={item.serviceId}
-              bookings={ctx.bookings}
-              excludeBookingId={item.id}
-              offById={ctx.offById}
-              stickyClass="sticky top-0 z-sticky-filter bg-surface pt-1 pb-2"
-            />
-          )}
+          : (() => {
+            const s0 = clockToMin(item.start); const e0 = clockToMin(item.end);
+            const max = item.isCouple ? 2 : 1;
+            const pickedPeople = picked.map((id) => ctx.people.find((t) => t.id === id) || { id, name: nameOf(id) });
+            const info = pickedRowStatusMulti(pickedPeople, {
+              slot: s0 != null ? { start: s0, end: e0 > s0 ? e0 : s0 + 60 } : null,
+              rangesById: staffDayRanges(ctx.bookings, { date: item.date, excludeBookingId: item.id }),
+              offById: ctx.offById, date: item.date, today: nepalNow().today,
+            });
+            const picker = (header, onPick) => (
+              <StaffPicker
+                key={item.id}
+                people={ctx.people}
+                selectedIds={picked}
+                onChange={onPick}
+                max={max}
+                header={header}
+                staffLabel={staffLabel}
+                staffLabelPlural={staffLabelPlural}
+                slot={{ date: item.date, start: item.start, end: item.end }}
+                serviceId={item.serviceId}
+                bookings={ctx.bookings}
+                excludeBookingId={item.id}
+                offById={ctx.offById}
+                stickyClass="sticky top-0 z-sticky-filter bg-surface pt-1 pb-2"
+              />
+            );
+            const sub = [item.service, s0 != null && e0 != null ? rangeLabel(s0, e0) : ''].filter(Boolean).join(' · ');
+            if (isPhone && pickOpen) { listNode = picker({ title: '', sub }, (ids) => { setPicked(ids); if (max === 1) setPickOpen(false); }); return null; }
+            return (
+              <>
+              <p className="mb-1.5 font-body font-body-medium text-[13px] text-text-primary">{item.isCouple ? staffLabelPlural : staffLabel}</p>
+              <StaffPickRow
+                people={pickedPeople}
+                max={max}
+                statusLine={info.statusLine}
+                pill={info.pill}
+                problem={info.problem}
+                emptyLabel={`Pick ${staffLower}`}
+                title={`Staff for ${item.customer}`}
+                onOpenPhone={() => setPickOpen(true)}
+                renderPicker={(close) => picker({ title: `Staff for ${item.customer}${item.isCouple ? ' · pick 2' : ''}`, sub }, (ids) => { setPicked(ids); if (max === 1) close(); })}
+              />
+              </>
+            );
+          })()}
       </div>
     );
+    if (isPhone && pickOpen && listNode) { // the list opens in place of the sheet body: "‹ Staff for <customer>" (ZNLY-318)
+      title = `Staff for ${item.customer}`; onBack = () => setPickOpen(false);
+      body = <div className="pb-4">{listNode}</div>;
+    }
     const need = item.isCouple ? (picked.length ? `${picked.length} of 2 picked` : 'Pick 2 people') : 'Pick 1 person';
     footer = (
       <div className="flex items-center gap-3 w-full">
@@ -225,6 +260,7 @@ const AssignFlow = ({
 
   const headerExtra = sub ? <p className="px-4 pb-1 text-xs text-text-secondary">{sub}</p> : null;
   const common = { isOpen, title, onClose, children: body, footer, headerExtra };
+  if (onBack) common.onBack = onBack;
   return isPhone ? <BottomSheet {...common} /> : <SidePanel {...common} width={PANEL_WIDTH_BOOKING} />;
 };
 

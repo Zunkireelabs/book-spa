@@ -110,6 +110,27 @@ export function pickedRowStatus(person, { slot = null, rangesById = {}, offById 
   return { name, statusLine: `Free ${rangeLabel(s, e)}`, pill: 'free', problem: '' };
 }
 
+/** 'HH:MM' or 'HH:MM:SS' -> minutes since midnight; null for empty / invalid. */
+export const clockToMin = (t) => {
+  if (!t) return null;
+  const [h, m] = String(t).slice(0, 5).split(':').map(Number);
+  return Number.isFinite(h) ? h * 60 + (Number.isFinite(m) ? m : 0) : null;
+};
+
+/**
+ * ZNLY-318: one row for 1-2 picked people (couple service). Same fields as pickedRowStatus: the first problem wins, a busy person
+ * makes the pill Busy, else Free; the line is the first non-free line (or the shared free window).
+ */
+export function pickedRowStatusMulti(people, opts = {}) {
+  const list = (people || []).filter(Boolean);
+  if (list.length === 0) return { names: [], statusLine: '', pill: null, problem: '' };
+  const all = list.map((p) => pickedRowStatus(p, opts));
+  const problem = all.find((x) => x.problem)?.problem || '';
+  const worst = all.find((x) => x.pill !== 'free' && x.statusLine) || all.find((x) => x.statusLine) || all[0];
+  const pill = all.some((x) => x.pill === 'busy') ? 'busy' : all.every((x) => x.pill === 'free') ? 'free' : null;
+  return { names: all.map((x) => x.name), statusLine: worst.statusLine, pill, problem };
+}
+
 /** { [id]: 'Off today' | 'On leave' } from the calendar's attendance map (id -> 'Absent' | 'Leave' | ...) and shift rows for `date`. */
 export function offStaffReasons(people, { attendanceMap = {}, shiftsByTherapist = {}, date } = {}) {
   const out = {};

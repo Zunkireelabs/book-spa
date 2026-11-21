@@ -45,7 +45,7 @@ import { wordBranchCap } from '../../utils/industryTerms';
 import { canonicalMode } from 'lib/dayMoney';
 import StaffPicker from './StaffPicker';
 import StaffPickRow from './StaffPickRow';
-import { pickedRowStatus, staffDayRanges } from '../../utils/staffFit';
+import { pickedRowStatus, pickedRowStatusMulti, staffDayRanges, rangeLabel, clockToMin } from '../../utils/staffFit';
 import { useDayAvailability } from '../../hooks/useDayAvailability';
 import { staffPickIncomplete } from '../../utils/staffFit';
 
@@ -2605,60 +2605,86 @@ const BookingActionModal = ({
                   const staffHeading = isPlural ? (staffLabelPlural || 'Team') : (staffLabel || 'Team member');
                   const staffLower = (staffLabel || 'team member').toLowerCase();
                   const assignedIds = (booking?.therapists?.length ? booking.therapists.map(t => t.id) : (booking?.therapist?.id ? [booking.therapist.id] : []));
-                  const rowBase = `flex items-center gap-3 min-h-[44px] px-3 py-1.5 border-t border-border first:border-t-0 spa-transition-fast ${isAssignmentBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`;
-                  const roomRow = (id, name, allocated) => (
-                    <label key={id || 'none'} className={`${rowBase} ${selectedRoom === id ? 'bg-primary/5' : 'hover:bg-background'}`}>
-                      <input
-                        type="radio"
-                        name="room"
-                        value={id}
-                        checked={selectedRoom === id}
-                        disabled={isAssignmentBlocked}
-                        onChange={() => setSelectedRoom(id)}
-                        className="w-5 h-5 flex-shrink-0 text-primary focus:ring-primary disabled:cursor-not-allowed"
-                      />
-                      {id ? <Icon name="DoorOpen" size={14} className="text-text-secondary flex-shrink-0" /> : null}
-                      <span className={`flex-1 min-w-0 truncate font-body text-sm ${id ? 'font-body-medium text-text-primary' : 'font-body-normal text-text-secondary'}`}>
-                        {name}
-                        {allocated && <span className={TAG}>Allocated</span>}
-                      </span>
-                    </label>
-                  );
                   return (
                     <>
-                      {/* Section 1: staff (shared picker, ZNLY-300) */}
-                      <StaffPicker
-                        key={booking?.bookingId}
-                        people={therapists}
-                        selectedIds={selectedTherapists}
-                        onChange={setSelectedTherapists}
-                        max={currentServiceObj?.is_couple ? 2 : (selectedTherapists.length > 1 ? Infinity : 1)}
-                        heading={staffHeading}
-                        note={isTherapistOptional ? (
-                          <p className="mt-1 font-caption font-caption-normal text-xs text-text-secondary">
-                            Optional for {selectedRoomObj?.name} — self-service room, no {staffLower} required.
-                          </p>
-                        ) : null}
-                        staffLabel={staffLabel || 'Team member'}
-                        staffLabelPlural={staffLabelPlural || 'Team'}
-                        slot={booking?.date && booking?.startTime ? { date: booking.date, start: booking.startTime, end: booking.endTime } : null}
-                        serviceId={booking?.serviceId || null}
-                        bookings={effDayBookings}
-                        excludeBookingId={booking?.bookingId || null}
-                        offById={effOffStaff}
-                        assignedIds={assignedIds}
-                        disabled={isAssignmentBlocked}
-                        stickyClass="sticky top-11 z-sticky-filter bg-surface pt-1 pb-2"
-                      />
+                      {/* Section 1: staff (shared row + list, ZNLY-300 / ZNLY-318) */}
+                      {(() => {
+                        const s0 = clockToMin(booking?.startTime); const e0 = clockToMin(booking?.endTime);
+                        const ownNames = Object.fromEntries([...(booking?.therapists || []), booking?.therapist].filter((t) => t?.id).map((t) => [t.id, t.name]));
+                        const nameFor = (tid) => (therapists || []).find((t) => t.id === tid)?.name || ownNames[tid] || '';
+                        const maxPick = currentServiceObj?.is_couple ? 2 : (selectedTherapists.length > 1 ? Infinity : 1);
+                        const picked = selectedTherapists.map((tid) => (therapists || []).find((t) => t.id === tid) || { id: tid, name: ownNames[tid] || 'Unknown' });
+                        const info = pickedRowStatusMulti(picked, {
+                          slot: effDayBookings && s0 != null ? { start: s0, end: e0 > s0 ? e0 : s0 + 60 } : null,
+                          rangesById: effDayBookings && booking?.date ? staffDayRanges(effDayBookings, { date: booking.date, excludeBookingId: booking.bookingId || null }) : {},
+                          offById: effOffStaff || {}, date: booking?.date, today: nepalNow().today,
+                        });
+                        const savedPeople = assignedIds.map(nameFor).filter(Boolean);
+                        return (
+                          <div>
+                            <h3 className="mb-2 font-heading font-heading-medium text-sm sm:text-base text-text-primary">{staffHeading}{Number.isFinite(maxPick) && maxPick > 1 && <span className="ml-2 text-xs font-normal text-text-secondary">Pick {maxPick}</span>}</h3>
+                            <StaffPickRow
+                              key={booking?.bookingId}
+                              people={picked}
+                              max={maxPick}
+                              statusLine={isAssignmentBlocked ? '' : info.statusLine}
+                              pill={isAssignmentBlocked ? null : info.pill}
+                              problem={isAssignmentBlocked ? '' : info.problem}
+                              assignedIds={assignedIds}
+                              assignedNames={savedPeople}
+                              disabled={isAssignmentBlocked}
+                              emptyLabel={`Pick ${staffLower}`}
+                              title={`${staffHeading} for the booking`}
+                              renderPicker={(close) => (
+                                <StaffPicker
+                                  people={therapists}
+                                  selectedIds={selectedTherapists}
+                                  onChange={(ids) => { setSelectedTherapists(ids); if (maxPick === 1) close(); }}
+                                  max={maxPick}
+                                  header={{ title: `${staffHeading} for the booking${maxPick === 2 ? ' · pick 2' : ''}`, sub: [booking?.service || booking?.serviceName, s0 != null && e0 != null ? rangeLabel(s0, e0) : ''].filter(Boolean).join(' · ') }}
+                                  onNone={isTherapistOptional ? () => { setSelectedTherapists([]); close(); } : null}
+                                  noneLabel={`No ${staffLower} · self-service`}
+                                  staffLabel={staffLabel || 'Team member'}
+                                  staffLabelPlural={staffLabelPlural || 'Team'}
+                                  slot={booking?.date && booking?.startTime ? { date: booking.date, start: booking.startTime, end: booking.endTime } : null}
+                                  serviceId={booking?.serviceId || null}
+                                  bookings={effDayBookings}
+                                  excludeBookingId={booking?.bookingId || null}
+                                  offById={effOffStaff}
+                                  assignedIds={assignedIds}
+                                  disabled={isAssignmentBlocked}
+                                />
+                              )}
+                            />
+                            {isTherapistOptional && (
+                              <p className="mt-1 font-caption font-caption-normal text-xs text-text-secondary">
+                                Optional for {selectedRoomObj?.name} — self-service room, no {staffLower} required.
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
 
-                      {/* Section 2: Room */}
+                      {/* Section 2: Room (same CustomSelect as New booking) */}
                       {rooms.length > 0 && (
                         <div>
                           <h3 className="mb-2 font-heading font-heading-medium text-sm sm:text-base text-text-primary">Room</h3>
-                          <div className="border border-border rounded-spa overflow-hidden">
-                            {roomRow('', 'No room assigned', false)}
-                            {rooms.map((room) => roomRow(room.id, room.name, booking?.roomId === room.id))}
-                          </div>
+                          <CustomSelect
+                            value={selectedRoom}
+                            onChange={(val) => setSelectedRoom(val)}
+                            disabled={isAssignmentBlocked}
+                            options={[
+                              { value: '', label: 'No room assigned' },
+                              ...rooms.map((room) => ({
+                                value: room.id,
+                                label: <>{room.name}{booking?.roomId === room.id && <span className={TAG}>Allocated</span>}</>,
+                                searchLabel: room.name,
+                              })),
+                            ]}
+                            placeholder="No room assigned"
+                            size="md"
+                            searchable
+                          />
                         </div>
                       )}
                     </>
