@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { staffPickIncomplete, arrangeByTime, staffDayRanges, rangeLabel, pillRange, offStaffReasons, offDayLabel, offReasonFor, staffHeldByOthers, pickedRowStatus, pickedRowStatusMulti, clockToMin } from './staffFit';
+import { staffPickIncomplete, arrangeByTime, staffDayRanges, rangeLabel, pillRange, offStaffReasons, offDayLabel, offReasonFor, staffHeldByOthers, pickedRowStatus, pickedRowStatusMulti, clockToMin, pickProblems, fillFreeStaff, undoFill } from './staffFit';
 
 const P = (id, name) => ({ id, name });
 const people = [P('a', 'Asha'), P('b', 'Bishnu'), P('c', 'Chhori'), P('d', 'Dil')];
@@ -86,7 +86,6 @@ describe('staffPickIncomplete', () => {
   });
 });
 
-import { staffHeldByOthers, pickProblems, fillFreeStaff, undoFill } from './staffFit';
 
 describe('group staff (ZNLY-303)', () => {
   const G = (idx, staffId, start = 840, end = 900, serviceId = 's') => ({ idx, staffId, start, end, serviceId });

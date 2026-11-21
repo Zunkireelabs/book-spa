@@ -1,4 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+// The nav registry reads these flags from import.meta.env at import time, so a
+// machine with a .env (flags on) and CI (no .env) saw different menus. Pin them on.
+vi.mock('lib/featureFlags', async (importOriginal) => ({
+  ...(await importOriginal()),
+  MEMBERSHIP_ENABLED: true,
+  VOUCHER_ENABLED: true,
+  OUTREACH_ENABLED: true,
+  PRODUCTS_ENABLED: true,
+  CAMPAIGNS_ENABLED: true,
+}));
 import { getNav, navPath } from './navRegistry';
 import { resolveActiveNav, claimedItemId, ROUTE_OWNER } from './navActive';
 import { REPORTS } from 'pages/branch-manager-dashboard/components/Reports/reportRegistry';
