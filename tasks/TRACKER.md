@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-21** by Project Manager · 283 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-21** by Project Manager · 284 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -312,3 +312,4 @@ Last synced: **2026-11-21** by Project Manager · 283 open tickets (epics exclud
 | ZNLY-264 | Sadin | low | Evaluate Astryx design system (Meta, beta): React 18 to 19 upgrade + StyleX vs our Tailwind stack. After go-live |
 | ZNLY-316 | — | low | Tech debt: AssignFlow's useDayContext duplicates the new useDayAvailability hook; use one |
 | ZNLY-321 | Sadin | low | Idea: "Booked last time" in the service list for a returning customer (where the customer is known before the service) |
+| ZNLY-326 | Sadin | low | Booking panel (phone): collapsing the sheet asks "Discard unsaved changes?" even when Edit details was not changed |
