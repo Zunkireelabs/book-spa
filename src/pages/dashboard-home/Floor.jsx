@@ -63,29 +63,29 @@ const GapBlock = ({ g, onClick, style }) => {
 const Floor = ({ floor, nowMin, open, close, collapsedCount = 6, onOpenBooking, onBookGap, staffPlural = 'people' }) => {
   const [all, setAll] = useState(false);
   const people = floor?.therapists || [];
-  if (!floor) return null;
   const { start, end } = axisBounds(people, open, close);
   const span = end - start;
   const pos = (m) => `${(((m - start) / span) * 100).toFixed(2)}%`;
   const hours = [];
   for (let m = start; m <= end; m += 60) hours.push(m);
   const shown = all ? people : people.slice(0, collapsedCount);
-  const others = Math.max(0, (floor.headcount || 0) - (floor.working || 0));
+  const others = Math.max(0, (floor?.headcount || 0) - (floor?.working || 0));
   // Phone (< md): the timeline scrolls sideways inside the card at 64px per hour with the staff column pinned; desktop keeps the fluid 190px | 1fr grid.
   const PHONE_NAME_W = 164; // 16px card gutter + 148px name column
   const tlPx = Math.round((span / 60) * 64);
   const scrollRef = useRef(null);
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el || nowMin == null || nowMin < start || nowMin > end || !window.matchMedia?.('(max-width: 767px)').matches) return;
+    if (!floor || !el || nowMin == null || nowMin < start || nowMin > end || !window.matchMedia?.('(max-width: 767px)').matches) return;
     el.scrollLeft = Math.max(0, PHONE_NAME_W + tlPx * ((nowMin - start) / span) - el.clientWidth / 3); // "now" about a third from the left
   }, [nowMin, start, end, span, tlPx, people.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!floor) return null; // every hook sits above this, so floor going null -> data keeps hook order
 
   return (
     <div>
-      <div ref={scrollRef} className="max-md:overflow-x-auto max-md:-mx-4 max-md:pb-1" data-floor-scroll>
-        <div className="relative isolate max-md:min-w-max max-md:pr-4 [--nc:164px] md:[--nc:190px] [--tw:calc(100%_-_var(--nc))] max-md:[--tw:var(--tl)]" style={{ '--tl': `${tlPx}px` }}>
-          <div className="grid grid-cols-[var(--nc)_var(--tw)] text-[10px] text-gray-400 mb-1">
+      <div ref={scrollRef} className="max-md:overflow-x-auto max-md:-mx-4 max-md:pb-1 md:overflow-hidden" data-floor-scroll>
+        <div className="relative isolate max-md:min-w-max max-md:pr-4 [--nc:164px] md:[--nc:190px]" style={{ '--tl': `${tlPx}px` }}>
+          <div className="grid grid-cols-[var(--nc)_minmax(0,1fr)] max-md:grid-cols-[var(--nc)_var(--tl)] text-[10px] text-gray-400 mb-1">
             <div className="max-md:sticky max-md:left-0 max-md:z-header max-md:bg-surface" />
             <div className="relative h-4">
               {hours.map((m) => (
@@ -95,12 +95,12 @@ const Floor = ({ floor, nowMin, open, close, collapsedCount = 6, onOpenBooking, 
           </div>
           <div className="relative">
             {nowMin != null && nowMin >= start && nowMin <= end && (
-              <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: 'var(--nc)', width: 'var(--tw)' }}>
+              <div className="absolute top-0 bottom-0 pointer-events-none md:right-0 max-md:w-[var(--tl)]" style={{ left: 'var(--nc)' }}>
                 <div className="absolute top-0 bottom-0 w-px bg-error z-sticky-filter" style={{ left: pos(nowMin) }} />
               </div>
             )}
             {shown.map((t) => (
-              <div key={t.therapist_id} className="grid grid-cols-[var(--nc)_var(--tw)] items-stretch border-t border-gray-100 max-md:min-h-11">
+              <div key={t.therapist_id} className="grid grid-cols-[var(--nc)_minmax(0,1fr)] max-md:grid-cols-[var(--nc)_var(--tl)] items-stretch border-t border-gray-100 max-md:min-h-11">
                 <div className="flex items-center gap-2 pr-2 py-1.5 min-w-0 max-md:sticky max-md:left-0 max-md:z-header max-md:bg-surface max-md:pl-4 max-md:border-r max-md:border-gray-100">
                   <span className="w-7 h-7 rounded-full bg-primary/10 text-primary text-[11px] font-medium flex items-center justify-center flex-shrink-0">{initials(t.name)}</span>
                   <div className="min-w-0">
