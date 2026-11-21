@@ -185,35 +185,12 @@ const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
           </Button>
         </div>
 
-        <div className="space-y-4">
-          {bookingData?.customerInfo?.email && (
-            <div className="flex items-center space-x-3 p-3 bg-success/10 rounded-spa">
-              <Icon name="Mail" size={16} className="text-success" />
-              <div className="flex-1">
-                <span className="font-body font-body-medium text-sm text-text-primary">
-                  Email confirmation sent
-                </span>
-                <p className="font-caption font-caption-normal text-xs text-text-secondary">
-                  Check your inbox at {bookingData.customerInfo.email}
-                </p>
-              </div>
-              <Icon name="CheckCircle" size={16} className="text-success" />
-            </div>
-          )}
-
-          <div className="flex items-center space-x-3 p-3 bg-success/10 rounded-spa">
-            <Icon name="MessageSquare" size={16} className="text-success" />
-            <div className="flex-1">
-              <span className="font-body font-body-medium text-sm text-text-primary">
-                SMS confirmation sent
-              </span>
-              <p className="font-caption font-caption-normal text-xs text-text-secondary">
-                Message sent to {bookingData?.customerInfo?.phoneCountryCode || '+977'} {bookingData?.customerInfo?.phone}
-              </p>
-            </div>
-            <Icon name="CheckCircle" size={16} className="text-success" />
-          </div>
-        </div>
+        {/* The "Email confirmation sent" / "SMS confirmation sent" rows used to sit here.
+            Removed deliberately: both were unconditional UI, not a report of anything
+            actually sent — the SMS row rendered its green tick regardless of whether a
+            message existed. Promising a customer a confirmation that never arrives is
+            worse than promising nothing. Re-add only next to a real send whose result
+            is read back. */}
 
         {showDetails && (
           <div className="mt-6 pt-6 border-t border-border space-y-4">

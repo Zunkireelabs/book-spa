@@ -465,8 +465,25 @@ const ProviderProfileFlow = () => {
     );
   }
 
+  // Success was the one screen in this flow with no header — the customer landed on a bare
+  // card with no branding and no way back to the rest of the site. Same shell as the profile
+  // page below: CustomerHeader is fixed, so the wrapper pays for its real measured height via
+  // --customer-header-h rather than hardcoding 64px (branding text can wrap and grow it).
   if (bookingData) {
-    return <BookingSuccess bookingData={bookingData} orgSlug={orgSlug} onBookAnother={handleBookAnother} />;
+    return (
+      <div
+        className="zn-scope min-h-screen bg-[var(--zn-background)]"
+        style={{ paddingTop: 'var(--customer-header-h, 64px)' }}
+      >
+        <CustomerHeader
+          branch={selectedBranch}
+          marketplaceName={marketplaceIdentity?.name}
+          marketplaceEmail={marketplaceIdentity?.email}
+          containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6"
+        />
+        <BookingSuccess bookingData={bookingData} orgSlug={orgSlug} onBookAnother={handleBookAnother} />
+      </div>
+    );
   }
 
   // entryChoiceOpen renders as a modal (below, layered over whichever of
