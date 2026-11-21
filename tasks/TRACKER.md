@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-21** by Project Manager · 313 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-21** by Project Manager · 315 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -105,6 +105,7 @@ Last synced: **2026-11-21** by Project Manager · 313 open tickets (epics exclud
 | ZNLY-112 | Sadin | high | In Review | Therapists page "Overall" fails: invalid uuid "__overall__" (prod lists all therapists with a Branch column) |
 | ZNLY-113 | Sadin | high | In Review | One home-branch model for temporary transfers: who sees, edits and pays a lent therapist |
 | ZNLY-118 | Sadin | high | In Review | Commission of a lent therapist can go missing: earnings/payroll use the therapist's branch at run time |
+| ZNLY-121 | Sadin | high | On Stage | Customer booking flow shows every date "Full" at Sanepa (local, after migrations 324–327) |
 | ZNLY-147 | Sadin | high | In Review | Dashboard redesign: role-based "what needs me now" home (admin / manager / staff) |
 | ZNLY-149 | Sadin | high | In Review | Admin/manager can't reach front-desk tools (Collect payment is staff-only in ⌘K and the staff page) |
 | ZNLY-150 | Sadin | high | In Review | Link a login to its therapist record (no user → therapist link today; "my bookings" matched by name) |
@@ -243,7 +244,6 @@ Last synced: **2026-11-21** by Project Manager · 313 open tickets (epics exclud
 | ZNLY-15 | — | high | Rotate/remove accounts exposed by deleted public/dev-info.html |
 | ZNLY-18 | — | high | Supabase Auth URL config / allowlists for new domain (both projects) |
 | ZNLY-82 | Sadin | high | UI-16: Release prep — regression pass, stage re-merge, PR to stage |
-| ZNLY-121 | Sadin | high | Customer booking flow shows every date "Full" at Sanepa (local, after migrations 324–327) |
 | ZNLY-196 | — | high | Port the Zone POS QC harness into the Zennly repo (critical-path screens, one shared test tenant), owned by the lead/QC session |
 | ZNLY-256 | — | high | Waitlist insert blocked by RLS for org-level admins (branch_id NULL, no user_branches row) |
 | ZNLY-258 | — | high | Cash expected in drawer subtracts card refunds (payment_refunds has no refund method) |
@@ -252,6 +252,7 @@ Last synced: **2026-11-21** by Project Manager · 313 open tickets (epics exclud
 | ZNLY-328 | Sadin | high | Prod data clean-up: ~1,000 "walk in N" bookings and placeholder phone numbers (97797000, 977123456, 9770000000000…) that merge hundreds of real people into fake profiles (Nuad) |
 | ZNLY-335 | — | high | Marketplace: customer can cancel / reschedule their booking (after go-live) |
 | ZNLY-336 | — | high | Marketplace: one availability rule: server-side slot RPC in bookX used by the marketplace drawer and the app (retire the marketplace's copied slot math) |
+| ZNLY-357 | Sadin | high | Turn on enforce_staff_availability for prod orgs: demospa + khems after release, Nuad after hours/leave check and before its marketplace go-live; default true for new orgs |
 | ZNLY-16 | — | medium | RLS access harness (6 principals x 64 tables) — confirm merged |
 | ZNLY-20 | — | medium | Legacy-domain redirect (zenly.zunkireelabs.com → app.zennly.io) + retire old domains |
 | ZNLY-21 | — | medium | Auth email via Resend SMTP (no-reply@mail.zennly.io) + DKIM/SPF/DMARC + templates |
@@ -293,6 +294,7 @@ Last synced: **2026-11-21** by Project Manager · 313 open tickets (epics exclud
 | ZNLY-315 | Sadin | medium | Own-bookings-only logins: Staff list can't show who is busy (RLS hides colleagues' bookings); needs a busy-times-only source |
 | ZNLY-337 | — | medium | Marketplace follow-ups: booking confirmation to the customer (email/SMS), multi-service + group + staff choice, link marketplace user id, track login_with_pin + users grant (Anish 337/338) as migrations |
 | ZNLY-344 | — | medium | Marketplace customer history: match by phone too (customers saved without email don't see their bookX history, membership, vouchers) |
+| ZNLY-356 | Sadin | medium | After release: write C6/C7/C8 from the drift allow-list as migrations (drop create_public_booking, service_categories policies, services.category nullability) |
 | ZNLY-19 | — | low | Remaining "Zenly" strings (PlatformNav, docs, favicon, skill footer) |
 | ZNLY-22 | — | low | Booking confirmation + day-before reminder emails; wire 2 stub "Send Email" buttons |
 | ZNLY-29 | — | low | Supabase dashboard cleanup: Postgres ERROR logging off, name the original 25P02 trigger |
