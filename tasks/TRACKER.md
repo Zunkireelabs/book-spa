@@ -2,7 +2,7 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-21** by Project Manager · 288 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
+Last synced: **2026-11-21** by Project Manager · 289 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83)
 
 ---
 
@@ -58,6 +58,7 @@ Last synced: **2026-11-21** by Project Manager · 288 open tickets (epics exclud
 | ZNLY-322 | Sadin | high | New booking → Group: the required service row gets lost (no own label, looks optional, "Fill free staff" box shows before a service) |
 | ZNLY-324 | Sadin | high | Booking panel → Edit details: redesign to match New booking (no layout gap, shared phone field, shared date/time controls) |
 | ZNLY-327 | Sadin | high | Walk-in customers: book without name/phone ("Walk-in" in the customer field), keep the record, add the client later; stop fake walk-in names and numbers |
+| ZNLY-331 | Sadin | high | One phone field everywhere: move the remaining plain phone boxes onto the shared country-code field + validity check (Collect payment, customer edit, vouchers, memberships, packages, Waitlist, staff profile, online booking, sign-up, Group guests) |
 | ZNLY-136 | Anish | medium | Group booking (Fresha-style): book multiple people, one shared slot, one checkout |
 | ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
 | ZNLY-175 | Sadin | medium | Therapist inner page: outcomes bar total counts upcoming bookings that sit in no bucket |
@@ -82,6 +83,7 @@ Last synced: **2026-11-21** by Project Manager · 288 open tickets (epics exclud
 | ZNLY-312 | Sadin | medium | Consistency: booking Staff tab opened from Bookings or Inbox shows no Free / Busy / Off (only the calendar day view passes that day's bookings) |
 | ZNLY-317 | Sadin | medium | Phone staff list sheet: empty title bar with only an ✕ above the "Staff for …" header (mockup has the header right under the grab handle) |
 | ZNLY-319 | Sadin | medium | QC: New booking → Group (phone): the guest card heading "Person 2" wraps onto two lines, squeezed by the "optional · blank uses the contact's details" hint |
+| ZNLY-325 | Sadin | medium | Portalled popovers may render behind side panels/modals (z-dropdown 300 < z-modal 1000): BookingHoverCard, PaymentModal, BookingActionModal |
 
 ## In review / on stage
 | Ticket | Owner | Priority | State | What |
@@ -189,7 +191,6 @@ Last synced: **2026-11-21** by Project Manager · 288 open tickets (epics exclud
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-180 | — | medium | Attendance worked time rounded to 0.1 h before display (1 h 32 min shows as 1 h 30 min) |
-| ZNLY-325 | Sadin | medium | Portalled popovers may render behind side panels/modals (z-dropdown 300 < z-modal 1000): BookingHoverCard, PaymentModal, BookingActionModal |
 | ZNLY-329 | Sadin | medium | Dashboard Live floor: right after a side panel closes, timeline rows render wider than the card (bars spill past its left edge and over Needs action) |
 
 ## Waiting on owner
