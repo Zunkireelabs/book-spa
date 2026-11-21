@@ -46,7 +46,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ found: false, error_code: 'INVALID_JSON', message: 'Invalid JSON body' }, 400);
   }
 
-  if (!body.org_slug || !body.email) {
+  if (!body?.org_slug || !body?.email) {
     return json({ found: false, error_code: 'MISSING_FIELD', message: 'org_slug and email are required' }, 400);
   }
 

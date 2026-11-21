@@ -65,30 +65,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const therapistIds = collapseTherapistIds(body);
 
   try {
-    body = (await req.json()) as CreateBookingBody;
-  } catch (_err) {
-    return json({ success: false, error_code: 'INVALID_JSON', message: 'Invalid JSON body' }, 400);
-  }
-
-  const problem = validateCreateBookingBody(body);
-  if (problem) {
-    return json({ success: false, error_code: 'MISSING_FIELD', message: problem }, 400);
-  }
-
-  const supabaseUrl = Deno.env.get('SUPABASE_URL');
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-  if (!supabaseUrl || !serviceKey) {
-    console.error('Missing Supabase configuration');
-    return json({ success: false, error_code: 'SERVER_MISCONFIGURED', message: 'Server misconfigured' }, 500);
-  }
-  const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
-
-  // therapist_id / therapist_ids mirror createBooking's own dual input shape (single vs
-  // multi) -- collapse to one array here so the SQL function only has to handle one form.
-  const therapistIds = body.therapist_ids?.filter(Boolean)
-    ?? (body.therapist_id ? [body.therapist_id] : null);
-
-  try {
     const { data, error } = await supabase.rpc('public_create_booking', {
       p_org_slug: body.org_slug,
       p_branch_id: body.branch_id,
