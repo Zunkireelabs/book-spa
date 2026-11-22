@@ -917,6 +917,11 @@ const BookingActionModal = ({
         serviceId: newBookingForm.serviceId,
         customerName: booking.customerName,
         customerPhone: booking.customerPhone || null,
+        // Same client as this booking: a walk-in stays a walk-in (no phone, no profile, ZNLY-327), and a known client is reused by id,
+        // so the new booking never needs a phone the source booking doesn't have (ZNLY-365).
+        ...(booking.isWalkIn
+          ? { isWalkIn: true, walkInLabel: booking.walkInLabel || undefined }
+          : { knownCustomerId: booking.customerId || undefined }),
         bookingDate: newBookingForm.date,
         bookingTime: newBookingForm.startTime,
         therapistId: newBookingForm.therapistId || null,

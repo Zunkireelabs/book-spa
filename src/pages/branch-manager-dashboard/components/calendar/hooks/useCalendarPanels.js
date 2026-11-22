@@ -308,7 +308,9 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       // The source booking may be one of the historical bookings created before phone became required: silently resubmitting
       // it would fail the DB's INSERT trigger. Route through the normal editable form instead, pre-filled with what's known,
       // so staff supply a phone here rather than hitting an opaque DB error.
-      if (!source.customerPhone || !source.customerPhone.trim()) {
+      const sourceBooking = source.booking || {};
+      // A walk-in (ZNLY-327) has no phone by design, and a known client is reused by id: neither needs the phone fallback (ZNLY-365).
+      if (!sourceBooking.isWalkIn && !sourceBooking.customerId && (!source.customerPhone || !source.customerPhone.trim())) {
         openQuickCreateForSlot({
           ...slotInfo,
           defaultCustomerName: source.customerName,
@@ -324,6 +326,9 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
         startTime,
         customerName: source.customerName,
         customerPhone: source.customerPhone,
+        ...(sourceBooking.isWalkIn
+          ? { isWalkIn: true, walkInLabel: sourceBooking.walkInLabel || undefined }
+          : { knownCustomerId: sourceBooking.customerId || undefined }),
         therapistId,
         roomId,
         overrideReason,
