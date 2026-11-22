@@ -59,6 +59,7 @@ import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideH
 import { getPeriodRange, getTodayISO } from '../utils/periodPresets';
 import { transferOccurrencesForDate } from '../utils/transferOccurrences';
 import { inChunks, failOpenAfter, IN_CHUNK, customerSearchFilter } from './queryHelpers';
+import { getCachedAuthProfile, setCachedAuthProfile, dropCachedAuthProfile, invalidateAuthenticatedUser } from '../lib/authProfileCache';
 import { buildCustomerDirectory, buildPanelDetail, nepalNow, avgPaidPerVisit } from '../utils/customerDirectory';
 import { addDays as addDaysISO } from '../utils/reportPeriod';
 import { attendanceDays, busyMinutesInSpans } from '../pages/branch-manager-dashboard/components/Performance/therapistInnerView';
@@ -260,11 +261,9 @@ export const staffCanRequestDiscountApproval = DISCOUNT_LIMITS.staff < STAFF_REQ
 // (a branch switch used to fire 4× GET /auth/v1/user and 4× GET users). So:
 //  - the user comes from the local session (getSession: no network; the access token is refreshed when due) instead of
 //    getUser (a round trip to the auth server on every call). RLS still checks the token on every data request;
-//  - the profile is shared between concurrent callers and kept for AUTH_PROFILE_TTL_MS. The cache is keyed by user AND access
+//  - the profile is shared between concurrent callers and kept for 30 s (lib/authProfileCache). The cache is keyed by user AND access
 //    token, so a sign-out/sign-in or a token refresh misses it by itself; invalidateAuthenticatedUser() drops it on demand.
-const AUTH_PROFILE_TTL_MS = 30000;
-let authProfileCache = null; // { key, at, promise }
-export function invalidateAuthenticatedUser() { authProfileCache = null; }
+export { invalidateAuthenticatedUser };
 
 async function loadAuthenticatedUser() {
   const { data: { session } } = await supabase.auth.getSession();
@@ -273,8 +272,8 @@ async function loadAuthenticatedUser() {
     return { user: null, profile: null, error: { code: 'UNAUTHENTICATED', message: 'You must be logged in.' } };
   }
   const key = `${user.id}:${session.access_token}`;
-  const cached = authProfileCache;
-  if (cached && cached.key === key && Date.now() - cached.at < AUTH_PROFILE_TTL_MS) return cached.promise;
+  const cached = getCachedAuthProfile(key);
+  if (cached) return cached;
   const promise = (async () => {
     const { data: profile, error: profileError } = await supabase
       .from('users')
@@ -282,12 +281,12 @@ async function loadAuthenticatedUser() {
       .eq('id', user.id)
       .single();
     if (profileError) {
-      if (authProfileCache?.promise === promise) authProfileCache = null; // never keep a failure
+      dropCachedAuthProfile(promise); // never keep a failure
       return { user, profile: null, error: { code: 'PROFILE_ERROR', message: 'Could not load user profile.' } };
     }
     return { user, profile, error: null };
   })();
-  authProfileCache = { key, at: Date.now(), promise };
+  setCachedAuthProfile(key, promise);
   return promise;
 }
 async function getAuthenticatedUser() {
@@ -19786,7 +19785,7 @@ async function provisionStaffLogin({ email, fullName, orgId, branchId, role, log
   return { data: created, error: null };
 }
 
-export async function grantStaffAccess({ therapistId, email, loginAccess, role, branchIds, calendarVisibility, canViewCustomerDetails, canViewPrices, password, pin }) {
+async function grantStaffAccessImpl({ therapistId, email, loginAccess, role, branchIds, calendarVisibility, canViewCustomerDetails, canViewPrices, password, pin }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -19924,10 +19923,15 @@ export async function grantStaffAccess({ therapistId, email, loginAccess, role, 
   }
 }
 
+// Editing staff access can change the signed-in user's own role/visibility, so drop the cached profile (see getAuthenticatedUser).
+export async function grantStaffAccess(...args) {
+  try { return await grantStaffAccessImpl(...args); } finally { invalidateAuthenticatedUser(); }
+}
+
 // The inverse of grantStaffAccess: attach an existing login to an existing
 // therapist without changing the account's settings. Rejects if either side
 // is already linked.
-export async function linkStaffToAccount({ therapistId, userId }) {
+async function linkStaffToAccountImpl({ therapistId, userId }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -19975,9 +19979,14 @@ export async function linkStaffToAccount({ therapistId, userId }) {
   }
 }
 
+// Editing staff access can change the signed-in user's own role/visibility, so drop the cached profile (see getAuthenticatedUser).
+export async function linkStaffToAccount(...args) {
+  try { return await linkStaffToAccountImpl(...args); } finally { invalidateAuthenticatedUser(); }
+}
+
 // Unlinking is not deletion: the users row survives, it just stops being
 // anyone's "who am I" link. The therapist goes back to no-login.
-export async function unlinkStaffAccess({ therapistId }) {
+async function unlinkStaffAccessImpl({ therapistId }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -20002,10 +20011,15 @@ export async function unlinkStaffAccess({ therapistId }) {
   }
 }
 
+// Editing staff access can change the signed-in user's own role/visibility, so drop the cached profile (see getAuthenticatedUser).
+export async function unlinkStaffAccess(...args) {
+  try { return await unlinkStaffAccessImpl(...args); } finally { invalidateAuthenticatedUser(); }
+}
+
 // Detail screen's Save: role / login_access / calendar_visibility / branch
 // grants for an already-linked (or account-only) user. Branch grants, when
 // provided, REPLACE the full set — same manual-ticking rule as grantStaffAccess.
-export async function updateStaffAccess({ userId, role, loginAccess, calendarVisibility, branchIds, canViewCustomerDetails, canViewPrices, pin }) {
+async function updateStaffAccessImpl({ userId, role, loginAccess, calendarVisibility, branchIds, canViewCustomerDetails, canViewPrices, pin }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -20101,6 +20115,11 @@ export async function updateStaffAccess({ userId, role, loginAccess, calendarVis
     console.error('[API] updateStaffAccess error:', error.message);
     return { data: null, error: plainError(error) };
   }
+}
+
+// Editing staff access can change the signed-in user's own role/visibility, so drop the cached profile (see getAuthenticatedUser).
+export async function updateStaffAccess(...args) {
+  try { return await updateStaffAccessImpl(...args); } finally { invalidateAuthenticatedUser(); }
 }
 
 // ============================================================
