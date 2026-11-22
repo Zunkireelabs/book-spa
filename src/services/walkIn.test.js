@@ -17,7 +17,7 @@ const chain = (table) => {
 };
 vi.mock('lib/supabase', () => ({
   supabase: {
-    auth: { getUser: async () => ({ data: { user: { id: 'u1' } } }) },
+    auth: { getUser: async () => ({ data: { user: { id: 'u1' } } }), getSession: async () => ({ data: { session: { user: { id: 'u1' }, access_token: 't1' } } }) },
     from: (table) => chain(table),
     rpc: (...a) => { state.rpcs.push(a); return Promise.resolve({ data: null, error: null }); },
   },

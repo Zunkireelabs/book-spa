@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
@@ -70,12 +70,30 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
   }, [branchId, today]);
   useEffect(() => { loadNeeds(); }, [loadNeeds]);
 
+  // Another device (or a colleague) changing a booking of this branch updates the Needs list here without a reload: one debounced
+  // refetch per burst of events, only while this view is mounted (the channel is dropped on unmount / branch change).
+  const loadNeedsRef = useRef(loadNeeds);
+  loadNeedsRef.current = loadNeeds;
+  useEffect(() => {
+    if (!branchId) return undefined;
+    let timer = null;
+    const channel = supabase
+      .channel(`dashboard-needs-${branchId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings', filter: `branch_id=eq.${branchId}` }, () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => loadNeedsRef.current?.(), 1000);
+      })
+      .subscribe();
+    return () => { clearTimeout(timer); supabase.removeChannel(channel); };
+  }, [branchId]);
+
   const loadClosed = useCallback(async () => {
     if (!branchId) return;
     const { data: r } = await supabase.from('daily_reports').select('closed_at, closer:users!daily_reports_closed_by_fkey(full_name)').eq('branch_id', branchId).eq('report_date', today).maybeSingle();
     setClosed(r || null);
   }, [branchId, today]);
-  useEffect(() => { loadClosed(); }, [loadClosed]);
+  // Only the Close part of the day shows who closed it, so the lookup waits until that part is open.
+  useEffect(() => { if (phase === 'close') loadClosed(); }, [loadClosed, phase]);
 
   const refresh = () => { loadNeeds(); onReload?.(); };
   const go = (view) => setSearchParams({ view });

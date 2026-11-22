@@ -59,6 +59,8 @@ import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideH
 import { getPeriodRange, getTodayISO } from '../utils/periodPresets';
 import { transferOccurrencesForDate } from '../utils/transferOccurrences';
 import { inChunks, failOpenAfter, IN_CHUNK, customerSearchFilter } from './queryHelpers';
+import { isNewTenant } from '../lib/dashboardTenant';
+import { getCachedAuthProfile, setCachedAuthProfile, dropCachedAuthProfile, invalidateAuthenticatedUser } from '../lib/authProfileCache';
 import { buildCustomerDirectory, buildPanelDetail, nepalNow, avgPaidPerVisit } from '../utils/customerDirectory';
 import { addDays as addDaysISO } from '../utils/reportPeriod';
 import { attendanceDays, busyMinutesInSpans } from '../pages/branch-manager-dashboard/components/Performance/therapistInnerView';
@@ -256,21 +258,40 @@ export const staffCanRequestDiscountApproval = DISCOUNT_LIMITS.staff < STAFF_REQ
  * Fetch authenticated user + profile in one call.
  * Returns { user, profile } or a structured error.
  */
-async function getAuthenticatedUser() {
-  const { data: { user } } = await supabase.auth.getUser();
+// The signed-in user + their users row (role, org, branch, visibility flags). ~215 call sites ask for this, often several at once
+// (a branch switch used to fire 4× GET /auth/v1/user and 4× GET users). So:
+//  - the user comes from the local session (getSession: no network; the access token is refreshed when due) instead of
+//    getUser (a round trip to the auth server on every call). RLS still checks the token on every data request;
+//  - the profile is shared between concurrent callers and kept for 30 s (lib/authProfileCache). The cache is keyed by user AND access
+//    token, so a sign-out/sign-in or a token refresh misses it by itself; invalidateAuthenticatedUser() drops it on demand.
+export { invalidateAuthenticatedUser };
+
+async function loadAuthenticatedUser() {
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user || null;
   if (!user) {
     return { user: null, profile: null, error: { code: 'UNAUTHENTICATED', message: 'You must be logged in.' } };
   }
-  const { data: profile, error: profileError } = await supabase
-    .from('users')
-    .select('id, role, branch_id, org_id, calendar_visibility, can_view_customer_details, can_view_prices')
-    .eq('id', user.id)
-    .single();
-
-  if (profileError) {
-    return { user, profile: null, error: { code: 'PROFILE_ERROR', message: 'Could not load user profile.' } };
-  }
-  return { user, profile, error: null };
+  const key = `${user.id}:${session.access_token}`;
+  const cached = getCachedAuthProfile(key);
+  if (cached) return cached;
+  const promise = (async () => {
+    const { data: profile, error: profileError } = await supabase
+      .from('users')
+      .select('id, role, branch_id, org_id, calendar_visibility, can_view_customer_details, can_view_prices')
+      .eq('id', user.id)
+      .single();
+    if (profileError) {
+      dropCachedAuthProfile(promise); // never keep a failure
+      return { user, profile: null, error: { code: 'PROFILE_ERROR', message: 'Could not load user profile.' } };
+    }
+    return { user, profile, error: null };
+  })();
+  setCachedAuthProfile(key, promise);
+  return promise;
+}
+async function getAuthenticatedUser() {
+  return loadAuthenticatedUser();
 }
 
 /**
@@ -669,16 +690,20 @@ export async function fetchNeeds({ branchIds, date }) {
 }
 
 // New-tenant check + setup checklist counts for one branch. firstBookingDate is the earliest booking's date (null when none).
-export async function fetchSetupState({ branchId }) {
+export async function fetchSetupState({ branchId, today }) {
   try {
-    const [sv, rm, th, first] = await Promise.all([
+    // The earliest booking decides whether this is a new tenant; the checklist counts (services, rooms, staff: five requests) are
+    // only worth fetching for one. An established branch costs a single request on every branch switch.
+    const first = await supabase.from('bookings').select('date').eq('branch_id', branchId).order('date', { ascending: true }).limit(1);
+    if (first.error) throw first.error;
+    const firstBookingDate = first.data?.[0]?.date || null;
+    if (today && !isNewTenant(firstBookingDate, today)) return { data: { counts: null, firstBookingDate }, error: null };
+    const [sv, rm, th] = await Promise.all([
       fetchServices(branchId),
       fetchRooms(branchId),
       supabase.from('therapists').select('id', { count: 'exact', head: true }).eq('branch_id', branchId).eq('is_active', true),
-      supabase.from('bookings').select('date').eq('branch_id', branchId).order('date', { ascending: true }).limit(1),
     ]);
-    if (th.error || first.error) throw (th.error || first.error);
-    const firstBookingDate = first.data?.[0]?.date || null;
+    if (th.error) throw th.error;
     return { data: { counts: { services: (sv.data || []).length, rooms: (rm.data || []).length, staff: th.count || 0, bookings: firstBookingDate ? 1 : 0 }, firstBookingDate }, error: null };
   } catch (error) {
     console.error('[API] fetchSetupState error:', error.message);
@@ -995,6 +1020,23 @@ export async function fetchBookings(branchId, { date, dateFrom, dateTo, status }
     return { data, error: null };
   } catch (error) {
     console.error('[API] fetchBookings error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * True when any booking of the day (for the branch, or org-wide on Overall) is locked ("This day is closed"). A head count
+ * with limit 1: the dashboard banner only needs this yes/no, not the day's bookings.
+ */
+export async function hasLockedBookings(branchId, date) {
+  try {
+    let query = supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('date', date).eq('is_locked', true).limit(1);
+    query = withBranch(query, branchId);
+    const { count, error } = await query;
+    if (error) throw error;
+    return { data: (count || 0) > 0, error: null };
+  } catch (error) {
+    console.error('[API] hasLockedBookings error:', error.message);
     return { data: null, error };
   }
 }
@@ -4027,8 +4069,23 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
 
 /**
  * Fetch bookings with pending discount requests (manager view).
+ * Callers that ask at the same moment (the header feed, the sidebar and the dashboard all do on a branch switch) share one
+ * request. A 'pending-approvals-changed' event (fired after any approve/reject/request) forgets the shared request, so the
+ * refetch that follows it always reads fresh data.
  */
-export async function fetchPendingDiscounts(branchId) {
+const pendingDiscountsInFlight = new Map(); // branchId -> promise
+if (typeof window !== 'undefined') window.addEventListener('pending-approvals-changed', () => pendingDiscountsInFlight.clear());
+export function fetchPendingDiscounts(branchId) {
+  const key = String(branchId);
+  const shared = pendingDiscountsInFlight.get(key);
+  if (shared) return shared;
+  const promise = fetchPendingDiscountsUncached(branchId).finally(() => {
+    if (pendingDiscountsInFlight.get(key) === promise) pendingDiscountsInFlight.delete(key);
+  });
+  pendingDiscountsInFlight.set(key, promise);
+  return promise;
+}
+async function fetchPendingDiscountsUncached(branchId) {
   try {
     const { user, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -19727,7 +19784,7 @@ async function provisionStaffLogin({ email, fullName, orgId, branchId, role, log
   return { data: created, error: null };
 }
 
-export async function grantStaffAccess({ therapistId, email, loginAccess, role, branchIds, calendarVisibility, canViewCustomerDetails, canViewPrices, password, pin }) {
+async function grantStaffAccessImpl({ therapistId, email, loginAccess, role, branchIds, calendarVisibility, canViewCustomerDetails, canViewPrices, password, pin }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -19865,10 +19922,15 @@ export async function grantStaffAccess({ therapistId, email, loginAccess, role, 
   }
 }
 
+// Editing staff access can change the signed-in user's own role/visibility, so drop the cached profile (see getAuthenticatedUser).
+export async function grantStaffAccess(...args) {
+  try { return await grantStaffAccessImpl(...args); } finally { invalidateAuthenticatedUser(); }
+}
+
 // The inverse of grantStaffAccess: attach an existing login to an existing
 // therapist without changing the account's settings. Rejects if either side
 // is already linked.
-export async function linkStaffToAccount({ therapistId, userId }) {
+async function linkStaffToAccountImpl({ therapistId, userId }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -19916,9 +19978,14 @@ export async function linkStaffToAccount({ therapistId, userId }) {
   }
 }
 
+// Editing staff access can change the signed-in user's own role/visibility, so drop the cached profile (see getAuthenticatedUser).
+export async function linkStaffToAccount(...args) {
+  try { return await linkStaffToAccountImpl(...args); } finally { invalidateAuthenticatedUser(); }
+}
+
 // Unlinking is not deletion: the users row survives, it just stops being
 // anyone's "who am I" link. The therapist goes back to no-login.
-export async function unlinkStaffAccess({ therapistId }) {
+async function unlinkStaffAccessImpl({ therapistId }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -19943,10 +20010,15 @@ export async function unlinkStaffAccess({ therapistId }) {
   }
 }
 
+// Editing staff access can change the signed-in user's own role/visibility, so drop the cached profile (see getAuthenticatedUser).
+export async function unlinkStaffAccess(...args) {
+  try { return await unlinkStaffAccessImpl(...args); } finally { invalidateAuthenticatedUser(); }
+}
+
 // Detail screen's Save: role / login_access / calendar_visibility / branch
 // grants for an already-linked (or account-only) user. Branch grants, when
 // provided, REPLACE the full set — same manual-ticking rule as grantStaffAccess.
-export async function updateStaffAccess({ userId, role, loginAccess, calendarVisibility, branchIds, canViewCustomerDetails, canViewPrices, pin }) {
+async function updateStaffAccessImpl({ userId, role, loginAccess, calendarVisibility, branchIds, canViewCustomerDetails, canViewPrices, pin }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -20042,6 +20114,11 @@ export async function updateStaffAccess({ userId, role, loginAccess, calendarVis
     console.error('[API] updateStaffAccess error:', error.message);
     return { data: null, error: plainError(error) };
   }
+}
+
+// Editing staff access can change the signed-in user's own role/visibility, so drop the cached profile (see getAuthenticatedUser).
+export async function updateStaffAccess(...args) {
+  try { return await updateStaffAccessImpl(...args); } finally { invalidateAuthenticatedUser(); }
 }
 
 // ============================================================
