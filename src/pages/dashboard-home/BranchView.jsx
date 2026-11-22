@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
@@ -69,6 +69,23 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
     if (!error) setNeeds(rows);
   }, [branchId, today]);
   useEffect(() => { loadNeeds(); }, [loadNeeds]);
+
+  // Another device (or a colleague) changing a booking of this branch updates the Needs list here without a reload: one debounced
+  // refetch per burst of events, only while this view is mounted (the channel is dropped on unmount / branch change).
+  const loadNeedsRef = useRef(loadNeeds);
+  loadNeedsRef.current = loadNeeds;
+  useEffect(() => {
+    if (!branchId) return undefined;
+    let timer = null;
+    const channel = supabase
+      .channel(`dashboard-needs-${branchId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings', filter: `branch_id=eq.${branchId}` }, () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => loadNeedsRef.current?.(), 1000);
+      })
+      .subscribe();
+    return () => { clearTimeout(timer); supabase.removeChannel(channel); };
+  }, [branchId]);
 
   const loadClosed = useCallback(async () => {
     if (!branchId) return;
