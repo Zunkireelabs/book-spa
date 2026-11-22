@@ -1,4 +1,4 @@
-import { nepalToday } from '../utils/nepalTime';
+import { nepalToday, nepalLocalDate } from '../utils/nepalTime';
 // Convert "HH:MM" or "HH:MM:SS" to 12h format
 export function to12h(timeStr) {
   if (!timeStr) return '';
@@ -249,8 +249,7 @@ function computeMembershipStatus(m) {
     return total >= advance ? 'active' : 'pending';
   }
   if (balance <= 0) return 'depleted';
-  const today = new Date();
-  const today00 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const today00 = nepalLocalDate(); // the Nepal day at local midnight
   const expiry = m.expiry_date ? new Date(m.expiry_date + 'T00:00:00') : null;
   if (expiry && expiry < today00) return 'lapsed';
   return 'active';

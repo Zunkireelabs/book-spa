@@ -1,3 +1,4 @@
+import { nepalToday } from '../../../../utils/nepalTime';
 import React, { useMemo } from 'react';
 import { nameForList } from '../../../../services/dataMasking';
 import { formatClockTime } from './timeFormat';
@@ -30,7 +31,7 @@ function addDaysToStr(dateStr, days) {
 // date itself (click -> jump to Day view). No drag-and-drop, no per-staff
 // columns, no attendance — those stay Day/Week-only.
 const MonthGridView = ({ currentDate, bookings = [], branchHours, hideSensitive, use24h = false, onDayClick, onBookingClick }) => {
-  const todayStr = toLocalISO(new Date());
+  const todayStr = nepalToday();
 
   const weeks = useMemo(() => {
     const d = new Date(currentDate + 'T00:00:00');

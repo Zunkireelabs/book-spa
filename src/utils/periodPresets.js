@@ -1,4 +1,4 @@
-import { nepalToday } from './nepalTime';
+import { nepalToday, nepalLocalDate } from './nepalTime';
 
 // Shared period presets for report date filtering.
 // Ranges are calendar-period-to-date ending today, except "weekly" which is a
@@ -28,10 +28,7 @@ export const toISO = (d) => {
 // (and utils/reportPeriod) works on local-field Dates, so building "today" this way keeps every range on the Nepal day whatever the
 // device timezone is.
 export const getTodayISO = () => nepalToday();
-export const nepalLocalDate = () => {
-  const [y, m, d] = nepalToday().split('-').map(Number);
-  return new Date(y, m - 1, d);
-};
+export { nepalLocalDate };
 
 export function getPeriodRange(presetId) {
   const today = nepalLocalDate();

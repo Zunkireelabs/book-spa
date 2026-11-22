@@ -31,3 +31,13 @@ export function addDays(dateStr, n) {
   const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
+
+/**
+ * A Date whose LOCAL fields (getFullYear/getMonth/getDate, setDate...) are the Nepal calendar day of `now`, at local midnight. For code that does
+ * month/week arithmetic with local-field Dates: it stays on the Nepal day whatever the device timezone. Never call toISOString() on it (use
+ * nepalToday()/addDays for strings); never use it for a time of day.
+ */
+export function nepalLocalDate(now = new Date()) {
+  const [y, m, d] = nepalToday(now).split('-').map(Number);
+  return new Date(y, m - 1, d);
+}

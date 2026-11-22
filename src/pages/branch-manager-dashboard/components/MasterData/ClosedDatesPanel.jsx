@@ -1,3 +1,4 @@
+import { nepalToday } from '../../../../utils/nepalTime';
 import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
@@ -53,7 +54,7 @@ const ClosedDatesPanel = ({ branchId }) => {
   useEffect(() => { load(); }, [load]);
 
   const openAddModal = () => {
-    const today = toLocalISO(new Date());
+    const today = nepalToday();
     setEditingId(null);
     setStartDate(today);
     setEndDate(today);

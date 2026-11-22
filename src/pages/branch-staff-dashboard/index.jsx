@@ -1,3 +1,4 @@
+import { nepalLocalDate } from '../../utils/nepalTime';
 import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -83,7 +84,7 @@ const BranchStaffDashboard = () => {
 
   // Check if a booking date falls within the current date filter
   const isDateInCurrentFilter = useCallback((bookingDate, dateRange) => {
-    const today = new Date();
+    const today = nepalLocalDate();
     const booking = new Date(bookingDate);
 
     switch (dateRange) {
@@ -113,7 +114,7 @@ const BranchStaffDashboard = () => {
 
   // Compute date filter from dateRange value
   const getDateFilter = useCallback((dateRange) => {
-    const today = new Date();
+    const today = nepalLocalDate();
     const fmt = (d) => toISO(d);
 
     switch (dateRange) {
@@ -337,7 +338,7 @@ const BranchStaffDashboard = () => {
 
   // Handle viewing a booking from the new booking notification
   const handleViewNewBooking = (bookingDate) => {
-    const today = new Date();
+    const today = nepalLocalDate();
     const booking = new Date(bookingDate);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);

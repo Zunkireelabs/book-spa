@@ -1,3 +1,4 @@
+import { nepalToday } from '../../utils/nepalTime';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import Icon from '../AppIcon';
 import SidePanel from './SidePanel';
@@ -304,8 +305,7 @@ export const DateField = ({ value, onChange, label, required, disabled, hint, mi
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
   }, [open]);
-  const today = new Date();
-  const todayYmd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const todayYmd = nepalToday(); // the spa's day, not the device's
   return (
     <Field label={label} required={required} hint={hint} error={error} id={id}>
       <div className="relative" ref={ref}>

@@ -12241,7 +12241,7 @@ export async function getCustomerIntelligence({ branchId }) {
     }
 
     // 3. Enrich each customer with stats + loyalty tier
-    const today = new Date().setHours(0, 0, 0, 0);
+    const today = Date.parse(nepalToday()); // UTC midnight of the Nepal day; lastVisitDate below is a date string parsed the same way
 
     const enriched = customers.map(c => {
       const s = statsMap[c.id] || {

@@ -1,4 +1,4 @@
-import { NEPAL_TZ, nepalToday } from '../../utils/nepalTime';
+import { NEPAL_TZ, nepalToday, nepalNow } from '../../utils/nepalTime';
 import React, { useState, useEffect } from 'react';
 import Icon from '../AppIcon';
 import {
@@ -367,8 +367,8 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
 
   const busy = transferring || extending || reverting || cancellingActive || editing;
   const fmtDT = (v) => formatRevert(new Date(v));
-  const todayLocal = toLocalYMD(new Date());
-  const nowHm = toHm(new Date());
+  const todayLocal = nepalToday(); // the spa's date and clock (Nepal), not the device's
+  const nowHm = nepalNow().hm;
   const staff = (staffLabel || 'Therapist');
 
   // Live shading preview of the transfer window (create view only).
@@ -471,11 +471,9 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
             setUseCustomReturnTime(e.target.checked);
             setRevertError(null);
             if (e.target.checked && !customReturnDate) {
-              const now = new Date();
-              // Local date/time components — toISOString() is UTC and can land on a different calendar day near midnight.
-              const pad = (n) => String(n).padStart(2, '0');
-              setCustomReturnDate(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
-              setCustomReturnTime(`${pad(now.getHours())}:${pad(now.getMinutes())}`);
+              const now = nepalNow(); // the spa's date and clock (Nepal)
+              setCustomReturnDate(now.today);
+              setCustomReturnTime(now.hm);
             }
           }}
           disabled={reverting}

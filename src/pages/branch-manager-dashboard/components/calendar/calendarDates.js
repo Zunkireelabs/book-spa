@@ -1,4 +1,4 @@
-import { NEPAL_TZ } from '../../../../utils/nepalTime';
+import { NEPAL_TZ, nepalToday } from '../../../../utils/nepalTime';
 // Pure date/time helpers shared by the calendar orchestrator, the grid and the quick-create panel.
 import { to12h as to12hSpaced } from '../../../../services/bookingTransformers';
 
@@ -7,7 +7,7 @@ export function toLocalISO(d) {
 }
 
 export function todayStr() {
-  return toLocalISO(new Date());
+  return nepalToday(); // the spa's day, not the device's
 }
 
 // Local-time date math. We can't use toISOString here: in Nepal (UTC+5:45)
