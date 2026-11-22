@@ -1,3 +1,4 @@
+import { nepalNow } from '../../utils/customerDirectory';
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
@@ -135,7 +136,7 @@ const BranchManagerDashboard = () => {
   const loadData = useCallback(async () => {
     if (!branchId) return;
     setLoading(true);
-    const today = new Date().toISOString().split('T')[0];
+    const today = nepalNow().today; // the spa's day (Nepal), not the UTC date, which is yesterday until 05:45
     const result = await fetchBookings(branchId, { date: today });
     if (result.data) {
       setBookings(transformBookings(result.data));
