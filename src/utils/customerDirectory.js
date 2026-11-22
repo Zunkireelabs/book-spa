@@ -1,3 +1,6 @@
+// KEEP IN SYNC WITH supabase/migration-419-customer-directory-rpc.sql: the Customers page now gets its rows from SQL (customer_directory_*),
+// which ports buildCustomerDirectory, lifecycleSegment, matchesSearch, phoneSearchDigits and the sort rules below. This file stays the
+// reference; src/services/customerDirectoryParity.test.js proves they agree.
 // Pure derivation for the Customers list: one row per customer with next/last visit, in-spa flag, balance, spent and a single
 // lifecycle segment. "Today"/"now" are Nepal wall-clock values (never toISOString(), which shifts the date) and are injectable
 // so the boundaries can be tested. All money comes from ./bookingMoney (the one model); only the "Before" figure of the V12 notice still
