@@ -4,7 +4,7 @@ import pg from 'pg';
 const [, , url, mode] = process.argv;
 const c = new pg.Client({ connectionString: url }); await c.connect();
 const base = (await c.query(`select b.id branch, s.id svc, s.name sname, s.duration_minutes dur, t.id th, (select u.id from users u where u.org_id=o.id limit 1) uid from organizations o join branches b on b.org_id=o.id
-  join services s on s.org_id=o.id join therapists t on t.org_id=o.id and t.branch_id=b.id where o.slug='nuad-thai-spa' limit 1`)).rows[0];
+  join services s on s.org_id=o.id join therapists t on t.org_id=o.id and t.branch_id=b.id where o.slug=$1 limit 1`, [process.env.WRITER_ORG || 'nuad-thai-spa'])).rows[0];
 if (mode === 'start') {
   let ok = 0, err = 0, i = 0; const lat = [];
   process.on('SIGTERM', async () => { console.log(JSON.stringify({ ok, err, maxWaitMs: Math.max(0, ...lat) })); await c.end(); process.exit(0); });
@@ -17,7 +17,9 @@ if (mode === 'start') {
     await new Promise((r) => setTimeout(r, 15));
   }
 } else {
-  const r = (await c.query(`select count(*)::int n, count(*) filter (where service_name_snapshot <> $1 or service_duration_snapshot <> $2 or end_time <> start_time + ($2 * interval '1 minute'))::int bad
-    from bookings where customer_name='CW test'`, [base.sname, base.dur])).rows[0];
+  // the snapshot trigger does not exist on prod: only check snapshots where it exists; the end time (compute trigger) is always checked
+  const snap = (await c.query("select count(*)::int n from pg_trigger where tgname='trg_booking_snapshots' and not tgisinternal")).rows[0].n > 0;
+  const r = (await c.query(`select count(*)::int n, count(*) filter (where ($3 and (service_name_snapshot <> $1 or service_duration_snapshot <> $2)) or end_time <> start_time + ($2 * interval '1 minute'))::int bad
+    from bookings where customer_name='CW test'`, [base.sname, base.dur, snap])).rows[0];
   console.log(JSON.stringify(r)); await c.end(); process.exit(r.bad ? 1 : 0);
 }

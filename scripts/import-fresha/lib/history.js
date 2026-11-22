@@ -16,8 +16,9 @@ export const HISTORY = [
   ['booking_therapists', 'trg_booking_therapists_guards_check', 'same, junction side'],
 ];
 
-// Triggers known on bookings/payments/booking_tips/booking_therapists in the LOCAL schema (mig 424/425 applied). Anything else is flagged.
-export const KNOWN_TRIGGERS = new Set(`booking_therapists.trg_booking_therapist_room_capacity_check booking_therapists.trg_booking_therapists_guards_check booking_therapists.trg_booking_therapists_overlap bookings.bookings_normalize_phone bookings.trg_00_bookings_stamp_allows_overlap bookings.trg_advance_booking_window_check bookings.trg_audit_booking_changes bookings.trg_audit_bookings bookings.trg_booking_number bookings.trg_booking_snapshots bookings.trg_bookings_clear_acknowledgement bookings.trg_bookings_no_future_status bookings.trg_bookings_no_inactive_branch bookings.trg_bookings_require_phone bookings.trg_bookings_tier_reprice bookings.trg_compute_datetimes bookings.trg_compute_final_amount bookings.trg_enforce_booking_immutability bookings.trg_enforce_therapist_required bookings.trg_handle_booking_cancellation_refund bookings.trg_notify_big_discount_fyi bookings.trg_notify_new_online_booking bookings.trg_online_capacity_check bookings.trg_online_closed_date_check bookings.trg_room_capacity_check bookings.trg_sync_booking_therapists bookings.trg_therapist_guards_check bookings.trg_updated_at bookings.trg_zz_bookings_therapist_junction_overlap payments.trg_payment_update_booking_status`.split(' '));
+// Triggers known on bookings/payments/booking_tips/booking_therapists (local schema with mig 424/425, plus payments.trg_audit_payments which only prod has:
+// it writes an audit row per payment, harmless). Anything else is flagged. A disable-list trigger that is ABSENT on the target is skipped and reported.
+export const KNOWN_TRIGGERS = new Set(`booking_therapists.trg_booking_therapist_room_capacity_check booking_therapists.trg_booking_therapists_guards_check booking_therapists.trg_booking_therapists_overlap bookings.bookings_normalize_phone bookings.trg_00_bookings_stamp_allows_overlap bookings.trg_advance_booking_window_check bookings.trg_audit_booking_changes bookings.trg_audit_bookings bookings.trg_booking_number bookings.trg_booking_snapshots bookings.trg_bookings_clear_acknowledgement bookings.trg_bookings_no_future_status bookings.trg_bookings_no_inactive_branch bookings.trg_bookings_require_phone bookings.trg_bookings_tier_reprice bookings.trg_compute_datetimes bookings.trg_compute_final_amount bookings.trg_enforce_booking_immutability bookings.trg_enforce_therapist_required bookings.trg_handle_booking_cancellation_refund bookings.trg_notify_big_discount_fyi bookings.trg_notify_new_online_booking bookings.trg_online_capacity_check bookings.trg_online_closed_date_check bookings.trg_room_capacity_check bookings.trg_sync_booking_therapists bookings.trg_therapist_guards_check bookings.trg_updated_at bookings.trg_zz_bookings_therapist_junction_overlap payments.trg_payment_update_booking_status payments.trg_audit_payments`.split(' '));
 const addMin = (time, m) => { const t = Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5)) + m; return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}:00`; };
 
 async function toggle(c, list, on) {
@@ -25,7 +26,7 @@ async function toggle(c, list, on) {
 }
 
 export async function historyImport(c, t, plan) {
-  const r = { inserted: 0, existing: 0, changed: [], failedFuture: [], payments: { inserted: 0, existing: 0, paisa: 0 }, tips: { inserted: 0, paisa: 0 }, notImported: [], disabled: [...ALWAYS, ...HISTORY], lockMs: null, orphanPayments: [] };
+  const r = { inserted: 0, existing: 0, changed: [], failedFuture: [], payments: { inserted: 0, existing: 0, paisa: 0 }, tips: { inserted: 0, paisa: 0 }, notImported: [], disabled: [], absentTriggers: [], lockMs: null, orphanPayments: [] };
   if (t.flags.phone) throw new Error('organizations.require_customer_phone must be false before phase C');
   if (!t.flags.overlap) throw new Error('organizations.allow_staff_overlap must be true before phase C');
 
@@ -51,8 +52,15 @@ export async function historyImport(c, t, plan) {
   const modeMap = t.modeMap || {};
   const modeOf = (m) => modeMap[m] ?? m;
 
+  // a listed trigger that does not exist on this database (e.g. trg_booking_snapshots is absent on prod) is skipped and reported
+  const present = new Set(inv);
+  const has = (l) => l.filter(([tbl, trg]) => present.has(`${tbl}.${trg}`));
+  r.absentTriggers = [...ALWAYS, ...HISTORY].filter(([tbl, trg]) => !present.has(`${tbl}.${trg}`)).map(([tbl, trg]) => `${tbl}.${trg}`);
+  const ALWAYS_P = has(ALWAYS), HISTORY_P = has(HISTORY);
+  r.disabled = [...ALWAYS_P, ...HISTORY_P];
+
   const t0 = Date.now();
-  await toggle(c, ALWAYS, false);
+  await toggle(c, ALWAYS_P, false);
   const idByRef = new Map();
 
   const insert = async (l) => {
@@ -96,7 +104,7 @@ export async function historyImport(c, t, plan) {
       await c.query('rollback to savepoint s'); r.failedFuture.push({ ref: l.ref, date: l.date, staff: l.staff, why: e.message.split('\n')[0].slice(0, 120) });
     }
   }
-  await toggle(c, HISTORY, false);
+  await toggle(c, HISTORY_P, false);
   for (const l of todo.filter((x) => !x.future)) { idByRef.set(l.refKey, await insert(l)); r.inserted++; }
 
   // ---- payments + tips, invoice by invoice (fill lines in order; exact to the paisa)
@@ -142,9 +150,9 @@ export async function historyImport(c, t, plan) {
     }
   }
 
-  await toggle(c, [...ALWAYS, ...HISTORY], true);
+  await toggle(c, [...ALWAYS_P, ...HISTORY_P], true);
   r.lockMs = Date.now() - t0;
-  const bad = (await c.query(`select c.relname, t.tgname from pg_trigger t join pg_class c on c.oid=t.tgrelid where t.tgname = any($1) and t.tgenabled <> 'O'`, [[...ALWAYS, ...HISTORY].map((x) => x[1])])).rows;
+  const bad = (await c.query(`select c.relname, t.tgname from pg_trigger t join pg_class c on c.oid=t.tgrelid where t.tgname = any($1) and t.tgenabled <> 'O' and c.relname = any($2)`, [[...ALWAYS_P, ...HISTORY_P].map((x) => x[1]), ['bookings', 'payments', 'booking_tips', 'booking_therapists']])).rows;
   if (bad.length) throw new Error(`Trigger(s) not re-enabled: ${JSON.stringify(bad)}`);
 
   // post-insert asserts: exact price/discount and true duration for EVERY imported row
