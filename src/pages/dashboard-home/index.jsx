@@ -116,11 +116,11 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
   useEffect(() => {
     if (!branchId || isOverall) { setSetupState(null); return undefined; }
     let cancelled = false;
-    fetchSetupState({ branchId }).then(({ data }) => { if (!cancelled) setSetupState(data); });
+    fetchSetupState({ branchId, today: now.today }).then(({ data }) => { if (!cancelled) setSetupState(data); });
     return () => { cancelled = true; };
   }, [branchId, isOverall]);
   const newTenant = !!setupState && isNewTenant(setupState.firstBookingDate, now.today);
-  const setup = setupState ? setupSteps(setupState.counts, { staffLabel, roomLabel: locationLabelPlural || 'Rooms', enableRooms }) : null;
+  const setup = setupState?.counts ? setupSteps(setupState.counts, { staffLabel, roomLabel: locationLabelPlural || 'Rooms', enableRooms }) : null;
   const nowMin = Number(now.hm.slice(0, 2)) * 60 + Number(now.hm.slice(3, 5));
   const openBranch = (id, discountId = null) => {
     switchBranch(id);

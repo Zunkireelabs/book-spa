@@ -75,7 +75,8 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
     const { data: r } = await supabase.from('daily_reports').select('closed_at, closer:users!daily_reports_closed_by_fkey(full_name)').eq('branch_id', branchId).eq('report_date', today).maybeSingle();
     setClosed(r || null);
   }, [branchId, today]);
-  useEffect(() => { loadClosed(); }, [loadClosed]);
+  // Only the Close part of the day shows who closed it, so the lookup waits until that part is open.
+  useEffect(() => { if (phase === 'close') loadClosed(); }, [loadClosed, phase]);
 
   const refresh = () => { loadNeeds(); onReload?.(); };
   const go = (view) => setSearchParams({ view });

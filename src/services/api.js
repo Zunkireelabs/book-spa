@@ -59,6 +59,7 @@ import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideH
 import { getPeriodRange, getTodayISO } from '../utils/periodPresets';
 import { transferOccurrencesForDate } from '../utils/transferOccurrences';
 import { inChunks, failOpenAfter, IN_CHUNK, customerSearchFilter } from './queryHelpers';
+import { isNewTenant } from '../lib/dashboardTenant';
 import { getCachedAuthProfile, setCachedAuthProfile, dropCachedAuthProfile, invalidateAuthenticatedUser } from '../lib/authProfileCache';
 import { buildCustomerDirectory, buildPanelDetail, nepalNow, avgPaidPerVisit } from '../utils/customerDirectory';
 import { addDays as addDaysISO } from '../utils/reportPeriod';
@@ -689,16 +690,20 @@ export async function fetchNeeds({ branchIds, date }) {
 }
 
 // New-tenant check + setup checklist counts for one branch. firstBookingDate is the earliest booking's date (null when none).
-export async function fetchSetupState({ branchId }) {
+export async function fetchSetupState({ branchId, today }) {
   try {
-    const [sv, rm, th, first] = await Promise.all([
+    // The earliest booking decides whether this is a new tenant; the checklist counts (services, rooms, staff: five requests) are
+    // only worth fetching for one. An established branch costs a single request on every branch switch.
+    const first = await supabase.from('bookings').select('date').eq('branch_id', branchId).order('date', { ascending: true }).limit(1);
+    if (first.error) throw first.error;
+    const firstBookingDate = first.data?.[0]?.date || null;
+    if (today && !isNewTenant(firstBookingDate, today)) return { data: { counts: null, firstBookingDate }, error: null };
+    const [sv, rm, th] = await Promise.all([
       fetchServices(branchId),
       fetchRooms(branchId),
       supabase.from('therapists').select('id', { count: 'exact', head: true }).eq('branch_id', branchId).eq('is_active', true),
-      supabase.from('bookings').select('date').eq('branch_id', branchId).order('date', { ascending: true }).limit(1),
     ]);
-    if (th.error || first.error) throw (th.error || first.error);
-    const firstBookingDate = first.data?.[0]?.date || null;
+    if (th.error) throw th.error;
     return { data: { counts: { services: (sv.data || []).length, rooms: (rm.data || []).length, staff: th.count || 0, bookings: firstBookingDate ? 1 : 0 }, firstBookingDate }, error: null };
   } catch (error) {
     console.error('[API] fetchSetupState error:', error.message);
