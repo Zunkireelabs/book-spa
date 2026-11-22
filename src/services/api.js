@@ -256,21 +256,42 @@ export const staffCanRequestDiscountApproval = DISCOUNT_LIMITS.staff < STAFF_REQ
  * Fetch authenticated user + profile in one call.
  * Returns { user, profile } or a structured error.
  */
-async function getAuthenticatedUser() {
-  const { data: { user } } = await supabase.auth.getUser();
+// The signed-in user + their users row (role, org, branch, visibility flags). ~215 call sites ask for this, often several at once
+// (a branch switch used to fire 4× GET /auth/v1/user and 4× GET users). So:
+//  - the user comes from the local session (getSession: no network; the access token is refreshed when due) instead of
+//    getUser (a round trip to the auth server on every call). RLS still checks the token on every data request;
+//  - the profile is shared between concurrent callers and kept for AUTH_PROFILE_TTL_MS. The cache is keyed by user AND access
+//    token, so a sign-out/sign-in or a token refresh misses it by itself; invalidateAuthenticatedUser() drops it on demand.
+const AUTH_PROFILE_TTL_MS = 30000;
+let authProfileCache = null; // { key, at, promise }
+export function invalidateAuthenticatedUser() { authProfileCache = null; }
+
+async function loadAuthenticatedUser() {
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user || null;
   if (!user) {
     return { user: null, profile: null, error: { code: 'UNAUTHENTICATED', message: 'You must be logged in.' } };
   }
-  const { data: profile, error: profileError } = await supabase
-    .from('users')
-    .select('id, role, branch_id, org_id, calendar_visibility, can_view_customer_details, can_view_prices')
-    .eq('id', user.id)
-    .single();
-
-  if (profileError) {
-    return { user, profile: null, error: { code: 'PROFILE_ERROR', message: 'Could not load user profile.' } };
-  }
-  return { user, profile, error: null };
+  const key = `${user.id}:${session.access_token}`;
+  const cached = authProfileCache;
+  if (cached && cached.key === key && Date.now() - cached.at < AUTH_PROFILE_TTL_MS) return cached.promise;
+  const promise = (async () => {
+    const { data: profile, error: profileError } = await supabase
+      .from('users')
+      .select('id, role, branch_id, org_id, calendar_visibility, can_view_customer_details, can_view_prices')
+      .eq('id', user.id)
+      .single();
+    if (profileError) {
+      if (authProfileCache?.promise === promise) authProfileCache = null; // never keep a failure
+      return { user, profile: null, error: { code: 'PROFILE_ERROR', message: 'Could not load user profile.' } };
+    }
+    return { user, profile, error: null };
+  })();
+  authProfileCache = { key, at: Date.now(), promise };
+  return promise;
+}
+async function getAuthenticatedUser() {
+  return loadAuthenticatedUser();
 }
 
 /**
@@ -995,6 +1016,23 @@ export async function fetchBookings(branchId, { date, dateFrom, dateTo, status }
     return { data, error: null };
   } catch (error) {
     console.error('[API] fetchBookings error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * True when any booking of the day (for the branch, or org-wide on Overall) is locked ("This day is closed"). A head count
+ * with limit 1: the dashboard banner only needs this yes/no, not the day's bookings.
+ */
+export async function hasLockedBookings(branchId, date) {
+  try {
+    let query = supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('date', date).eq('is_locked', true).limit(1);
+    query = withBranch(query, branchId);
+    const { count, error } = await query;
+    if (error) throw error;
+    return { data: (count || 0) > 0, error: null };
+  } catch (error) {
+    console.error('[API] hasLockedBookings error:', error.message);
     return { data: null, error };
   }
 }
@@ -4027,8 +4065,23 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
 
 /**
  * Fetch bookings with pending discount requests (manager view).
+ * Callers that ask at the same moment (the header feed, the sidebar and the dashboard all do on a branch switch) share one
+ * request. A 'pending-approvals-changed' event (fired after any approve/reject/request) forgets the shared request, so the
+ * refetch that follows it always reads fresh data.
  */
-export async function fetchPendingDiscounts(branchId) {
+const pendingDiscountsInFlight = new Map(); // branchId -> promise
+if (typeof window !== 'undefined') window.addEventListener('pending-approvals-changed', () => pendingDiscountsInFlight.clear());
+export function fetchPendingDiscounts(branchId) {
+  const key = String(branchId);
+  const shared = pendingDiscountsInFlight.get(key);
+  if (shared) return shared;
+  const promise = fetchPendingDiscountsUncached(branchId).finally(() => {
+    if (pendingDiscountsInFlight.get(key) === promise) pendingDiscountsInFlight.delete(key);
+  });
+  pendingDiscountsInFlight.set(key, promise);
+  return promise;
+}
+async function fetchPendingDiscountsUncached(branchId) {
   try {
     const { user, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };

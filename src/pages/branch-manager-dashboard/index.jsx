@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import Icon from '../../components/AppIcon';
@@ -7,8 +7,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useLock } from '../../contexts/LockContext';
 import { useBranch } from '../../contexts/BranchContext';
 import AppShell from '../../components/ui/AppShell';
-import { fetchBookings, fetchTherapists, updateBookingStatus, fetchPendingDiscounts } from '../../services/api';
-import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
+import { fetchTherapists, hasLockedBookings, fetchPendingDiscounts } from '../../services/api';
 import { supabase } from '../../lib/supabase';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import { useOrg } from '../../contexts/OrgContext';
@@ -110,7 +109,7 @@ const BranchManagerDashboard = () => {
   const todayDateStr = getTodayISO();
   const setPeriod = setPeriodState;
   const viewMode = searchParams.get('view') || 'dashboard';
-  const [bookings, setBookings] = useState([]);
+  const [dayLocked, setDayLocked] = useState(false); // any of today's bookings closed → the "This day is closed" banner
   const [loading, setLoading] = useState(true);
   const [newBookingNotification, setNewBookingNotification] = useState(null);
   const [actionSuccess, setActionSuccess] = useState(null);
@@ -131,19 +130,19 @@ const BranchManagerDashboard = () => {
     email: profile?.email || ''
   };
 
-  // Load live data
-  const loadData = useCallback(async () => {
+  // The banner only needs a yes/no, so ask for exactly that (a head count), not the day's bookings with their joins.
+  const loadDayLock = useCallback(async ({ silent = false } = {}) => {
     if (!branchId) return;
-    setLoading(true);
+    if (!silent) setLoading(true); // a realtime re-check must not flash the banner away
     const today = new Date().toISOString().split('T')[0];
-    const result = await fetchBookings(branchId, { date: today });
-    if (result.data) {
-      setBookings(transformBookings(result.data));
-    }
-    setLoading(false);
+    const result = await hasLockedBookings(branchId, today);
+    if (result.data != null) setDayLocked(result.data);
+    if (!silent) setLoading(false);
   }, [branchId]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  const loadDayLockRef = useRef(loadDayLock);
+  loadDayLockRef.current = loadDayLock;
+  useEffect(() => { loadDayLock(); }, [loadDayLock]);
 
   // Pending discount approvals routed to the current user → notification feed
   const loadDiscountNotifs = useCallback(async () => {
@@ -184,10 +183,17 @@ const BranchManagerDashboard = () => {
     let active = true;
     setRealtimeStatus('connecting');
 
+    // A burst of booking events (a group booking, a bulk update) re-checks the day lock once, not once per event.
+    let lockTimer = null;
+    const scheduleLockCheck = () => {
+      clearTimeout(lockTimer);
+      lockTimer = setTimeout(() => { if (active) loadDayLockRef.current?.({ silent: true }); }, 400);
+    };
+
     const handleRealtimeUpdate = (payload) => {
       // Small delay to ensure DB triggers (booking_number generation, end_time calculation) complete
       setTimeout(() => {
-        loadData();
+        scheduleLockCheck();
 
         // Show notification for new bookings not for today
         if (payload.eventType === 'INSERT' && payload.new) {
@@ -253,8 +259,8 @@ const BranchManagerDashboard = () => {
         }
       });
 
-    return () => { active = false; supabase.removeChannel(channel); };
-  }, [branchId, isOverall, loadData]);
+    return () => { active = false; clearTimeout(lockTimer); supabase.removeChannel(channel); };
+  }, [branchId, isOverall]); // the channel is rebuilt only when the branch (its filter) changes
 
   // The old single Outreach page: its tabs are now URL tabs, so old links land on Rules.
   useEffect(() => {
@@ -270,49 +276,6 @@ const BranchManagerDashboard = () => {
       navigate('?view=dashboard', { replace: true });
     }
   }, [isOverall, viewMode, navigate]);
-
-  // Compute live metrics from real bookings
-  const totalBookings = bookings.length;
-  const paidBookings = bookings.filter(b => b.paymentStatus === 'paid');
-  const dailyRevenue = paidBookings.reduce((sum, b) => sum + b.finalAmount, 0);
-  const cancelledCount = bookings.filter(b => b.status === 'cancelled').length;
-  const cancellationRate = totalBookings > 0 ? ((cancelledCount / totalBookings) * 100).toFixed(1) : '0.0';
-  const unpaidCount = bookings.filter(b => b.paymentStatus === 'unpaid' && ['confirmed', 'in-progress', 'completed'].includes(b.status)).length;
-
-  const metricsData = [
-    {
-      title: "Today's Bookings",
-      value: String(totalBookings),
-      change: '',
-      changeType: 'neutral',
-      icon: 'Calendar',
-      currency: false
-    },
-    {
-      title: 'Daily Revenue',
-      value: dailyRevenue.toLocaleString('en-IN'),
-      change: '',
-      changeType: 'neutral',
-      icon: 'IndianRupee',
-      currency: true
-    },
-    {
-      title: 'Cancellation Rate',
-      value: `${cancellationRate}%`,
-      change: '',
-      changeType: 'neutral',
-      icon: 'XCircle',
-      currency: false
-    },
-    {
-      title: 'Unpaid Bookings',
-      value: String(unpaidCount),
-      change: '',
-      changeType: unpaidCount > 0 ? 'negative' : 'positive',
-      icon: 'AlertCircle',
-      currency: false
-    }
-  ];
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -359,14 +322,6 @@ const BranchManagerDashboard = () => {
     }
     setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
     navigate('?view=bookings');
-  };
-
-  const handleQuickStatusUpdate = async (bookingId, newStatus) => {
-    const dbStatus = toDbStatus(newStatus);
-    const result = await updateBookingStatus({ bookingId, newStatus: dbStatus });
-    if (!result.error) {
-      await loadData();
-    }
   };
 
   // V36a: the old widget stack is retired; DashboardHome owns the dashboard (the widgets stay in the repo for Reports).
@@ -528,7 +483,7 @@ const BranchManagerDashboard = () => {
           onItemClick: handleNotificationClick,
         }}
         banner={
-          viewMode === 'dashboard' && !loading && bookings.length > 0 && bookings.some(b => b.isLocked) && (
+          viewMode === 'dashboard' && !loading && dayLocked && (
             <div className="bg-amber-50 border-b border-amber-200 px-4 sm:px-6 lg:px-8 py-2">
               <div className="flex items-center space-x-2 text-amber-700">
                 <Icon name="Lock" size={16} />
