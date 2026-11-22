@@ -12260,9 +12260,7 @@ export async function getCustomerIntelligence({ branchId }) {
   }
 }
 
-// Customers list (V11): every customer of the org with next/last visit, in-spa flag, balance, spent and a lifecycle segment
-// (derivation in utils/customerDirectory). Org-wide like getCustomerIntelligence. Both big tables are paged with .range() so
-// PostgREST's 1,000-row cap never truncates the list; membership status comes from the existing staff-safe RPC (one call).
+// Pages every row of a big table with .range() so PostgREST's 1,000-row cap never truncates it.
 const pageAllRows = async (buildQuery) => {
   const PAGE = 1000;
   const rows = [];
@@ -12275,50 +12273,46 @@ const pageAllRows = async (buildQuery) => {
   return rows;
 };
 
-export async function getCustomerDirectory({ branchId, now = new Date() }) {
+// The directory is computed in SQL (migration 419: customer_directory_page / customer_directory_summary), org-wide through the
+// caller's RLS. "Today"/"now" come from the server's Nepal clock, never the browser's. The old version downloaded every customer and
+// booking and derived all of this here; utils/customerDirectory.js stays the reference the parity test compares the SQL against.
+const directoryArgs = ({ search, tab, segment, noMember, therapist, service, last, sort, dir, limit = PAGE_SIZE_DEFAULT, offset = 0, onlyId }) => ({
+  p_search: search || null,
+  p_tab: tab || 'all',
+  p_segment: segment || null,
+  p_no_member: !!noMember,
+  p_therapist: therapist || null,
+  p_service: service || null,
+  p_last: last || null,
+  p_sort: sort || 'next',
+  p_dir: dir || null,
+  p_limit: limit,
+  p_offset: offset,
+  p_only_id: onlyId || null,
+  p_with_members: !!MEMBERSHIP_ENABLED,
+});
+const PAGE_SIZE_DEFAULT = 25;
+
+/** One page of the Customers list (filter + search + sort + paging done in SQL). → { rows, total, today } */
+export async function getCustomerDirectoryPage(opts = {}) {
   try {
-    if (!branchId) {
-      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
-    }
-    // Resolve the org (the Overall sentinel has no branches row, so use the logged-in user's profile for it).
-    let orgId;
-    if (isOverallBranch(branchId)) {
-      const { profile, error: authError } = await getAuthenticatedUser();
-      if (authError) return { data: null, error: authError };
-      orgId = profile.org_id;
-    } else {
-      const { data: branch, error: branchErr } = await supabase.from('branches').select('org_id').eq('id', resolveBranchId(branchId)).single();
-      if (branchErr) throw branchErr;
-      orgId = branch.org_id;
-    }
-    const { data: orgBranches, error: orgBranchesErr } = await supabase.from('branches').select('id').eq('org_id', orgId);
-    if (orgBranchesErr) throw orgBranchesErr;
-    const orgBranchIds = (orgBranches || []).map((b) => b.id);
-
-    const [customers, bookings, statusResult] = await Promise.all([
-      pageAllRows(() => supabase.from('customers').select('id, full_name, phone, email, gender, created_at').eq('org_id', orgId).order('id')),
-      pageAllRows(() => supabase.from('bookings')
-        .select('id, customer_id, status, payment_status, final_amount, date, start_time, service_name_snapshot, therapist_id, therapist_name_snapshot, is_locked, payments(amount), payment_refunds(amount)')
-        .not('customer_id', 'is', null)
-        .in('branch_id', orgBranchIds)
-        .order('id')),
-      MEMBERSHIP_ENABLED ? fetchMembershipStatus() : Promise.resolve({ data: [] }),
-    ]);
-
-    const memberIds = new Set((statusResult.data || []).filter((r) => r.status === 'active').map((r) => r.customerId));
-    const { today, hm } = nepalNow(now);
-    const therapists = new Map();
-    for (const b of bookings) if (b.therapist_id && b.therapist_name_snapshot && !therapists.has(b.therapist_id)) therapists.set(b.therapist_id, b.therapist_name_snapshot);
-    return {
-      data: {
-        customers: buildCustomerDirectory({ customers, bookings, memberIds, today, nowHM: hm }),
-        therapists: [...therapists].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
-        today,
-      },
-      error: null,
-    };
+    const { data, error } = await supabase.rpc('customer_directory_page', directoryArgs(opts));
+    if (error) throw error;
+    return { data: { rows: data?.rows || [], total: data?.total || 0, today: data?.today }, error: null };
   } catch (error) {
-    console.error('[API] getCustomerDirectory error:', error.message);
+    console.error('[API] getCustomerDirectoryPage error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Org-wide numbers around the list: tab counts, lifecycle mix, Spotlight inputs, filter options. → { tabs, mix, spotlight, therapists, services, today } */
+export async function getCustomerDirectorySummary() {
+  try {
+    const { data, error } = await supabase.rpc('customer_directory_summary', { p_with_members: !!MEMBERSHIP_ENABLED });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] getCustomerDirectorySummary error:', error.message);
     return { data: null, error };
   }
 }
