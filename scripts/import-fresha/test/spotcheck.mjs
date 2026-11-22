@@ -6,8 +6,8 @@ import { buildPlan } from '../lib/plan.js';
 import { normalizePhone, toPaisa, parseDuration } from '../lib/parse.js';
 const [, , dir, url, slug] = process.argv;
 const x = loadExport(dir); const c = new pg.Client({ connectionString: url }); await c.connect();
-const plan = buildPlan({ clients: x.clients.rows, team: x.team.rows, menu: x.menu.rows, appts: x.appts.rows, sales: x.sales.rows, payments: x.payments.rows, today: '2026-11-22' });
 const oid = (await c.query('select id from organizations where slug=$1', [slug])).rows[0].id;
+const plan = buildPlan({ clients: x.clients.rows, team: x.team.rows, menu: x.menu.rows, appts: x.appts.rows, sales: x.sales.rows, payments: x.payments.rows, today: '2026-11-22', ns: oid });
 const pick = (a, n) => [...a].sort(() => Math.random() - 0.5).slice(0, n);
 let bad = 0; const fail = (m) => { bad++; console.log('MISMATCH', m); };
 const q = async (s, p) => (await c.query(s, p)).rows;
@@ -39,8 +39,8 @@ for (const [day, n] of Object.entries(perDay).sort((a, b) => b[1] - a[1]).slice(
 const att = plan.invoices.filter((i) => i.attached && i.status !== 'Voided');
 const cases = [att.find((i) => i.discount?.clean), att.find((i) => i.status === 'Part Paid'), att.find((i) => i.tips > 0), ...pick(att.filter((i) => !i.discount && i.tips === 0 && i.status === 'Paid'), 2)];
 for (const i of cases.filter(Boolean)) {
-  const d = (await q(`select coalesce(sum(p.amount),0)::numeric s from payments p where p.notes like $1`, [`Fresha pay % inv ${i.no} appt %`]))[0].s;
-  const tips = (await q(`select coalesce(sum(amount),0)::numeric s from booking_tips where notes=$1`, [`Fresha tip inv ${i.no}`]))[0].s;
+  const d = (await q(`select coalesce(sum(p.amount),0)::numeric s from payments p join bookings b on b.id=p.booking_id join branches r on r.id=b.branch_id where r.org_id=$2 and p.notes like $1`, [`Fresha pay % inv ${i.no} appt %`, oid]))[0].s;
+  const tips = (await q(`select coalesce(sum(t.amount),0)::numeric s from booking_tips t join bookings b on b.id=t.booking_id join branches r on r.id=b.branch_id where r.org_id=$2 and t.notes=$1`, [`Fresha tip inv ${i.no}`, oid]))[0].s;
   const dc = (await q(`select coalesce(sum(b.discount_amount),0)::numeric s from bookings b where b.client_request_id = any($1)`, [i.lines.map((l) => l.requestId)]))[0].s;
   const wantPay = Math.min(i.paid - i.tips, i.lines.reduce((a, l) => a + l.price - l.discount, 0));
   const ok = Math.round(d * 100) === wantPay && Math.round(tips * 100) === i.tips && Math.round(dc * 100) === (i.discount?.discountPaisa || 0);

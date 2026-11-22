@@ -9,6 +9,7 @@ import pg from 'pg';
 import { loadExport } from './lib/load.js';
 import { buildPlan } from './lib/plan.js';
 import { getTarget, setupImport } from './lib/setup.js';
+import { customersDelta, productsDelta } from './lib/delta.js';
 import { historyImport } from './lib/history.js';
 import { ownerSheet } from './lib/ownersheet.js';
 
@@ -42,7 +43,9 @@ try {
   t.ackTriggers = a['ack-triggers'] && a['ack-triggers'] !== true ? a['ack-triggers'].split(',') : [];
   t.modeMap = modeMap;
   if (phase === 'setup' || phase === 'all') result.setup = await setupImport(c, t, x, { staffGender: a['staff-gender'] });
-  if (phase === 'history' || phase === 'all') result.history = await historyImport(c, t, plan);
+  if (phase === 'customers-delta' || phase === 'delta') result.customersDelta = await customersDelta(c, t, x);
+  if (phase === 'products-delta' || phase === 'delta') result.productsDelta = await productsDelta(c, t, x);
+  if (phase === 'history' || phase === 'all' || phase === 'delta') result.history = await historyImport(c, t, plan);
   result.appMethods = (await c.query("select settings->'paymentMethods' as m from organizations where id=$1", [t.orgId])).rows[0].m;
   await c.query(dry ? 'rollback' : 'commit');
 } catch (e) { await c.query('rollback').catch(() => {}); console.error('FAILED, nothing written:', e.message); process.exit(1); }
@@ -50,7 +53,9 @@ await c.end();
 const file = path.join(out, `import-${a.org}-${phase}${dry ? '-dry' : ''}-${Date.now()}.json`);
 const slim = JSON.parse(JSON.stringify({ result, plan: { lines: plan.lines.length, groups: plan.groups.length, report: plan.report } }));
 fs.writeFileSync(file, JSON.stringify({ ...slim, invoices: plan.invoices.map((i) => ({ no: i.no, status: i.status, gross: i.gross, tips: i.tips, paid: i.paid, attached: i.attached, discount: i.discount })) }, null, 1));
-if (result.history) { const sheet = path.join(out, `owner-review-${a.org}.md`); fs.writeFileSync(sheet, ownerSheet({ plan, setup: result.setup, history: result.history, x, appMethods: result.appMethods, modeMap })); console.log('owner sheet:', sheet); }
+if (result.customersDelta) console.log('customers-delta:', JSON.stringify({ read: result.customersDelta.read, existing: result.customersDelta.existing, created: result.customersDelta.created, shared: result.customersDelta.sharedMobile.length, noPhone: result.customersDelta.noPhone.length }));
+if (result.productsDelta) { const d = result.productsDelta; console.log('products-delta:', JSON.stringify({ read: d.read, created: d.created, stockChanged: d.stockChanged.length, unchanged: d.unchanged, priceDiffers: d.priceDiffers.length })); }
+if (result.history) { const sheet = path.join(out, `owner-review-${a.org}.md`); fs.writeFileSync(sheet, ownerSheet({ plan, setup: result.setup, history: result.history, customersDelta: result.customersDelta, productsDelta: result.productsDelta, x, appMethods: result.appMethods, modeMap })); console.log('owner sheet:', sheet); }
 console.log(`${dry ? 'DRY-RUN (rolled back)' : 'COMMITTED'} phase=${phase}; report: ${file}`);
 if (result.setup) { const s = result.setup; console.log('B:', JSON.stringify({ customers: [s.customers.read, s.customers.created, s.customers.skipped], staff: [s.staff.read, s.staff.created, s.staff.skipped], services: [s.services.read, s.services.created], products: [s.products.read, s.products.created] })); }
 if (result.history) { const h = result.history; console.log('C:', JSON.stringify({ inserted: h.inserted, existing: h.existing, changed: h.changed.length, failedFuture: h.failedFuture, payments: h.payments, tips: h.tips, notImported: h.notImported.length, orphan: h.orphanPayments.length, verified: h.verified, lockMs: h.lockMs })); console.log('RECON:', JSON.stringify(h.reconciliation)); }

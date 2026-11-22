@@ -6,7 +6,7 @@ const days = (a, b) => Math.abs((Date.parse(a) - Date.parse(b)) / 864e5);
 const money = (p) => (p / 100).toFixed(2);
 
 const DEFAULT_METHODS = ['Cash', 'Mastercard', 'Visa', 'Khalti', 'eSewa', 'IME Pay', 'MobileBanking', 'Cheque'];
-export function ownerSheet({ plan, setup, history, x, appMethods, modeMap = {} }) {
+export function ownerSheet({ plan, setup, history, x, appMethods, modeMap = {}, customersDelta, productsDelta }) {
   const R = plan.report, o = [];
   const h = (t) => o.push(`\n## ${t}\n`);
   o.push('# Sami\'s Fresha import: owner review sheet (suggestions only, nothing below is applied)');
@@ -23,6 +23,15 @@ export function ownerSheet({ plan, setup, history, x, appMethods, modeMap = {} }
     o.push(`- Not in the Fresha export at all, so not imported: product sales lines, vouchers, memberships, packages.`);
     o.push(`- ${setup.lists.noPhone.length} clients have no phone number and ${setup.lists.sharedMobile.length} phone numbers are shared by two people: both kept, nobody merged (section 4).`);
     o.push(`- Invoices not fully paid (part paid, unpaid or voided) are listed in section 6; ${plan.invoices.filter((i) => i.discount && !i.discount.clean).length} discounts are not round percentages and are listed in section 7.`);
+  }
+  if (history && (history.existing > 0 || customersDelta || productsDelta)) {
+    h('Changes since the previous import (delta)');
+    o.push(`New appointments added: ${history.inserted}. Already in Zennly: ${history.existing}. Appointments that CHANGED in Fresha since: ${history.changed.length} (listed below, NOT applied).`);
+    o.push(md(history.changed.map((c) => ({ ref: c.ref, client: c.client, date: c.date, changed: c.kinds.join('+'), was: `${c.was.status} ${c.was.price} ${c.was.date} ${c.was.time}`, now: `${c.now.status} ${c.now.price} ${c.now.date} ${c.now.time}` })), ['ref', 'client', 'date', 'changed', 'was', 'now']));
+    const st = history.changed.filter((c) => c.kinds.includes('status'));
+    o.push(`\nStatus-only changes (e.g. Booked to Cancelled/Completed): ${st.filter((c) => c.kinds.length === 1).length} of ${st.length}.`);
+    if (customersDelta) o.push(`\nNew clients added: ${customersDelta.created} (already there: ${customersDelta.existing}, never changed).`);
+    if (productsDelta) o.push(`\nProducts: ${productsDelta.created} new, ${productsDelta.stockChanged.length} stock figures moved to the Fresha figure (new stock movement each), ${productsDelta.priceDiffers.length} prices differ (reported only):\n` + md(productsDelta.stockChanged, ['name', 'from', 'to']));
   }
   h('1. Past appointments still "Booked" in Fresha (imported as Confirmed; decide each: Completed / Cancelled / No Show)');
   o.push(md(R.pastBooked.map((p) => ({ ref: p.ref, date: p.date, client: p.name })), ['ref', 'date', 'client']));

@@ -32,7 +32,14 @@ export async function historyImport(c, t, plan) {
   const staffId = new Map((await c.query('select id, name from therapists where org_id=$1', [t.orgId])).rows.map((x) => [normName(x.name), x.id]));
   const svc = new Map((await c.query('select id, name, category from services where org_id=$1', [t.orgId])).rows.map((x) => [normName(x.name), x]));
   const cust = new Map((await c.query('select id, full_name, phone from customers where org_id=$1', [t.orgId])).rows.map((x) => [x.id, x]));
-  const exist = new Map((await c.query('select id, client_request_id, status::text as status, base_amount, discount_amount, date::text as date, start_time from bookings where client_request_id = any($1)', [plan.lines.map((l) => l.requestId)])).rows.map((x) => [x.client_request_id, x]));
+  // polite refusal: appointments for clients that are not in Zennly yet (a client added in Fresha after phase B)
+  const missing = new Map();
+  for (const l of plan.lines) if (l.customerFreshaId && !cust.has(uuid5(`${t.orgId}|client:${l.customerFreshaId}`))) missing.set(l.customerFreshaId, l.name);
+  if (missing.size) {
+    r.missingClients = [...missing].map(([id, name]) => ({ id, name }));
+    throw new Error(`${missing.size} client(s) in the appointments are not in Zennly yet (Fresha ids: ${[...missing.keys()].slice(0, 10).join(', ')}${missing.size > 10 ? ', ...' : ''}). Run --phase customers-delta (or --phase delta) first. Nothing written.`);
+  }
+  const exist = new Map((await c.query('select id, client_request_id, status::text as status, base_amount, discount_amount, date::text as date, start_time::text as start_time from bookings where client_request_id = any($1)', [plan.lines.map((l) => l.requestId)])).rows.map((x) => [x.client_request_id, x]));
   const therapistName = new Map((await c.query('select id, name from therapists where org_id=$1', [t.orgId])).rows.map((x) => [x.id, x.name]));
 
   // ---- prod-drift guard: print every non-internal trigger on the touched tables; refuse unknown ones unless acknowledged by name
@@ -74,7 +81,12 @@ export async function historyImport(c, t, plan) {
     const e = exist.get(l.requestId);
     if (e) {
       r.existing++; idByRef.set(l.refKey, e.id);
-      if (e.status !== l.status || Math.round(Number(e.base_amount) * 100) !== l.price || String(e.date).slice(0, 10) !== l.date) r.changed.push({ ref: l.ref, was: e.status, now: l.status });
+      const kinds = [];
+      if (e.status !== l.status) kinds.push('status');
+      if (Math.round(Number(e.base_amount) * 100) !== l.price) kinds.push('price');
+      if (String(e.date).slice(0, 10) !== l.date) kinds.push('date');
+      if (String(e.start_time).slice(0, 8) !== l.time) kinds.push('time');
+      if (kinds.length) r.changed.push({ ref: l.ref, bookingId: e.id, client: l.name, date: l.date, kinds, was: { status: e.status, price: Number(e.base_amount), date: String(e.date).slice(0, 10), time: String(e.start_time).slice(0, 5) }, now: { status: l.status, price: l.price / 100, date: l.date, time: l.time.slice(0, 5) } });
     } else todo.push(l);
   }
   // future rows FIRST with the availability guards ON, one savepoint per row: a failing row is listed, not dropped silently
@@ -140,13 +152,16 @@ export async function historyImport(c, t, plan) {
   const chk = (await c.query(
     `select b.client_request_id, b.base_amount, b.discount_amount, b.final_amount, b.service_duration_snapshot, extract(epoch from (b.end_datetime-b.start_datetime))/60 as mins from bookings b where b.client_request_id = any($1)`, [refs])).rows;
   const byReq = new Map(plan.lines.map((l) => [l.requestId, l]));
-  const wrong = chk.filter((b) => { const l = byReq.get(b.client_request_id); return Math.round(Number(b.base_amount) * 100) !== l.price || Math.round(Number(b.discount_amount) * 100) !== l.discount || Number(b.mins) !== l.duration || Number(b.service_duration_snapshot) !== l.duration; });
+  const changedRefs = new Set(r.changed.map((x) => x.ref));
+  const wrong = chk.filter((b) => { const l = byReq.get(b.client_request_id); if (changedRefs.has(l.ref)) return false; return Math.round(Number(b.base_amount) * 100) !== l.price || Math.round(Number(b.discount_amount) * 100) !== l.discount || Number(b.mins) !== l.duration || Number(b.service_duration_snapshot) !== l.duration; });
   if (wrong.length) throw new Error(`${wrong.length} booking(s) differ from Fresha after insert (price/discount/duration), e.g. ${JSON.stringify(wrong[0])}`);
   r.verified = chk.length;
 
   // ---- reconciliation against the DB itself (all must balance or the run aborts)
   const failed = new Set(r.failedFuture.map((f) => f.ref));
-  const exp = plan.lines.filter((l) => !failed.has(l.ref));
+  // a changed existing booking is REPORTED, not applied: it counts with its stored (old) values
+  const chBy = new Map(r.changed.map((x) => [x.ref, x.was]));
+  const exp = plan.lines.filter((l) => !failed.has(l.ref)).map((l) => { const w = chBy.get(l.ref); return w ? { ...l, status: w.status, date: w.date, price: Math.round(w.price * 100) } : l; });
   const q1 = async (sql, p) => (await c.query(sql, p)).rows;
   const db = {
     staff: Object.fromEntries((await q1(`select therapist_name_snapshot n, count(*)::int k from bookings where client_request_id = any($1) group by 1`, [refs])).map((x) => [x.n, x.k])),
