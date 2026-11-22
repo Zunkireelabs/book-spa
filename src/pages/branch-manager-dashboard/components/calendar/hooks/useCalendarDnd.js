@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { refreshLight } from '../refreshLight';
 import { PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import {
   updateBlock,
@@ -364,7 +365,7 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
           const failed = results.find(r => r.error);
           if (failed) failWith(failed.error, 'Failed to update.');
           else showToast(`Moved ${selectedBookings.length} selected`, 'success');
-          refreshCalendar();
+          refreshLight(refreshCalendar);
         })();
       } else {
         // Default: show confirmation dialog to reschedule entire booking (moves all therapists)
@@ -424,7 +425,7 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
         } else {
           showToast(`Rescheduled to ${newStartTime}`, 'success');
         }
-        refreshCalendar();
+        refreshLight(refreshCalendar);
       } else if (isSharedReassign) {
         // Shared booking: swap therapist in junction table
         // Get current therapist IDs from the booking_therapists
@@ -454,7 +455,7 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
             showToast(`Reassigned from ${colNameMap[sourceColId] || teamMemberLower()} to ${targetColName}`, 'success');
           }
         }
-        refreshCalendar();
+        refreshLight(refreshCalendar);
       } else {
         // Standard reassignment (non-shared)
         const apiParams = { bookingId, newDate, newStartTime };
@@ -485,14 +486,14 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
         const result = await guard((overrideReason) => rescheduleBooking({ ...apiParams, overrideReason }));
         if (result.error) {
           failWith(result.error, 'Failed to reassign booking.');
-          refreshCalendar();
+          refreshLight(refreshCalendar);
         } else {
           showToast(timeOnly ? `Rescheduled to ${newStartTime}` : `Reassigned to ${targetColName}`, 'success');
         }
       }
     } catch (err) {
       failWith(err, 'An error occurred while reassigning.');
-      refreshCalendar();
+      refreshLight(refreshCalendar);
     } finally {
       setIsRescheduling(false);
     }

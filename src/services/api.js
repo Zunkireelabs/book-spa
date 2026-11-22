@@ -1,3 +1,4 @@
+import { getCalendarStatic, setCalendarStatic } from '../lib/calendarStaticCache';
 import { buildQueue, needsOf } from '../lib/dashboardNeeds';
 import { WALLET_MODES, addTender, isTendered, canonicalMode, dayMoneyView, applyRefundsToBuckets } from '../lib/dayMoney';
 import { closeDayBlock } from '../lib/closeDay';
@@ -6536,29 +6537,36 @@ export async function fetchTransferOccurrences(branchId, startDate, endDate) {
 //  - tags home therapists lent out in the range (transferredOut + window; they never leave the list),
 //  - adds a "visiting" column for every visitor whose window touches the range.
 // Fails open: on any error (including missing tables) returns the therapists unchanged.
-async function applyCalendarTransfers(branchId, startDate, endDate, therapists) {
+// The three staff_transfers reads behind the calendar's transfer layer. Started separately so getCalendarBookings can run them
+// in the same round as therapists / rooms / bookings (they do not depend on the therapist list; only the merge below does).
+function fetchCalendarTransferRows(branchId, startDate, endDate) {
+  const cols = 'id, therapist_id, revert_at, effective_date, start_time, from_display_order, reverted, reverted_at';
+  const therapistCols = 'therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order, branch_id)';
+  // Temporary, applied, non-return-leg windows; still-active ones plus ones that ended within the range.
+  const windowFilter = `reverted.eq.false,and(effective_date.gte.${startDate},effective_date.lte.${endDate})`;
+  return Promise.all([
+    supabase.from('staff_transfers')
+      .select(`${cols}, toBranch:branches!staff_transfers_to_branch_id_fkey(name), fromBranch:branches!staff_transfers_from_branch_id_fkey(name), ${therapistCols}`)
+      .eq('from_branch_id', branchId).eq('applied', true).eq('is_permanent', false).eq('is_return_leg', false)
+      .not('revert_at', 'is', null).or(windowFilter)
+      .order('effective_date').order('start_time'),
+    supabase.from('staff_transfers')
+      .select(`${cols}, toBranch:branches!staff_transfers_to_branch_id_fkey(name), fromBranch:branches!staff_transfers_from_branch_id_fkey(name), ${therapistCols}`)
+      .eq('to_branch_id', branchId).eq('applied', true).eq('is_permanent', false).eq('is_return_leg', false)
+      .not('revert_at', 'is', null).or(windowFilter)
+      .order('effective_date').order('start_time'),
+    supabase.from('staff_transfers')
+      .select('id, therapist_id, effective_date, start_time, revert_at, is_permanent, toBranch:branches!staff_transfers_to_branch_id_fkey(name), fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
+      .eq('from_branch_id', branchId).eq('applied', false)
+      .gte('effective_date', startDate).lte('effective_date', endDate)
+      .order('effective_date').order('start_time'),
+  ]);
+}
+
+// `prefetchedRows`: the promise from fetchCalendarTransferRows when the caller already started it.
+async function applyCalendarTransfers(branchId, startDate, endDate, therapists, prefetchedRows = null) {
   try {
-    const cols = 'id, therapist_id, revert_at, effective_date, start_time, from_display_order, reverted, reverted_at';
-    const therapistCols = 'therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order, branch_id)';
-    // Temporary, applied, non-return-leg windows; still-active ones plus ones that ended within the range.
-    const windowFilter = `reverted.eq.false,and(effective_date.gte.${startDate},effective_date.lte.${endDate})`;
-    const [outRes, inRes, schedRes] = await Promise.all([
-      supabase.from('staff_transfers')
-        .select(`${cols}, toBranch:branches!staff_transfers_to_branch_id_fkey(name), fromBranch:branches!staff_transfers_from_branch_id_fkey(name), ${therapistCols}`)
-        .eq('from_branch_id', branchId).eq('applied', true).eq('is_permanent', false).eq('is_return_leg', false)
-        .not('revert_at', 'is', null).or(windowFilter)
-        .order('effective_date').order('start_time'),
-      supabase.from('staff_transfers')
-        .select(`${cols}, toBranch:branches!staff_transfers_to_branch_id_fkey(name), fromBranch:branches!staff_transfers_from_branch_id_fkey(name), ${therapistCols}`)
-        .eq('to_branch_id', branchId).eq('applied', true).eq('is_permanent', false).eq('is_return_leg', false)
-        .not('revert_at', 'is', null).or(windowFilter)
-        .order('effective_date').order('start_time'),
-      supabase.from('staff_transfers')
-        .select('id, therapist_id, effective_date, start_time, revert_at, is_permanent, toBranch:branches!staff_transfers_to_branch_id_fkey(name), fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
-        .eq('from_branch_id', branchId).eq('applied', false)
-        .gte('effective_date', startDate).lte('effective_date', endDate)
-        .order('effective_date').order('start_time'),
-    ]);
+    const [outRes, inRes, schedRes] = await (prefetchedRows || fetchCalendarTransferRows(branchId, startDate, endDate));
     const err = outRes.error || inRes.error || schedRes.error;
     if (err) {
       if (!isTransferFeatureMissing(err)) console.warn('[API] applyCalendarTransfers:', err.message);
@@ -6700,7 +6708,10 @@ export async function fetchUnassignedBookings({ branchId, fromDate, toDate }) {
   }
 }
 
-export async function getCalendarBookings(branchId, startDate, endDate) {
+// `opts.reuseStatic`: a refresh after a booking change. Re-reads only the bookings (and their extras) and reuses the branch hours,
+// therapists + transfer windows, rooms and check-outs from the last full load of this same branch / range / user / visibility.
+// No saved copy (or it expired, or the user's visibility differs) = the normal full load, so passing it can never return less.
+export async function getCalendarBookings(branchId, startDate, endDate, opts = {}) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);
 
@@ -6729,70 +6740,17 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       };
     }
 
-    // 1. Fetch branch hours + timezone
-    const { data: branch, error: branchError } = await supabase
-      .from('branches')
-      .select('open_time, close_time, timezone')
-      .eq('id', resolvedBranchId)
-      .single();
+    const staticKey = [resolvedBranchId, startDate, endDate, profile.id, vis.ownBookingsOnly, vis.canViewCustomerDetails, vis.canViewPrices, vis.therapistId].join('|');
+    const reused = opts.reuseStatic ? getCalendarStatic(staticKey) : null;
 
-    if (branchError) throw branchError;
-
-    // 2. Fetch therapists and rooms for this branch; transfer windows (staff away / visiting / scheduled)
-    //    are layered on by applyCalendarTransfers below.
-    const [
-      therapistsResult, roomsResult, checkedOutResult,
-    ] = await Promise.all([
-      supabase
-        .from('therapists')
-        .select('id, name, gender, specialties, position, is_service_staff, display_order')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true)
-        .order('display_order')
-        .order('name'),
-      supabase
-        .from('rooms')
-        .select('id, name, is_active, display_order, amenities, floor, capacity')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true)
-        .order('display_order')
-        .order('name'),
-      // Therapists who've already checked out (for real, not just marked absent/leave) on
-      // some date in this range — the calendar blocks the rest of that day's column for
-      // them, same as a transfer-out window, so a booking can't be dropped onto someone
-      // who's already gone home. Only Present/Half-day rows can have a check_out_time.
-      supabase
-        .from('therapist_attendance')
-        .select('therapist_id, date, check_out_time')
-        .eq('branch_id', resolvedBranchId)
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .not('check_out_time', 'is', null),
-    ]);
-
-    if (therapistsResult.error) throw therapistsResult.error;
-    if (roomsResult.error) throw roomsResult.error;
-    if (checkedOutResult.error) throw checkedOutResult.error;
-
-    // Keyed "<therapistId>_<date>" -> raw check_out_time (timestamptz), so the calendar
-    // can block each affected day's column independently.
-    const checkedOutByTherapistAndDate = {};
-    (checkedOutResult.data || []).forEach(row => {
-      checkedOutByTherapistAndDate[`${row.therapist_id}_${row.date}`] = row.check_out_time;
-    });
-
-    const mergedTherapists = await applyCalendarTransfers(
-      resolvedBranchId, startDate, endDate,
-      (therapistsResult.data || [])
-        .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name))
-    );
-
-    // 3. Fetch bookings in date range, excluding Cancelled and No Show.
-    // Money and customer-contact columns are left out of the select entirely
-    // when withheld, rather than fetched and blanked after — once a column
-    // never leaves the database, there's nothing for devtools to recover.
-    let bookings = [];
-    {
+    // ONE round trip for everything the grid needs. None of these reads depends on another: the bookings query needs only the branch id
+    // and the visibility flags resolved above (so staff-own / restricted visibility applies exactly as before), the transfer reads need only
+    // the branch and range (the merge with the therapist list happens in memory below). This used to be five hops in a row
+    // (branch hours, then therapists/rooms, then transfers, then bookings), each a full network round trip on prod.
+    const bookingsPromise = (async () => {
+      // Money and customer-contact columns are left out of the select entirely
+      // when withheld, rather than fetched and blanked after — once a column
+      // never leaves the database, there's nothing for devtools to recover.
       const bookingFields = [
         'id', 'booking_number', 'customer_id', 'customer_name', 'is_walk_in', 'walk_in_label', // ZNLY-327
         'customer_phone',   // fetched always; masked below when withheld — see maskPhone
@@ -6822,10 +6780,78 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       // RESTRICTIVE RLS policy already scopes this SELECT to the caller's
       // own bookings when vis.ownBookingsOnly is true.
 
-      const { data: bookingsData, error: bookingsError } = await bookingsQuery;
-      if (bookingsError) throw bookingsError;
-      bookings = bookingsData || [];
+      return bookingsQuery;
+    })();
+    const transferRowsPromise = reused ? null : fetchCalendarTransferRows(resolvedBranchId, startDate, endDate);
+
+    // Branch hours + timezone, therapists and rooms for this branch; transfer windows (staff away / visiting / scheduled)
+    // are layered on by applyCalendarTransfers below.
+    const [
+      branchResult, therapistsResult, roomsResult, checkedOutResult, bookingsResult,
+    ] = reused ? [null, null, null, null, await bookingsPromise] : await Promise.all([
+      supabase
+        .from('branches')
+        .select('open_time, close_time, timezone')
+        .eq('id', resolvedBranchId)
+        .single(),
+      supabase
+        .from('therapists')
+        .select('id, name, gender, specialties, position, is_service_staff, display_order')
+        .eq('branch_id', resolvedBranchId)
+        .eq('is_active', true)
+        .order('display_order')
+        .order('name'),
+      supabase
+        .from('rooms')
+        .select('id, name, is_active, display_order, amenities, floor, capacity')
+        .eq('branch_id', resolvedBranchId)
+        .eq('is_active', true)
+        .order('display_order')
+        .order('name'),
+      // Therapists who've already checked out (for real, not just marked absent/leave) on
+      // some date in this range — the calendar blocks the rest of that day's column for
+      // them, same as a transfer-out window, so a booking can't be dropped onto someone
+      // who's already gone home. Only Present/Half-day rows can have a check_out_time.
+      supabase
+        .from('therapist_attendance')
+        .select('therapist_id, date, check_out_time')
+        .eq('branch_id', resolvedBranchId)
+        .gte('date', startDate)
+        .lte('date', endDate)
+        .not('check_out_time', 'is', null),
+      bookingsPromise,
+    ]);
+
+    if (!reused) {
+      if (branchResult.error) throw branchResult.error;
+      if (therapistsResult.error) throw therapistsResult.error;
+      if (roomsResult.error) throw roomsResult.error;
+      if (checkedOutResult.error) throw checkedOutResult.error;
     }
+    if (bookingsResult.error) throw bookingsResult.error;
+    const branch = reused ? reused.branch : branchResult.data;
+
+    // Keyed "<therapistId>_<date>" -> raw check_out_time (timestamptz), so the calendar
+    // can block each affected day's column independently.
+    let checkedOutByTherapistAndDate = {};
+    let mergedTherapists;
+    if (reused) {
+      ({ checkedOutByTherapistAndDate, mergedTherapists } = reused);
+    } else {
+      (checkedOutResult.data || []).forEach(row => {
+        checkedOutByTherapistAndDate[`${row.therapist_id}_${row.date}`] = row.check_out_time;
+      });
+      mergedTherapists = await applyCalendarTransfers(
+        resolvedBranchId, startDate, endDate,
+        (therapistsResult.data || [])
+          .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name)),
+        transferRowsPromise,
+      );
+      setCalendarStatic(staticKey, { branch, mergedTherapists, rooms: roomsResult.data || [], checkedOutByTherapistAndDate });
+    }
+
+    // Bookings in the date range, excluding Cancelled and No Show.
+    let bookings = bookingsResult.data || [];
 
     // Name and phone are MASKED, not withheld: staff still need to tell two
     // bookings apart and confirm the person in front of them.
@@ -7056,7 +7082,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         },
         // ZNLY-278: an own-only login gets only its own team member back: colleagues' columns would look free while they are busy.
         therapists: calendarColumnsFor(vis.ownBookingsOnly, finalTherapists, vis.therapistId),
-        rooms: roomsResult.data || [],
+        rooms: reused ? reused.rooms : (roomsResult.data || []),
         bookings: bookingsWithNewFlag,
         checkedOutByTherapistAndDate,
       },

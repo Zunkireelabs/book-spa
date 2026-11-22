@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   getCalendarBookings,
   fetchBlocksForRange,
@@ -37,11 +37,33 @@ export function useCalendarData({ branchId, currentDate, viewMode }) {
 
   // ── Data fetching ──────────────────────────────────────────
 
-  const fetchData = useCallback(async (startDate, endDate) => {
+  // The last FULL load (branch + range) and a request counter: a light refresh is only allowed on top of a full load of the same
+  // branch and range, and an older response never overwrites a newer one.
+  const fullKeyRef = useRef(null);
+  const reqRef = useRef(0);
+  const lastFetchStartedAtRef = useRef(0); // lets the Realtime refresh skip itself when a refresh already started after the event
+  const fullPendingRef = useRef(0); // full loads still in flight: a light refresh then runs as a full one so it cannot discard them
+
+  const fetchData = useCallback(async (startDate, endDate, { light = false } = {}) => {
     if (!branchId || !startDate || !endDate) return;
+    const key = `${branchId}|${startDate}|${endDate}`;
+    const id = ++reqRef.current;
+    lastFetchStartedAtRef.current = Date.now();
+
+    // LIGHT (after a booking change): re-read only the bookings; attendance, blocks, transfers and shifts stay as loaded, and the API
+    // reuses the saved branch hours / team / rooms. Without a matching full load it falls through to the full path below.
+    if (light && fullKeyRef.current === key && fullPendingRef.current === 0) {
+      const result = await getCalendarBookings(branchId, startDate, endDate, { reuseStatic: true });
+      if (id !== reqRef.current) return;
+      if (result.error) { setError(result.error.message || 'Failed to load calendar data.'); return; }
+      setError(null);
+      setCalendarData((prev) => ({ ...result.data, blockOccurrences: prev?.blockOccurrences || [], transferOccurrences: prev?.transferOccurrences || [] }));
+      return;
+    }
 
     setLoading(true);
     setError(null);
+    fullPendingRef.current += 1;
 
     const [result, attResult, blocksResult, transferResult, shiftsResult] = await Promise.all([
       getCalendarBookings(branchId, startDate, endDate),
@@ -51,11 +73,14 @@ export function useCalendarData({ branchId, currentDate, viewMode }) {
       fetchShiftsForRange({ branchId, startDate, endDate }),
     ]);
 
+    fullPendingRef.current -= 1;
+    if (id !== reqRef.current) return; // a newer refresh started while this one was loading
     if (result.error) {
       setError(result.error.message || 'Failed to load calendar data.');
       setLoading(false);
       return;
     }
+    fullKeyRef.current = key;
 
     // Blocks are best-effort: a failure (e.g. DB without migration-001) must not break the calendar.
     const blocksTableMissing = ['PGRST205', '42P01'].includes(blocksResult.error?.code);
@@ -89,6 +114,14 @@ export function useCalendarData({ branchId, currentDate, viewMode }) {
     const { start, end } = getDateRange(currentDate, viewMode);
     fetchData(start, end);
   }, [currentDate, viewMode, fetchData]);
+
+  // refreshCalendar.light(): after a BOOKING change (move, assign, status, payment, create...). See fetchData.
+  const refreshCalendarLight = useCallback(() => {
+    invalidateBookingDayCounts();
+    const { start, end } = getDateRange(currentDate, viewMode);
+    fetchData(start, end, { light: true });
+  }, [currentDate, viewMode, fetchData]);
+  refreshCalendar.light = refreshCalendarLight;
 
   const handleTherapistReorder = useCallback(async (orderedIds) => {
     if (!branchId) return;
@@ -144,6 +177,6 @@ export function useCalendarData({ branchId, currentDate, viewMode }) {
 
   return {
     calendarData, setCalendarData, loading, error, attendanceMap, attendanceByTherapist, shiftsByTherapist, blocksAvailable, transfersAvailable,
-    fetchData, refreshCalendar, handleTherapistReorder, handleRoomReorder,
+    fetchData, refreshCalendar, handleTherapistReorder, handleRoomReorder, lastFetchStartedAtRef,
   };
 }
