@@ -19,6 +19,8 @@ import CalendarToolbar from './CalendarToolbar';
 import DragPreviewOverlay from './DragPreviewOverlay';
 import ReassignConfirmDialog from './ReassignConfirmDialog';
 import QuickCreatePanel from './QuickCreatePanel';
+import { GuideNotice } from '../../../../components/ui/GuideCard';
+import { describeError } from '../../../../utils/errorGuide';
 import { useCalendarData } from './hooks/useCalendarData';
 import { useCalendarDnd } from './hooks/useCalendarDnd';
 import { useCalendarPanels } from './hooks/useCalendarPanels';
@@ -130,6 +132,12 @@ const OperationalCalendar = ({ branchId }) => {
   // Multi-drag: ref to get selected bookings from CalendarGrid
   const getSelectedBookingsRef = useRef(() => []);
 
+  // Refused drag / reschedule / resize: a floating ✦ card (or the calm system card), see GuideNotice.
+  const [guideNotice, setGuideNotice] = useState(null);
+  const showGuide = (error, extra, area) => setGuideNotice({
+    area, card: describeError(error, { staffLabel, staffLabelPlural, hasRooms: (calendarData?.rooms || []).length > 0, ...extra }),
+  });
+
   const showToast = (msg, type = 'success') => {
     setActionToast({ msg, type });
     setTimeout(() => setActionToast(null), 3000);
@@ -218,7 +226,7 @@ const OperationalCalendar = ({ branchId }) => {
   const {
     sensors, activeDragId, activeDragBooking, activeDragBlock, overSlotData, isRescheduling, pendingReassign, setPendingReassign,
     handleDragStart, handleDragMove, handleDragOver, handleDragEnd, handleDragCancel, handleConfirmReassign,
-  } = useCalendarDnd({ calendarData, setCalendarData, columnMode, refreshCalendar, showToast, gridRef, getSelectedBookingsRef });
+  } = useCalendarDnd({ calendarData, setCalendarData, columnMode, refreshCalendar, showToast, showGuide, gridRef, getSelectedBookingsRef });
 
   const {
     selectedBooking, setSelectedBooking, modalOpen, previewBooking, quickGuardRef, bookingGuardRef, blockGuardRef,
@@ -227,18 +235,18 @@ const OperationalCalendar = ({ branchId }) => {
     blockDeleteRequest, setBlockDeleteRequest, lastBlockWasRoomOnly,
     transferModalTarget, setTransferModalTarget, editingTransferTherapist, setEditingTransferTherapist,
     blockPanelOpen, blockRetarget,
-    servicesCache, servicesLoading, rebookSource, rebookFallback, rebookCardRef, reschedulePending,
+    servicesCache, servicesLoading, rebookSource, rebookCardRef, reschedulePending,
     waitlistCollapsed, setWaitlistCollapsed, waitlistRefreshToken, handleBookInFromWaitlist,
     openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick,
-    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleRebookStart, handleRescheduleStart,
+    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleAddServiceStart, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,
-  } = useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, gridRef, canViewCustomerDetails });
+  } = useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, showGuide, gridRef, canViewCustomerDetails });
   const waitlist = useWaitlistEntries(branchId, waitlistRefreshToken);
   const [waitlistSheetOpen, setWaitlistSheetOpen] = useState(false);
 
   const {
     handleStatusUpdate, handleAssignTherapist, handleBookingResize, handleEditBooking, handleApplyDiscount, handleRecordPayment, handleGroupPaymentRecorded,
-  } = useBookingActions({ showToast, refreshCalendar, selectedBooking, setSelectedBooking, getSelectedBookingsRef, staffLabel });
+  } = useBookingActions({ showToast, refreshCalendar, selectedBooking, setSelectedBooking, getSelectedBookingsRef, staffLabel, showGuide });
 
   // Auto-refresh every 60s. Paused while any modal/panel/drag/confirm is active
   // (the tab-hidden skip lives in the hook). fetchData swaps calendarData in place,
@@ -514,6 +522,7 @@ const OperationalCalendar = ({ branchId }) => {
               columnMode={columnMode}
               allTherapists={calendarData?.therapists || []}
               guardRef={quickGuardRef}
+              onRefreshCalendar={refreshCalendar}
             />
           </div>
         </div>
@@ -592,14 +601,13 @@ const OperationalCalendar = ({ branchId }) => {
         onApplyDiscount={handleApplyDiscount}
         onEditBooking={handleEditBooking}
         // Overall is view-only for creating data: with no create/rebook/reschedule handlers the panel hides Rebook, + Service and Reschedule.
-        onCreateBooking={isOverallBranch(branchId) ? undefined : handleQuickCreateSubmit}
+        onAddServiceStart={isOverallBranch(branchId) ? undefined : handleAddServiceStart}
         onRebookStart={isOverallBranch(branchId) ? undefined : handleRebookStart}
         onRescheduleStart={isOverallBranch(branchId) ? undefined : handleRescheduleStart}
         onGroupPaymentRecorded={handleGroupPaymentRecorded}
         canViewCustomerDetails={canViewCustomerDetails}
         onViewBooking={(bookingId) => handleBookingClick({ bookingId })}
         branchHours={calendarData?.branchHours}
-        defaultNewBookingMode={rebookFallback ? 'rebook' : null}
         userRole={profile?.role || 'staff'}
       />
 
@@ -635,6 +643,9 @@ const OperationalCalendar = ({ branchId }) => {
       )}
 
       {/* Toast */}
+      <GuideNotice notice={guideNotice} can={new Set(['show-calendar'])} onClose={() => setGuideNotice(null)}
+        onAction={(act) => { if (act.intent === 'show-calendar') { setGuideNotice(null); refreshCalendar(); } }} />
+
       {actionToast && (
         <div className={`fixed toast-top left-1/2 transform -translate-x-1/2 z-toast px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2 ${
           actionToast.type === 'error' ? 'bg-error text-white' :

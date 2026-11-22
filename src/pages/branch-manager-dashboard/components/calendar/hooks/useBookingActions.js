@@ -16,19 +16,21 @@ import { teamMemberLower } from '../../../../../utils/industryTerms';
 
 // Booking-level actions wired to the booking panel (status, assignment, edit, discount, payment) plus the
 // shared-booking card resize from the grid.
-export function useBookingActions({ showToast, refreshCalendar, selectedBooking, setSelectedBooking, getSelectedBookingsRef, staffLabel }) {
+export function useBookingActions({ showToast, refreshCalendar, selectedBooking, setSelectedBooking, getSelectedBookingsRef, staffLabel, showGuide }) {
   const { guard } = useAvailabilityGuard();
-  const handleStatusUpdate = async (bookingId, newStatus, reason) => {
+  const handleStatusUpdate = async (bookingId, newStatus, reason, opts) => {
     const dbStatus = toDbStatus(newStatus);
     const result = await updateBookingStatus({ bookingId, newStatus: dbStatus, reason });
     if (result.error) {
+      // The booking panel shows the ✦ guidance card itself (opts.inline): no toast, just hand the error back.
+      if (opts?.inline) return { error: result.error };
       showToast(result.error.message || 'Failed to update status.', 'error');
       return;
     }
     showToast(`Status updated to ${newStatus}`);
   };
 
-  const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId, therapistRoomOverrides, companionName, companionPhone) => {
+  const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId, therapistRoomOverrides, companionName, companionPhone, opts) => {
     const ids = Array.isArray(therapistIds) ? therapistIds : (therapistIds ? [therapistIds] : []);
     const result = await guard((overrideReason) => assignTherapist({
       bookingId,
@@ -41,6 +43,7 @@ export function useBookingActions({ showToast, refreshCalendar, selectedBooking,
       overrideReason,
     }));
     if (result.error) {
+      if (opts?.inline) return { error: result.error };
       showToast(result.error.message || `Failed to assign ${staffLabel.toLowerCase()}.`, 'error');
       return;
     }
@@ -99,7 +102,7 @@ export function useBookingActions({ showToast, refreshCalendar, selectedBooking,
       : await guard((overrideReason) => resizeSharedBookingTime({ bookingId, startTime: newStartTime, endTime: newEndTime, overrideReason }));
 
     if (result.error) {
-      showToast(result.error.message || 'Failed to resize.', 'error');
+      if (showGuide) showGuide(result.error, {}, 'calendar-resize'); else showToast(result.error.message || 'Failed to resize.', 'error');
     } else if (isPartOfSelection) {
       showToast(`Resized ${booking.therapistName || teamMemberLower()} independently to ${newStartTime} – ${newEndTime}`, 'success');
     } else {
@@ -108,10 +111,10 @@ export function useBookingActions({ showToast, refreshCalendar, selectedBooking,
     refreshCalendar();
   }, [refreshCalendar, guard]);
 
-  const handleEditBooking = async (bookingId, updates) => {
+  const handleEditBooking = async (bookingId, updates, opts) => {
     const result = await guard((overrideReason) => updateBookingDetails({ bookingId, ...updates, overrideReason }));
     if (result.error) {
-      showToast(result.error.message || 'Failed to update booking.', 'error');
+      if (!opts?.inline) showToast(result.error.message || 'Failed to update booking.', 'error');
       return { error: result.error };
     }
     showToast('Booking updated successfully');

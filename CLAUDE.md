@@ -238,12 +238,12 @@ Cancelled  Cancelled / No Show (terminal)
 
 | Role | Max Discount |
 |------|-------------|
-| staff | **50% direct-apply — TEMPORARY, raised from 15% on 2026-08-31.** No manager approval step while this is in effect; the request-to-approver path is unreachable since direct-apply now equals the hard ceiling. Revert by lowering `DISCOUNT_LIMITS.staff` back to `0.15` in `api.js`. |
+| staff | **50% direct-apply — TEMPORARY, raised from 15% on 2026-08-31.** No manager approval step while this is in effect; the request-to-approver path is unreachable since direct-apply now equals the hard ceiling. Revert by lowering `DISCOUNT_LIMITS.staff` back to `0.15` in `src/services/discountLimits.js` (moved out of `api.js` in ZNLY-365 so the guidance text reads the same numbers). |
 | manager | 100% |
 | admin | 100% |
 
 Hard ceiling: staff requests capped at **50%**; manager/admin direct-apply capped at
-**100%** (enforced in `api.js` `DISCOUNT_LIMITS` + `STAFF_REQUEST_CEILING` and
+**100%** (enforced by `DISCOUNT_LIMITS` in `services/discountLimits.js` + `STAFF_REQUEST_CEILING` in `api.js` and
 `BookingActionModal.jsx`).
 
 ### PIN Login Flow

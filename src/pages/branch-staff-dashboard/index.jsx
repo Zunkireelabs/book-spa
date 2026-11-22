@@ -367,11 +367,12 @@ const BranchStaffDashboard = () => {
   };
 
   // Wire to real API: updateBookingStatus
-  const handleStatusUpdate = async (bookingId, newStatus, reason) => {
+  const handleStatusUpdate = async (bookingId, newStatus, reason, opts) => {
     setActionError(null);
     const dbStatus = toDbStatus(newStatus);
     const result = await updateBookingStatus({ bookingId, newStatus: dbStatus, reason });
 
+    if (result.error && opts?.inline) return { error: result.error };
     if (result.error) {
       showError(friendlyError(result.error, 'Failed to update status.'));
       return;
@@ -382,11 +383,12 @@ const BranchStaffDashboard = () => {
   };
 
   // Wire to real API: assignTherapist
-  const handleAssignTherapist = async (bookingId, therapistIds, notes) => {
+  const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId, overrides, companionName, companionPhone, opts) => {
     setActionError(null);
     const ids = Array.isArray(therapistIds) ? therapistIds : (therapistIds ? [therapistIds] : []);
     const result = await assignTherapist({ bookingId, therapistIds: ids });
 
+    if (result.error && opts?.inline) return { error: result.error };
     if (result.error) {
       showError(result.error.message || `Failed to assign ${teamMemberLower()}.`);
       return;

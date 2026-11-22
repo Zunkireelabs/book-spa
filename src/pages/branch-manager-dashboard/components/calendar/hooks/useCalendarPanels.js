@@ -17,13 +17,15 @@ import { useBranch } from '../../../../../contexts/BranchContext';
 import { useAvailabilityGuard } from '../../../../../contexts/AvailabilityOverrideContext';
 import { friendlyError, isNetworkError, NETWORK_CHECK_CALENDAR_COPY } from '../../../../../utils/friendlyError';
 import { submitQuickCreate } from '../quickCreateSubmit';
+import { buildAddServiceSlot } from '../addServiceSlot';
 import { isCheckedOutBlockedSlot, DEFAULT_SLOT_MINUTES } from '../calendarSlots';
 import { teamMemberLower } from '../../../../../utils/industryTerms';
 
 // Panel routing for the calendar: which panel is open (booking details, quick-create, block / transfer forms), the
 // dirty-guard refs and open/switch/close helpers, the empty-slot / drag-to-create / new-booking entry points, the
 // rebook "pick and place" mode, and the create / block / transfer-cancel actions those panels trigger.
-export function useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, gridRef, canViewCustomerDetails = true }) {
+export function useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, showGuide, gridRef, canViewCustomerDetails = true }) {
+  const failWith = (error, fallback) => (showGuide ? showGuide(error, {}, 'calendar-place') : showToast(friendlyError(error, fallback), 'error'));
   const [searchParams, setSearchParams] = useSearchParams();
   const { guard } = useAvailabilityGuard();
   const { branches } = useBranch();
@@ -87,7 +89,6 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   // Rebook "pick and place" mode
   // Shape: { booking, customerName, customerPhone, serviceId, serviceName, duration }
   const [rebookSource, setRebookSource] = useState(null);
-  const [rebookFallback, setRebookFallback] = useState(false);
   // A reschedule RPC is in flight: pick mode stays up (with a spinner on the card) and slot clicks / Escape are ignored until it answers.
   const [reschedulePending, setReschedulePending] = useState(false);
   const reschedulePendingRef = useRef(false);
@@ -142,11 +143,10 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
           setRebookSource(null);
           return;
         }
-        // Reopen modal with rebook inline form
-        setSelectedBooking(rebookSource.booking);
-        setModalOpen(true);
-        setRebookFallback(true);
+        // ZNLY-365: leaving pick mode with Escape opens the same New booking panel, locked to this client (no inline form any more).
+        const src = rebookSource.booking;
         setRebookSource(null);
+        openQuickCreateForSlot(buildAddServiceSlot({ booking: src, mode: 'rebook', rawBookings: calendarData?.bookings }));
       }
     };
 
@@ -289,10 +289,10 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
             // The request may have committed before the connection dropped and a retry isn't safe: leave pick mode and let
             // the refreshed calendar show what actually happened.
             setRebookSource(null);
-            showToast(NETWORK_CHECK_CALENDAR_COPY, 'error');
+            failWith(result.error, 'Failed to reschedule.');
             refreshCalendar();
           } else {
-            showToast(friendlyError(result.error, 'Failed to reschedule.'), 'error');
+            failWith(result.error, 'Failed to reschedule.');
           }
         } else {
           setRebookSource(null);
@@ -308,7 +308,9 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       // The source booking may be one of the historical bookings created before phone became required: silently resubmitting
       // it would fail the DB's INSERT trigger. Route through the normal editable form instead, pre-filled with what's known,
       // so staff supply a phone here rather than hitting an opaque DB error.
-      if (!source.customerPhone || !source.customerPhone.trim()) {
+      const sourceBooking = source.booking || {};
+      // A walk-in (ZNLY-327) has no phone by design, and a known client is reused by id: neither needs the phone fallback (ZNLY-365).
+      if (!sourceBooking.isWalkIn && !sourceBooking.customerId && (!source.customerPhone || !source.customerPhone.trim())) {
         openQuickCreateForSlot({
           ...slotInfo,
           defaultCustomerName: source.customerName,
@@ -324,6 +326,9 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
         startTime,
         customerName: source.customerName,
         customerPhone: source.customerPhone,
+        ...(sourceBooking.isWalkIn
+          ? { isWalkIn: true, walkInLabel: sourceBooking.walkInLabel || undefined }
+          : { knownCustomerId: sourceBooking.customerId || undefined }),
         therapistId,
         roomId,
         overrideReason,
@@ -332,10 +337,10 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
         if (isNetworkError(result.error)) {
           // Rebook isn't atomic: the insert may have committed before the connection dropped, so restoring pick mode would invite a
           // duplicate on retry. Leave pick mode and show the real state.
-          showToast(NETWORK_CHECK_CALENDAR_COPY, 'error');
+          failWith(result.error, 'Failed to rebook.');
           refreshCalendar();
         } else {
-          showToast(friendlyError(result.error, 'Failed to rebook.'), 'error');
+          failWith(result.error, 'Failed to rebook.');
           // Restore rebook mode on failure so user can retry
           setRebookSource(source);
         }
@@ -440,7 +445,11 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
 
   const handleQuickCreateSubmit = useCallback(async (formData) => {
     const r = await submitQuickCreate({ formData, branchId, guard });
-    if (r.error) return { message: r.error, code: r.code };
+    if (r.error) {
+      // Part of a group, or a booking whose confirmation could not load, exists already: show the calendar as it really is.
+      if (r.partial || ['BOOKING_CONFIRMATION_UNAVAILABLE', 'BOOKING_NOT_VISIBLE', 'BOOKING_GROUP_PARTIAL'].includes(r.code)) refreshCalendar();
+      return { message: r.error, code: r.code, raw: r.raw, partial: r.partial };
+    }
     showToast(r.toast.msg, r.toast.type);
     // The booking exists for real: flip the waitlist entry to 'booked'. Best-effort, a failure here never undoes the booking.
     if (bookingWaitlistEntryId && r.bookingId) {
@@ -455,6 +464,17 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   }, [branchId, refreshCalendar, guard, bookingWaitlistEntryId, showToast]);
 
   // ── Rebook "pick and place" handlers ───────────────────────
+
+  // "+ Service" on a booking: the New booking panel, pre-filled and locked to the booking's client (ZNLY-365).
+  const handleAddServiceStart = useCallback((booking, mode = 'add-service') => {
+    if (isOverallBranch(branchId)) return;
+    runThroughPanelGuard(() => {
+      setModalOpen(false);
+      setSelectedBooking(null);
+      setPreviewBooking(null);
+      openQuickCreateForSlot(buildAddServiceSlot({ booking, mode, rawBookings: calendarData?.bookings }));
+    });
+  }, [branchId, calendarData, openQuickCreateForSlot]);
 
   const handleRebookStart = useCallback((booking) => {
     if (isOverallBranch(branchId)) return;
@@ -563,7 +583,6 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     setModalOpen(false);
     setSelectedBooking(null);
     setPreviewBooking(null);
-    setRebookFallback(false);
     refreshCalendar();
   }, [refreshCalendar]);
 
@@ -574,10 +593,10 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     blockDeleteRequest, setBlockDeleteRequest, lastBlockWasRoomOnly,
     transferModalTarget, setTransferModalTarget, editingTransferTherapist, setEditingTransferTherapist,
     blockPanelOpen, blockRetarget,
-    servicesCache, servicesLoading, rebookSource, rebookFallback, rebookCardRef, reschedulePending,
+    servicesCache, servicesLoading, rebookSource, rebookCardRef, reschedulePending,
     bookingWaitlistEntryId, waitlistCollapsed, setWaitlistCollapsed, waitlistRefreshToken, handleBookInFromWaitlist,
     openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick,
-    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleRebookStart, handleRescheduleStart,
+    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleAddServiceStart, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,
   };
 }

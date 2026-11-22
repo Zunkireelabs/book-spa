@@ -71,17 +71,19 @@ const InboxBookingPanel = ({ bookingId, onClose, onChanged }) => {
 
   const after = async (id) => { await refresh(id); onChanged?.(); };
 
-  const handleStatusUpdate = async (id, newStatus, reason) => {
+  const handleStatusUpdate = async (id, newStatus, reason, opts) => {
     const r = await updateBookingStatus({ bookingId: id, newStatus: toDbStatus(newStatus), reason });
+    if (r.error && opts?.inline) return { error: r.error };
     if (r.error) { showToast(friendlyError(r.error, 'Failed to update status.'), 'error'); return; }
     showToast(`Status updated to ${newStatus}`);
     await after(id);
   };
-  const handleAssignTherapist = async (id, therapistIds, notes, roomId, therapistRoomOverrides, companionName, companionPhone) => {
+  const handleAssignTherapist = async (id, therapistIds, notes, roomId, therapistRoomOverrides, companionName, companionPhone, opts) => {
     const ids = Array.isArray(therapistIds) ? therapistIds : (therapistIds ? [therapistIds] : []);
     const r = await guard((overrideReason) => assignTherapist({
       bookingId: id, therapistIds: ids, roomId: roomId !== undefined ? (roomId || null) : undefined, therapistRoomOverrides, companionName, companionPhone, overrideReason,
     }));
+    if (r.error && opts?.inline) return { error: r.error };
     if (r.error) { showToast(friendlyError(r.error, `Failed to assign ${teamMemberLower()}.`), 'error'); return; }
     showToast(`${teamMemberCap()} assigned successfully`);
     await after(id);
@@ -106,9 +108,9 @@ const InboxBookingPanel = ({ bookingId, onClose, onChanged }) => {
     await after(id);
     return { data: r.data };
   };
-  const handleEditBooking = async (id, updates) => {
+  const handleEditBooking = async (id, updates, opts) => {
     const r = await guard((overrideReason) => updateBookingDetails({ bookingId: id, ...updates, overrideReason }));
-    if (r.error) { showToast(friendlyError(r.error, 'Failed to update booking.'), 'error'); return { error: r.error }; }
+    if (r.error) { if (!opts?.inline) showToast(friendlyError(r.error, 'Failed to update booking.'), 'error'); return { error: r.error }; }
     showToast('Booking updated successfully');
     await after(id);
     return { error: null };
