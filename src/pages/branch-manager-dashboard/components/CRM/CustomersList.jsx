@@ -491,7 +491,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
                   {c.inSpa ? <InSpaTag /> : c.segment === 'new' && <span className="h-5 rounded-full px-[7px] text-[11.5px] font-medium inline-flex items-center bg-[#EEF3EC] text-primary">New</span>}
                   {c.vip && <StarIcon />}
                 </div>
-                <div className="text-[12.5px] text-[#8A8A90] mt-0.5 truncate">{formatPhoneGrouped(c.phone)}</div>
+                <div className="text-[12.5px] text-[#8A8A90] mt-0.5 truncate">{formatPhoneGrouped(c.phone) || 'No phone'}</div>
                 <div className="sm:hidden text-[12.5px] text-[#515152] truncate">{next ? `${relativeDayLabel(next.date, today)} · ${next.time}` : 'No upcoming booking'}</div>
               </div>
             </div>

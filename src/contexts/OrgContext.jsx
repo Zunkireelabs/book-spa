@@ -25,7 +25,7 @@ export const OrgProvider = ({ children }) => {
     try {
       const { data, error: fetchError } = await supabase
         .from('organizations')
-        .select('id, name, code, slug, timezone, currency, is_active, settings, industry_type, logo_url, hero_image_url, enforce_staff_availability')
+        .select('id, name, code, slug, timezone, currency, is_active, settings, industry_type, logo_url, hero_image_url, enforce_staff_availability, allow_staff_overlap, require_customer_phone')
         .eq('id', profile.org_id)
         .single();
 
@@ -95,6 +95,10 @@ export const OrgProvider = ({ children }) => {
     orgSettings: org?.settings || {},
     paymentMethods: getOrgPaymentMethods(org?.settings),
     enforceStaffAvailability: org?.enforce_staff_availability === true,
+    // ZNLY-389: this org lets one staff member hold overlapping bookings (default off: the database refuses a double booking).
+    allowStaffOverlap: org?.allow_staff_overlap === true,
+    // ZNLY-390: a customer's phone is required unless the org switched that off (default on; also while the org is loading).
+    requireCustomerPhone: org?.require_customer_phone !== false,
     showStaffSelection: org?.settings?.show_staff_selection === true,
     enableStaffRatings: org?.settings?.enable_staff_ratings === true,
     // Opposite default from the two toggles above — see TenantContext.jsx's matching

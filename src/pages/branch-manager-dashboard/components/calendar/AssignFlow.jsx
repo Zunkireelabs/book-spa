@@ -9,6 +9,7 @@ import { indexShifts } from '../../../../services/availabilityShading';
 import { useAvailabilityGuard } from '../../../../contexts/AvailabilityOverrideContext';
 import { nepalNow } from '../../../../utils/customerDirectory';
 import { addDays } from '../../../../utils/reportPeriod';
+import { useOrg } from '../../../../contexts/OrgContext';
 import { offStaffReasons, staffPickIncomplete, pickedRowStatusMulti, staffDayRanges, rangeLabel, clockToMin } from '../../../../utils/staffFit';
 import { buildAssignList, clock12, durationLabel, listSummary, dayTag, firstGroupLabel } from '../../../../utils/unassignedList';
 
@@ -104,6 +105,7 @@ const AssignFlow = ({
 
   useEffect(() => { onCountChange?.(rows ? list.today.length : null); }, [rows, list.today.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const { allowStaffOverlap } = useOrg();
   const ctx = useDayContext({ branchId, date: item?.date, currentDate, calendarData, attendanceMap, shiftsByTherapist, enabled: isOpen && !!item && step !== 'list' });
   const rooms = (calendarData?.rooms || []).filter((r) => r.is_active !== false);
   const hasRooms = rooms.length > 0;
@@ -183,7 +185,7 @@ const AssignFlow = ({
             const info = pickedRowStatusMulti(pickedPeople, {
               slot: s0 != null ? { start: s0, end: e0 > s0 ? e0 : s0 + 60 } : null,
               rangesById: staffDayRanges(ctx.bookings, { date: item.date, excludeBookingId: item.id }),
-              offById: ctx.offById, date: item.date, today: nepalNow().today,
+              offById: ctx.offById, date: item.date, today: nepalNow().today, busyOk: allowStaffOverlap,
             });
             const picker = (header, onPick) => (
               <StaffPicker

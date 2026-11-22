@@ -75,3 +75,16 @@ describe('isNewCustomerBooking (ZNLY-327)', () => {
     expect(isNewCustomerBooking({ id: 'b1', customer_id: 'c1' }, { c1: 'b1' }, true)).toBe(false);
   });
 });
+
+describe('customerMissing with the org phone rule off (ZNLY-390)', () => {
+  it('a new customer needs a name but no phone', () => {
+    expect(customerMissing({ kind: 'new', name: 'Sita', phoneRequired: false })).toBe('');
+    expect(customerMissing({ kind: 'new', name: '', phoneRequired: false })).toBe('Enter the customer name');
+  });
+  it('a typed phone is still validated', () => {
+    expect(customerMissing({ kind: 'new', name: 'Sita', phone: '98', phoneRequired: false })).toMatch(/isn't valid for Nepal/);
+  });
+  it('the default is unchanged: phone required', () => {
+    expect(customerMissing({ kind: 'new', name: 'Sita' })).toBe('Enter the customer phone');
+  });
+});
