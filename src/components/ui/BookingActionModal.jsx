@@ -308,7 +308,7 @@ const BookingActionModal = ({
   onRescheduleStart,
 }) => {
   const { branchId } = useBranch();
-  const { org: orgForNav, paymentMethods, orgSettings, staffLabel, staffLabelPlural } = useOrg();
+  const { org: orgForNav, paymentMethods, orgSettings, staffLabel, staffLabelPlural, allowStaffOverlap } = useOrg();
   const navigate = useNavigate();
   const cancelReasonOptions = orgSettings?.cancellation_reasons?.length
     ? orgSettings.cancellation_reasons
@@ -2617,7 +2617,7 @@ const BookingActionModal = ({
                         const info = pickedRowStatusMulti(picked, {
                           slot: effDayBookings && s0 != null ? { start: s0, end: e0 > s0 ? e0 : s0 + 60 } : null,
                           rangesById: effDayBookings && booking?.date ? staffDayRanges(effDayBookings, { date: booking.date, excludeBookingId: booking.bookingId || null }) : {},
-                          offById: effOffStaff || {}, date: booking?.date, today: nepalNow().today,
+                          offById: effOffStaff || {}, date: booking?.date, today: nepalNow().today, busyOk: allowStaffOverlap,
                         });
                         const savedPeople = assignedIds.map(nameFor).filter(Boolean);
                         return (

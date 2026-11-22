@@ -50,13 +50,14 @@ export function customerSavePayload({ kind, name = '', phone = '', countryCode =
 }
 
 /** The footer reason when the customer part is incomplete ('' = ready). */
-export function customerMissing({ kind, name = '', phone = '', countryCode = '+977', knownCustomerId = null }) {
+export function customerMissing({ kind, name = '', phone = '', countryCode = '+977', knownCustomerId = null, phoneRequired = true }) {
   if (kind === 'walkin') return '';
   if (!kind) return PICK_REASON;
   if (!String(name).trim()) return 'Enter the customer name';
-  if (!String(phone).replace(/\D/g, '') && !knownCustomerId) return 'Enter the customer phone';
+  const hasPhone = !!String(phone).replace(/\D/g, '');
+  if (!hasPhone && !knownCustomerId && phoneRequired) return 'Enter the customer phone';   // ZNLY-390: phoneRequired comes from the org setting
   // ZNLY-327: a typed number must be a real one for its country. A picked customer's stored number is never re-checked.
-  if (kind === 'new') return phoneProblem(countryCode, phone);
+  if (kind === 'new') return hasPhone || phoneRequired ? phoneProblem(countryCode, phone) : '';
   return '';
 }
 

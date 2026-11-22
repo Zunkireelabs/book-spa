@@ -241,3 +241,20 @@ describe('ZNLY-318 clockToMin', () => {
     expect(clockToMin('xx')).toBeNull();
   });
 });
+
+describe('allowOverlap (ZNLY-389)', () => {
+  const guests = [{ idx: 0, staffId: 's1', start: 600, end: 660 }, { idx: 1, staffId: 's1', start: 630, end: 690 }];
+  const rangesById = { s1: [{ start: 620, end: 700 }] };
+  it('flags busy / clash by default', () => {
+    expect(Object.keys(pickProblems(guests, { rangesById })).length).toBeGreaterThan(0);
+    expect(Object.keys(staffHeldByOthers(guests)[1]).length).toBe(1);
+  });
+  it('flags nothing when the org allows overlap', () => {
+    expect(pickProblems(guests, { rangesById, allowOverlap: true })).toEqual({});
+    expect(staffHeldByOthers(guests, { allowOverlap: true })[1]).toEqual({});
+  });
+  it('a busy pick has no problem text when busyOk', () => {
+    const r = pickedRowStatus({ id: 's1', name: 'Sami' }, { slot: { start: 600, end: 660 }, rangesById, busyOk: true });
+    expect(r.pill).toBe('busy'); expect(r.problem).toBe('');
+  });
+});

@@ -5,6 +5,7 @@ import Input from '../../../../components/ui/Input';
 import PhoneField from '../../../../components/ui/PhoneField';
 import { isValidPhone } from '../../../../utils/phone';
 import CustomerForm from '../../../customer-booking-flow/components/CustomerForm';
+import { useTenant } from '../../../../contexts/TenantContext';
 import { useResolvedServicePricing } from '../../../../hooks/useCustomerServicePricing';
 
 const GUEST_GENDER_OPTIONS = [
@@ -35,10 +36,10 @@ export const mapBookingError = (error) => {
 // createBooking() hard-rejects a missing phone ("Phone number is required", with no
 // `code`, so mapBookingError can't recognise it) and every guest row inherits this
 // phone — gating here is strictly better than the solo flow's gap, not a regression.
-export const isLeadContactValid = (leadContact) => {
+export const isLeadContactValid = (leadContact, { phoneRequired = true } = {}) => {
   if (!leadContact.firstName.trim()) return false;
   if (leadContact.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(leadContact.email)) return false;
-  if (!leadContact.phone.trim()) return false;
+  if (!leadContact.phone.trim()) return !phoneRequired;   // ZNLY-390: blank is fine when the org does not require a phone
   return isValidPhone(leadContact.phoneCountryCode || '+977', leadContact.phone); // the shared validator (ZNLY-331)
 };
 
@@ -62,6 +63,7 @@ export const isGuestContactValid = (person) => {
 };
 
 const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBranch, selectedDateTime, orgSlug, genderPreference, customerAccountId, onGuestFieldChange, onSubmit, submitting, submitError }) => {
+  const { requireCustomerPhone } = useTenant();   // ZNLY-390
   const pricingItems = people.map((p) => ({
     key: p.id,
     service: p.service,
@@ -217,7 +219,7 @@ const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBr
       <Button
         variant="primary"
         onClick={onSubmit}
-        disabled={submitting || !isLeadContactValid(leadContact) || people.some((p) => !p.isLead && !isGuestContactValid(p))}
+        disabled={submitting || !isLeadContactValid(leadContact, { phoneRequired: requireCustomerPhone }) || people.some((p) => !p.isLead && !isGuestContactValid(p))}
         className="w-full justify-center"
       >
         {submitting ? 'Booking…' : `Confirm group booking — ${totalLabel}`}

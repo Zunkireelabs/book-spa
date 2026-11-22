@@ -48,7 +48,7 @@ const MEMBERSHIP_STATE_COPY = {
 const EnrollMemberPanel = ({ onClose, onEnrolled, onRenewExisting, initialTierId = null }) => {
   const { profile } = useAuth();
   const { branchId } = useBranch();
-  const { paymentMethods } = useOrg();
+  const { paymentMethods, requireCustomerPhone } = useOrg();
   const orgId = profile?.org_id;
   const isAdmin = profile?.role === 'admin';
   const paymentTree = useMemo(() => buildPaymentMethodTree(paymentMethods), [paymentMethods]);
@@ -130,7 +130,7 @@ const EnrollMemberPanel = ({ onClose, onEnrolled, onRenewExisting, initialTierId
 
   const phoneIssue = digitsOf(phone) ? phoneFieldProblem({ dial: countryCode, national: phone, original: picked?.phone }) : '';
   const reason = !name.trim() ? 'Enter the customer name'
-    : !digitsOf(phone) ? 'Enter the phone'
+    : !digitsOf(phone) && requireCustomerPhone ? 'Enter the phone'
     : phoneIssue ? phoneIssue
     : blockingMembership ? 'Already a member'
     : phoneOwner ? 'Phone already on file'
@@ -173,7 +173,7 @@ const EnrollMemberPanel = ({ onClose, onEnrolled, onRenewExisting, initialTierId
     const next = {};
     const digits = digitsOf(phone);
     // A picked customer's stored number is not re-checked; a typed one must be real (the shared validator).
-    if (!digits) next.phone = 'Enter a valid phone number.';
+    if (!digits && requireCustomerPhone) next.phone = 'Enter a valid phone number.';
     if (!picked && email.trim() && !EMAIL_RE.test(email.trim())) next.email = 'Enter a valid email address.';
     const dob = picked ? { iso: '', error: null } : parseDob(dobText);
     if (dob.error) next.dob = dob.error;
@@ -198,7 +198,7 @@ const EnrollMemberPanel = ({ onClose, onEnrolled, onRenewExisting, initialTierId
         orgId,
         branchId,
         fullName: name.trim(),
-        phone: `${countryCode}${digits}`,
+        phone: digits ? `${countryCode}${digits}` : null,
         email: email.trim() || null,
         gender: gender || null,
         dateOfBirth: dob.iso || null,
@@ -286,7 +286,7 @@ const EnrollMemberPanel = ({ onClose, onEnrolled, onRenewExisting, initialTierId
           />
         </Field>
 
-        <Field label="Phone" required id="enr-phone" error={errors.phone}>
+        <Field label="Phone" required={requireCustomerPhone} id="enr-phone" error={errors.phone}>
           <PhoneField
             id="enr-phone"
             dial={countryCode} national={phone}

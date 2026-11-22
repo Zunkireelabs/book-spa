@@ -46,6 +46,14 @@ const staffAvailabilityCache = createEnforcementCache(async (branchId) => {
 });
 // true = the tenant switch is ON: leave/transfer windows are judged by the DB guard only (same code and message everywhere).
 const staffAvailabilityEnforced = (branchId) => staffAvailabilityCache.get(branchId);
+// ZNLY-390: true = this org does NOT require a customer phone (organizations.require_customer_phone = false). Anything unknown or failing reads as
+// "required", the safe default. Cleared when the admin flips the switch.
+const customerPhoneOptionalCache = createEnforcementCache(async (branchId) => {
+  const { data, error } = await supabase.from('branches').select('organizations(require_customer_phone)').eq('id', branchId).maybeSingle();
+  if (error) throw error;
+  return data?.organizations?.require_customer_phone === false;
+});
+const customerPhoneOptional = (branchId) => customerPhoneOptionalCache.get(branchId);
 const overrideReasonOf = (reason) => (typeof reason === 'string' && reason.trim() ? reason.trim() : null);
 // The reason authorises exactly one write; clear it afterwards so it can never be mistaken for a fresh override later.
 async function clearAvailabilityOverride(bookingId) {
@@ -841,6 +849,30 @@ export async function setEnforceStaffAvailability({ enabled }) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] setEnforceStaffAvailability error:', error.message);
+    return { data: null, error: plainError(error) };
+  }
+}
+
+// ZNLY-389 / ZNLY-390: per-org booking rules. Admin only (migrations 424 / 425: organizations has no UPDATE policy, so SECURITY DEFINER RPCs).
+export async function setAllowStaffOverlap({ enabled }) {
+  try {
+    const { data, error } = await supabase.rpc('set_allow_staff_overlap', { p_value: !!enabled });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setAllowStaffOverlap error:', error.message);
+    return { data: null, error: plainError(error) };
+  }
+}
+
+export async function setRequireCustomerPhone({ enabled }) {
+  try {
+    const { data, error } = await supabase.rpc('set_require_customer_phone', { p_value: !!enabled });
+    if (error) throw error;
+    customerPhoneOptionalCache.clear();
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setRequireCustomerPhone error:', error.message);
     return { data: null, error: plainError(error) };
   }
 }
@@ -3649,7 +3681,7 @@ export async function linkWalkInClient({ bookingId, customerId, customerName, cu
       name = c.full_name; phone = c.phone;
     } else {
       if (!String(customerName || '').trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Enter the client\'s name.' } };
-      if (!String(customerPhone || '').trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Enter the client\'s phone number.' } };
+      if (!String(customerPhone || '').trim() && !(await customerPhoneOptional(booking.branch_id))) return { data: null, error: { code: 'INVALID_INPUT', message: 'Enter the client\'s phone number.' } };
       const { data: branch, error: branchError } = await supabase.from('branches').select('org_id').eq('id', booking.branch_id).single();
       if (branchError) throw branchError;
       const { data: resolved, error: resolveError } = await findOrCreateCustomer({
@@ -7196,7 +7228,7 @@ export async function createBooking({
   try {
     const availabilityOverride = overrideReasonOf(overrideReason);
     if (isWalkIn) { knownCustomerId = undefined; customerPhone = null; customerEmail = null; }
-    if (!isWalkIn && (!customerPhone || !customerPhone.trim()) && !knownCustomerId) {
+    if (!isWalkIn && (!customerPhone || !customerPhone.trim()) && !knownCustomerId && !(await customerPhoneOptional(resolveBranchId(branchId)))) {
       return { data: null, error: { code: 'PHONE_REQUIRED', message: 'Phone number is required' } };
     }
 
@@ -7234,7 +7266,7 @@ export async function createBooking({
       // customer record can legitimately have neither on file. Fail closed
       // here rather than silently writing a booking with no way to look the
       // customer back up by contact info.
-      if (!customerPhone && !customerEmail) {
+      if (!customerPhone && !customerEmail && !(await customerPhoneOptional(resolveBranchId(branchId)))) {
         return { data: null, error: { code: 'NO_CONTACT_INFO', message: 'This customer has no phone or email on file — add one to their profile before booking.' } };
       }
     } else if (!isWalkIn) {
@@ -13756,6 +13788,7 @@ export async function fetchOrganizationBySlug(slug) {
         settings,
         logo_url,
         hero_image_url,
+        require_customer_phone,
         industries (
           id,
           name,
@@ -15146,7 +15179,7 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
     }
 
     // 2. Create a fresh customer. A customer profile needs a phone number (customers.phone is required).
-    if (!normalizedPhone) {
+    if (!normalizedPhone && !(await customerPhoneOptional(branchId))) {
       return { data: null, error: { code: 'PHONE_REQUIRED', message: 'A phone number is required to add a customer.' } };
     }
     const { data: created, error: insertErr } = await supabase
@@ -15155,7 +15188,7 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
         org_id: orgId,
         branch_id: branchId,
         full_name: fullName,
-        phone: normalizedPhone,
+        phone: normalizedPhone || null,   // NULL, never a placeholder (org setting require_customer_phone = false)
         email: normalizedEmail,
         gender: normalizedGender,
         date_of_birth: normalizedDob,
