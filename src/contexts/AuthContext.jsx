@@ -5,6 +5,7 @@ import { isTransientStatus, ServiceUnavailableError } from '../lib/supabaseRetry
 import { isLoginAllowed, LOGIN_OFF_MESSAGE, isLoginOffHookError, LOGIN_OFF_HOOK_MESSAGE } from '../services/loginAccess';
 import { setRestrictedReads } from '../lib/restrictedReads';
 import { invalidateAuthenticatedUser } from '../lib/authProfileCache';
+import { clearCalendarStatic } from '../lib/calendarStaticCache';
 import { isRestricted } from '../services/dataMasking';
 
 // Ceiling on how long the profile fetch may run before we give up and treat it
@@ -223,6 +224,7 @@ export const AuthProvider = ({ children }) => {
   const signOut = async () => {
     reset();
     invalidateAuthenticatedUser();
+    clearCalendarStatic();
     setRestrictedReads(false);
     setProfile(null);
     setUser(null);

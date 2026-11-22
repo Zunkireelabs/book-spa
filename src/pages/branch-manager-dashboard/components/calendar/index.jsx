@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { refreshLight } from './refreshLight';
 import { buildClientIndex, clientDayInfo } from './sameClient';
 import { viewerAccess } from 'services/dataMasking';
 import UnlinkedLoginNotice from 'components/ui/UnlinkedLoginNotice';
@@ -28,6 +29,7 @@ import { useCalendarShortcuts } from './hooks/useCalendarShortcuts';
 import { useGoTodaySignal } from './calendarSignals';
 import { useBookingActions } from './hooks/useBookingActions';
 import { isOverallBranch, assignTherapist } from '../../../../services/api';
+import { supabase } from '../../../../lib/supabase';
 import { useAvailabilityGuard } from '../../../../contexts/AvailabilityOverrideContext';
 import AssignFlow from './AssignFlow';
 import { dayAssignCount } from '../../../../utils/unassignedList';
@@ -166,7 +168,7 @@ const OperationalCalendar = ({ branchId }) => {
 
   const {
     calendarData, setCalendarData, error, attendanceMap, attendanceByTherapist, shiftsByTherapist, blocksAvailable, transfersAvailable,
-    fetchData, refreshCalendar, handleTherapistReorder, handleRoomReorder,
+    fetchData, refreshCalendar, handleTherapistReorder, handleRoomReorder, lastFetchStartedAtRef,
   } = useCalendarData({ branchId, currentDate, viewMode });
 
   // Available position options for filter (from service staff only)
@@ -257,6 +259,37 @@ const OperationalCalendar = ({ branchId }) => {
   useEffect(() => { if (!modalOpen) setOpenTab(null); }, [modalOpen]);
   useAutoRefresh(refreshCalendar, { intervalMs: 60000, enabled: !!branchId && !autoRefreshPaused });
 
+  // A booking changed on another device (or by a colleague): refresh the bookings only, debounced to one request per burst. While a
+  // modal, panel or drag is open the refresh waits and runs once it closes (same rule as the auto-refresh above).
+  const refreshCalendarRef = useRef(refreshCalendar);
+  refreshCalendarRef.current = refreshCalendar;
+  const realtimePausedRef = useRef(autoRefreshPaused);
+  realtimePausedRef.current = autoRefreshPaused;
+  const realtimeDirtyRef = useRef(false);
+  useEffect(() => {
+    if (!autoRefreshPaused && realtimeDirtyRef.current) { realtimeDirtyRef.current = false; refreshLight(refreshCalendarRef.current); }
+  }, [autoRefreshPaused]);
+  useEffect(() => {
+    if (!branchId || isOverallBranch(branchId)) return undefined;
+    let timer = null;
+    let burstStart = null;
+    const channel = supabase
+      .channel(`calendar-bookings-${branchId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings', filter: `branch_id=eq.${branchId}` }, () => {
+        if (burstStart == null) burstStart = Date.now();
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          const since = burstStart;
+          burstStart = null;
+          if (lastFetchStartedAtRef.current >= since) return; // a refresh already started after the change (e.g. our own edit): it has the new data
+          if (realtimePausedRef.current) realtimeDirtyRef.current = true;
+          else refreshLight(refreshCalendarRef.current);
+        }, 1000);
+      })
+      .subscribe();
+    return () => { clearTimeout(timer); supabase.removeChannel(channel); };
+  }, [branchId]);
+
   // ── Navigation ─────────────────────────────────────────────
 
   const overlapOccurrences = useMemo(() => [...(calendarData?.blockOccurrences || []), ...(calendarData?.transferOccurrences || [])], [calendarData]);
@@ -277,7 +310,7 @@ const OperationalCalendar = ({ branchId }) => {
   const assignCount = useMemo(() => dayAssignCount(calendarData?.bookings || [], currentDate), [calendarData?.bookings, currentDate]);
 
   const handleAssigned = ({ bookingId, date, names, prevRoomId, roomChanged }) => {
-    refreshCalendar();
+    refreshLight(refreshCalendar);
     if (date && date !== currentDate) setCurrentDate(date);
     flashBooking(bookingId);
     const who = names.join(' & ') || staffLabel.toLowerCase();
@@ -286,7 +319,7 @@ const OperationalCalendar = ({ branchId }) => {
       const r = await assignGuard((overrideReason) => assignTherapist({ bookingId, therapistIds: [], roomId: roomChanged ? prevRoomId : undefined, overrideReason }));
       if (r?.error) { showToast(r.error.message || 'Could not undo. Open the booking to change it.', 'error'); return; }
       showToast('Back to unassigned');
-      refreshCalendar();
+      refreshLight(refreshCalendar);
     };
     showAssignedToast({ msg: `Assigned to ${who}`, undo });
   };
