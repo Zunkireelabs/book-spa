@@ -15,6 +15,7 @@ vi.mock('../../../../services/api', async (importOriginal) => ({
   fetchServiceComboComponents: vi.fn(async () => ({ data: [], error: null })),
   fetchServices: vi.fn(async () => ({ data: [], error: null })),
   fetchServiceEligibility: vi.fn(async () => ({ data: [], error: null })),
+  fetchCustomerName: vi.fn(async () => ({ data: 'Hema Demo', error: null })),
 }));
 
 import QuickCreatePanel from './QuickCreatePanel';
@@ -213,5 +214,42 @@ describe('QuickCreatePanel smoke', () => {
     expect(card.textContent).toMatch(/Book at 1:30 pm/);
     expect(card.textContent).toMatch(/Give it to Asha/);
     expect(screen.getByRole('button', { name: /create booking/i }).disabled).toBe(true);
+  });
+  it('ZNLY-365: a part-created group shows "N of M bookings were already created", only Show on calendar, and Create stays disabled', async () => {
+    const { container } = await refusedSave({ message: 'Failed for Ram: x (2 bookings already created)', code: 'ROOMS_FULL', raw: { code: 'ROOMS_FULL' }, partial: { created: 2, total: 3 } });
+    const card = container.ownerDocument.querySelector('[data-guide-card="ROOMS_FULL"]');
+    expect(card.textContent).toMatch(/2 of 3 bookings were already created\./);
+    expect(screen.getByText('Show on calendar')).toBeTruthy();
+    expect(screen.queryByText(/Book at/)).toBeNull();
+    expect(screen.getByRole('button', { name: /create booking/i }).disabled).toBe(true);
+  });
+  it('ZNLY-365: Show on calendar closes without the discard prompt and refreshes the calendar', async () => {
+    const onClose = vi.fn(); const onRefreshCalendar = vi.fn();
+    const onSubmit = vi.fn(async () => ({ message: 'x', code: 'BOOKING_CONFIRMATION_UNAVAILABLE', raw: { code: 'BOOKING_CONFIRMATION_UNAVAILABLE' } }));
+    const slot = { day: '2026-11-22', hour: 12, minute: 0, defaultServiceId: 's1', walkIn: true, defaultTherapistIds: ['t1'] };
+    const { container } = render(<QuickCreatePanel {...props} onClose={onClose} onRefreshCalendar={onRefreshCalendar} onSubmit={onSubmit} slotInfo={slot} />);
+    fireEvent.click(screen.getByRole('button', { name: /create booking/i }));
+    await vi.waitFor(() => expect(container.ownerDocument.querySelector('[data-guide-card]')).toBeTruthy());
+    expect(screen.getByRole('button', { name: /create booking/i }).disabled).toBe(true);
+    fireEvent.click(screen.getByText('Show on calendar'));
+    expect(onRefreshCalendar).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(container.ownerDocument.querySelector('[role="alertdialog"]')).toBeNull();
+  });
+  it('ZNLY-365: a freshly opened Rebook / + Service panel (preset service, staff, locked client) is not dirty: Cancel closes at once', () => {
+    const onClose = vi.fn();
+    const slot = { day: '2026-11-22', hour: 12, minute: 0, title: 'Rebook', defaultServiceId: 's1', defaultTherapistIds: ['t1', 't2'], lockedClient: { kind: 'existing', customerId: 'c1', name: 'Anish Balami' }, defaultCustomerId: 'c1', defaultCustomerName: 'Anish Balami' };
+    const { container } = render(<QuickCreatePanel {...props} therapists={[{ id: 't1', name: 'Tara Gurung' }, { id: 't2', name: 'Asha Rai' }]} onClose={onClose} slotInfo={slot} />);
+    fireEvent.click(screen.getAllByRole('button', { name: /^cancel$/i })[0]);
+    expect(container.ownerDocument.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+  it('ZNLY-365: a walk-in booking with a linked client shows the client RECORD name (not "Walk-in · Sahil") and no Walk-in tag', async () => {
+    const slot = { day: '2026-11-22', hour: 12, minute: 0, defaultCustomerId: 'c9', defaultCustomerName: '', lockedClient: { kind: 'existing', customerId: 'c9', name: '', bookingNumber: 'BK-1' } };
+    const { container } = render(<QuickCreatePanel {...props} slotInfo={slot} />);
+    await vi.waitFor(() => expect(container.ownerDocument.querySelector('[data-locked-client]').textContent).toMatch(/Hema Demo/));
+    const card = container.ownerDocument.querySelector('[data-locked-client]');
+    expect(card.textContent).not.toMatch(/Walk-in|Sahil/);
+    expect(card.textContent).toMatch(/Same client as BK-1/);
   });
 });

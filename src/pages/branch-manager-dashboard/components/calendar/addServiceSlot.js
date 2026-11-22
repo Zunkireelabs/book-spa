@@ -7,14 +7,17 @@ const IDLE = new Set(['Cancelled', 'No Show']);
 // The booking's client, locked: a walk-in stays a walk-in (no phone, no profile), a known client is used by record.
 // An old booking with neither a customer record nor a phone cannot be locked: the panel then asks for the missing details.
 export function lockedClientOf(booking) {
+  // Same rule as isClientlessWalkIn: a walk-in that later got a client linked is that client, by record (never a clientless walk-in).
+  // A walk-in booking's customer_name is "Walk-in · Sahil", not the client's: leave it empty so the panel shows the client record's own name.
+  if (booking.customerId) return { kind: 'existing', customerId: booking.customerId, name: booking.isWalkIn ? '' : (booking.customerName || ''), bookingNumber: booking.id || '' };
   if (booking.isWalkIn) return { kind: 'walkin', walkInLabel: booking.walkInLabel || '', bookingNumber: booking.id || '' };
-  if (booking.customerId) return { kind: 'existing', customerId: booking.customerId, name: booking.customerName || '', bookingNumber: booking.id || '' };
   return null;
 }
 
 // The same people as this booking, if they are free at `atMin` (nobody else of theirs is in a booking covering that minute).
-export function sameStaffIfFree(booking, rawBookings, atMin) {
-  const ids = (booking.therapists || []).map((t) => t.id).filter(Boolean);
+// One service = one person, so only the first person is preset (`max` > 1 only for a couple service).
+export function sameStaffIfFree(booking, rawBookings, atMin, max = 1) {
+  const ids = (booking.therapists || []).map((t) => t.id).filter(Boolean).slice(0, max);
   if (!ids.length || atMin == null) return [];
   const busy = new Set();
   for (const b of rawBookings || []) {
@@ -60,7 +63,7 @@ export function buildAddServiceSlot({ booking, mode = 'add-service', rawBookings
     slot.defaultCustomerCountryCode = m ? m[1] : '+977';
   } else if (lockedClient.kind === 'existing') {
     slot.defaultCustomerId = booking.customerId;
-    slot.defaultCustomerName = booking.customerName || '';
+    slot.defaultCustomerName = lockedClient.name;
   }
   return slot;
 }

@@ -15,14 +15,14 @@ import { phoneProblem } from '../../../../utils/phone';
 import { customerSavePayload, customerMissing, seedFromSearch, PICK_REASON } from '../../../../utils/customerPick';
 import RoomPickRow from '../../../../components/ui/RoomPickRow';
 import ErrorGuide from '../../../../components/ui/GuideCard';
-import { describeError } from '../../../../utils/errorGuide';
+import { describeError, makeRef } from '../../../../utils/errorGuide';
 import { roomStates } from '../../../../utils/roomPick';
 import { parsePhone } from '../../../../components/ui/CountryCodeSelect'
 import PhoneField, { usePhoneState } from '../../../../components/ui/PhoneField';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import { useDayBlocks } from '../../../../hooks/useBlockOverlap';
 import { findBlockOverlap, describeBlockOverlap } from '../../../../utils/blockOverlap';
-import { getCustomerOutstandingBalance, fetchServiceComboComponents, fetchServices, fetchServiceEligibility } from '../../../../services/api';
+import { getCustomerOutstandingBalance, fetchCustomerName, fetchServiceComboComponents, fetchServices, fetchServiceEligibility } from '../../../../services/api';
 import { homeServiceNameSet, servicesBookableHere } from '../../../../utils/visitorServices';
 import { CUSTOMER_REFERRALS_ENABLED } from '../../../../lib/featureFlags';
 import StaffPicker, { useServiceEligibility } from '../../../../components/ui/StaffPicker';
@@ -39,7 +39,7 @@ import { fieldForErrorCode } from '../../../../utils/quickCreateErrorField';
 
 // ZNLY-365: the client row when the panel was opened from a booking ("+ Service" / Rebook). Not editable: same client as that booking.
 const LockedClientCard = ({ client, name }) => {
-  const label = client.kind === 'walkin' ? `Walk-in${client.walkInLabel ? ` · ${client.walkInLabel}` : ''}` : (name || client.name || '');
+  const label = client.kind === 'walkin' ? `Walk-in${client.walkInLabel ? ` · ${client.walkInLabel}` : ''}` : (name || client.name || 'Client');
   const initials = client.kind === 'walkin' ? 'WI' : label.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
   return (
     <div data-locked-client className="flex items-center gap-2.5 rounded-spa bg-[#F4F4F6] px-3 py-2">
@@ -58,7 +58,7 @@ const LockedClientCard = ({ client, name }) => {
 
 // ── Quick Create Panel ────────────────────────────────────────
 
-const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours, retarget, onDraftChange, columnMode = 'therapist', allTherapists = [], guardRef, offStaff = {}, offDate = null }) => {
+const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours, retarget, onDraftChange, columnMode = 'therapist', allTherapists = [], guardRef, offStaff = {}, offDate = null, onRefreshCalendar }) => {
   const { profile: viewerProfile } = useAuth();
   // ZNLY-278: an own-only login books only itself; the data layer hands it a single team member, so that one is the default.
   const defaultTherapistId = viewerAccess(viewerProfile).ownOnly && therapists?.length === 1 ? therapists[0].id : null;
@@ -113,7 +113,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [roomSignal, setRoomSignal] = useState(0);
   const [errorKey, setErrorKey] = useState(null); // snapshot of the form when the rejection came back: the reason stands until something relevant changes
   const nameRef = useRef(null);
-  const initialDraftRef = useRef({ date: '', time: '', therapist: '', room: '' });
+  const initialDraftRef = useRef({ date: '', time: '', therapist: '', room: '', service: '' });
   // Inline confirm in the footer: { type: 'discard' } or { type: 'move', slot }. Replaces window.confirm.
   const [confirm, setConfirm] = useState(null);
 
@@ -209,6 +209,15 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setReferringCustomerId(customer.id);
   }, []);
 
+  // A locked known client shows (and saves under) the client RECORD's name, e.g. a walk-in booking that got a client linked.
+  useEffect(() => {
+    const lc = slotInfo?.lockedClient;
+    if (!lc || lc.kind !== 'existing' || !lc.customerId) return undefined;
+    let live = true;
+    fetchCustomerName(lc.customerId).then(({ data }) => { if (live && data) setCustomerName(data); }).catch(() => {});
+    return () => { live = false; };
+  }, [slotInfo]);
+
   // Reset form when slot changes + pre-select therapist/room from column
   useEffect(() => {
     setServiceId(slotInfo?.defaultServiceId || '');
@@ -270,8 +279,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     initialDraftRef.current = {
       date: slotInfo?.day || '',
       time: slotTime,
-      therapist: slotInfo?.colType === 'therapist' && slotInfo.colId ? slotInfo.colId : (slotInfo?.defaultTherapistIds?.length === 1 ? slotInfo.defaultTherapistIds[0] : ''),
+      therapist: slotInfo?.colType === 'therapist' && slotInfo.colId ? slotInfo.colId : (slotInfo?.defaultTherapistIds?.length ? slotInfo.defaultTherapistIds.join(',') : ''),
       room: slotInfo?.colType === 'room' ? slotInfo.colId : '',
+      service: slotInfo?.defaultServiceId || '',   // a service the slot preset (Rebook, Book from Customers) is the baseline, not an edit
     };
   }, [slotInfo]);
 
@@ -651,7 +661,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       const text = friendlyError(err, 'Couldn\'t create the booking. Please try again.');
       setError(text);
       setErrorCode(err?.code || null);
-      setErrorCard(describeError(err?.raw || { code: err?.code, message: err?.message }, guideCtx));
+      setErrorCard(describeError(err?.raw || { code: err?.code, message: err?.message }, { ...guideCtx, partial: err?.partial }));
       setErrorKey(formKey);
       setSubmitting(false);
       submitInFlightRef.current = false;
@@ -678,7 +688,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // moved silently by retargeting); service, customer, contact, notes, group members, referral, and a therapist/room
   // choice that differs from what the slot set all count as an edit.
   const isDirty = isOpen && (
-    !!(serviceId || (!slotInfo?.lockedClient && (customerName.trim() || customerPhone.trim() || customerEmail.trim() || customerGender)) || specialRequests.trim()
+    !!((serviceId && serviceId !== initialDraftRef.current.service) || (!slotInfo?.lockedClient && (customerName.trim() || customerPhone.trim() || customerEmail.trim() || customerGender)) || specialRequests.trim()
       || (customerKind === 'walkin' && !slotInfo?.walkIn && !slotInfo?.lockedClient) || (!slotInfo?.lockedClient && walkInLabel.trim()) || groupServiceId || peopleEdited || referringCustomerName)
     || selectedTherapistIds.join(',') !== (initialDraftRef.current.therapist ? initialDraftRef.current.therapist : '')
     || (roomId || '') !== initialDraftRef.current.room
@@ -731,6 +741,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       time: t,
       therapist: s.colType === 'therapist' && s.colId ? s.colId : initialDraftRef.current.therapist,
       room: s.colType === 'room' && s.colId ? s.colId : initialDraftRef.current.room,
+      service: initialDraftRef.current.service,
     };
   };
   useEffect(() => {
@@ -808,9 +819,12 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     });
     return busy[0] || null;
   })();
+  // A live system card (only possible for a code missing from the catalog) keeps ONE reference id per code + slot, so it is reported once.
+  const liveRefs = useRef({});
+  const liveOpts = (code) => ({ makeRef: () => (liveRefs.current[`${code}|${bookingDate}|${bookingTime}`] ||= makeRef()) });
   const liveCard = (() => {
     if (activeCard || bookingMode !== 'individual') return null;
-    if (precheck.verdict) return { ...describeError({ code: precheck.verdict.code, message: precheck.verdict.message }, guideCtx), blocking: !!precheck.blocked };
+    if (precheck.verdict) return { ...describeError({ code: precheck.verdict.code, message: precheck.verdict.message }, guideCtx, liveOpts(precheck.verdict.code)), blocking: !!precheck.blocked };
     // No precheck verdict (the org's staff-availability rule is off): an overlap the Staff row already shows is still a hard stop, because the
     // database refuses a double booking (excl_therapist_overlap) and nobody can override it.
     if (busyPick) {
@@ -846,7 +860,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       case 'set-date': setBookingDate(a.value); break;
       case 'set-date-tomorrow': { const d = new Date(`${bookingDate}T00:00:00`); d.setDate(d.getDate() + 1); setBookingDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); break; }
       case 'set-walk-in': setCustomerKind('walkin'); setCustomerName(''); setCustomerPhone(''); setKnownCustomerId(null); scrollToField('customer'); break;
-      case 'show-calendar': requestClose(); break;
+      // Close without the discard prompt (the form is finished: the booking, or part of the group, already exists) and show the real calendar.
+      case 'show-calendar': onRefreshCalendar?.(); onClose(); break;
       case 'retry': handleSubmit({ preventDefault() {} }); break;
       default: break;
     }

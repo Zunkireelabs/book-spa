@@ -4,11 +4,9 @@
 import { fmt12 } from './errorGuide';
 
 const toMin = (t) => { const m = /^(\d{1,2}):(\d{2})/.exec(t || ''); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
-// Beds / chairs come from the room's first amenity ("2 Beds"): the same rule as api.getRoomCapacity.
-export const capacityOf = (room) => {
-  const m = room?.amenities?.[0] ? String(room.amenities[0]).match(/^(\d+)/) : null;
-  return m ? parseInt(m[1], 10) : 1;
-};
+// Places in a room: exactly api.getRoomCapacity (the rooms.capacity column, default 1), which is what the server and the DB trigger count with.
+// The amenity text ("2 Beds") is only a label and is never used for counting.
+export const capacityOf = (room) => room?.capacity ?? 1;
 // The server's check counts every status except Cancelled and No Show (a Completed booking still holds its room).
 const IDLE = new Set(['cancelled', 'no show']);
 

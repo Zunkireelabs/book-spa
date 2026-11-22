@@ -41,7 +41,7 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
       if (result.error) {
         const who = person.customerName || `person ${i + 1}`;
         const tail = created > 0 ? ` (${created} booking${created > 1 ? 's' : ''} already created)` : '';
-        return { error: `Failed for ${who}: ${friendlyError(result.error, 'could not create booking.')}${tail}`, code: result.error.code };
+        return { error: `Failed for ${who}: ${friendlyError(result.error, 'could not create booking.')}${tail}`, code: result.error.code, raw: result.error, partial: created > 0 ? { created, total: people.length } : undefined };
       }
       created++;
     }

@@ -4,6 +4,8 @@
 // Rule-based (no live AI call): instant, free, always the same right answer. An unknown code is a system error.
 // Actions are plain descriptors { id, label, intent, value }. A fix action only FILLS or OPENS something; it never saves.
 import { isNetworkError, friendlyError, NETWORK_CHECK_CALENDAR_COPY } from './friendlyError';
+import { localizeTerms, wordBranch } from './industryTerms';
+import { directDiscountPercent } from '../services/discountLimits';
 import { fieldForErrorCode } from './quickCreateErrorField';
 import { capture } from '../lib/analytics';
 
@@ -39,7 +41,8 @@ const freeNames = (c) => (c.freeStaff || []).map((s) => s.name.split(' ')[0]).jo
 
 // code -> { kind, field?, build(ctx, err) -> { lead, how, why?, actions? } }
 const fix = (build, field) => ({ kind: 'fix', field, build });
-const system = () => ({ kind: 'system', build: () => ({ lead: SYSTEM_LEAD }) });
+// `noRetry`: the same save can never work (the record is gone), so no Try again.
+const system = ({ how, noRetry } = {}) => ({ kind: 'system', noRetry: !!noRetry, build: () => ({ lead: SYSTEM_LEAD, how }) });
 const availability = (how) => fix((c, e) => ({ lead: safeMsg(e) || `${who(c)} is not available ${when(c)}.`, how, actions: [...timeActions(c), ...altStaff(c), pickStaff] }), 'staff');
 
 export const ERROR_CATALOG = {
@@ -136,7 +139,8 @@ export const ERROR_CATALOG = {
   CUSTOMER_REQUIRED: fix(() => ({ lead: 'Pick a client first.', how: 'Every booking is for a client or a walk-in.', actions: [act('pick-client', 'Pick a client', 'open-customer-pick')] }), 'customer'),
   // ---- booking state ----
   BOOKING_IMMUTABLE: fix((c) => ({
-    lead: `This booking is ${c.isPaid ? 'paid' : (c.status ? c.status.toLowerCase() : 'completed')}, so it can't be edited.`,
+    // Status unknown (a drag or reschedule passes none): stay neutral rather than guess "completed".
+    lead: c.isPaid ? "This booking is paid, so it can't be edited." : c.status ? `This booking is ${c.status.toLowerCase()}, so it can't be edited.` : "This booking can't be changed any more.",
     how: 'An admin can correct it; every change is logged.',
     actions: [act('ask-admin', 'Ask an admin', 'explain-admin')],
   })),
@@ -146,7 +150,11 @@ export const ERROR_CATALOG = {
     how: 'Bookings move Pending → Confirmed → In progress → Completed. Cancel and No show are allowed before it starts.',
     actions: [],
   })),
-  FUTURE_BOOKING: fix((c, e) => ({ lead: safeMsg(e) || 'This booking is for another day.', how: 'Move it to today to start or complete it.', actions: [] })),
+  FUTURE_BOOKING: fix((c, e) => {
+    const m = safeMsg(e);
+    // The server's own sentence already says "Move it to today …": don't say it twice.
+    return { lead: m || 'This booking is for another day.', how: /move it to today/i.test(m) ? '' : 'Move it to today to start or complete it.', actions: [] };
+  }),
   REASON_REQUIRED: fix(() => ({ lead: 'Add a reason first.', how: 'Cancelling or marking a no-show needs a short reason.', actions: [] })),
   SCHEDULING_CONFLICT: fix((c) => ({ lead: `That time clashes with another booking ${when(c)}.`, how: c.hasRooms ? 'Pick another time, person or room.' : 'Pick another time or person.', actions: [...timeActions(c), pickStaff] }), 'time'),
   COUPLE_SERVICE_NOT_ALLOWED_IN_GROUP: fix((c) => ({
@@ -172,10 +180,11 @@ export const ERROR_CATALOG = {
   })),
   // ---- discount ----
   DISCOUNT_LIMIT_EXCEEDED: fix((c) => ({
-    lead: `Your discount limit is ${c.limitPercent ?? 50}%.`,
-    how: 'Managers and admins can give up to 100%.',
-    why: 'Each role has a top discount it can give by itself: staff 50%, manager 100%, admin 100%. "Ask a manager" only shows who can give a bigger discount; it sends nothing and changes nothing.',
-    actions: [act('set-limit', `Set to ${c.limitPercent ?? 50}%`, 'set-discount-percent', c.limitPercent ?? 50), act('ask-manager', 'Ask a manager', 'explain-manager')],
+    // Every number comes from DISCOUNT_LIMITS (via directDiscountPercent), so the text follows the limit when it changes.
+    lead: `Your discount limit is ${c.limitPercent ?? directDiscountPercent('staff')}%.`,
+    how: `Managers and admins can give up to ${directDiscountPercent('manager')}%.`,
+    why: `Each role has a top discount it can give by itself: staff ${directDiscountPercent('staff')}%, manager ${directDiscountPercent('manager')}%, admin ${directDiscountPercent('admin')}%. "Ask a manager" only shows who can give a bigger discount; it sends nothing and changes nothing.`,
+    actions: [act('set-limit', `Set to ${c.limitPercent ?? directDiscountPercent('staff')}%`, 'set-discount-percent', c.limitPercent ?? directDiscountPercent('staff')), act('ask-manager', 'Ask a manager', 'explain-manager')],
   })),
   DISCOUNT_BELOW_PAID: fix((c) => ({
     lead: `This discount would take the bill below what is already paid${c.amountPaidLabel ? ` (${c.amountPaidLabel})` : ''}.`,
@@ -201,8 +210,8 @@ export const ERROR_CATALOG = {
   // ---- code/system problems: never steps ----
   // 23505 (unique) from the database
   DUPLICATE: fix((c) => ({ lead: 'That already exists.', how: c.what ? `A ${c.what} with the same details is already saved. Open the existing one instead.` : 'Something with the same details is already saved. Open the existing one instead.', actions: [] })),
-  BOOKING_NOT_FOUND: system(),
-  SERVICE_NOT_FOUND: system(),
+  BOOKING_NOT_FOUND: system({ how: 'It may have been removed. Close and reopen the calendar.', noRetry: true }),
+  SERVICE_NOT_FOUND: system({ how: 'It may have been removed. Close and reopen the calendar.', noRetry: true }),
 };
 
 export const catalogCodes = () => Object.keys(ERROR_CATALOG);
@@ -236,8 +245,7 @@ const codeFromPostgres = (err) => {
 //   { kind: 'fix', code, lead, how, why, field, actions[] }
 //   { kind: 'system', code, lead, how: '', field: null, actions[], ref, networkLost, canRetry }
 // context fills in names / times / next free data the calendar already knows (all optional).
-export function describeError(err, context = {}, opts = {}) {
-  const ctx = context || {};
+function buildCard(err, ctx, opts) {
   const network = isNetworkError(err);
   if (network) {
     return {
@@ -249,9 +257,11 @@ export function describeError(err, context = {}, opts = {}) {
   const code = (err?.code && ERROR_CATALOG[err.code] ? err.code : undefined) || codeFromText(err) || codeFromPostgres(err);
   const entry = code && ERROR_CATALOG[code];
   if (!entry || entry.kind === 'system') {
+    const built = entry ? entry.build(ctx, err) : {};
+    const noRetry = !!entry?.noRetry;
     return {
-      kind: 'system', code: code || err?.code || 'UNKNOWN', lead: SYSTEM_LEAD, how: SYSTEM_HOW, why: '', field: null,
-      networkLost: false, canRetry: true, ref: (opts.makeRef || makeRef)(), actions: [act('try-again', 'Try again', 'retry')],
+      kind: 'system', code: code || err?.code || 'UNKNOWN', lead: SYSTEM_LEAD, how: built.how || SYSTEM_HOW, why: '', field: null,
+      networkLost: false, canRetry: !noRetry, ref: (opts.makeRef || makeRef)(), actions: noRetry ? [] : [act('try-again', 'Try again', 'retry')],
     };
   }
   const built = entry.build(ctx, err) || {};
@@ -264,6 +274,33 @@ export function describeError(err, context = {}, opts = {}) {
     kind: 'fix', code, lead: word(built.lead), how: word(built.how), why: word(built.why),
     field: entry.field || fieldForErrorCode(code), actions,
   };
+}
+
+// Part of a group already exists: say so first, never offer a fix or a retry that could book those people twice, only the calendar.
+const withPartial = (card, ctx) => {
+  const n = ctx.partial?.created;
+  if (!n) return card;
+  const own = `${card.lead} ${card.how}`.trim();
+  return {
+    ...card, lead: `${n} of ${ctx.partial.total} bookings were already created.`,
+    how: card.kind === 'system' ? 'Check the calendar before booking again.' : own,
+    canRetry: false, networkLost: card.networkLost, actions: [act('show-calendar', 'Show on calendar', 'show-calendar')],
+  };
+};
+
+// The catalog is written in plain words; swap in the org's own terms (branch / room / booking / staff words) once, at the end.
+const siteWords = (t) => {
+  const w = String(wordBranch() || 'branch').toLowerCase();
+  return w === 'branch' ? t : t.replace(/\bbranch\b/g, w).replace(/\bBranch\b/g, w.charAt(0).toUpperCase() + w.slice(1));
+};
+const localized = (card) => {
+  const f = (t) => siteWords(localizeTerms(t || ''));
+  return { ...card, lead: f(card.lead), how: f(card.how), why: f(card.why) };
+};
+
+export function describeError(err, context = {}, opts = {}) {
+  const ctx = context || {};
+  return localized(withPartial(buildCard(err, ctx, opts), ctx));
 }
 
 // System errors go to the error log with the SAME reference id the user sees. No names, phones or free text: code + area only.

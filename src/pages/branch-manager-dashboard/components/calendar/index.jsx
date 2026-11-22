@@ -522,6 +522,7 @@ const OperationalCalendar = ({ branchId }) => {
               columnMode={columnMode}
               allTherapists={calendarData?.therapists || []}
               guardRef={quickGuardRef}
+              onRefreshCalendar={refreshCalendar}
             />
           </div>
         </div>

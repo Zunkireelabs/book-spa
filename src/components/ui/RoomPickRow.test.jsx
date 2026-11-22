@@ -8,7 +8,7 @@ beforeEach(() => { window.matchMedia = (q) => ({ matches: false, media: q, addEv
 afterEach(cleanup);
 
 const rooms = [
-  { id: 'bkk', name: 'BANGKOK', amenities: ['1 Bed'] }, { id: 'cm', name: 'CHAINGMAI', amenities: ['3 Beds'] }, { id: 'fm', name: 'FOOT MASSAGE', amenities: ['2 Chairs'] },
+  { id: 'bkk', name: 'BANGKOK', amenities: ['1 Bed'] }, { id: 'cm', name: 'CHAINGMAI', amenities: ['3 Beds'], capacity: 3 }, { id: 'fm', name: 'FOOT MASSAGE', amenities: ['2 Chairs'], capacity: 2 },
   { id: 'hh', name: 'HUA HIN', amenities: ['1 Bed'] }, { id: 'ped', name: 'PEDICURE', amenities: ['1 Bed'] }, { id: 'ktm', name: 'KATHMANDU', amenities: ['1 Bed'] },
 ];
 const bk = (room_id, s, e) => ({ id: room_id + s, date: '2026-11-22', status: 'Confirmed', room_id, start_time: s, end_time: e });

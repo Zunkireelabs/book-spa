@@ -4121,7 +4121,7 @@ const BookingActionModal = ({
           ) : (
           <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 p-4 pb-6 sm:p-6 border-t border-border flex-shrink-0">
             {/* Left side — Add another service / Rebook */}
-            {!isEditing && !showExtendPanel && onAddServiceStart ? (
+            {!isEditing && !showExtendPanel && !isViewer && onAddServiceStart ? (
               <div className="flex items-stretch gap-2">
                 <button
                   onClick={() => onAddServiceStart(booking, 'add-service')}

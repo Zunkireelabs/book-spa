@@ -7,7 +7,22 @@ const raw = (o) => ({ id: 'x', date: '2026-11-22', status: 'Confirmed', start_ti
 describe('lockedClientOf', () => {
   it('walk-in stays a walk-in with its label', () => expect(lockedClientOf({ ...base, isWalkIn: true, walkInLabel: 'Sahil' })).toMatchObject({ kind: 'walkin', walkInLabel: 'Sahil', bookingNumber: base.id }));
   it('known client is used by record id', () => expect(lockedClientOf({ ...base, customerId: 'c1', customerName: 'Anish Balami' })).toMatchObject({ kind: 'existing', customerId: 'c1' }));
+  it('a walk-in with a linked client is that client by record, not a clientless walk-in', () => {
+    // the booking's customer_name is the walk-in text, so the name is left for the panel to load from the client record
+    expect(lockedClientOf({ ...base, isWalkIn: true, walkInLabel: 'Sahil', customerId: 'c9', customerName: 'Walk-in · Sahil' })).toMatchObject({ kind: 'existing', customerId: 'c9', name: '' });
+    const slot = buildAddServiceSlot({ booking: { ...base, isWalkIn: true, customerId: 'c9' } });
+    expect(slot).toMatchObject({ defaultCustomerId: 'c9', lockedClient: { kind: 'existing' } });
+  });
   it('old booking with no record cannot be locked', () => expect(lockedClientOf(base)).toBeNull());
+});
+
+describe('presets one person only', () => {
+  const couple = { ...base, therapists: [{ id: 't-susan' }, { id: 't-aksa' }] };
+  it('a couple source presets only the first person', () => expect(buildAddServiceSlot({ booking: couple }).defaultTherapistIds).toEqual(['t-susan']));
+  it('the first person busy means nobody is preset (the second is not substituted)', () => {
+    expect(buildAddServiceSlot({ booking: couple, rawBookings: [raw({ start_time: '11:40:00' })] }).defaultTherapistIds).toEqual([]);
+  });
+  it('sameStaffIfFree with max 2 keeps both when free (couple service)', () => expect(sameStaffIfFree(couple, [], 11 * 60 + 50, 2)).toEqual(['t-susan', 't-aksa']));
 });
 
 describe('buildAddServiceSlot', () => {

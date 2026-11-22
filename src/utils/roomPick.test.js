@@ -3,15 +3,23 @@ import { roomStates, anyAvailableLine, statusText, capacityOf } from './roomPick
 
 const rooms = [
   { id: 'bkk', name: 'BANGKOK', amenities: ['1 Bed'] },
-  { id: 'cm', name: 'CHAINGMAI', amenities: ['3 Beds'] },
+  { id: 'cm', name: 'CHAINGMAI', amenities: ['3 Beds'], capacity: 3 },
   { id: 'hh', name: 'HUA HIN', amenities: ['1 Bed'] },
-  { id: 'fm', name: 'FOOT MASSAGE', amenities: ['2 Chairs'] },
+  { id: 'fm', name: 'FOOT MASSAGE', amenities: ['2 Chairs'], capacity: 2 },
 ];
 const bk = (room_id, start_time, end_time, o = {}) => ({ id: `${room_id}${start_time}`, date: '2026-11-22', status: 'Confirmed', room_id, start_time, end_time, ...o });
 const args = { rooms, date: '2026-11-22', startTime: '12:00', durationMin: 120 };
 const by = (st) => Object.fromEntries(st.map((x) => [x.room.id, x]));
 
 describe('roomStates agrees with the server room check', () => {
+  it('a room with capacity 1 and amenities "2 Beds" is full after one booking (the amenity text is a label only)', () => {
+    const r = [{ id: 'x', name: 'X', amenities: ['2 Beds'], capacity: 1 }];
+    expect(roomStates({ ...args, rooms: r, bookings: [bk('x', '12:00:00', '14:00:00')] })[0]).toMatchObject({ state: 'full', capacity: 1 });
+  });
+  it('a room with capacity 2 and no amenity text shows places left', () => {
+    const r = [{ id: 'x', name: 'X', amenities: [], capacity: 2 }];
+    expect(roomStates({ ...args, rooms: r, bookings: [bk('x', '12:00:00', '14:00:00')] })[0]).toMatchObject({ state: 'few', remaining: 1 });
+  });
   it('a Completed booking still holds its room', () => {
     expect(by(roomStates({ ...args, bookings: [bk('hh', '12:00:00', '14:00:00', { status: 'Completed' })] })).hh.state).toBe('full');
   });
@@ -67,7 +75,8 @@ describe('roomStates', () => {
     const st = roomStates({ ...args, bookings: [bk('hh', '12:00:00', '14:00:00')] });
     expect(anyAvailableLine(st)).toBe('3 of 4 rooms free at this time');
   });
-  it('capacityOf reads the leading number, default 1', () => {
-    expect(capacityOf({ amenities: ['2 Chairs'] })).toBe(2); expect(capacityOf({})).toBe(1); expect(capacityOf({ amenities: ['Shower'] })).toBe(1);
+  it('capacityOf is the capacity column, default 1, exactly like api.getRoomCapacity', () => {
+    expect(capacityOf({ capacity: 2 })).toBe(2); expect(capacityOf({})).toBe(1); expect(capacityOf({ amenities: ['Shower'] })).toBe(1);
+    expect(capacityOf({ capacity: 0 })).toBe(0);
   });
 });

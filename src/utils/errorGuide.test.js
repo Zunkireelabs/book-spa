@@ -6,6 +6,7 @@ const capture = vi.fn();
 vi.mock('../lib/analytics', () => ({ capture: (...a) => capture(...a) }));
 import { describeError, ERROR_CATALOG, SYSTEM_MESSAGE, makeRef, reportSystemError, fmt12 } from './errorGuide';
 import { NETWORK_CHECK_CALENDAR_COPY } from './friendlyError';
+import { directDiscountPercent } from '../services/discountLimits';
 
 describe('fmt12', () => {
   it.each([['12:00', '12:00 pm'], ['13:30:00', '1:30 pm'], ['00:05', '12:05 am'], ['09:00', '9:00 am']])('%s', (i, o) => expect(fmt12(i)).toBe(o));
@@ -113,6 +114,41 @@ describe('describeError', () => {
   });
   it('makeRef is stable in shape and has no look-alike characters', () => {
     for (let i = 0; i < 50; i++) expect(makeRef()).toMatch(/^[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{2}$/);
+  });
+});
+
+describe('describeError: review fixes', () => {
+  it('BOOKING_IMMUTABLE stays neutral when the status is unknown, and names paid / the real status when known', () => {
+    expect(describeError({ code: 'BOOKING_IMMUTABLE' }).lead).toBe("This booking can't be changed any more.");
+    expect(describeError({ code: 'BOOKING_IMMUTABLE' }, { isPaid: true }).lead).toBe("This booking is paid, so it can't be edited.");
+    expect(describeError({ code: 'BOOKING_IMMUTABLE' }, { status: 'Cancelled' }).lead).toBe("This booking is cancelled, so it can't be edited.");
+  });
+  it('FUTURE_BOOKING does not say "Move it to today" twice', () => {
+    const c = describeError({ code: 'FUTURE_BOOKING', message: 'This booking is for 23 Nov. Move it to today to start it.' });
+    expect(`${c.lead} ${c.how}`.match(/Move it to today/gi)).toHaveLength(1);
+    expect(describeError({ code: 'FUTURE_BOOKING' }).how).toMatch(/Move it to today/);
+  });
+  it('BOOKING_NOT_FOUND / SERVICE_NOT_FOUND: system card, no Try again, "may have been removed"', () => {
+    for (const code of ['BOOKING_NOT_FOUND', 'SERVICE_NOT_FOUND']) {
+      const c = describeError({ code });
+      expect(c).toMatchObject({ kind: 'system', canRetry: false, actions: [] });
+      expect(c.how).toBe('It may have been removed. Close and reopen the calendar.');
+    }
+  });
+  it('a part-created group leads with N of M, offers only Show on calendar and never a retry', () => {
+    const fixCard = describeError({ code: 'ROOMS_FULL' }, { partial: { created: 2, total: 3 }, hasRooms: true, nextFreeTimes: ['14:00'] });
+    expect(fixCard).toMatchObject({ kind: 'fix', lead: '2 of 3 bookings were already created.' });
+    expect(fixCard.actions.map((a) => a.intent)).toEqual(['show-calendar']);
+    const sys = describeError({ code: 'XX1' }, { partial: { created: 1, total: 4 } });
+    expect(sys).toMatchObject({ kind: 'system', lead: '1 of 4 bookings were already created.', canRetry: false });
+    expect(sys.actions.map((a) => a.intent)).toEqual(['show-calendar']);
+    expect(describeError({ code: 'ROOMS_FULL' }, { partial: { created: 0, total: 3 } }).lead).not.toMatch(/already created/);
+  });
+  it('the discount text is built from DISCOUNT_LIMITS (no hard-coded numbers)', () => {
+    const c = describeError({ code: 'DISCOUNT_LIMIT_EXCEEDED' });
+    expect(c.lead).toBe(`Your discount limit is ${directDiscountPercent('staff')}%.`);
+    expect(c.how).toBe(`Managers and admins can give up to ${directDiscountPercent('manager')}%.`);
+    expect(c.why).toContain(`staff ${directDiscountPercent('staff')}%, manager ${directDiscountPercent('manager')}%, admin ${directDiscountPercent('admin')}%`);
   });
 });
 
