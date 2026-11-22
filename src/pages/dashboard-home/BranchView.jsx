@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../utils/nepalTime';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
@@ -20,7 +21,7 @@ import { npr, plural, shortDay, clock12, LoadError, Card, Row, SuggestionsCard, 
 import { dayStatus, nextClient } from '../../lib/dashboardMyDay';
 import { ofKind } from '../../lib/dashboardNeeds';
 
-const WEEKDAY = new Date().toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'Asia/Kathmandu' });
+const WEEKDAY = new Date().toLocaleDateString('en-GB', { weekday: 'short', timeZone: NEPAL_TZ });
 // Delta vs the same weekday last week: green up / red down, plain "—" when there is no data to compare.
 const Delta = ({ now, prev, unit }) => {
   if (now == null || prev == null || (unit === '%' && Number(prev) === 0)) return <span className="text-gray-400">— vs last {WEEKDAY}</span>;
@@ -242,7 +243,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
                   <div className="flex justify-between py-2"><b>Cash expected in the drawer</b><b className="font-data">{npr(data.money.cash_expected)}</b></div>
                 </div>
                 {closed ? (
-                  <p className="text-sm text-success font-medium mt-2">Closed at {new Date(closed.closed_at).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kathmandu' })}{closed.closer?.full_name ? ` by ${closed.closer.full_name}` : ''} ✓</p>
+                  <p className="text-sm text-success font-medium mt-2">Closed at {new Date(closed.closed_at).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: NEPAL_TZ })}{closed.closer?.full_name ? ` by ${closed.closer.full_name}` : ''} ✓</p>
                 ) : canAct && (
                   <Button className="mt-3 max-md:min-h-11" onClick={() => setClosing((v) => !v)}>{closing ? 'Hide closing' : 'Close the day'}</Button>
                 )}

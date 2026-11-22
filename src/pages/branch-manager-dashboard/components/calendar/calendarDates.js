@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../../../utils/nepalTime';
 // Pure date/time helpers shared by the calendar orchestrator, the grid and the quick-create panel.
 import { to12h as to12hSpaced } from '../../../../services/bookingTransformers';
 
@@ -36,8 +37,8 @@ export function toKathmanduParts(isoString) {
   const d = new Date(isoString);
   if (Number.isNaN(d.getTime())) return null;
   return {
-    date: d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' }),
-    time: d.toLocaleTimeString('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', hour12: false }),
+    date: d.toLocaleDateString('en-CA', { timeZone: NEPAL_TZ }),
+    time: d.toLocaleTimeString('en-GB', { timeZone: NEPAL_TZ, hour: '2-digit', minute: '2-digit', hour12: false }),
   };
 }
 

@@ -1,3 +1,4 @@
+import { NEPAL_TZ, nepalToday } from '../../utils/nepalTime';
 import React, { useState, useEffect } from 'react';
 import Icon from '../AppIcon';
 import {
@@ -45,7 +46,7 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
   const role = profile?.role;
   const can = (action, row) => canAct(action, { role, side: row.toBranchId === currentBranchId ? 'receiving' : 'home' });
   const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
-  const today = new Date().toISOString().split('T')[0];
+  const today = nepalToday();
 
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [activeTransfer, setActiveTransfer] = useState(null);
@@ -401,7 +402,7 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
     const input = toTransferInput(row);
     const dur = !row.isPermanent ? transferDurationText(input) : '';
     const hours = dur ? ` · ${dur}` : '';
-    const setAt = row.transferredAt ? new Date(row.transferredAt).toLocaleString('en-GB', { timeZone: 'Asia/Kathmandu', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: !use24h }).replace(/,/g, '').replace(/\s([ap]m)$/i, '$1') : null;
+    const setAt = row.transferredAt ? new Date(row.transferredAt).toLocaleString('en-GB', { timeZone: NEPAL_TZ, weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: !use24h }).replace(/,/g, '').replace(/\s([ap]m)$/i, '$1') : null;
     return [
       ['Type', row.isPermanent ? 'Permanent' : `Temporary${hours}`],
       ['From → to', `${row.fromBranch} → ${row.toBranch}`],

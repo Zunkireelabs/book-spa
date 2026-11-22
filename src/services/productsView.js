@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../utils/nepalTime';
 // Products page (V25): pure logic for the Products / Stock history / Suppliers tabs: stock status, the five-part strip, the lead
 // sentence, Needs-you-now, sorting, search, margins, average-cost preview, the stock-movement labels and the CSV import checks.
 // No React, no Supabase. A "row" is what buildRows() makes from fetchProductCatalog(): one product with its sizes (variants), the
@@ -10,7 +11,7 @@ export { npr };
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const sum = (list, f) => list.reduce((n, x) => n + f(x), 0);
 const num = (v) => (v == null || v === '' ? null : Number(v));
-const TZ = 'Asia/Kathmandu';
+const TZ = NEPAL_TZ;
 /** Nepal calendar date of a timestamp. */
 export const nepalDate = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: TZ });
 /** Nepal clock time "14:20" of a timestamp. */

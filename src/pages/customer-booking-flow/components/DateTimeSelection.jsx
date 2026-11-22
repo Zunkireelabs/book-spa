@@ -1,3 +1,4 @@
+import { nepalToday, addDays } from '../../../utils/nepalTime';
 import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
@@ -67,16 +68,16 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
   // Generate the branch's effective advance-booking window (date-chip strip)
   const dates = useMemo(() => {
     const result = [];
-    const today = new Date();
+    const today = nepalToday();
 
     for (let i = 0; i < effectiveWindow; i++) {
-      const date = new Date(today);
-      date.setDate(today.getDate() + i);
+      // The Nepal calendar day i days from today; labels are read from that date (noon UTC, formatted in UTC) so the device timezone can't shift them.
+      const fullDate = addDays(today, i);
+      const date = new Date(`${fullDate}T12:00:00Z`);
 
-      const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
-      const dayNumber = date.getDate();
-      const monthName = date.toLocaleDateString('en-US', { month: 'short' });
-      const fullDate = date.toISOString().split('T')[0];
+      const dayName = date.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+      const dayNumber = date.getUTCDate();
+      const monthName = date.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
 
       result.push({
         dayName,
@@ -84,7 +85,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
         monthName,
         fullDate,
         isToday: i === 0,
-        isWeekend: date.getDay() === 0 || date.getDay() === 6
+        isWeekend: date.getUTCDay() === 0 || date.getUTCDay() === 6
       });
     }
 

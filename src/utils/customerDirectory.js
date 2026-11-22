@@ -7,6 +7,7 @@
 // uses the old rule (legacyDue).
 
 import { summarizeMoney, classifyBooking, paidPaisa } from './bookingMoney';
+import { nepalNow } from './nepalTime';
 
 export const NEW_DAYS = 30;
 export const AT_RISK_DAYS = 60;
@@ -18,14 +19,8 @@ export const VIP_MIN_SPENT = 25000;
 
 const RENDERED = ['Completed', 'In-Progress']; // a visit that has happened (or is happening)
 const UPCOMING = ['Pending', 'Confirmed'];
-const TZ = 'Asia/Kathmandu';
-
-/** { today: 'YYYY-MM-DD', hm: 'HH:MM' } in Nepal time for the given instant. */
-export function nepalNow(now = new Date()) {
-  const today = now.toLocaleDateString('en-CA', { timeZone: TZ });
-  const hm = now.toLocaleTimeString('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).slice(0, 5);
-  return { today, hm };
-}
+// { today: 'YYYY-MM-DD', hm: 'HH:MM' } in Nepal time for the given instant: the one implementation lives in ./nepalTime (kept exported from here so every existing import still works).
+export { nepalNow };
 
 const hm = (t) => (t ? String(t).slice(0, 5) : '');
 const dayNumber = (iso) => {

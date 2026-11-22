@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../utils/nepalTime';
 // Inbox hover quick actions (ZNLY-140): which primary action a row offers, the "handled by" note, and the
 // Gmail-style delayed save behind Confirm. Pure (no React, no Supabase) so it is unit-tested (inboxActions.test.js).
 
@@ -39,7 +40,7 @@ export function actionFor(row, { role, now = new Date() } = {}) {
 
 /** Nepal-time h:mm (no am/pm, as in the mockup: "Confirmed by Ram · 9:12"). */
 export const clockOf = (iso) => {
-  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kathmandu', hour: 'numeric', minute: '2-digit', hourCycle: 'h12' }).formatToParts(new Date(iso));
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: NEPAL_TZ, hour: 'numeric', minute: '2-digit', hourCycle: 'h12' }).formatToParts(new Date(iso));
   return `${parts.find((p) => p.type === 'hour').value}:${parts.find((p) => p.type === 'minute').value}`;
 };
 

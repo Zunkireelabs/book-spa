@@ -1,8 +1,9 @@
+import { NEPAL_TZ } from '../../utils/nepalTime';
 import React from 'react';
 import { dayMoneyView } from '../../lib/dayMoney';
 import Icon from '../AppIcon';
 
-const clock = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kathmandu' }) : '');
+const clock = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: NEPAL_TZ }) : '');
 
 // The payment rows of a day's reconciliation (ZNLY-234). Open day: methods, refunds, cash expected. Closed day: "At close", "After close", "Now".
 const SOURCES = [['product', 'Products', 'Package'], ['voucher', 'Voucher sales', 'Ticket'], ['membership', 'Membership deposits', 'Wallet'], ['package', 'Package sales', 'Gift']];

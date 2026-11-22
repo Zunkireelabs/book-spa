@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../utils/nepalTime';
 // Attendance of a visiting therapist (ZNLY-113 / V33c). One row per person per day, owned by HOME; worked_at_branch_id says where it
 import { wordBranch } from '../utils/industryTerms';
 // was checked in. Home's Attendance and the profile History show "Worked at Sanepa 12:02 – 3:30 pm" from that row.
@@ -24,6 +25,6 @@ export function workedAtNote({ row, homeBranchId, branchNameById }) {
 
 /** "from 6:55 pm" for a visitor whose window has not started yet (window start is an ISO timestamp). */
 export function visitFromText(windowFromIso) {
-  const hm = new Date(windowFromIso).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', hour12: false });
+  const hm = new Date(windowFromIso).toLocaleTimeString('en-GB', { timeZone: NEPAL_TZ, hour: '2-digit', minute: '2-digit', hour12: false });
   return `from ${hmTo12h(hm)}`;
 }

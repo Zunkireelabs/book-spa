@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../utils/nepalTime';
 // Pure notification rules (ZNLY-135 V35a): category mapping, per-category defaults, bell grouping and the
 // pop-up / sound gate. No React, no Supabase, so it is unit-tested directly (notificationRules.test.js).
 
@@ -92,7 +93,7 @@ export const badgeText = (n) => (n > 99 ? '99+' : String(n));
 
 /** Nepal-time (or the branch's timezone) minutes since midnight. */
 function minutesIn(tz, now) {
-  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: tz || 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: tz || NEPAL_TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
     .formatToParts(now);
   const h = Number(parts.find((p) => p.type === 'hour').value);
   const m = Number(parts.find((p) => p.type === 'minute').value);
@@ -163,14 +164,14 @@ export function buildInboxFilter({ unreadOnly = true, category = null, branchId 
 }
 
 /** Nepal-time day key (YYYY-MM-DD) for grouping. */
-const dayKey = (v, tz = 'Asia/Kathmandu') => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(v));
+const dayKey = (v, tz = NEPAL_TZ) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(v));
 
 /** "Today" / "Yesterday" / "Mon 26 Oct" for an item's created_at. */
 export function dayGroupLabel(createdAt, now = new Date()) {
   const k = dayKey(createdAt);
   if (k === dayKey(now)) return 'Today';
   if (k === dayKey(new Date(now.getTime() - 86400000))) return 'Yesterday';
-  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kathmandu', weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(createdAt));
+  return new Intl.DateTimeFormat('en-GB', { timeZone: NEPAL_TZ, weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(createdAt));
 }
 
 /** Newest-first rows -> [{ label, items }] (never merges items, unlike the bell). */

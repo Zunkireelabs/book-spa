@@ -34,6 +34,15 @@ jobs:
       - name: Check new/modified migrations self-record
         run: scripts/check-migrations.sh "origin/${{ github.base_ref }}"
 
+  nepal-dates:
+    name: Nepal dates guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No UTC-style "today", no inline Asia/Kathmandu (use src/utils/nepalTime.js)
+        run: scripts/check-nepal-dates.sh
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

@@ -1,3 +1,4 @@
+import { nepalToday } from '../../../utils/nepalTime';
 import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import { dayMoneyView } from '../../../lib/dayMoney';
@@ -22,7 +23,7 @@ function formatDate(dateStr) {
 }
 
 const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = nepalToday();
   const [selectedDate, setSelectedDate] = useState(today);
   const [summary, setSummary] = useState(null);
   const [unfinished, setUnfinished] = useState([]);   // ZNLY-234: bookings that block the close
