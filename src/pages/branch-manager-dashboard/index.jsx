@@ -1,3 +1,4 @@
+import { nepalNow } from '../../utils/customerDirectory';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
@@ -134,7 +135,7 @@ const BranchManagerDashboard = () => {
   const loadDayLock = useCallback(async ({ silent = false } = {}) => {
     if (!branchId) return;
     if (!silent) setLoading(true); // a realtime re-check must not flash the banner away
-    const today = new Date().toISOString().split('T')[0];
+    const today = nepalNow().today; // the spa's day (Nepal), not the UTC date, which is yesterday until 05:45
     const result = await hasLockedBookings(branchId, today);
     if (result.data != null) setDayLocked(result.data);
     if (!silent) setLoading(false);
