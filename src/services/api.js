@@ -244,16 +244,7 @@ const VALID_TRANSITIONS = {
 
 const TERMINAL_STATUSES = ['Completed', 'Cancelled', 'No Show'];
 
-const DISCOUNT_LIMITS = {
-  // TEMPORARY (2026-08-31): raised from 0.15 to match STAFF_REQUEST_CEILING, so staff
-  // can direct-apply up to 50% with no manager approval step. Revert by setting this
-  // back to 0.15 — the request-to-manager path (STAFF_REQUEST_CEILING below) reactivates
-  // automatically once this drops below it again.
-  staff:        0.50,
-  manager:      1.00, // 100%
-  admin:        1.00, // 100%
-  admin_viewer: 0,    // view-only role — RLS blocks writes regardless, this is just a safe default
-};
+import { DISCOUNT_LIMITS, directDiscountPercent as _directDiscountPercent } from './discountLimits';
 
 // Staff can request a discount up to this band (above their direct-apply limit).
 // Manager/admin direct-apply is bounded by DISCOUNT_LIMITS above.
@@ -710,7 +701,7 @@ export async function fetchMyTherapistId(userId) {
 
 // ── Access section (ZNLY-198 4b): read one person's login, and the "Link needs review" prompt ──
 // What a role may direct-apply, in whole percent, from the one table the booking rules use (so the role cards never drift from it).
-export const directDiscountPercent = (role) => Math.round((DISCOUNT_LIMITS[role] || 0) * 100);
+export const directDiscountPercent = _directDiscountPercent;
 
 // One person's login: their users row, whether a PIN is set (the PIN itself is never read), and the extra branches ticked for them.
 // Does the SIGNED-IN person have a PIN? (ZNLY-210: the lock screen needs one; has_pin() answers yes/no, the PIN is never read.) { data: boolean|null }
@@ -6761,7 +6752,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .order('name'),
       supabase
         .from('rooms')
-        .select('id, name, is_active, display_order, amenities, floor')
+        .select('id, name, is_active, display_order, amenities, floor, capacity')
         .eq('branch_id', resolvedBranchId)
         .eq('is_active', true)
         .order('display_order')
@@ -7121,7 +7112,7 @@ export async function createBooking({
     const availabilityOverride = overrideReasonOf(overrideReason);
     if (isWalkIn) { knownCustomerId = undefined; customerPhone = null; customerEmail = null; }
     if (!isWalkIn && (!customerPhone || !customerPhone.trim()) && !knownCustomerId) {
-      return { data: null, error: { message: 'Phone number is required' } };
+      return { data: null, error: { code: 'PHONE_REQUIRED', message: 'Phone number is required' } };
     }
 
     // ZNLY-235: an own-only login only ever sees bookings it is on, so a booking it makes is assigned to itself when it did not pick
@@ -12022,6 +12013,19 @@ export async function updateCustomerProfileDetails(customerId, {
 }
 
 // Staff-side: one customer's stored date of birth ("YYYY-MM-DD" or null). Plain read under the existing row-level RLS.
+// The client record's own name (a walk-in booking that got a client linked keeps "Walk-in · Sahil" as its customer_name).
+export async function fetchCustomerName(customerId) {
+  try {
+    if (!customerId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID is required.' } };
+    const { data, error } = await supabase.from('customers').select('full_name').eq('id', customerId).maybeSingle();
+    if (error) throw error;
+    return { data: data?.full_name || null, error: null };
+  } catch (error) {
+    console.error('[API] fetchCustomerName error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function fetchCustomerDateOfBirth(customerId) {
   try {
     if (!customerId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID is required.' } };

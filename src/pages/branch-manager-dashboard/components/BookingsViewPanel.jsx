@@ -346,8 +346,9 @@ const BookingsViewPanel = ({ branchId }) => {
     if (openId) document.querySelector(`tr[data-booking-id="${openId}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [openId, rows.length]);
 
-  const handleStatusUpdate = async (bookingId, newStatus, reason) => {
+  const handleStatusUpdate = async (bookingId, newStatus, reason, opts) => {
     const result = await updateBookingStatus({ bookingId, newStatus: toDbStatus(newStatus), reason });
+    if (result.error && opts?.inline) return { error: result.error };
     if (result.error) { showToast(friendlyError(result.error, 'Failed to update status.'), 'error'); return; }
     showToast(`Status updated to ${newStatus}`);
     await load();
@@ -360,11 +361,12 @@ const BookingsViewPanel = ({ branchId }) => {
     setBusyId(null);
   };
   // Same signature the booking dialog calls it with (bookingId, therapistIds[], notes, roomId, overrides, companion…); a single id also works.
-  const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId, therapistRoomOverrides, companionName, companionPhone) => {
+  const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId, therapistRoomOverrides, companionName, companionPhone, opts) => {
     const ids = Array.isArray(therapistIds) ? therapistIds : (therapistIds ? [therapistIds] : []);
     const result = await guard((overrideReason) => assignTherapist({
       bookingId, therapistIds: ids, roomId: roomId !== undefined ? (roomId || null) : undefined, therapistRoomOverrides, companionName, companionPhone, overrideReason,
     }));
+    if (result.error && opts?.inline) return { error: result.error };
     if (result.error) { showToast(friendlyError(result.error, `Failed to assign ${teamMemberLower()}.`), 'error'); return; }
     showToast(`${teamMemberCap()} assigned successfully`);
     await load();
@@ -397,9 +399,9 @@ const BookingsViewPanel = ({ branchId }) => {
     await refreshSelected(bookingId);
     return { data: result.data };
   };
-  const handleEditBooking = async (bookingId, updates) => {
+  const handleEditBooking = async (bookingId, updates, opts) => {
     const result = await guard((overrideReason) => updateBookingDetails({ bookingId, ...updates, overrideReason }));
-    if (result.error) { showToast(friendlyError(result.error, 'Failed to update booking.'), 'error'); return { error: result.error }; }
+    if (result.error) { if (!opts?.inline) showToast(friendlyError(result.error, 'Failed to update booking.'), 'error'); return { error: result.error }; }
     showToast('Booking updated successfully');
     await load();
     await refreshSelected(bookingId);
