@@ -1,0 +1,57 @@
+// ZNLY-365: "+ Service" and Rebook open the New booking panel pre-filled and locked to the booking's client.
+// buildAddServiceSlot() returns the slotInfo the panel reads (lockedClient, defaults, title). Pure, so it is table-tested.
+
+const toMin = (t) => { const m = /^(\d{1,2}):(\d{2})/.exec(t || ''); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+const IDLE = new Set(['Cancelled', 'No Show']);
+
+// The booking's client, locked: a walk-in stays a walk-in (no phone, no profile), a known client is used by record.
+// An old booking with neither a customer record nor a phone cannot be locked: the panel then asks for the missing details.
+export function lockedClientOf(booking) {
+  if (booking.isWalkIn) return { kind: 'walkin', walkInLabel: booking.walkInLabel || '', bookingNumber: booking.id || '' };
+  if (booking.customerId) return { kind: 'existing', customerId: booking.customerId, name: booking.customerName || '', bookingNumber: booking.id || '' };
+  return null;
+}
+
+// The same people as this booking, if they are free at `atMin` (nobody else of theirs is in a booking covering that minute).
+export function sameStaffIfFree(booking, rawBookings, atMin) {
+  const ids = (booking.therapists || []).map((t) => t.id).filter(Boolean);
+  if (!ids.length || atMin == null) return [];
+  const busy = new Set();
+  for (const b of rawBookings || []) {
+    if (b.id === booking.bookingId || b.date !== booking.date || IDLE.has(b.status)) continue;
+    const s = toMin(b.start_time); const e = toMin(b.end_time);
+    if (s == null || e == null || !(s <= atMin && atMin < e)) continue;
+    if (b.booking_therapists?.length) b.booking_therapists.forEach((bt) => busy.add(bt.therapist_id));
+    else if (b.therapist_id) busy.add(b.therapist_id);
+  }
+  return ids.every((id) => !busy.has(id)) ? ids : [];
+}
+
+export function buildAddServiceSlot({ booking, mode = 'add-service', rawBookings = [] }) {
+  const lockedClient = lockedClientOf(booking);
+  const endMin = toMin(booking.endTime) ?? toMin(booking.startTime) ?? toMin(booking.time);
+  const slot = {
+    day: booking.date,
+    title: mode === 'rebook' ? 'Rebook' : 'Add a service',
+    lockedClient,
+    openServiceFirst: mode === 'add-service',
+    sourceBookingId: booking.bookingId,
+  };
+  if (mode === 'add-service' && endMin != null) {
+    slot.hour = Math.floor(endMin / 60);
+    slot.minute = endMin % 60;
+    slot.defaultTherapistIds = sameStaffIfFree(booking, rawBookings, endMin);
+  }
+  if (mode === 'rebook') slot.defaultServiceId = booking.serviceId || '';
+  if (!lockedClient) {
+    // Old booking with no client record: carry the name and phone it has; the panel asks for whatever is missing.
+    const m = /^(\+\d{1,3})(\d+)$/.exec(booking.customerPhone || '');
+    slot.defaultCustomerName = booking.customerName || '';
+    slot.defaultCustomerPhone = m ? m[2] : (booking.customerPhone || '');
+    slot.defaultCustomerCountryCode = m ? m[1] : '+977';
+  } else if (lockedClient.kind === 'existing') {
+    slot.defaultCustomerId = booking.customerId;
+    slot.defaultCustomerName = booking.customerName || '';
+  }
+  return slot;
+}

@@ -36,7 +36,7 @@ import { useNavigate } from 'react-router-dom';
 import AvailabilityNoteLine from './AvailabilityNoteLine';
 import { AlertsBlock } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
 import { getBookingStatusColors } from '../../utils/bookingStatusColors';
-import { editFormChanged, editFormSeed, editChanges, isClientlessWalkIn, newBookingFormChanged } from '../../utils/editDetails';
+import { editFormChanged, editFormSeed, editChanges, isClientlessWalkIn } from '../../utils/editDetails';
 import { formatPhoneGrouped } from '../../utils/phone';
 import { parsePhone } from './CountryCodeSelect';
 import PhoneField, { usePhoneState, phoneFieldProblem, phoneFieldValue } from './PhoneField';
@@ -276,10 +276,9 @@ const BookingActionModal = ({
   onGroupPaymentRecorded,
   onApplyDiscount,
   onEditBooking,
-  onCreateBooking,
+  onAddServiceStart,
   onRebookStart,
   branchHours,
-  defaultNewBookingMode,
   userRole = 'staff',
   dayBookings = null, // raw calendar bookings of the day: turns on the time-aware Staff list (Free / Busy then / Best fit); null = plain list
   offStaff = {}, // { staffId: 'Off today' | 'On leave' } for the Staff list's Off today group
@@ -317,7 +316,7 @@ const BookingActionModal = ({
   // A restricted login cannot read a booking back after writing it, so the only writes it gets are status, check-in and notes (each a
   // definer RPC in migration 393). Everything else is removed, not shown-then-failing.
   const restricted = isRestricted(viewerProfile);
-  if (restricted) { onEditBooking = undefined; onCreateBooking = undefined; onRebookStart = undefined; onRescheduleStart = undefined; }
+  if (restricted) { onEditBooking = undefined; onAddServiceStart = undefined; onRebookStart = undefined; onRescheduleStart = undefined; }
   const [activeTab, setActiveTab] = useState('details');
   const [isFirstBooking, setIsFirstBooking] = useState(false);
   const [selectedTherapists, setSelectedTherapists] = useState([]);
@@ -411,10 +410,6 @@ const BookingActionModal = ({
   const [rowDiscountOverrides, setRowDiscountOverrides] = useState({});
 
   // Add another service / Rebook state
-  const [newBookingMode, setNewBookingMode] = useState(null); // 'add-service' | 'rebook' | null
-  const [newBookingForm, setNewBookingForm] = useState({});
-  const [newBookingError, setNewBookingError] = useState(null);
-  const [newBookingSubmitting, setNewBookingSubmitting] = useState(false);
 
   // Who created this booking (lazy-loaded on open)
   const [creator, setCreator] = useState(null);
@@ -495,10 +490,6 @@ const BookingActionModal = ({
     setIsEditing(false);
     setEditError(null);
     setActionError(null);
-    setNewBookingMode(null);
-    setNewBookingError(null);
-    setNewBookingForm({});
-    setNewBookingSubmitting(false);
     setShowAdminCorrection(false);
     setCorrectionConfirming(null);
     setCorrectionError(null);
@@ -680,13 +671,6 @@ const BookingActionModal = ({
     }
   }, [isOpen, activeTab]);
 
-  // Auto-open rebook form when triggered via Escape fallback
-  useEffect(() => {
-    if (defaultNewBookingMode && booking) {
-      openNewBookingForm(defaultNewBookingMode);
-    }
-  }, [defaultNewBookingMode, booking?.bookingId]);
-
   const tabs = [
     { id: 'details', label: 'Details', labelFull: 'Booking Details', icon: 'FileText' },
     { id: 'assign', label: 'Assigned', labelFull: 'Assigned', icon: 'UserCheck' },
@@ -723,34 +707,6 @@ const BookingActionModal = ({
     therapistIds: bookingTherapistIds,
     roomId: booking?.roomId || null,
   }, !!isEditing);
-  const newService = (services || []).find((t) => t.id === newBookingForm.serviceId);
-  const { message: newBookingBlockMsg } = useBlockOverlap(branchId, {
-    date: newBookingForm.date,
-    startTime: newBookingForm.startTime,
-    durationMinutes: newService?.duration_minutes || currentDurationMin,
-    therapistId: newBookingForm.therapistId || null,
-    therapistIds: newBookingForm.therapistId ? [newBookingForm.therapistId] : (newBookingMode === 'rebook' ? bookingTherapistIds : []),
-    roomId: newBookingForm.roomId || (newBookingMode === 'rebook' ? booking?.roomId || null : null),
-  }, !!newBookingMode);
-  // ZNLY-310: Rebook / Add another service pick staff for the FORM's own date + time + service length, not the original booking's.
-  // Day data: the caller's dayBookings only when the form date is that booking's date, else the panel's own fetch (own-only logins: plain list).
-  const reuseFormDay = dayBookings != null && !!booking?.date && newBookingForm.date === booking.date;
-  const formDay = useDayAvailability({
-    branchId: booking?.branchId || branchId,
-    date: newBookingForm.date,
-    enabled: !!(isOpen && newBookingMode && newBookingForm.date && newBookingForm.startTime && !reuseFormDay && !ownOnlyViewer),
-  });
-  const formDayBookings = reuseFormDay ? dayBookings : (formDay.ready ? formDay.bookings : null);
-  const formDayOff = reuseFormDay ? offStaff : (formDay.ready ? formDay.offById : {});
-  const formSlotMin = (() => { const [h, m] = String(newBookingForm.startTime || '').slice(0, 5).split(':').map(Number); return h * 60 + (m || 0); })();
-  const formSlotEnd = formSlotMin + (newService?.duration_minutes || currentDurationMin);
-  const formHHMM = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-  const formPickInfo = pickedRowStatus((therapists || []).find((x) => x.id === newBookingForm.therapistId), {
-    slot: formDayBookings ? { start: formSlotMin, end: formSlotEnd } : null,
-    rangesById: formDayBookings ? staffDayRanges(formDayBookings, { date: newBookingForm.date }) : {},
-    offById: formDayOff, date: newBookingForm.date, today: nepalNow().today,
-  });
-
   // Extend-duration options (same service, category, longer duration)
   const [showExtendPanel, setShowExtendPanel] = useState(false);
   const extendPanelRef = useRef(null);
@@ -775,14 +731,6 @@ const BookingActionModal = ({
       extendPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, [showExtendPanel]);
-
-  // Same auto-scroll for the Add another service / Rebook panel.
-  const newBookingPanelRef = useRef(null);
-  useEffect(() => {
-    if (newBookingMode && newBookingPanelRef.current) {
-      newBookingPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, [newBookingMode]);
 
   const handleExtendService = async (option) => {
     if (!booking || !onEditBooking) return;
@@ -877,69 +825,6 @@ const BookingActionModal = ({
     const [openH, openM] = (branchHours?.openTime || '09:00:00').split(':').map(Number);
     const [closeH, closeM] = (branchHours?.closeTime || '21:00:00').split(':').map(Number);
     return minutes >= openH * 60 + openM && minutes <= closeH * 60 + closeM;
-  };
-
-  const openNewBookingForm = (mode) => {
-    const today = new Date().toISOString().slice(0, 10);
-    setNewBookingForm({
-      serviceId: mode === 'rebook' ? (booking.serviceId || '') : '',
-      date: mode === 'rebook' ? '' : (booking.date || today),
-      startTime: '',
-      therapistId: '',
-      roomId: '',
-    });
-    setNewBookingError(null);
-    setNewBookingSubmitting(false);
-    setNewBookingMode(mode);
-  };
-
-  const handleNewBookingSubmit = async () => {
-    if (!booking || !onCreateBooking) return;
-    if (!newBookingForm.serviceId) {
-      setNewBookingError('Please select a service.');
-      return;
-    }
-    if (!newBookingForm.date) {
-      setNewBookingError('Please select a date.');
-      return;
-    }
-    if (!newBookingForm.startTime) {
-      setNewBookingError('Please select a time.');
-      return;
-    }
-    if (newBookingBlockMsg) return;
-
-    setNewBookingSubmitting(true);
-    setNewBookingError(null);
-
-    try {
-      const result = await onCreateBooking({
-        serviceId: newBookingForm.serviceId,
-        customerName: booking.customerName,
-        customerPhone: booking.customerPhone || null,
-        // Same client as this booking: a walk-in stays a walk-in (no phone, no profile, ZNLY-327), and a known client is reused by id,
-        // so the new booking never needs a phone the source booking doesn't have (ZNLY-365).
-        ...(booking.isWalkIn
-          ? { isWalkIn: true, walkInLabel: booking.walkInLabel || undefined }
-          : { knownCustomerId: booking.customerId || undefined }),
-        bookingDate: newBookingForm.date,
-        bookingTime: newBookingForm.startTime,
-        therapistId: newBookingForm.therapistId || null,
-        roomId: newBookingForm.roomId || null,
-      });
-
-      if (result) {
-        // onCreateBooking returns { message, code } on a refused save (ZNLY-304); never render the object itself.
-        setNewBookingError(typeof result === 'string' ? result : (result.message || 'Could not create the booking. Please try again.'));
-      } else {
-        setNewBookingMode(null);
-        onClose();
-      }
-    } catch (err) {
-      setNewBookingError(friendlyError(err, 'Unexpected error. Please try again.'));
-    } finally {
-      setNewBookingSubmitting(false);
-    }
   };
 
   // ── Admin correction (inline) ──────────────────────────────
@@ -1320,8 +1205,8 @@ const BookingActionModal = ({
   useEffect(() => { if (!isOpen) setDetent('half'); }, [isOpen]);
   // Anything that needs room (edit, payment, + Service, Extend) opens the sheet fully.
   useEffect(() => {
-    if (useSheet && isOpen && (isEditing || showExtendPanel || showPaymentModal || newBookingMode)) setDetent('full');
-  }, [useSheet, isOpen, isEditing, showExtendPanel, showPaymentModal, newBookingMode]);
+    if (useSheet && isOpen && (isEditing || showExtendPanel || showPaymentModal)) setDetent('full');
+  }, [useSheet, isOpen, isEditing, showExtendPanel, showPaymentModal]);
   // Two-column Customer | Service layout only when the panel body is >= 520px wide (container-based, not viewport-based).
   const bodyRef = useRef(null);
   const [wideBody, setWideBody] = useState(false);
@@ -1345,7 +1230,6 @@ const BookingActionModal = ({
   // value (picking an option applies at once), so opening it alone is never dirty.
   const formDirty = !!booking && (
     (isEditing && editFormChanged(editForm, booking))
-    || (!!newBookingMode && newBookingFormChanged(newBookingForm, newBookingMode, booking, new Date().toISOString().slice(0, 10)))
   );
   const isDirty = !!booking && (
     formDirty
@@ -1387,7 +1271,7 @@ const BookingActionModal = ({
   // Collapsing full -> half closes any edit / extend / add form; unsaved edits go through the same discard guard as closing.
   const changeDetent = (next) => {
     if (next !== 'half') { setDetent(next); return; }
-    const collapse = () => { if (isEditing) cancelEditing(); setShowExtendPanel(false); setNewBookingMode(null); setDetent('half'); };
+    const collapse = () => { if (isEditing) cancelEditing(); setShowExtendPanel(false); setDetent('half'); };
     if (formDirty) setPanelConfirm({ type: 'switch', action: collapse });
     else collapse();
   };
@@ -1757,8 +1641,8 @@ const BookingActionModal = ({
   })();
   // Visible secondary actions (left), in collapse-priority order; disabled ones are not shown here (only in the overflow).
   const secondaryVisible = [
-    !isViewer && onCreateBooking && !isEditing && { key: 'rebook', label: rebookLabel, icon: 'CalendarClock', run: () => onRebookStart?.(booking) },
-    !isViewer && onCreateBooking && !isEditing && { key: 'add', label: '+ Service', icon: 'PlusCircle', run: () => { setActiveTab('details'); openNewBookingForm('add-service'); } },
+    !isViewer && onAddServiceStart && !isEditing && { key: 'rebook', label: rebookLabel, icon: 'CalendarClock', run: () => onRebookStart?.(booking) },
+    !isViewer && onAddServiceStart && !isEditing && { key: 'add', label: '+ Service', icon: 'PlusCircle', run: () => onAddServiceStart(booking, 'add-service') },
     !isViewer && !restricted && !isTerminal && !isLocked && extendOptions.length > 0 && { key: 'extend', label: 'Extend', icon: 'Timer', run: () => { setActiveTab('details'); setShowExtendPanel(true); } },
   ].filter(Boolean);
   // Fit: footer width minus the ⋯ button, the primary action and gaps; each button's width is estimated from its label.
@@ -3879,141 +3763,6 @@ const BookingActionModal = ({
               </div>
             )}
 
-            {/* Add Another Service / Rebook Form */}
-            {!showExtendPanel && newBookingMode && (
-              <div ref={newBookingPanelRef} className="space-y-4 scroll-mt-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Icon name={newBookingMode === 'rebook' ? 'CalendarClock' : 'PlusCircle'} size={18} className="text-primary" />
-                    <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
-                      {newBookingMode === 'rebook' ? `${rebookLabel} Service` : 'Add Another Service'}
-                    </h3>
-                  </div>
-                  <button
-                    onClick={() => setNewBookingMode(null)}
-                    className="p-1.5 rounded-spa hover:bg-background spa-transition-fast text-text-secondary hover:text-text-primary"
-                  >
-                    <Icon name="X" size={16} />
-                  </button>
-                </div>
-
-                <div className="bg-background/50 rounded-spa p-3 border border-border/50">
-                  <p className="font-body text-xs text-text-secondary">
-                    Customer: <span className="font-semibold text-text-primary">{booking.customerName}</span>
-                    {booking.customerPhone && <span className="ml-2">({booking.customerPhone})</span>}
-                  </p>
-                  {newBookingMode === 'rebook' && (
-                    <p className="font-body text-xs text-text-secondary mt-1">
-                      Same service: <span className="font-semibold text-text-primary">{booking.service}</span>
-                    </p>
-                  )}
-                </div>
-
-                {newBookingError && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-spa bg-error/10 border border-error/20">
-                    <Icon name="AlertCircle" size={14} className="text-error flex-shrink-0" />
-                    <span className="font-body text-xs text-error">{newBookingError}</span>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Service — editable only for "add another service" */}
-                  {newBookingMode === 'add-service' && (
-                    <div className="sm:col-span-2">
-                      <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Service *</label>
-                      <ServicePickRow required services={services} value={newBookingForm.serviceId} onChange={(val) => setNewBookingForm(f => ({ ...f, serviceId: val }))} branchId={booking?.branchId || branchId} canViewPrices={canViewPrices} title="Service to add" sub={booking.customerName || ''} ariaLabel="Service" />
-                    </div>
-                  )}
-
-                  {/* Date */}
-                  <div>
-                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Date *</label>
-                    <input
-                      type="date"
-                      value={newBookingForm.date}
-                      min={new Date().toISOString().slice(0, 10)}
-                      onChange={e => setNewBookingForm(f => ({ ...f, date: e.target.value }))}
-                      className={inputClasses}
-                    />
-                  </div>
-
-                  {/* Time */}
-                  <div>
-                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Time *</label>
-                    <CustomSelect
-                      value={newBookingForm.startTime}
-                      onChange={(val) => setNewBookingForm(f => ({ ...f, startTime: val }))}
-                      options={timeOptions.map(t => ({ value: t, label: format12h(t) }))}
-                      placeholder="Select time..."
-                      searchable
-                      size="sm"
-                    />
-                  </div>
-
-                  {/* Staff (shared row + list, ZNLY-310) */}
-                  <div className="sm:col-span-2">
-                    <label className="flex items-baseline justify-between font-body font-body-medium text-xs text-text-secondary mb-1">{staffLabel} <span className="font-normal text-text-tertiary">optional</span></label>
-                    <StaffPickRow
-                      id={newBookingForm.therapistId || null}
-                      {...formPickInfo}
-                      emptyLabel={`Pick ${(staffLabel || 'team member').toLowerCase()}`}
-                      title={`${staffLabel} for ${newBookingMode === 'rebook' ? 'rebook' : 'add service'}`}
-                      renderPicker={(close) => (
-                        <StaffPicker
-                          people={therapists}
-                          selectedIds={newBookingForm.therapistId ? [newBookingForm.therapistId] : []}
-                          onChange={(ids) => { setNewBookingForm(f => ({ ...f, therapistId: ids[0] || '' })); close(); }}
-                          max={1}
-                          header={{
-                            title: `${staffLabel} for ${newBookingMode === 'rebook' ? 'rebook' : 'add service'} · ${booking.customerName}`,
-                            sub: `${newService?.name || booking.service || 'Service'}${newBookingForm.date && newBookingForm.startTime ? ` · ${new Date(`${newBookingForm.date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '')} ${format12h(newBookingForm.startTime)}` : ''}`,
-                          }}
-                          onNone={() => { setNewBookingForm(f => ({ ...f, therapistId: '' })); close(); }}
-                          noneLabel={`No ${(staffLabel || 'team member').toLowerCase()} · assign later`}
-                          staffLabel={staffLabel || 'Team member'}
-                          staffLabelPlural={staffLabelPlural || 'Team'}
-                          slot={newBookingForm.date && newBookingForm.startTime ? { date: newBookingForm.date, start: formHHMM(formSlotMin), end: formHHMM(formSlotEnd) } : null}
-                          serviceId={newBookingForm.serviceId || null}
-                          bookings={formDayBookings}
-                          offById={formDayOff}
-                        />
-                      )}
-                    />
-                  </div>
-
-                  {/* Room: only where the business has rooms */}
-                  {rooms.length > 0 && (
-                    <div className="sm:col-span-2">
-                      <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Room</label>
-                      <CustomSelect
-                        value={newBookingForm.roomId}
-                        onChange={(val) => setNewBookingForm(f => ({ ...f, roomId: val }))}
-                        options={[{ value: '', label: 'Any available' }, ...rooms.map(r => ({ value: r.id, label: r.name }))]}
-                        placeholder="Any available"
-                        size="sm"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                <BlockOverlapWarning message={newBookingBlockMsg} />
-
-                <div className="flex items-center justify-end gap-2 pt-2">
-                  <Button variant="outline" onClick={() => setNewBookingMode(null)} className="min-h-[44px] sm:min-h-0">
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="primary"
-                    onClick={handleNewBookingSubmit}
-                    loading={newBookingSubmitting}
-                    disabled={!!newBookingBlockMsg}
-                    className="min-h-[44px] sm:min-h-0"
-                  >
-                    {newBookingMode === 'rebook' ? rebookLabel : 'Create Booking'}
-                  </Button>
-                </div>
-              </div>
-            )}
           </div>
 
     </>
@@ -4354,10 +4103,10 @@ const BookingActionModal = ({
           ) : (
           <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 p-4 pb-6 sm:p-6 border-t border-border flex-shrink-0">
             {/* Left side — Add another service / Rebook */}
-            {!isEditing && !newBookingMode && !showExtendPanel && onCreateBooking ? (
+            {!isEditing && !showExtendPanel && onAddServiceStart ? (
               <div className="flex items-stretch gap-2">
                 <button
-                  onClick={() => openNewBookingForm('add-service')}
+                  onClick={() => onAddServiceStart(booking, 'add-service')}
                   className="flex items-center justify-center text-center px-3 py-1.5 text-xs font-body font-body-medium text-primary border border-primary/30 rounded-spa hover:bg-primary/5 spa-transition-fast min-h-[36px]"
                 >
                   Add another service

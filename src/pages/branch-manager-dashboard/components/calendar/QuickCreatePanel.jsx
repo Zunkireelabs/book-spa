@@ -34,6 +34,25 @@ import { shouldShowFillFree } from '../../../../utils/serviceCatalog';
 import { fieldForErrorCode } from '../../../../utils/quickCreateErrorField';
 
 
+// ZNLY-365: the client row when the panel was opened from a booking ("+ Service" / Rebook). Not editable: same client as that booking.
+const LockedClientCard = ({ client, name }) => {
+  const label = client.kind === 'walkin' ? `Walk-in${client.walkInLabel ? ` · ${client.walkInLabel}` : ''}` : (name || client.name || '');
+  const initials = client.kind === 'walkin' ? 'WI' : label.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  return (
+    <div data-locked-client className="flex items-center gap-2.5 rounded-spa bg-[#F4F4F6] px-3 py-2">
+      <span className="grid h-[30px] w-[30px] flex-shrink-0 place-items-center rounded-full bg-[#fde7c7] text-[11px] font-semibold text-secondary">{initials}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold text-text-primary">{label}</span>
+        <span className="block truncate text-xs text-text-secondary">
+          {client.bookingNumber ? `Same client as ${client.bookingNumber}` : 'Same client'}
+          {client.kind === 'walkin' && <span className="ml-1.5 rounded-full bg-[#FDF1DC] px-2 py-px text-[11px] font-medium text-secondary">Walk-in</span>}
+        </span>
+      </span>
+      <span className="flex flex-shrink-0 items-center gap-1 text-[11px] text-[#8A8A90]"><Icon name="Lock" size={12} />same client</span>
+    </div>
+  );
+};
+
 // ── Quick Create Panel ────────────────────────────────────────
 
 const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours, retarget, onDraftChange, columnMode = 'therapist', allTherapists = [], guardRef, offStaff = {}, offDate = null }) => {
@@ -58,6 +77,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [dragMinutes, setDragMinutes] = useState(0); // length of the range dragged on the grid; used until a service is picked
   const [selectedTherapistIds, setSelectedTherapistIds] = useState([]);
   const [roomId, setRoomId] = useState('');
+  const [openServiceSignal, setOpenServiceSignal] = useState(0);
   // Couple (is_couple service + 2 therapists, Individual mode): per-companion (non-primary therapist) room override and
   // the companion's name/phone. Not used by the Group flow.
   const [therapistRoomOverrides, setTherapistRoomOverrides] = useState({});
@@ -194,11 +214,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setCustomerEmail(slotInfo?.defaultCustomerEmail || '');
     setCustomerGender(slotInfo?.defaultCustomerGender ? String(slotInfo.defaultCustomerGender).toLowerCase() : '');
     // The dashboard Walk-in button opens with Walk-in preselected; a known customer (Book from Customers / waitlist) starts as an existing pick.
-    setCustomerKind(slotInfo?.walkIn ? 'walkin'
+    // ZNLY-365: "+ Service" / Rebook open this panel locked to the booking's client (a walk-in stays a walk-in; a known client is used by record).
+    const lc = slotInfo?.lockedClient || null;
+    setCustomerKind(lc ? lc.kind : slotInfo?.walkIn ? 'walkin'
       : slotInfo?.defaultCustomerId || (slotInfo?.defaultCustomerExisting && slotInfo?.defaultCustomerPhone) ? 'existing'
         : (slotInfo?.defaultCustomerName || slotInfo?.defaultCustomerPhone) ? 'new' : null);
-    setWalkInLabel('');
-    setProfileMissing({ email: !slotInfo?.defaultCustomerEmail, gender: !slotInfo?.defaultCustomerGender });
+    setWalkInLabel(lc?.kind === 'walkin' ? (lc.walkInLabel || '') : '');
+    setProfileMissing(lc ? { email: false, gender: false } : { email: !slotInfo?.defaultCustomerEmail, gender: !slotInfo?.defaultCustomerGender });
     setSpecialRequests('');
     setIsExistingCustomer(false);
     setReferringCustomerId('');
@@ -206,7 +228,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setReferringCustomerCountryCode('+977');
     setReferringCustomerName('');
     setReferringRewardAmount('');
-    setSelectedTherapistIds(slotInfo?.colType === 'therapist' && slotInfo.colId ? [slotInfo.colId] : (defaultTherapistId ? [defaultTherapistId] : []));
+    setSelectedTherapistIds(slotInfo?.colType === 'therapist' && slotInfo.colId ? [slotInfo.colId] : slotInfo?.defaultTherapistIds?.length ? slotInfo.defaultTherapistIds : (defaultTherapistId ? [defaultTherapistId] : []));
+    // The service list opens first when the panel is opened to add a service.
+    setOpenServiceSignal(slotInfo?.openServiceFirst ? Date.now() : 0);
     setRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
     setTherapistRoomOverrides({});
     setCompanionName('');
@@ -241,7 +265,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     initialDraftRef.current = {
       date: slotInfo?.day || '',
       time: slotTime,
-      therapist: slotInfo?.colType === 'therapist' && slotInfo.colId ? slotInfo.colId : '',
+      therapist: slotInfo?.colType === 'therapist' && slotInfo.colId ? slotInfo.colId : (slotInfo?.defaultTherapistIds?.length === 1 ? slotInfo.defaultTherapistIds[0] : ''),
       room: slotInfo?.colType === 'room' ? slotInfo.colId : '',
     };
   }, [slotInfo]);
@@ -700,8 +724,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // moved silently by retargeting); service, customer, contact, notes, group members, referral, and a therapist/room
   // choice that differs from what the slot set all count as an edit.
   const isDirty = isOpen && (
-    !!(serviceId || customerName.trim() || customerPhone.trim() || customerEmail.trim() || customerGender || specialRequests.trim()
-      || (customerKind === 'walkin' && !slotInfo?.walkIn) || walkInLabel.trim() || groupServiceId || peopleEdited || referringCustomerName)
+    !!(serviceId || (!slotInfo?.lockedClient && (customerName.trim() || customerPhone.trim() || customerEmail.trim() || customerGender)) || specialRequests.trim()
+      || (customerKind === 'walkin' && !slotInfo?.walkIn && !slotInfo?.lockedClient) || (!slotInfo?.lockedClient && walkInLabel.trim()) || groupServiceId || peopleEdited || referringCustomerName)
     || selectedTherapistIds.join(',') !== (initialDraftRef.current.therapist ? initialDraftRef.current.therapist : '')
     || (roomId || '') !== initialDraftRef.current.room
   );
@@ -874,7 +898,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   );
 
   return (
-    <SidePanel isOpen={isOpen} width={PANEL_WIDTH_BOOKING} title="New booking" onClose={requestClose} footer={footerNode}>
+    <SidePanel isOpen={isOpen} width={PANEL_WIDTH_BOOKING} title={slotInfo?.title || 'New booking'} onClose={requestClose} footer={footerNode}>
       <form id="quick-create-form" onSubmit={handleSubmit} className="px-5 py-5 space-y-4">
         {summaryRow}
 
@@ -887,7 +911,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         />
 
             {/* Booking mode: Individual | Group */}
-            <Segmented options={[['individual', 'Individual'], ['group', 'Group']]} value={bookingMode} onChange={setBookingMode} />
+            {!slotInfo?.lockedClient && <Segmented options={[['individual', 'Individual'], ['group', 'Group']]} value={bookingMode} onChange={setBookingMode} />}
 
             {bookingMode === 'individual' && (
             <>
@@ -896,7 +920,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                 Service <span className="text-error">*</span>
               </label>
-              <div data-qc-field="service"><ServicePickRow required invalid={flashSvc === 'service' && !serviceId} services={pickerServices} value={serviceId} onChange={setServiceId} branchId={branchId} canViewPrices={canViewPrices} loading={servicesLoading} title="Service for the booking" sub={svcSubLine} ariaLabel="Service" /></div>
+              <div data-qc-field="service"><ServicePickRow required invalid={flashSvc === 'service' && !serviceId} services={pickerServices} value={serviceId} onChange={setServiceId} branchId={branchId} canViewPrices={canViewPrices} loading={servicesLoading} openSignal={openServiceSignal} title="Service for the booking" sub={svcSubLine} ariaLabel="Service" /></div>
               {visitorTherapist && visitorServiceNames && (
                 <p className="mt-1.5 text-xs text-text-secondary" data-visitor-services-help>
                   Showing the {pickerServices.length} service{pickerServices.length === 1 ? '' : 's'} {visitorTherapist.name} does at the home {(locationLabel || 'branch').toLowerCase()} that this one also offers.
@@ -1138,10 +1162,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 Customer <span className="text-error">*</span>
                 {customerKind === 'existing' && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
               </label>
-              <CustomerPickRow invalid={flashSvc === 'customer' && !customerKind} kind={customerKind} name={customerName} phone={customerPhone ? `${customerCountryCode}${customerPhone}` : ''} sub={svcSubLine} branchId={branchId} onPick={handleCustomerPick} />
+              {slotInfo?.lockedClient ? <LockedClientCard client={slotInfo.lockedClient} name={customerName} /> : <CustomerPickRow invalid={flashSvc === 'customer' && !customerKind} kind={customerKind} name={customerName} phone={customerPhone ? `${customerCountryCode}${customerPhone}` : ''} sub={svcSubLine} branchId={branchId} onPick={handleCustomerPick} />}
             </div>
 
-            {customerKind === 'walkin' && (
+            {customerKind === 'walkin' && !slotInfo?.lockedClient && (
               <div>
                 <label className="flex items-baseline justify-between font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                   <span>Name</span><span className="text-xs font-normal text-text-secondary">optional</span>

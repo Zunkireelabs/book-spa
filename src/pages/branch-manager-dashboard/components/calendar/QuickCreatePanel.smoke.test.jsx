@@ -125,4 +125,19 @@ describe('QuickCreatePanel smoke', () => {
       expect(document.querySelector('.border-amber-300')).toBeTruthy();
     });
   });
+  it('ZNLY-365: opened from a walk-in booking it is "Add a service": client locked, no Individual/Group toggle, staff and time pre-filled', () => {
+    const slot = { day: '2026-11-22', hour: 11, minute: 50, title: 'Add a service', openServiceFirst: true, defaultTherapistIds: ['t1'], lockedClient: { kind: 'walkin', walkInLabel: 'Sahil', bookingNumber: 'BK-20261122-0015' } };
+    const { container } = render(<QuickCreatePanel {...props} slotInfo={slot} />);
+    expect(screen.getByText('Add a service')).toBeTruthy();
+    expect(container.ownerDocument.querySelector('[data-locked-client]').textContent).toMatch(/Walk-in · Sahil.*Same client as BK-20261122-0015/);
+    expect(screen.queryByText('Individual')).toBeNull();
+    expect(screen.queryByPlaceholderText(/First name, e.g. Ram/)).toBeNull();
+    expect(screen.getByDisplayValue('11:50am')).toBeTruthy();
+  });
+  it('ZNLY-365: a locked known client needs no phone: Create is blocked only by the missing service', () => {
+    const slot = { day: '2026-11-22', hour: 11, minute: 50, title: 'Rebook', defaultCustomerId: 'c1', defaultCustomerName: 'Anish Balami', lockedClient: { kind: 'existing', customerId: 'c1', name: 'Anish Balami', bookingNumber: 'BK-1' } };
+    render(<QuickCreatePanel {...props} slotInfo={slot} />);
+    expect(screen.getByText('Anish Balami')).toBeTruthy();
+    expect(screen.getByText('Pick a service')).toBeTruthy();
+  });
 });

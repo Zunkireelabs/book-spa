@@ -17,6 +17,7 @@ import { useBranch } from '../../../../../contexts/BranchContext';
 import { useAvailabilityGuard } from '../../../../../contexts/AvailabilityOverrideContext';
 import { friendlyError, isNetworkError, NETWORK_CHECK_CALENDAR_COPY } from '../../../../../utils/friendlyError';
 import { submitQuickCreate } from '../quickCreateSubmit';
+import { buildAddServiceSlot } from '../addServiceSlot';
 import { isCheckedOutBlockedSlot, DEFAULT_SLOT_MINUTES } from '../calendarSlots';
 import { teamMemberLower } from '../../../../../utils/industryTerms';
 
@@ -87,7 +88,6 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   // Rebook "pick and place" mode
   // Shape: { booking, customerName, customerPhone, serviceId, serviceName, duration }
   const [rebookSource, setRebookSource] = useState(null);
-  const [rebookFallback, setRebookFallback] = useState(false);
   // A reschedule RPC is in flight: pick mode stays up (with a spinner on the card) and slot clicks / Escape are ignored until it answers.
   const [reschedulePending, setReschedulePending] = useState(false);
   const reschedulePendingRef = useRef(false);
@@ -142,11 +142,10 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
           setRebookSource(null);
           return;
         }
-        // Reopen modal with rebook inline form
-        setSelectedBooking(rebookSource.booking);
-        setModalOpen(true);
-        setRebookFallback(true);
+        // ZNLY-365: leaving pick mode with Escape opens the same New booking panel, locked to this client (no inline form any more).
+        const src = rebookSource.booking;
         setRebookSource(null);
+        openQuickCreateForSlot(buildAddServiceSlot({ booking: src, mode: 'rebook', rawBookings: calendarData?.bookings }));
       }
     };
 
@@ -461,6 +460,17 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
 
   // ── Rebook "pick and place" handlers ───────────────────────
 
+  // "+ Service" on a booking: the New booking panel, pre-filled and locked to the booking's client (ZNLY-365).
+  const handleAddServiceStart = useCallback((booking, mode = 'add-service') => {
+    if (isOverallBranch(branchId)) return;
+    runThroughPanelGuard(() => {
+      setModalOpen(false);
+      setSelectedBooking(null);
+      setPreviewBooking(null);
+      openQuickCreateForSlot(buildAddServiceSlot({ booking, mode, rawBookings: calendarData?.bookings }));
+    });
+  }, [branchId, calendarData, openQuickCreateForSlot]);
+
   const handleRebookStart = useCallback((booking) => {
     if (isOverallBranch(branchId)) return;
     setRebookSource({
@@ -568,7 +578,6 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     setModalOpen(false);
     setSelectedBooking(null);
     setPreviewBooking(null);
-    setRebookFallback(false);
     refreshCalendar();
   }, [refreshCalendar]);
 
@@ -579,10 +588,10 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     blockDeleteRequest, setBlockDeleteRequest, lastBlockWasRoomOnly,
     transferModalTarget, setTransferModalTarget, editingTransferTherapist, setEditingTransferTherapist,
     blockPanelOpen, blockRetarget,
-    servicesCache, servicesLoading, rebookSource, rebookFallback, rebookCardRef, reschedulePending,
+    servicesCache, servicesLoading, rebookSource, rebookCardRef, reschedulePending,
     bookingWaitlistEntryId, waitlistCollapsed, setWaitlistCollapsed, waitlistRefreshToken, handleBookInFromWaitlist,
     openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick,
-    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleRebookStart, handleRescheduleStart,
+    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleAddServiceStart, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,
   };
 }

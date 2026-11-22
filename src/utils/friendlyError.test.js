@@ -39,7 +39,7 @@ describe('friendlyError', () => {
   });
 
   it('has one single-sentence copy for non-idempotent writes', () => {
-    expect(NETWORK_CHECK_CALENDAR_COPY).toBe("Couldn't reach the server. Check the calendar before trying again.");
+    expect(NETWORK_CHECK_CALENDAR_COPY).toBe('Connection lost. The booking may have saved. Check the calendar before trying again.');
   });
 
   it('does not treat other TypeErrors as network problems', () => {

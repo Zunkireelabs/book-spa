@@ -10,7 +10,7 @@ import { mostBooked, categoryGroups, showCategoryHeaders, priceLine, searchServi
 // `anyLabel` (Waitlist): "no service" is a real answer, so the empty state and the first list row read that label.
 const Chip = ({ children }) => <span className="ml-1.5 px-1.5 py-px rounded-[5px] bg-indigo-50 text-indigo-700 text-[10px] font-bold align-middle">{children}</span>;
 
-const ServicePickRow = ({ services, value, onChange, branchId = null, canViewPrices = true, title = 'Pick a service', sub = '', emptyLabel = 'Pick a service', anyLabel = '', disabled = false, loading = false, ariaLabel, required = false, invalid = false }) => {
+const ServicePickRow = ({ services, value, onChange, branchId = null, canViewPrices = true, title = 'Pick a service', sub = '', emptyLabel = 'Pick a service', anyLabel = '', disabled = false, loading = false, ariaLabel, required = false, invalid = false, openSignal = 0 }) => {
   const { counts, categoryOrder, tiers } = useServicePickerData(branchId);
   const list = services || [];
   const selected = list.find((s) => s.id === value) || null;
@@ -31,7 +31,7 @@ const ServicePickRow = ({ services, value, onChange, branchId = null, canViewPri
   );
 
   return (
-    <PickShell tone={tone} title={title} renderPicker={renderPicker} disabled={disabled || loading}
+    <PickShell tone={tone} title={title} renderPicker={renderPicker} disabled={disabled || loading} openSignal={openSignal}
       belowRow={invalid && empty ? <p className="mt-1.5 px-0.5 text-xs text-error" role="alert">Pick a service</p> : null}>
       {loading ? <span className="flex-1 text-sm text-text-secondary">Loading services…</span>
         : selected ? (

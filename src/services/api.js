@@ -7121,7 +7121,7 @@ export async function createBooking({
     const availabilityOverride = overrideReasonOf(overrideReason);
     if (isWalkIn) { knownCustomerId = undefined; customerPhone = null; customerEmail = null; }
     if (!isWalkIn && (!customerPhone || !customerPhone.trim()) && !knownCustomerId) {
-      return { data: null, error: { message: 'Phone number is required' } };
+      return { data: null, error: { code: 'PHONE_REQUIRED', message: 'Phone number is required' } };
     }
 
     // ZNLY-235: an own-only login only ever sees bookings it is on, so a booking it makes is assigned to itself when it did not pick
