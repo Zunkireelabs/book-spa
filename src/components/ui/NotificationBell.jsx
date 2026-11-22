@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../utils/nepalTime';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useBodyScrollLock } from './BottomSheet';
@@ -22,7 +23,7 @@ function timeAgo(date) {
 }
 
 // Nepal-day boundary for the Today / Earlier split.
-const dayKey = (d) => new Date(d).toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' });
+const dayKey = (d) => new Date(d).toLocaleDateString('en-CA', { timeZone: NEPAL_TZ });
 
 export const bookingWords = ({ industryType, sessionLabel, sessionLabelPlural }) => (
   industryType === 'spa' || !sessionLabel

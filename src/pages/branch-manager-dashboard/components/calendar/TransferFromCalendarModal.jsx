@@ -1,3 +1,4 @@
+import { nepalToday } from '../../../../utils/nepalTime';
 import React, { useState, useEffect } from 'react';
 import { transferTherapist, fetchAllBranches, fetchTherapistTransferStatus } from '../../../../services/api';
 import { useAvailabilityConflictGuard } from '../../../../hooks/useAvailabilityConflictGuard';
@@ -108,7 +109,7 @@ const TransferFromCalendarForm = ({
     : !isPermanent && !startTime ? 'Pick a start time'
     : !isPermanent && !durationUnit ? 'Pick a duration unit'
     : !isPermanent && !(Number(durationValue) > 0) ? 'Enter a duration' : '';
-  const scheduled = startDate && startDate > new Date().toISOString().split('T')[0];
+  const scheduled = startDate && startDate > nepalToday();
 
   return (
     <>

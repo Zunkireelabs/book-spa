@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../../utils/nepalTime';
 import React, { useState, useEffect, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import { fetchCustomerPhotos } from '../../../services/api';
@@ -90,7 +91,7 @@ const CustomerHeader = ({ loading, data, readOnly, isAdmin, showMessages, onBack
             <div className="flex gap-x-3.5 gap-y-1 text-[13px] text-text-secondary flex-wrap">
               {c.phone && <span className="tabular-nums">{formatPhoneGrouped(c.phone)}</span>}
               {c.email && <span className="break-all">{c.email}</span>}
-              {c.createdAt && <span>Customer since {new Date(c.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kathmandu' })}</span>}
+              {c.createdAt && <span>Customer since {new Date(c.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: NEPAL_TZ })}</span>}
             </div>
             {c.tags?.length > 0 && <div className="flex gap-1.5 flex-wrap">{c.tags.map((t) => <span key={t} className="h-6 px-2.5 rounded-md text-xs bg-background text-text-primary border border-border inline-flex items-center">{t}</span>)}</div>}
           </div>

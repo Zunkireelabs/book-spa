@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../utils/nepalTime';
 // Pure logic for the Attendance page (ZNLY-123 / V34b): what state a person's day is in, who needs attention, what a bulk "Mark
 // present" may do, what a change costs in pay (the SAME formula as Payroll), and when a reason is required (mirrors migration 364).
 // Times are 'HH:MM' (Kathmandu); dates 'YYYY-MM-DD'.
@@ -202,7 +203,7 @@ export function visitWindowOn({ transfers, toBranchId, date, checkIn = null }) {
   const at = (d, hm) => new Date(`${d}T${String(hm).slice(0, 5)}:00+05:45`).getTime();
   const list = (transfers || []).map((t) => ({ ...t, ws: at(t.effective_date, t.start_time || '00:00') })).sort((a, b) => a.ws - b.ws);
   const dayStart = at(date, '00:00'); const dayEnd = dayStart + 86400000;
-  const hm = (ms) => new Date(ms).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', hour12: false }).slice(0, 5);
+  const hm = (ms) => new Date(ms).toLocaleTimeString('en-GB', { timeZone: NEPAL_TZ, hour: '2-digit', minute: '2-digit', hour12: false }).slice(0, 5);
   const found = [];
   list.forEach((t, i) => {
     if (t.is_return_leg || t.is_permanent || t.to_branch_id !== toBranchId) return;

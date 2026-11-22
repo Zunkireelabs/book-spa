@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../utils/nepalTime';
 import {
   dbDowOfDate, hoursFromShiftRow, dayWorkingMinutes, todayStatus, timeToMinutes,
 } from '../utils/staffDay';
@@ -25,7 +26,7 @@ export function weekDatesOf(dateStr) {
 /** ISO timestamp -> 'HH:MM' Nepal time. */
 export function nepalClock(iso) {
   if (!iso) return '';
-  return new Date(iso).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', hour12: false }).slice(0, 5);
+  return new Date(iso).toLocaleTimeString('en-GB', { timeZone: NEPAL_TZ, hour: '2-digit', minute: '2-digit', hour12: false }).slice(0, 5);
 }
 
 /**

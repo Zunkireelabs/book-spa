@@ -1,3 +1,4 @@
+import { nepalLocalDate } from '../../../../utils/nepalTime';
 import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
@@ -34,7 +35,7 @@ function formatMonth(isoDate) {
 // Build last-12-month options for the month picker.
 function buildMonthOptions() {
   const options = [];
-  const now = new Date();
+  const now = nepalLocalDate(); // the spa's current month, not the device's
   for (let i = 0; i < 12; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;

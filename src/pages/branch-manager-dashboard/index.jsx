@@ -1,3 +1,4 @@
+import { nepalToday } from '../../utils/nepalTime';
 import { nepalNow } from '../../utils/customerDirectory';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
@@ -199,7 +200,7 @@ const BranchManagerDashboard = () => {
         // Show notification for new bookings not for today
         if (payload.eventType === 'INSERT' && payload.new) {
           const newBooking = payload.new;
-          const today = new Date().toISOString().split('T')[0];
+          const today = nepalToday();
           const isToday = newBooking.date === today;
 
           // Add every new booking to the header notification feed (deduped by id). Online bookings (created_by IS NULL) already

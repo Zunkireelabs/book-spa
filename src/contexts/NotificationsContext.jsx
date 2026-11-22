@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../utils/nepalTime';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { isReadingViaSafeViews } from '../lib/restrictedReads';
 import { useNavigate } from 'react-router-dom';
@@ -270,7 +271,7 @@ export const NotificationsProvider = ({ children }) => {
     if (n.type === 'attendance_gaps') {
       // the digest is about one branch + day: land on Attendance for it
       if (n.branchId) switchBranch?.(n.branchId);
-      const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kathmandu' }).format(new Date(n.createdAt));
+      const day = new Intl.DateTimeFormat('en-CA', { timeZone: NEPAL_TZ }).format(new Date(n.createdAt));
       navigate(`${base}/dashboard?view=attendance&date=${day}`);
     } else if (n.type === 'discount_big_fyi' && exists) navigate(`${base}/dashboard?view=bookings&open=${n.bookingId}`);
     else if (n.category === 'approvals') navigate(`${base}/inbox?c=approvals&n=${n.id}`); // "Review" lands on the Approvals view with that row open

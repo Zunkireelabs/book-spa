@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../utils/nepalTime';
 import React, { useEffect, useState } from 'react';
 import Icon from '../AppIcon';
 import { fetchAuditLogs } from '../../services/api';
@@ -8,7 +9,7 @@ import { describeClientAdded, describeDetailsChanged } from '../../utils/booking
 // written by migration-353's guard: what was skipped, the reason the manager gave, who and when (panel C, right).
 const when = (iso) => {
   try {
-    return new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kathmandu' });
+    return new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: NEPAL_TZ });
   } catch { return ''; }
 };
 

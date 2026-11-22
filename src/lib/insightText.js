@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../utils/nepalTime';
 // Words for the Insights ✦ (get_dashboard_insights, migration-370). The server returns numbers only; the sentence is built here so
 // industry words come from useIndustry (`labels.staff` / `labels.staffPlural`), never from SQL. Pure.
 import { npr } from './dashboardMoney';
@@ -97,6 +98,6 @@ export function describeInsight(item, labels = {}) {
 }
 
 export const sourceLine = (item) => {
-  const t = item.as_of ? new Date(item.as_of).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kathmandu' }) : '';
+  const t = item.as_of ? new Date(item.as_of).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: NEPAL_TZ }) : '';
   return `Source: rule · ${item.rule} v${item.version} · data as of ${t}`;
 };

@@ -1,3 +1,4 @@
+import { NEPAL_TZ, nepalToday, nepalDateOf, addDays } from '../utils/nepalTime';
 import { getCalendarStatic, setCalendarStatic } from '../lib/calendarStaticCache';
 import { buildQueue, needsOf } from '../lib/dashboardNeeds';
 import { WALLET_MODES, addTender, isTendered, canonicalMode, dayMoneyView, applyRefundsToBuckets } from '../lib/dayMoney';
@@ -5117,7 +5118,7 @@ export async function getTodayInsights(branchId, from, to) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const rangeStart = from || new Date().toISOString().split('T')[0];
+    const rangeStart = from || nepalToday();
     const rangeEnd = to || rangeStart;
 
     // rangeEnd is a Nepal calendar date; the exclusive upper bound used by the
@@ -5959,16 +5960,17 @@ export function exportDailyReportCSV(reportData) {
 // Phase 10D-1: Revenue Intelligence
 // ============================================================
 
+// 'YYYY-MM-DD' of the Monday of the week containing `date` (a date string, or an instant: then its Nepal date). Pure calendar arithmetic.
 function getISOWeekMonday(date) {
-  const d = new Date(date);
-  const day = d.getDay(); // 0=Sun ... 6=Sat
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
-  return new Date(d.setDate(diff)).toISOString().split('T')[0];
+  const ds = typeof date === 'string' ? date.slice(0, 10) : nepalDateOf(date);
+  const [y, m, d] = ds.split('-').map(Number);
+  const day = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Sun ... 6=Sat
+  return addDays(ds, day === 0 ? -6 : 1 - day);
 }
 
 function getMonthStart(date) {
-  const d = new Date(date);
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
+  const ds = typeof date === 'string' ? date.slice(0, 10) : nepalDateOf(date);
+  return `${ds.slice(0, 8)}01`;
 }
 
 async function computeRevenueForRange(branchId, startDate, endDate) {
@@ -6073,8 +6075,8 @@ export async function getRevenueIntelligence({ branchId, date }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const targetDate = date || new Date().toISOString().split('T')[0];
-    const yesterday = new Date(new Date(targetDate).getTime() - 86400000).toISOString().split('T')[0];
+    const targetDate = date || nepalToday();
+    const yesterday = addDays(targetDate, -1);
     const weekStart = getISOWeekMonday(targetDate);
     const monthStart = getMonthStart(targetDate);
 
@@ -6118,7 +6120,7 @@ export async function getUtilizationIntelligence({ branchId, date, from, to }) {
     }
 
     const overall = isOverallBranch(branchId);
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const targetDate = date || nepalToday();
     // Range mode (multi-day period filter): aggregate across [from, to] instead
     // of a single day. Attendance is tracked per-day, so a multi-day window
     // skips the absent/leave exclusion below rather than trying to prorate it —
@@ -6792,7 +6794,7 @@ export async function getCalendarBookings(branchId, startDate, endDate, opts = {
     // and keeps the intent legible here.
     if (vis.ownBookingsOnly && !vis.therapistId) {
       return {
-        data: { branchHours: { openTime: '09:00:00', closeTime: '21:00:00', timezone: 'Asia/Kathmandu' }, therapists: [], rooms: [], bookings: [], checkedOutByTherapistAndDate: {} },
+        data: { branchHours: { openTime: '09:00:00', closeTime: '21:00:00', timezone: NEPAL_TZ }, therapists: [], rooms: [], bookings: [], checkedOutByTherapistAndDate: {} },
         error: null,
       };
     }
@@ -7135,7 +7137,7 @@ export async function getCalendarBookings(branchId, startDate, endDate, opts = {
         branchHours: {
           openTime: branch.open_time || '09:00:00',
           closeTime: branch.close_time || '21:00:00',
-          timezone: branch.timezone || 'Asia/Kathmandu',
+          timezone: branch.timezone || NEPAL_TZ,
         },
         // ZNLY-278: an own-only login gets only its own team member back: colleagues' columns would look free while they are busy.
         therapists: calendarColumnsFor(vis.ownBookingsOnly, finalTherapists, vis.therapistId),
@@ -9442,7 +9444,7 @@ export async function toggleTherapistActive({ therapistId, isActive }) {
 
     // If deactivating, check for future bookings
     if (!isActive) {
-      const today = new Date().toISOString().split('T')[0];
+      const today = nepalToday();
       const { data: futureBookings, error: bookingsError } = await supabase
         .from('bookings')
         .select('id')
@@ -9797,11 +9799,10 @@ export async function fetchClosedDateRanges(branchId) {
 export async function fetchPublicClosedDateRanges(branchId, { days = 400 } = {}) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);
-    const start = new Date();
-    const end = new Date(start.getTime() + days * 86400000);
-    const iso = (d) => d.toISOString().split('T')[0];
+    const start = nepalToday();
+    const end = addDays(start, days);
     const { data, error } = await supabase.rpc('public_get_closed_dates', {
-      p_branch_id: resolvedBranchId, p_start: iso(start), p_end: iso(end),
+      p_branch_id: resolvedBranchId, p_start: start, p_end: end,
     });
     if (error) throw error;
     const dates = (data || []).map((r) => r.closed_date).sort();
@@ -9891,9 +9892,7 @@ export async function deleteBlock({ blockId, scope, occurrenceDate = null }) {
 
     if (scope === 'following') {
       if (!occurrenceDate) return { data: null, error: { code: 'INVALID_INPUT', message: 'occurrenceDate is required.' } };
-      const dayBefore = new Date(occurrenceDate);
-      dayBefore.setDate(dayBefore.getDate() - 1);
-      const endDateStr = dayBefore.toISOString().split('T')[0];
+      const endDateStr = addDays(occurrenceDate, -1);
 
       const { error } = await supabase
         .from('manual_blocks')
@@ -9977,9 +9976,7 @@ export async function updateBlock({ blockId, scope, occurrenceDate = null, ...fi
 
       // scope === 'following': cap the existing series the day before occurrenceDate, then
       // insert a new row starting at occurrenceDate carrying the edited fields forward.
-      const dayBefore = new Date(occurrenceDate);
-      dayBefore.setDate(dayBefore.getDate() - 1);
-      const endDateStr = dayBefore.toISOString().split('T')[0];
+      const endDateStr = addDays(occurrenceDate, -1);
 
       const { error: capError } = await supabase
         .from('manual_blocks')
@@ -11180,7 +11177,7 @@ export async function toggleServiceActive({ serviceId, isActive }) {
 
     // If deactivating, check for future bookings (within this org's branches)
     if (!isActive) {
-      const today = new Date().toISOString().split('T')[0];
+      const today = nepalToday();
       const { data: futureBookings, error: bookingsError } = await supabase
         .from('bookings')
         .select('id, branches!inner(org_id)')
@@ -12244,7 +12241,7 @@ export async function getCustomerIntelligence({ branchId }) {
     }
 
     // 3. Enrich each customer with stats + loyalty tier
-    const today = new Date().setHours(0, 0, 0, 0);
+    const today = Date.parse(nepalToday()); // UTC midnight of the Nepal day; lastVisitDate below is a date string parsed the same way
 
     const enriched = customers.map(c => {
       const s = statsMap[c.id] || {
@@ -12439,13 +12436,13 @@ export async function getRiskIndicators({ branchId, date }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const today = date || new Date().toISOString().split('T')[0];
+    const today = date || nepalToday();
 
     // Date windows
-    const sevenDaysAgo = new Date(new Date(today).getTime() - 7 * 86400000).toISOString().split('T')[0];
-    const fourteenDaysAgo = new Date(new Date(today).getTime() - 14 * 86400000).toISOString().split('T')[0];
-    const thirtyDaysAgo = new Date(new Date(today).getTime() - 30 * 86400000).toISOString().split('T')[0];
-    const sixtyDaysAgo = new Date(new Date(today).getTime() - 60 * 86400000).toISOString().split('T')[0];
+    const sevenDaysAgo = addDays(today, -7);
+    const fourteenDaysAgo = addDays(today, -14);
+    const thirtyDaysAgo = addDays(today, -30);
+    const sixtyDaysAgo = addDays(today, -60);
 
     // 1. Unpaid risk: Confirmed/Completed + unpaid
     let unpaidQuery = supabase
@@ -12672,7 +12669,7 @@ function combineDateTimeKathmandu(date, time) {
 function formatTimeKathmandu(isoTimestamp) {
   if (!isoTimestamp) return null;
   return new Date(isoTimestamp).toLocaleTimeString('en-GB', {
-    timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZone: NEPAL_TZ, hour: '2-digit', minute: '2-digit', hour12: false,
   });
 }
 
@@ -12686,7 +12683,7 @@ export async function fetchAttendance({ branchId, date }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const targetDate = date || nepalToday();
 
     // Parallel: active therapists + attendance records. Attendance is one record per
     // (therapist_id, date) globally — not scoped by branch_id — so it's fetched unfiltered
@@ -13020,7 +13017,7 @@ export async function fetchAttendanceByTherapistIds({ therapistIds, date }) {
   try {
     if (!therapistIds || therapistIds.length === 0) return { data: {}, error: null };
 
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const targetDate = date || nepalToday();
 
     const { data, error } = await supabase
       .from('therapist_attendance')
@@ -13056,7 +13053,7 @@ export async function fetchAttendanceSummary({ branchId, date }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const targetDate = date || nepalToday();
 
     // Attendance is keyed by (therapist_id, date) globally, not branch_id, so it's fetched
     // unfiltered by branch (in parallel with the therapist list) and joined in-memory against
@@ -13343,9 +13340,9 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
     }
 
     const overall = isOverallBranch(branchId);
-    const today = new Date().toISOString().split('T')[0];
+    const today = nepalToday();
     const endDate = toDate || today;
-    const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
+    const startDate = fromDate || addDays(endDate, -30);
 
     // 1. Fetch active therapists + branch hours.
     // Overall: build a branch_id → operating-window map across the org instead of one branch row.
@@ -13508,9 +13505,9 @@ export async function getTherapistOverview({ branchId, therapistId, fromDate, to
       return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = nepalToday();
     const endDate = toDate || today;
-    const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
+    const startDate = fromDate || addDays(endDate, -30);
 
     // Branch hours come from the branchId PARAM (resolveBranchId, same as getTherapistPerformance's
     // non-overall path) — not from the therapist's live branch_id. The bookings/attendance
@@ -13630,9 +13627,9 @@ export async function getTherapistAttendanceDetail({ branchId, therapistId, from
       return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = nepalToday();
     const endDate = toDate || today;
-    const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
+    const startDate = fromDate || addDays(endDate, -30);
 
     // Branch id from the branchId PARAM (resolveBranchId), matching the attendance query's withBranch() scope (see getTherapistOverview).
     const hoursBranch = await hoursBranchOf(branchId, therapistId);
@@ -14686,7 +14683,7 @@ const prevPeriodMonth = (periodMonth) => {
   const [y, m] = periodMonth.split('-').map(Number);
   return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
 };
-const nepalMonthOf = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' }).slice(0, 7);
+const nepalMonthOf = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: NEPAL_TZ }).slice(0, 7);
 
 // What product commission is worked out from, per therapist, for one pay run:
 //   earned   = unrefunded product_sales.total_amount of sales made in [month] (Nepal) at the branch, credited to that therapist, for

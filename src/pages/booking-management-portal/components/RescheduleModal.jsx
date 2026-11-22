@@ -1,3 +1,4 @@
+import { nepalToday, addDays } from '../../../utils/nepalTime';
 import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useMemo } from 'react';
 import Icon from '../../../components/AppIcon';
@@ -12,14 +13,13 @@ const RescheduleModal = ({ isOpen, onClose, booking, onConfirm, staffLabel = 'Th
   // Generate next 14 days
   const dates = useMemo(() => {
     const result = [];
-    const today = new Date();
+    const today = nepalToday();
     for (let i = 1; i <= 14; i++) {
-      const date = new Date(today);
-      date.setDate(today.getDate() + i);
+      const fullDate = addDays(today, i); // the Nepal calendar day, whatever the device timezone
       result.push({
-        fullDate: date.toISOString().split('T')[0],
-        display: date.toLocaleDateString('en-GB', {
-          weekday: 'short', day: 'numeric', month: 'short'
+        fullDate,
+        display: new Date(`${fullDate}T12:00:00Z`).toLocaleDateString('en-GB', {
+          weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC'
         })
       });
     }

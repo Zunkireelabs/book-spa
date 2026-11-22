@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { useBranch } from 'contexts/BranchContext';
 import { fetchBusinessHealth } from 'services/api';
 import { getReportRange } from 'utils/reportPeriod';
+import { nepalLocalDate } from 'utils/periodPresets';
 
 // Business health numbers for the header's branch scope (one branch, or every branch under All branches) and the chosen period.
 // Shared by the Reports home (its key number) and the report itself, so both always agree.
 export function useBusinessHealth(periodId, enabled = true, custom = null) {
   const { branchId, branches, isOverall, loading: branchLoading } = useBranch();
-  const range = useMemo(() => getReportRange(periodId, new Date(), custom), [periodId, custom?.from, custom?.to]); // eslint-disable-line react-hooks/exhaustive-deps
+  const range = useMemo(() => getReportRange(periodId, nepalLocalDate(), custom), [periodId, custom?.from, custom?.to]); // eslint-disable-line react-hooks/exhaustive-deps
   const ids = useMemo(() => (isOverall ? branches.map((b) => b.id) : [branchId]).filter(Boolean), [isOverall, branches, branchId]);
   const key = ids.join(',');
   const [state, setState] = useState({ data: null, error: null, loading: true, key: '' });

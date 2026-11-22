@@ -1,3 +1,4 @@
+import { NEPAL_TZ, nepalToday } from '../../../utils/nepalTime';
 // Shared real-availability helpers for the customer booking flow — used by both
 // DateTimeSelection (full multi-day grid) and AvailableTodayPanel (same-day quick picks), so the
 // two stay consistent about what "available" means (room capacity + gender headcount).
@@ -25,12 +26,12 @@ export function slotRangeForDate(dateStr, hours) {
 
 export function getNepalNow() {
   const now = new Date();
-  const nepalTime = now.toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' });
+  const nepalTime = now.toLocaleString('en-US', { timeZone: NEPAL_TZ });
   return new Date(nepalTime);
 }
 
 export function getNepalToday() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' });
+  return nepalToday();
 }
 
 // Closed-date ranges, as returned by fetchClosedDateRanges: [{ startDate, endDate }].

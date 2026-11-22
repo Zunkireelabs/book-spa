@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../../utils/nepalTime';
 import React, { useState, useEffect } from 'react';
 import InvoicePrintModal from '../../../components/ui/InvoicePrintModal';
 import Icon from '../../../components/AppIcon';
@@ -20,7 +21,7 @@ const CustomerPaymentsTab = ({ data, detail, canViewCustomerDetails = true, onOp
     ...(h.paymentEvents || []).map((e) => ({ type: 'pay', h, ...e })),
     ...(h.refundEvents || []).map((e) => ({ type: 'refund', h, ...e })),
   ]).sort((x, y) => String(y.at).localeCompare(String(x.at)));
-  const moneyDay = (at) => (at ? new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Kathmandu' }) : '');
+  const moneyDay = (at) => (at ? new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: NEPAL_TZ }) : '');
   const ids = [...new Set(events.filter((e) => e.type === 'pay').map((e) => e.h.bookingId))].join(',');
 
   useEffect(() => {
