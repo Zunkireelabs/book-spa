@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../utils/nepalTime';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Icon from '../AppIcon';
@@ -267,7 +268,7 @@ const Picker = ({ rect, cp, guestName, onClose, returnFocus }) => {
       </div>
       <div id="prod-listbox" role="listbox" aria-label="Products" className="max-h-[300px] overflow-y-auto py-1">
         {bought.length > 0 && <div className="px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-[.04em] text-[#8A8A90]">{first(guestName) || 'Guest'} bought before</div>}
-        {bought.map((p, i) => <Row key={`b${p.id}`} p={p} i={i} sub={(() => { const h = lastBought(p); const v = h && cp.variantIndex.get(h.variantId)?.v; return h ? `${v?.name ? `${v.name} · ` : ''}last bought ${new Date(h.lastBoughtAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Kathmandu' })}` : ''; })()} />)}
+        {bought.map((p, i) => <Row key={`b${p.id}`} p={p} i={i} sub={(() => { const h = lastBought(p); const v = h && cp.variantIndex.get(h.variantId)?.v; return h ? `${v?.name ? `${v.name} · ` : ''}last bought ${new Date(h.lastBoughtAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: NEPAL_TZ })}` : ''; })()} />)}
         {matches.length > 0 && <div className="px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-[.04em] text-[#8A8A90]">{ql ? `Matches “${q.trim()}”` : (bought.length ? 'More products' : 'Products')}</div>}
         {matches.map((p, j) => <Row key={p.id} p={p} i={bought.length + j} />)}
         {empty && <div className="px-3 py-6 text-center text-[#8A8A90]" role="status">{cp.rows ? (ql ? `Nothing for “${q.trim()}”` : 'No products are for sale here yet') : 'Loading…'}</div>}

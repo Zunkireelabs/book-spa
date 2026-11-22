@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../../../utils/nepalTime';
 import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import SidePanel from '../../../../components/ui/SidePanel';
@@ -23,7 +24,7 @@ const modeOf = (status) => {
 
 const STATUS_TEXT = { '1st-Half Day': 'half day (first half)', '2nd-Half Day': 'half day (second half)', 'Day Off': 'off' };
 const statusWord = (v) => STATUS_TEXT[v] || String(v).toLowerCase();
-const hmFromIso = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', hour12: false }) : '');
+const hmFromIso = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-GB', { timeZone: NEPAL_TZ, hour: '2-digit', minute: '2-digit', hour12: false }) : '');
 const nowHM = () => hmFromIso(new Date().toISOString());
 const toMin = (hm) => { const [h, m] = String(hm).split(':').map(Number); return h * 60 + m; };
 const floorStep = (hm, step) => { const t = toMin(hm); const f = t - (t % step); return `${String(Math.floor(f / 60)).padStart(2, '0')}:${String(f % 60).padStart(2, '0')}`; };

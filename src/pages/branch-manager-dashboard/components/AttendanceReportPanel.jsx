@@ -1,3 +1,4 @@
+import { addDays } from '../../../utils/nepalTime';
 import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -24,13 +25,8 @@ function parseLocalDate(iso) {
 // Build ordered list of ISO date strings in [startDate, endDate].
 function getDatesInRange(startDate, endDate) {
   const dates = [];
-  const end = parseLocalDate(endDate);
-  const cur = parseLocalDate(startDate);
-  while (cur <= end) {
-    dates.push(cur.toISOString().split('T')[0].slice(0, 10)); // 'YYYY-MM-DD'
-    // Reconstruct from parts to avoid DST oddities
-    cur.setDate(cur.getDate() + 1);
-  }
+  // Pure date-string arithmetic (a local-midnight Date run through toISOString is the previous day on any device east of UTC).
+  for (let cur = startDate; cur <= endDate; cur = addDays(cur, 1)) dates.push(cur);
   return dates;
 }
 

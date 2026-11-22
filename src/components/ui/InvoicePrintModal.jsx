@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../utils/nepalTime';
 import React, { useState, useEffect } from 'react';
 import Button from './Button';
 import ModalShell from './ModalShell';
@@ -15,7 +16,7 @@ function escapeHtml(str) {
 
 function formatIssuedAt(isoString) {
   return new Date(isoString).toLocaleString('en-GB', {
-    timeZone: 'Asia/Kathmandu',
+    timeZone: NEPAL_TZ,
     day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
   });
 }

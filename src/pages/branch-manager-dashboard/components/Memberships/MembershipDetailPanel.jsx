@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../../../utils/nepalTime';
 import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -227,7 +228,7 @@ const MembershipDetailPanel = ({ membershipId, isAdmin = false, readOnly = false
               {txns.length === 0 ? <p className="text-[13px] text-[#8A8A90]">No wallet activity yet.</p> : (
                 <ul className="flex flex-col" data-timeline>
                   {txns.slice(0, 5).map((t) => {
-                    const tile = tileDate(new Date(t.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' }));
+                    const tile = tileDate(new Date(t.created_at).toLocaleDateString('en-CA', { timeZone: NEPAL_TZ }));
                     const { title, sub } = ledgerLine(t);
                     const amt = Number(t.amount) || 0;
                     return (

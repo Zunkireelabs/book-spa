@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../utils/nepalTime';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useDirtyGuard, useGuardedNavigate } from '../../contexts/DirtyGuardContext';
@@ -68,7 +69,7 @@ const idOfSlug = (slug) => SECTIONS.find((s) => s.slug === slug || s.id === slug
 const TITLES = { profile: 'Profile', services: 'Services', hours: 'Working hours', pay: 'Pay' };
 
 const initialsOf = (name) => (name || '?').trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('') || '?';
-const sinceText = (iso) => (iso ? new Date(iso).toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'Asia/Kathmandu' }) : null);
+const sinceText = (iso) => (iso ? new Date(iso).toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: NEPAL_TZ }) : null);
 
 const StaffDetailPage = () => {
   const navigate = useNavigate();

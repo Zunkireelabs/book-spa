@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../../utils/nepalTime';
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import { fetchMembershipTransactions } from '../../../services/api';
@@ -6,7 +7,7 @@ function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
 }
 
-const formatShort = (d) => (d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Kathmandu' }) : '—');
+const formatShort = (d) => (d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: NEPAL_TZ }) : '—');
 
 function formatDate(d) {
   return d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';

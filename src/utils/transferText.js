@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from './nepalTime';
 // One place that words a staff transfer (calendar header, side panel, Attendance, profile, reports). State comes from
 // the row's data only: upcoming = not applied · now = applied, not reverted, before revert_at · ended = reverted at or
 // after revert_at (or revert_at passed) · back early = reverted before revert_at · permanent = no revert_at.
@@ -6,7 +7,7 @@ import { toKathmanduParts } from '../pages/branch-manager-dashboard/components/c
 import { formatClockTime } from '../pages/branch-manager-dashboard/components/calendar/timeFormat';
 import { wordBranch } from './industryTerms';
 
-const DAY_FMT = { timeZone: 'Asia/Kathmandu', weekday: 'short', day: 'numeric', month: 'short' };
+const DAY_FMT = { timeZone: NEPAL_TZ, weekday: 'short', day: 'numeric', month: 'short' };
 
 function dayLabel(date) {
   const label = new Date(`${date}T12:00:00+05:45`).toLocaleDateString('en-GB', DAY_FMT);

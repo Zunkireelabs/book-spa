@@ -1,3 +1,4 @@
+import { nepalToday } from '../../../utils/nepalTime';
 import { friendlyError } from '../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
@@ -22,7 +23,7 @@ const RevenueAnalyticsChart = ({ branchId, period }) => {
     setLoading(true);
     setError(null);
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = nepalToday();
     const result = await fetchBookings(branchId, { dateFrom: period?.from || today, dateTo: period?.to || today });
 
     if (result.error) {

@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { refreshLight } from '../refreshLight';
 import {
   updateBookingStatus,
   assignTherapist,
@@ -108,7 +109,7 @@ export function useBookingActions({ showToast, refreshCalendar, selectedBooking,
     } else {
       showToast(`Resized to ${newStartTime} – ${newEndTime}`, 'success');
     }
-    refreshCalendar();
+    refreshLight(refreshCalendar);
   }, [refreshCalendar, guard]);
 
   const handleEditBooking = async (bookingId, updates, opts) => {
@@ -123,7 +124,7 @@ export function useBookingActions({ showToast, refreshCalendar, selectedBooking,
     if (!refreshed.error) {
       setSelectedBooking(transformBooking(refreshed.data));
     }
-    refreshCalendar();
+    refreshLight(refreshCalendar);
     return { error: null };
   };
 
@@ -134,7 +135,7 @@ export function useBookingActions({ showToast, refreshCalendar, selectedBooking,
     // Refresh booking in modal
     const refreshed = await fetchBookingById(bookingId);
     if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
-    refreshCalendar();
+    refreshLight(refreshCalendar);
     return { data: result.data };
   };
 
@@ -159,7 +160,7 @@ export function useBookingActions({ showToast, refreshCalendar, selectedBooking,
       const refreshed = await fetchBookingById(bookingId);
       if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
     }
-    refreshCalendar();
+    refreshLight(refreshCalendar);
     return { error: null };
   };
 
@@ -167,7 +168,7 @@ export function useBookingActions({ showToast, refreshCalendar, selectedBooking,
   // happened in one transaction covering every booking in the bundle, so just toast and refresh once.
   const handleGroupPaymentRecorded = () => {
     showToast('Payment recorded successfully');
-    refreshCalendar();
+    refreshLight(refreshCalendar);
     if (selectedBooking) {
       fetchBookingById(selectedBooking.bookingId).then((refreshed) => {
         if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));

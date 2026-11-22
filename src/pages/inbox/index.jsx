@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../utils/nepalTime';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import AppShell from '../../components/ui/AppShell';
@@ -33,8 +34,8 @@ const ICON_STYLE = { bookings: 'bg-primary/10 text-primary', approvals: 'bg-warn
 // Where a non-booking item leads (the panel offers it as a link).
 const DESTINATION = { stock: ['products', 'Open products'], team: ['attendance', 'Open attendance'], guests: ['outreach-review', 'Open outreach review'] };
 
-const timeOf = (iso) => new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kathmandu', hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
-const dateTimeOf = (iso) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kathmandu', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
+const timeOf = (iso) => new Intl.DateTimeFormat('en-US', { timeZone: NEPAL_TZ, hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
+const dateTimeOf = (iso) => new Intl.DateTimeFormat('en-GB', { timeZone: NEPAL_TZ, day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
 
 const normalizeRow = (r) => ({
   id: r.id, type: r.type, title: r.title, body: r.body, bookingId: r.booking_id, branchId: r.branch_id || null, actorId: r.actor_id || null, booking: r.booking || null,
@@ -211,7 +212,7 @@ const InboxBody = () => {
     markRead([n.id]); setRead(n.id, true);
     if (dest === 'attendance') {
       if (n.branchId) switchBranch?.(n.branchId);
-      const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kathmandu' }).format(new Date(n.createdAt));
+      const day = new Intl.DateTimeFormat('en-CA', { timeZone: NEPAL_TZ }).format(new Date(n.createdAt));
       navigate(`${base}/dashboard?view=attendance&date=${day}`);
     } else navigate(`${base}/dashboard?view=${dest}`);
   };

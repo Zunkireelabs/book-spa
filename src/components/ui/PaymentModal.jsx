@@ -1,3 +1,4 @@
+import { NEPAL_TZ, nepalToday } from '../../utils/nepalTime';
 import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, forwardRef } from 'react';
 import { supabase } from '../../lib/supabase';
@@ -368,7 +369,7 @@ const PaymentModal = ({
     if (!savesProducts || !mainBookingId || !productBranchId) { setProductsBlocked(null); return undefined; }
     (async () => {
       try {
-        const today = new Date(Date.now() + 5.75 * 3600 * 1000).toISOString().slice(0, 10);   // Nepal day
+        const today = nepalToday();
         const [{ data: b }, { data: r }] = await Promise.all([
           supabase.from('bookings').select('is_locked').eq('id', mainBookingId).maybeSingle(),
           supabase.from('daily_reports').select('id').eq('branch_id', productBranchId).eq('report_date', today).maybeSingle(),
@@ -1354,7 +1355,7 @@ const PaymentModal = ({
     }
     return {
       orgName, branchName, guestName, guestPhone, bookingNumber,
-      dateLabel: new Date().toLocaleString('en-GB', { timeZone: 'Asia/Kathmandu', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      dateLabel: new Date().toLocaleString('en-GB', { timeZone: NEPAL_TZ, day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
       lines, tenders: productPart ? productPart.treatmentTenders : tenderRows, total: entered, leftover, extraCount: additionalBookings.length,
       products: productPart,
       hasMember: lines.some((l) => l.member), lineTotal: round2(grandTotal - (extra?.productsTotal ?? productsTotal)),

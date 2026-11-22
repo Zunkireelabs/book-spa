@@ -1,0 +1,2 @@
+# Justified exceptions for scripts/check-nepal-dates.sh. Format: <file> <rule> <reason>   (rule: utc-today | tz-literal)
+# Empty on purpose: every UTC-style "today" and every inline Asia/Kathmandu was moved to src/utils/nepalTime.js (ZNLY-385).

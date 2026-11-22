@@ -1,3 +1,5 @@
+import { daysBetween } from '../../utils/customerDirectory';
+import { nepalToday } from '../../utils/nepalTime';
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import Icon from 'components/AppIcon';
@@ -45,9 +47,7 @@ function formatNPR(amount) {
 function formatRelativeDate(dateStr) {
   if (!dateStr) return '';
   const target = new Date(dateStr + 'T00:00:00');
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const diffDays = Math.round((target - today) / 86400000);
+  const diffDays = daysBetween(nepalToday(), String(dateStr).slice(0, 10)); // Nepal calendar days, not the device's
 
   if (diffDays === 0) return 'Today';
   if (diffDays === 1) return 'Tomorrow';
@@ -286,7 +286,7 @@ const CustomerAccount = () => {
   }, [customerProfile?.customer_id]);
 
   const { nextBooking, upcomingBookings, pastBookings } = useMemo(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = nepalToday();
     const upcoming = bookings
       .filter((b) => UPCOMING_STATUSES.has(b.status) && b.date >= todayStr)
       .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));

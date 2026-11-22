@@ -1,3 +1,4 @@
+import { nepalLocalDate } from '../../../../utils/nepalTime';
 import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -64,7 +65,7 @@ const RosterPanel = ({ branchId }) => {
   const navigate = useNavigate();
   const { orgSlug } = useParams();
 
-  const now = new Date();
+  const now = nepalLocalDate(); // the spa's day, not the device's
   const todayStr = toLocalISO(now);
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());

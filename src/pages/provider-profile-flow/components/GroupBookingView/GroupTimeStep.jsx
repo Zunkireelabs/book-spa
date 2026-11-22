@@ -1,3 +1,4 @@
+import { nepalToday, addDays } from '../../../../utils/nepalTime';
 import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
@@ -27,15 +28,15 @@ const GroupTimeStep = ({ selectedBranch, orgSlug, people, therapists, selectedDa
 
   const dates = useMemo(() => {
     const result = [];
-    const today = new Date();
+    const today = nepalToday();
     for (let i = 0; i < effectiveWindow; i++) {
-      const date = new Date(today);
-      date.setDate(today.getDate() + i);
+      const fullDate = addDays(today, i); // the Nepal calendar day, whatever the device timezone
+      const date = new Date(`${fullDate}T12:00:00Z`);
       result.push({
-        dayName: date.toLocaleDateString('en-US', { weekday: 'short' }),
-        dayNumber: date.getDate(),
-        monthName: date.toLocaleDateString('en-US', { month: 'short' }),
-        fullDate: date.toISOString().split('T')[0],
+        dayName: date.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }),
+        dayNumber: date.getUTCDate(),
+        monthName: date.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' }),
+        fullDate,
         isToday: i === 0,
       });
     }

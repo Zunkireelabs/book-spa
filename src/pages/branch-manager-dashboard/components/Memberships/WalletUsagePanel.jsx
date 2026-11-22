@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../../../utils/nepalTime';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ScrollRow from '../../../../components/ui/ScrollRow';
 import { useSearchParams } from 'react-router-dom';
@@ -92,7 +93,7 @@ const WalletUsagePanel = ({ members, tiers, today, stickyTop, registerExport, on
 
   const exportCsv = useCallback(() => {
     csvDownload(`wallet-activity-${from}_to_${to}.csv`, ['When', 'Member', 'Card', 'Tier', 'Type', 'Detail', 'By', `${wordBranchCap()}`, 'Amount'],
-      filtered.map((r) => [new Date(r.createdAt).toLocaleString('en-GB', { timeZone: 'Asia/Kathmandu' }), r.memberName, r.cardNo, r.tierName, kindLabel(r.kind), detailOf(r), r.performerName, r.branchName, r.amount]));
+      filtered.map((r) => [new Date(r.createdAt).toLocaleString('en-GB', { timeZone: NEPAL_TZ }), r.memberName, r.cardNo, r.tierName, kindLabel(r.kind), detailOf(r), r.performerName, r.branchName, r.amount]));
   }, [filtered, from, to]);
   useEffect(() => { registerExport({ run: exportCsv, disabled: !rows || filtered.length === 0 }); }, [exportCsv, rows, filtered.length, registerExport]);
   useEffect(() => () => registerExport(null), [registerExport]);

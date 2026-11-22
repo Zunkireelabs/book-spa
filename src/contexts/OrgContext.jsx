@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../utils/nepalTime';
 import { friendlyError } from '../utils/friendlyError';
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
@@ -89,7 +90,7 @@ export const OrgProvider = ({ children }) => {
     orgId: profile?.org_id || null,
     orgName: org?.name || null,
     orgCode: org?.code || null,
-    orgTimezone: org?.timezone || 'Asia/Kathmandu',
+    orgTimezone: org?.timezone || NEPAL_TZ,
     orgCurrency: org?.currency || 'NPR',
     orgSettings: org?.settings || {},
     paymentMethods: getOrgPaymentMethods(org?.settings),

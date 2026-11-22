@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../utils/nepalTime';
 // Vouchers page (V23): pure logic for the Vouchers / Voucher types / Activity tabs — status, the lifecycle strip, the lead
 // sentence, Needs-you-now, sorting, search, reminders and the activity feed. No React, no Supabase: `today` is a Nepal
 // 'YYYY-MM-DD' passed in by the caller. Rows are fetchVouchers() rows. Since migration-344 `totalAmountIssued` is the voucher's
@@ -25,7 +26,7 @@ const addMonths = (s, n) => {
 };
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const sum = (list, f) => list.reduce((n, x) => n + f(x), 0);
-const TZ = 'Asia/Kathmandu';
+const TZ = NEPAL_TZ;
 /** Nepal calendar date of a timestamp. */
 export const nepalDate = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: TZ });
 

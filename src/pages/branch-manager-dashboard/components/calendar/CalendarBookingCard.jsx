@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../../../utils/nepalTime';
 import React, { useState, useRef, useEffect, useCallback, useId, useLayoutEffect } from 'react';
 import { nameForList } from '../../../../services/dataMasking';
 import { useDraggable } from '@dnd-kit/core';
@@ -37,7 +38,7 @@ function compactRange12h(startStr, endStr, use24h = false) {
 const NON_DRAGGABLE_STATUSES = ['Completed', 'Cancelled', 'No Show'];
 
 function getNepalNow() {
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
+  return new Date(new Date().toLocaleString('en-US', { timeZone: NEPAL_TZ }));
 }
 
 // Confirmed/In-Progress lock once their start time has passed; Pending stays
