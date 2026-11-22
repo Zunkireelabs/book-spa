@@ -924,7 +924,8 @@ const BookingActionModal = ({
       });
 
       if (result) {
-        setNewBookingError(result);
+        // onCreateBooking returns { message, code } on a refused save (ZNLY-304); never render the object itself.
+        setNewBookingError(typeof result === 'string' ? result : (result.message || 'Could not create the booking. Please try again.'));
       } else {
         setNewBookingMode(null);
         onClose();
