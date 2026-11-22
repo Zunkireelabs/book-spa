@@ -6,11 +6,13 @@ import { phoneProblem } from '../../../utils/phone';
 import Icon from '../../../components/AppIcon';
 import { checkExistingCustomerByPhone, findCustomerMatch } from '../../../services/api';
 import { formatNPR } from '../../../services/bookingTransformers';
+import { useTenant } from '../../../contexts/TenantContext';
 
 // showSummary defaults to true so the v2 wizard (which has no summary elsewhere) is
 // unaffected; the provider-profile flow already shows a live, multi-service summary
 // in its own SummaryCard and sets this false to avoid a second, contradicting one.
 const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, selectedService, selectedDateTime, genderPreference, orgSlug, showSummary = true }) => {
+  const { requireCustomerPhone } = useTenant();   // ZNLY-390
   const [errors, setErrors] = useState({});
   const [isValidating, setIsValidating] = useState(false);
   // Purely informational — createBooking()'s isNewCustomer check (unchanged) is what
@@ -67,7 +69,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
         // The shared validator (ZNLY-331): a real number for the chosen country, the same rule as the staff forms.
         const phoneIssue = phoneProblem(customerInfo.phoneCountryCode || '+977', value, { walkInHint: false });
         if (!value.trim()) {
-          newErrors.phone = 'Phone number is required';
+          if (requireCustomerPhone) newErrors.phone = 'Phone number is required'; else delete newErrors.phone;
         } else if (phoneIssue) {
           newErrors.phone = phoneIssue;
         } else {
@@ -392,7 +394,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           {/* Phone */}
           <div className="space-y-2 col-span-2 sm:col-span-1">
             <label className="font-body font-body-medium text-sm text-text-primary">
-              Phone number <span className="text-error">*</span>
+              Phone number {requireCustomerPhone ? <span className="text-error">*</span> : <span className="text-text-secondary font-normal">(optional)</span>}
             </label>
             <PhoneField
               name="phone" id="customer-phone" placeholder="9841234567" showProblem={false} dataPhMask

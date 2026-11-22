@@ -35,6 +35,7 @@ import { staffPickIncomplete, staffDayRanges, arrangeByTime, staffHeldByOthers, 
 import { friendlyError } from '../../../../utils/friendlyError';
 import { shouldShowFillFree } from '../../../../utils/serviceCatalog';
 import { fieldForErrorCode } from '../../../../utils/quickCreateErrorField';
+import { useOrg } from '../../../../contexts/OrgContext';
 
 
 // ZNLY-365: the client row when the panel was opened from a booking ("+ Service" / Rebook). Not editable: same client as that booking.
@@ -60,6 +61,7 @@ const LockedClientCard = ({ client, name }) => {
 
 const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours, retarget, onDraftChange, columnMode = 'therapist', allTherapists = [], guardRef, offStaff = {}, offDate = null, onRefreshCalendar }) => {
   const { profile: viewerProfile } = useAuth();
+  const { allowStaffOverlap, requireCustomerPhone } = useOrg();   // ZNLY-389 / ZNLY-390: per-org booking rules
   // ZNLY-278: an own-only login books only itself; the data layer hands it a single team member, so that one is the default.
   const defaultTherapistId = viewerAccess(viewerProfile).ownOnly && therapists?.length === 1 ? therapists[0].id : null;
   const canViewPrices = viewerAccess(viewerProfile).canViewPrices; // ZNLY-235: no prices for this login
@@ -412,8 +414,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const dayOff = reuseCalDay ? offStaff : (ownDayData.ready ? ownDayData.offById : {});
   const groupRanges = useMemo(() => (bookingMode === 'group' && bookingDate && dayBookings ? staffDayRanges(dayBookings, { date: bookingDate }) : {}), [bookingMode, bookingDate, dayBookings]);
   const groupOff = dayOff;
-  const groupHeld = useMemo(() => staffHeldByOthers(guestSlots), [guestSlots]);
-  const groupProblems = useMemo(() => pickProblems(guestSlots, { rangesById: groupRanges, offById: groupOff }), [guestSlots, groupRanges, groupOff]); // eslint-disable-line react-hooks/exhaustive-deps
+  const groupHeld = useMemo(() => staffHeldByOthers(guestSlots, { allowOverlap: allowStaffOverlap }), [guestSlots, allowStaffOverlap]);
+  const groupProblems = useMemo(() => pickProblems(guestSlots, { rangesById: groupRanges, offById: groupOff, allowOverlap: allowStaffOverlap }), [guestSlots, groupRanges, groupOff, allowStaffOverlap]); // eslint-disable-line react-hooks/exhaustive-deps
   const guestSub = (idx) => {
     const g = guestSlots[idx]; if (!g) return '';
     const svc = (services || []).find((t) => t.id === g.serviceId);
@@ -440,16 +442,16 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     idx: i, serviceId: c.serviceId, start: c.base + c.start, end: c.base + c.end,
     staffId: c.defaultSameStaff ? (selectedTherapistIds[0] || '') : (comboTherapistOverrides[c.serviceId] || ''),
   })), [comboSchedule, selectedTherapistIds, comboTherapistOverrides]);
-  const comboHeld = useMemo(() => staffHeldByOthers(comboSlots), [comboSlots]);
+  const comboHeld = useMemo(() => staffHeldByOthers(comboSlots, { allowOverlap: allowStaffOverlap }), [comboSlots, allowStaffOverlap]);
   const comboRanges = useMemo(() => (comboComponents.length && bookingDate && dayBookings ? staffDayRanges(dayBookings, { date: bookingDate }) : {}), [comboComponents, bookingDate, dayBookings]);
   const comboOff = dayOff;
-  const comboProblems = useMemo(() => pickProblems(comboSlots, { rangesById: comboRanges, offById: comboOff }), [comboSlots, comboRanges, comboOff]);
+  const comboProblems = useMemo(() => pickProblems(comboSlots, { rangesById: comboRanges, offById: comboOff, allowOverlap: allowStaffOverlap }), [comboSlots, comboRanges, comboOff, allowStaffOverlap]);
   const minToHHMM = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
   const comboPick = (i) => {
     const g = comboSlots[i];
     if (!g?.staffId) return { name: '', statusLine: '', pill: null, problem: '' };
     return pickedRowStatus(pickerPeople.find((t) => t.id === g.staffId) || { id: g.staffId, name: staffNameOf(g.staffId) }, {
-      slot: dayBookings ? { start: g.start, end: g.end } : null, rangesById: comboRanges, offById: comboOff, date: bookingDate, today: nepalNow().today,
+      slot: dayBookings ? { start: g.start, end: g.end } : null, rangesById: comboRanges, offById: comboOff, date: bookingDate, today: nepalNow().today, busyOk: allowStaffOverlap,
     });
   };
   const comboProblemText = (i) => {
@@ -567,7 +569,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     ? !!groupServiceId
     : (people.length > 0 && people.every((p) => !!p.serviceId));
   const groupValid = bookingMode !== 'group'
-    || (!guestPhoneProblem && (people[0]?.kind === 'walkin' ? groupServiceValid : (people[0]?.kind && people[0]?.name?.trim() && people[0]?.phone?.replace(/\D/g, '') && !(people[0].kind === 'new' && contactPhoneProblem) && groupServiceValid)));
+    || (!guestPhoneProblem && (people[0]?.kind === 'walkin' ? groupServiceValid : (people[0]?.kind && people[0]?.name?.trim() && (people[0]?.phone?.replace(/\D/g, '') || !requireCustomerPhone) && !(people[0].kind === 'new' && contactPhoneProblem) && groupServiceValid)));
 
   const buildGroupPeople = () => {
     // Blank "other" persons inherit the booking contact's credentials.
@@ -607,7 +609,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     if (/slot|time|booked|closed|date|day|hours|window|advance|past/i.test(text)) return 'time';
     return null;
   };
-  const customerFields = { kind: customerKind, name: customerName, phone: customerPhone, countryCode: customerCountryCode, email: customerEmail, gender: customerGender, knownCustomerId, walkInLabel };
+  const customerFields = { phoneRequired: requireCustomerPhone, kind: customerKind, name: customerName, phone: customerPhone, countryCode: customerCountryCode, email: customerEmail, gender: customerGender, knownCustomerId, walkInLabel };
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (bookingMode === 'group' ? !groupValid : (!serviceId || customerMissing(customerFields))) return;
@@ -813,7 +815,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // The first picked person whose own bookings clash with the slot (from the same day data the Staff row uses).
   const busyPick = (() => {
     const s0 = clockToMin(bookingTime); const e0 = clockToMin(pickerSlotEnd);
-    if (bookingMode !== 'individual' || s0 == null || !dayBookings || !bookingDate || !selectedTherapistIds.length) return null;
+    if (allowStaffOverlap || bookingMode !== 'individual' || s0 == null || !dayBookings || !bookingDate || !selectedTherapistIds.length) return null;
     const { busy } = arrangeByTime(pickerPeople.filter((t) => selectedTherapistIds.includes(t.id)), {
       slotStart: s0, slotEnd: e0 > s0 ? e0 : s0 + 60, rangesById: staffDayRanges(dayBookings, { date: bookingDate }), offById: dayOff,
     });
@@ -1000,7 +1002,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               const info = pickedRowStatusMulti(picked, {
                 slot: dayBookings && s0 != null ? { start: s0, end: e0 > s0 ? e0 : s0 + 60 } : null,
                 rangesById: dayBookings && bookingDate ? staffDayRanges(dayBookings, { date: bookingDate }) : {},
-                offById: dayOff, date: bookingDate, today: nepalNow().today,
+                offById: dayOff, date: bookingDate, today: nepalNow().today, busyOk: allowStaffOverlap,
               });
               const lbl = selectedTherapistIds.length > 1 ? staffLabelPlural : staffLabel;
               return (
@@ -1195,7 +1197,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             {/* Phone */}
             <div data-qc-field="phone" className={flashSvc === 'phone' ? 'rounded-spa ring-2 ring-error' : ''}>
               <PhoneField
-                label="Phone" required id="qc-phone" walkInHint
+                label="Phone" required={requireCustomerPhone} id="qc-phone" walkInHint
                 dial={customerCountryCode} national={customerPhone}
                 onChange={({ dial, national }) => { if (dial !== customerCountryCode) setCustomerCountryCode(dial); if (national !== customerPhone) handleCustomerPhoneChange(national); }}
                 renderInput={(r) => (
@@ -1207,7 +1209,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     onBlur={() => checkPreviousDue(`${customerCountryCode}${customerPhone.replace(/\D/g, '')}`)}
                     branchId={branchId}
                     searchBy="phone"
-                    required
+                    required={requireCustomerPhone}
                     inputMode={r.inputMode}
                     inputClassName={r.className}
                   />
@@ -1410,7 +1412,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
                   <div {...(idx === 0 ? { 'data-qc-field': 'phone' } : {})} className={idx === 0 && flashSvc === 'phone' ? 'rounded-spa ring-2 ring-error' : ''}>
                     <PhoneField
-                      label="Phone" required={idx === 0} id={`qc-person-${idx}-phone`} walkInHint
+                      label="Phone" required={idx === 0 && requireCustomerPhone} id={`qc-person-${idx}-phone`} walkInHint
                       dial={p.countryCode || '+977'} national={p.phone || ''}
                       placeholder={idx === 0 ? '98XXXXXXXX' : `Blank = ${contactFirst}'s`}
                       showProblem={idx === 0 ? p.kind === 'new' : !p.customerId}

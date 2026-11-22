@@ -97,6 +97,8 @@ export const TenantProvider = ({ children }) => {
 
     // Org booking settings
     showStaffSelection: org?.settings?.show_staff_selection === true,
+    // ZNLY-390: the online form asks for a phone only when the org requires one (default on)
+    requireCustomerPhone: org?.require_customer_phone !== false,
     enableStaffRatings: org?.settings?.enable_staff_ratings === true,
     // Opposite default from the two toggles above: group booking is already live today
     // for every tenant with the VITE_ENABLE_GROUP_BOOKING env flag on, via no per-org gate

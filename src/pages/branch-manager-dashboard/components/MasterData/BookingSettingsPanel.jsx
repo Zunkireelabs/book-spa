@@ -6,7 +6,7 @@ import Button from '../../../../components/ui/Button';
 import ModalShell from '../../../../components/ui/ModalShell';
 import { useIndustry } from '../../../../hooks/useIndustry';
 import { DB_DOW_LABELS } from '../../../../utils/staffDay';
-import { updateOrgBookingSetting, fetchAvailabilityRolloutCheck, setEnforceStaffAvailability } from '../../../../services/api';
+import { updateOrgBookingSetting, fetchAvailabilityRolloutCheck, setEnforceStaffAvailability, setAllowStaffOverlap, setRequireCustomerPhone } from '../../../../services/api';
 import { localizeBranch } from '../../../../utils/industryTerms';
 import SettingsSectionHeading from '../../../../components/ui/SettingsSectionHeading';
 
@@ -103,7 +103,7 @@ const RolloutCheck = ({ check, staffLabel, staffLabelPlural, branchWord = 'branc
 
 const BookingSettingsPanel = () => {
   const org = useOrg();
-  const { refreshOrg, orgId, enforceStaffAvailability } = org;
+  const { refreshOrg, orgId, enforceStaffAvailability, allowStaffOverlap, requireCustomerPhone } = org;
   const { staffLabel, staffLabelPlural, branchWord } = useIndustry();
   const [saving, setSaving] = useState(null);
   const [error, setError] = useState(null);
@@ -124,6 +124,15 @@ const BookingSettingsPanel = () => {
     setSaving(null);
     if (checkErr || !data) { setError(friendlyError(checkErr, 'Could not check what turning this on would change.')); return; }
     setRollout(data);
+  };
+
+  // ZNLY-389 / ZNLY-390: two plain on/off rules, saved straight away (no rollout check: neither changes an existing booking).
+  const saveRule = async (key, save, next) => {
+    setError(null);
+    setSaving(key);
+    const r = await save({ enabled: next });
+    if (r.error) setError(friendlyError(r.error, 'Failed to update setting.')); else await refreshOrg();
+    setSaving(null);
   };
 
   const confirmEnforce = async () => {
@@ -181,6 +190,52 @@ const BookingSettingsPanel = () => {
           >
             <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
               enforceStaffAvailability ? 'translate-x-6' : 'translate-x-1'
+            }`} />
+          </button>
+        </label>
+        <label className="flex items-center justify-between p-3 border border-border rounded-spa cursor-pointer hover:bg-background" data-testid="allow-overlap-row">
+          <div className="pr-4">
+            <span className="font-body font-body-medium text-sm text-text-primary">Allow overlapping bookings for one staff member</span>
+            <p className="font-caption text-xs text-text-secondary">
+              {'A ' + staffLabel.toLowerCase()} can hold two bookings at the same time. Overlapping bookings show side by side on the calendar. Turn this off to stop new overlaps; bookings already made stay as they are.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={allowStaffOverlap}
+            aria-label="Allow overlapping bookings for one staff member"
+            disabled={saving === 'allow_staff_overlap'}
+            onClick={() => saveRule('allow_staff_overlap', setAllowStaffOverlap, !allowStaffOverlap)}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full spa-transition-fast ${
+              allowStaffOverlap ? 'bg-success' : 'bg-border'
+            } ${saving === 'allow_staff_overlap' ? 'opacity-50' : ''}`}
+          >
+            <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+              allowStaffOverlap ? 'translate-x-6' : 'translate-x-1'
+            }`} />
+          </button>
+        </label>
+        <label className="flex items-center justify-between p-3 border border-border rounded-spa cursor-pointer hover:bg-background" data-testid="require-phone-row">
+          <div className="pr-4">
+            <span className="font-body font-body-medium text-sm text-text-primary">Require a customer phone number</span>
+            <p className="font-caption text-xs text-text-secondary">
+              A phone number is needed to create a customer or a booking. Turn this off if some customers have no mobile; those customers are saved without a phone.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={requireCustomerPhone}
+            aria-label="Require a customer phone number"
+            disabled={saving === 'require_customer_phone'}
+            onClick={() => saveRule('require_customer_phone', setRequireCustomerPhone, !requireCustomerPhone)}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full spa-transition-fast ${
+              requireCustomerPhone ? 'bg-success' : 'bg-border'
+            } ${saving === 'require_customer_phone' ? 'opacity-50' : ''}`}
+          >
+            <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+              requireCustomerPhone ? 'translate-x-6' : 'translate-x-1'
             }`} />
           </button>
         </label>
