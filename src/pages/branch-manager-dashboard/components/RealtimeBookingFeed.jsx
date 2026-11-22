@@ -1,3 +1,4 @@
+import { nepalToday } from '../../../utils/nepalTime';
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
@@ -22,7 +23,7 @@ const RealtimeBookingFeed = ({
   const loadBookings = useCallback(async () => {
     if (!branchId) return;
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = nepalToday();
     const result = await fetchBookings(branchId, { date: today });
 
     if (result.data) {

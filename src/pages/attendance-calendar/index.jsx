@@ -1,3 +1,4 @@
+import { nepalLocalDate } from '../../utils/nepalTime';
 import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -176,14 +177,14 @@ const AttendanceCalendarPage = ({ embedded = false }) => {
       return { startDate: toISO(startD), endDate: toISO(endD) };
     }
     if (activePreset === 'monthly') {
-      const now = new Date();
+      const now = nepalLocalDate();
       return {
         startDate: toISO(new Date(now.getFullYear(), now.getMonth(), 1)),
         endDate: toISO(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
       };
     }
     if (activePreset === 'quarterly') {
-      const now = new Date();
+      const now = nepalLocalDate();
       const q = Math.floor(now.getMonth() / 3);
       return {
         startDate: toISO(new Date(now.getFullYear(), q * 3, 1)),
@@ -191,7 +192,7 @@ const AttendanceCalendarPage = ({ embedded = false }) => {
       };
     }
     if (activePreset === 'semiannual') {
-      const now = new Date();
+      const now = nepalLocalDate();
       const half = now.getMonth() < 6 ? 0 : 6;
       return {
         startDate: toISO(new Date(now.getFullYear(), half, 1)),
@@ -199,7 +200,7 @@ const AttendanceCalendarPage = ({ embedded = false }) => {
       };
     }
     if (activePreset === 'annually') {
-      const now = new Date();
+      const now = nepalLocalDate();
       return {
         startDate: toISO(new Date(now.getFullYear(), 0, 1)),
         endDate: toISO(new Date(now.getFullYear(), 12, 0)),

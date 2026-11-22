@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { useBranch } from 'contexts/BranchContext';
 import { fetchTherapistPerformance } from 'services/api';
 import { getReportRange } from 'utils/reportPeriod';
+import { nepalLocalDate } from 'utils/periodPresets';
 
 // Therapist performance numbers for the header's branch scope (one branch, or every branch under All branches) and the chosen period.
 export function useTherapistPerformance(periodId, custom = null) {
   const { branchId, branches, isOverall, loading: branchLoading } = useBranch();
-  const range = useMemo(() => getReportRange(periodId, new Date(), custom), [periodId, custom?.from, custom?.to]); // eslint-disable-line react-hooks/exhaustive-deps
+  const range = useMemo(() => getReportRange(periodId, nepalLocalDate(), custom), [periodId, custom?.from, custom?.to]); // eslint-disable-line react-hooks/exhaustive-deps
   const ids = useMemo(() => (isOverall ? branches.map((b) => b.id) : [branchId]).filter(Boolean), [isOverall, branches, branchId]);
   const key = ids.join(',');
   const [state, setState] = useState({ data: null, error: null, loading: true });

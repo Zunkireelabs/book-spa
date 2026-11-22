@@ -1,3 +1,4 @@
+import { nepalLocalDate } from '../../../../utils/nepalTime';
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { getBookingDayCounts } from '../../../../services/api';
@@ -56,7 +57,7 @@ const MiniMonthCalendar = ({ selectedDate, onDateSelect, branchId }) => {
   }, [selected]);
 
   const today = useMemo(() => {
-    const d = new Date();
+    const d = nepalLocalDate();
     return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate() };
   }, []);
 

@@ -1,3 +1,6 @@
+// KEEP IN SYNC WITH supabase/migration-419-customer-directory-rpc.sql (the Customers list recomputes these rules in SQL: paid, due,
+// upcoming, deposit, credit, unclosed). After any rule change run src/services/customerDirectoryParity.test.js (see its header).
+//
 // The one money model (customers, panel, Outstanding report, calendar Prev. due, booking-form warnings, Collect bundling).
 // Everything that shows "owed", "upcoming", "deposit" or "credit" goes through here. Cash reconciliation, daily closing and revenue
 // reports are NOT part of this: they keep their payment_status = 'paid' rule.

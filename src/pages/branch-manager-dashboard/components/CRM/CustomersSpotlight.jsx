@@ -46,19 +46,9 @@ const MembershipArt = ({ tier }) => (
 );
 
 // The one Spotlight on the Customers page: up to three data-driven slides, each only when relevant.
-const CustomersSpotlight = ({ customers, today, role, orgId, branchName, onSeeOwes, onReviewAtRisk, onSeeRegularsNoMember }) => {
+const CustomersSpotlight = ({ stats, today, role, orgId, branchName, onSeeOwes, onReviewAtRisk, onSeeRegularsNoMember }) => {
   const isMgrUp = role === 'admin' || role === 'manager';
   const [tier, setTier] = useState(null);
-
-  const stats = useMemo(() => {
-    const at = customers.filter((c) => c.segment === 'at-risk');
-    return {
-      atRisk: at,
-      regularsNoMember: customers.filter((c) => c.segment === 'regular' && !c.member).length,
-      before: customers.reduce((s, c) => s + c.legacyBalance, 0),
-      now: customers.reduce((s, c) => s + c.balance, 0),
-    };
-  }, [customers]);
 
   const wantMembership = MEMBERSHIP_ENABLED && isMgrUp && stats.regularsNoMember > 0;
   useEffect(() => {
@@ -81,11 +71,11 @@ const CustomersSpotlight = ({ customers, today, role, orgId, branchName, onSeeOw
         art: stats.before !== stats.now ? <BeforeNowArt before={stats.before} now={stats.now} /> : null,
       });
     }
-    if (isMgrUp && stats.atRisk.length > 0) {
-      const pick = [...stats.atRisk].sort((a, b) => b.spent - a.spent)[0];
+    if (isMgrUp && stats.atRiskCount > 0) {
+      const pick = stats.atRiskTop; // the at-risk guest who spent most (chosen in SQL)
       out.push({
         id: 'win-back-v1', version: 1, eyebrow: 'New · Win-back',
-        title: `${stats.atRisk.length} returning guest${stats.atRisk.length === 1 ? '' : 's'} ${stats.atRisk.length === 1 ? 'hasn’t' : 'haven’t'} been back in 60+ days.`,
+        title: `${stats.atRiskCount} returning guest${stats.atRiskCount === 1 ? '' : 's'} ${stats.atRiskCount === 1 ? 'hasn’t' : 'haven’t'} been back in 60+ days.`,
         body: 'Reach out with a personal note and their favourite ' + staffWord() + ', while they’re still easy to win back.',
         primary: { label: 'Review at-risk guests', onClick: onReviewAtRisk },
         secondary: { label: 'How it works →', popover: <><b>At risk</b> means a guest with 2 or more visits whose last visit was more than 60 days ago and who has nothing booked. They are shown in amber in the list so you can reach out before they lapse (6+ months).</> },

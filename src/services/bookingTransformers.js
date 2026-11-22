@@ -1,3 +1,4 @@
+import { nepalToday, nepalLocalDate } from '../utils/nepalTime';
 // Convert "HH:MM" or "HH:MM:SS" to 12h format
 export function to12h(timeStr) {
   if (!timeStr) return '';
@@ -9,7 +10,7 @@ export function to12h(timeStr) {
 
 // ZNLY-275: a booking for a later day (Nepal time) can't be Started, Completed or marked No Show (DB trigger, migration 403).
 // Returns the plain sentence staff see, or null when the booking is for today or earlier. `action`: 'start' | 'complete' | 'noshow'.
-export const nepalToday = (now = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kathmandu' }).format(now);
+export { nepalToday }; // the one implementation lives in utils/nepalTime
 export function futureBookingMessage(date, action = 'start', now = new Date()) {
   const d = String(date || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d <= nepalToday(now)) return null;
@@ -248,8 +249,7 @@ function computeMembershipStatus(m) {
     return total >= advance ? 'active' : 'pending';
   }
   if (balance <= 0) return 'depleted';
-  const today = new Date();
-  const today00 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const today00 = nepalLocalDate(); // the Nepal day at local midnight
   const expiry = m.expiry_date ? new Date(m.expiry_date + 'T00:00:00') : null;
   if (expiry && expiry < today00) return 'lapsed';
   return 'active';

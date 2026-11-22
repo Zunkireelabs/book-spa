@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../utils/nepalTime';
 import { dayProgress } from '../../lib/dayProgress';
 import React, { useEffect, useState } from 'react';
 import Icon from '../../components/AppIcon';
@@ -9,11 +10,11 @@ import { friendlyError } from '../../utils/friendlyError';
 import { wordBranch, wordBranchCap, wordBranches, wordBranchesCap } from '../../utils/industryTerms';
 
 const waited = (min) => (min >= 24 * 60 ? `${Math.floor(min / 1440)}d` : min >= 60 ? `${Math.floor(min / 60)}h` : `${min}m`);
-const nepalDay = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' });
+const nepalDay = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: NEPAL_TZ });
 const sinceLabel = (ms, today) => {
   if (ms == null) return null;
   if (nepalDay(ms) !== today) return shortDay(nepalDay(ms));
-  return new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kathmandu' }).toLowerCase();
+  return new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: NEPAL_TZ }).toLowerCase();
 };
 
 const Change = ({ pct }) => (pct == null ? <span className="text-gray-400">—</span>

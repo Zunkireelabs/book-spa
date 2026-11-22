@@ -10,7 +10,7 @@ import { useAuth } from '../contexts/AuthContext';
 // before Save. The database still enforces the rule on the write itself.
 // excludeBookingId: the booking being edited (so it doesn't overlap itself).
 export function useAvailabilityPrecheck({ branchId, date, therapistId, startTime, durationMin, excludeBookingId = null, enabled = true }) {
-  const { enforceStaffAvailability } = useOrg();
+  const { enforceStaffAvailability, allowStaffOverlap } = useOrg();
   const { staffLabel } = useIndustry();
   const { profile } = useAuth();
   const canOverride = profile?.role === 'manager' || profile?.role === 'admin';
@@ -35,7 +35,7 @@ export function useAvailabilityPrecheck({ branchId, date, therapistId, startTime
     if (startMin === null || !durationMin) return none;
     const endMin = startMin + durationMin;
     const forTherapist = (t) => ({
-      ...t, bookings: (t.bookings || []).filter((b) => !excludeBookingId || b.id !== excludeBookingId),
+      ...t, bookings: allowStaffOverlap ? [] : (t.bookings || []).filter((b) => !excludeBookingId || b.id !== excludeBookingId),   // ZNLY-389: overlap is not a conflict for this org
     });
     const candidates = day.therapists.map(forTherapist);
     const me = candidates.find((t) => t.id === therapistId);
@@ -52,7 +52,7 @@ export function useAvailabilityPrecheck({ branchId, date, therapistId, startTime
       blocked: !(verdict.overridable && canOverride),
       warn: verdict.overridable && canOverride,
     };
-  }, [active, day, key, startTime, durationMin, therapistId, excludeBookingId, staffLabel, canOverride]);
+  }, [active, day, key, startTime, durationMin, therapistId, excludeBookingId, staffLabel, canOverride, allowStaffOverlap]);
 }
 
 export default useAvailabilityPrecheck;

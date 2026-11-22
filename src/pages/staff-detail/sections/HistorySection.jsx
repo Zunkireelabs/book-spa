@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../../utils/nepalTime';
 import React from 'react';
 import Icon from '../../../components/AppIcon';
 import { Card, Loading, Problem } from './ui';
@@ -8,7 +9,7 @@ const TONE_CLASS = { 'on-time': 'bg-primary/70', late: 'bg-warning', leave: 'bg-
 const TONE_LABEL = { 'on-time': 'On time', late: 'Late', leave: 'Leave', off: 'Day off', absent: 'Absent' };
 const CAT_ICON = { profile: 'User', pay: 'Banknote', hours: 'Clock', transfers: 'Building2', created: 'Plus' };
 
-const fmtDate = (iso) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kathmandu' });
+const fmtDate = (iso) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: NEPAL_TZ });
 const monthTitle = (ym) => new Date(`${ym}-01T00:00:00Z`).toLocaleDateString('en-GB', { month: 'long', timeZone: 'UTC' });
 
 const HistorySection = ({

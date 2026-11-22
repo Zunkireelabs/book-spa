@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../../../utils/nepalTime';
 import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
@@ -273,7 +274,7 @@ const AttendancePanel = ({ branchId }) => {
   }, [therapists, shiftByTherapist, settings, selectedDate, today, nowMin, gapOf, focusTherapistId, isIncomingTransferOverdue, branchId, transferStatusByTherapist, pendingByTherapist, visitTransfers, punchesBy]);
 
   const visitorRows = useMemo(() => visitors.map((v) => {
-    const parts = (iso) => ({ date: new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' }), hm: new Date(iso).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', hour12: false }).slice(0, 5) });
+    const parts = (iso) => ({ date: new Date(iso).toLocaleDateString('en-CA', { timeZone: NEPAL_TZ }), hm: new Date(iso).toLocaleTimeString('en-GB', { timeZone: NEPAL_TZ, hour: '2-digit', minute: '2-digit', hour12: false }).slice(0, 5) });
     // The window is clipped to this branch's opening hours (same as availability, mig 363); "all day" when it covers them.
     const win = v.windowFrom && v.windowTo ? clipVisitWindow({ fromParts: parts(v.windowFrom), toParts: parts(v.windowTo), date: selectedDate, openTime: settings.openTime, closeTime: settings.closeTime }) : null;
     const shift = win ? { start: win.start, end: win.end } : null;

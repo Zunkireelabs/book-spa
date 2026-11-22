@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { NEPAL_TZ } from '../../utils/nepalTime';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
@@ -20,7 +21,7 @@ import { npr, plural, shortDay, clock12, LoadError, Card, Row, SuggestionsCard, 
 import { dayStatus, nextClient } from '../../lib/dashboardMyDay';
 import { ofKind } from '../../lib/dashboardNeeds';
 
-const WEEKDAY = new Date().toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'Asia/Kathmandu' });
+const WEEKDAY = new Date().toLocaleDateString('en-GB', { weekday: 'short', timeZone: NEPAL_TZ });
 // Delta vs the same weekday last week: green up / red down, plain "—" when there is no data to compare.
 const Delta = ({ now, prev, unit }) => {
   if (now == null || prev == null || (unit === '%' && Number(prev) === 0)) return <span className="text-gray-400">— vs last {WEEKDAY}</span>;
@@ -70,12 +71,30 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
   }, [branchId, today]);
   useEffect(() => { loadNeeds(); }, [loadNeeds]);
 
+  // Another device (or a colleague) changing a booking of this branch updates the Needs list here without a reload: one debounced
+  // refetch per burst of events, only while this view is mounted (the channel is dropped on unmount / branch change).
+  const loadNeedsRef = useRef(loadNeeds);
+  loadNeedsRef.current = loadNeeds;
+  useEffect(() => {
+    if (!branchId) return undefined;
+    let timer = null;
+    const channel = supabase
+      .channel(`dashboard-needs-${branchId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings', filter: `branch_id=eq.${branchId}` }, () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => loadNeedsRef.current?.(), 1000);
+      })
+      .subscribe();
+    return () => { clearTimeout(timer); supabase.removeChannel(channel); };
+  }, [branchId]);
+
   const loadClosed = useCallback(async () => {
     if (!branchId) return;
     const { data: r } = await supabase.from('daily_reports').select('closed_at, closer:users!daily_reports_closed_by_fkey(full_name)').eq('branch_id', branchId).eq('report_date', today).maybeSingle();
     setClosed(r || null);
   }, [branchId, today]);
-  useEffect(() => { loadClosed(); }, [loadClosed]);
+  // Only the Close part of the day shows who closed it, so the lookup waits until that part is open.
+  useEffect(() => { if (phase === 'close') loadClosed(); }, [loadClosed, phase]);
 
   const refresh = () => { loadNeeds(); onReload?.(); };
   const go = (view) => setSearchParams({ view });
@@ -224,7 +243,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
                   <div className="flex justify-between py-2"><b>Cash expected in the drawer</b><b className="font-data">{npr(data.money.cash_expected)}</b></div>
                 </div>
                 {closed ? (
-                  <p className="text-sm text-success font-medium mt-2">Closed at {new Date(closed.closed_at).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kathmandu' })}{closed.closer?.full_name ? ` by ${closed.closer.full_name}` : ''} ✓</p>
+                  <p className="text-sm text-success font-medium mt-2">Closed at {new Date(closed.closed_at).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: NEPAL_TZ })}{closed.closer?.full_name ? ` by ${closed.closer.full_name}` : ''} ✓</p>
                 ) : canAct && (
                   <Button className="mt-3 max-md:min-h-11" onClick={() => setClosing((v) => !v)}>{closing ? 'Hide closing' : 'Close the day'}</Button>
                 )}

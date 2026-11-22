@@ -1,9 +1,13 @@
+// KEEP IN SYNC WITH supabase/migration-419-customer-directory-rpc.sql: the Customers page now gets its rows from SQL (customer_directory_*),
+// which ports buildCustomerDirectory, lifecycleSegment, matchesSearch, phoneSearchDigits and the sort rules below. This file stays the
+// reference; src/services/customerDirectoryParity.test.js proves they agree.
 // Pure derivation for the Customers list: one row per customer with next/last visit, in-spa flag, balance, spent and a single
 // lifecycle segment. "Today"/"now" are Nepal wall-clock values (never toISOString(), which shifts the date) and are injectable
 // so the boundaries can be tested. All money comes from ./bookingMoney (the one model); only the "Before" figure of the V12 notice still
 // uses the old rule (legacyDue).
 
 import { summarizeMoney, classifyBooking, paidPaisa } from './bookingMoney';
+import { nepalNow } from './nepalTime';
 
 export const NEW_DAYS = 30;
 export const AT_RISK_DAYS = 60;
@@ -15,14 +19,8 @@ export const VIP_MIN_SPENT = 25000;
 
 const RENDERED = ['Completed', 'In-Progress']; // a visit that has happened (or is happening)
 const UPCOMING = ['Pending', 'Confirmed'];
-const TZ = 'Asia/Kathmandu';
-
-/** { today: 'YYYY-MM-DD', hm: 'HH:MM' } in Nepal time for the given instant. */
-export function nepalNow(now = new Date()) {
-  const today = now.toLocaleDateString('en-CA', { timeZone: TZ });
-  const hm = now.toLocaleTimeString('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).slice(0, 5);
-  return { today, hm };
-}
+// { today: 'YYYY-MM-DD', hm: 'HH:MM' } in Nepal time for the given instant: the one implementation lives in ./nepalTime (kept exported from here so every existing import still works).
+export { nepalNow };
 
 const hm = (t) => (t ? String(t).slice(0, 5) : '');
 const dayNumber = (iso) => {

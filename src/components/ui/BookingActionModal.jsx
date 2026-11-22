@@ -1,3 +1,4 @@
+import { NEPAL_TZ, nepalToday } from '../../utils/nepalTime';
 import { futureBookingMessage } from '../../services/bookingTransformers';
 import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -58,7 +59,7 @@ import { useDayAvailability } from '../../hooks/useDayAvailability';
 import { staffPickIncomplete } from '../../utils/staffFit';
 
 function getNepalNow() {
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
+  return new Date(new Date().toLocaleString('en-US', { timeZone: NEPAL_TZ }));
 }
 
 // "No Show" only becomes selectable once the booking's scheduled start time
@@ -99,9 +100,9 @@ const fmtNpr = (n) => Number(n || 0).toLocaleString('en-IN');
 const whenShort = (ts) => {
   if (!ts) return '';
   const d = new Date(ts);
-  const day = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' });
-  const t = d.toLocaleTimeString('en-US', { timeZone: 'Asia/Kathmandu', hour: 'numeric', minute: '2-digit' }).replace(' ', '').toLowerCase();
-  return `${day === nepalNow().today ? 'today' : d.toLocaleDateString('en-GB', { timeZone: 'Asia/Kathmandu', day: 'numeric', month: 'short' })} ${t}`;
+  const day = d.toLocaleDateString('en-CA', { timeZone: NEPAL_TZ });
+  const t = d.toLocaleTimeString('en-US', { timeZone: NEPAL_TZ, hour: 'numeric', minute: '2-digit' }).replace(' ', '').toLowerCase();
+  return `${day === nepalNow().today ? 'today' : d.toLocaleDateString('en-GB', { timeZone: NEPAL_TZ, day: 'numeric', month: 'short' })} ${t}`;
 };
 const MemberDiscountCard = ({ md, ctx, serviceLabel, busy, onApply, onDecline }) => {
   const b = ctx.booking;
@@ -307,7 +308,7 @@ const BookingActionModal = ({
   onRescheduleStart,
 }) => {
   const { branchId } = useBranch();
-  const { org: orgForNav, paymentMethods, orgSettings, staffLabel, staffLabelPlural } = useOrg();
+  const { org: orgForNav, paymentMethods, orgSettings, staffLabel, staffLabelPlural, allowStaffOverlap } = useOrg();
   const navigate = useNavigate();
   const cancelReasonOptions = orgSettings?.cancellation_reasons?.length
     ? orgSettings.cancellation_reasons
@@ -2616,7 +2617,7 @@ const BookingActionModal = ({
                         const info = pickedRowStatusMulti(picked, {
                           slot: effDayBookings && s0 != null ? { start: s0, end: e0 > s0 ? e0 : s0 + 60 } : null,
                           rangesById: effDayBookings && booking?.date ? staffDayRanges(effDayBookings, { date: booking.date, excludeBookingId: booking.bookingId || null }) : {},
-                          offById: effOffStaff || {}, date: booking?.date, today: nepalNow().today,
+                          offById: effOffStaff || {}, date: booking?.date, today: nepalNow().today, busyOk: allowStaffOverlap,
                         });
                         const savedPeople = assignedIds.map(nameFor).filter(Boolean);
                         return (
@@ -3336,7 +3337,7 @@ const BookingActionModal = ({
               // "Today's" only when that day actually IS today, so a staffer looking at a
               // past booking (via search, not the live Calendar) doesn't see a misleading
               // "Today" label on services that happened days ago.
-              const todayStr = new Date().toISOString().slice(0, 10);
+              const todayStr = nepalToday();
               const relatedGroupLabel = booking.date === todayStr ? "Today's Services" : 'Other Day Services';
 
               return (

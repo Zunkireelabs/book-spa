@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../../../../utils/nepalTime';
 // Pure view-model for Money owed: raw RPC numbers in, tiles / age bars / CSV rows out (unit-tested; no React).
 import { num } from './businessHealthView';
 import { wordBranch, wordBranchCap } from '../../../../utils/industryTerms';
@@ -8,7 +9,7 @@ export const dayLabel = day;
 
 /** Whole days from an ISO date (YYYY-MM-DD) to today in Nepal (matches the owed rows' age_days). Never negative. */
 export const daysSinceNepal = (iso, now = new Date()) => {
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kathmandu' }).format(now);
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: NEPAL_TZ }).format(now);
   const utc = (d) => { const [y, m, dd] = d.split('-').map(Number); return Date.UTC(y, m - 1, dd); };
   return Math.max(0, Math.round((utc(today) - utc(iso)) / 86400000));
 };

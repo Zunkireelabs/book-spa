@@ -2,11 +2,9 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate, useParams, useSearchParams, useLocation, useNavigationType } from 'react-router-dom';
 import { useAppScroller } from '../../../../components/ui/AppShell';
 import Icon from '../../../../components/AppIcon';
-import { getCustomerDirectory, fetchDuplicateCandidates } from '../../../../services/api';
+import { getCustomerDirectoryPage, getCustomerDirectorySummary, fetchDuplicateCandidates } from '../../../../services/api';
 import { useAuth } from '../../../../contexts/AuthContext';
-import {
-  TABS, SORTS, LIFECYCLE, tabCounts, lifecycleCounts, matchesSearch, sortCustomers, relativeDayLabel, monthsSince, initials, daysBetween,
-} from '../../../../utils/customerDirectory';
+import { TABS, SORTS, LIFECYCLE, relativeDayLabel, monthsSince, initials } from '../../../../utils/customerDirectory';
 import { formatPhoneGrouped } from '../../../../utils/phone';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { FilterChip, Menu } from '../../../../components/ui/ListToolbarKit';
@@ -18,12 +16,14 @@ import { teamMemberWord } from '../../../../utils/industryTerms';
 import ScrollRow from '../../../../components/ui/ScrollRow';
 
 const PAGE_SIZE = 25;
+const EMPTY_ROWS = [];
+// The matching rule lives in SQL (customer_directory_page p_last), same buckets as before.
 const LAST_VISIT_OPTIONS = [
-  { id: '30', label: 'In the last 30 days', test: (d) => d != null && d <= 30 },
-  { id: '90', label: 'In the last 3 months', test: (d) => d != null && d <= 90 },
-  { id: '180', label: 'In the last 6 months', test: (d) => d != null && d <= 180 },
-  { id: 'old', label: 'More than 6 months ago', test: (d) => d != null && d > 180 },
-  { id: 'never', label: 'No visits yet', test: (d) => d == null },
+  { id: '30', label: 'In the last 30 days' },
+  { id: '90', label: 'In the last 3 months' },
+  { id: '180', label: 'In the last 6 months' },
+  { id: 'old', label: 'More than 6 months ago' },
+  { id: 'never', label: 'No visits yet' },
 ];
 const TAB_DEFS = [
   { id: 'all', label: 'All' },
@@ -93,8 +93,10 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
     setSearchParams(next, { replace: !push });
   }, [setSearchParams]);
 
-  const [data, setData] = useState(null);
+  const [summary, setSummary] = useState(null); // org-wide: tab counts, lifecycle mix, Spotlight inputs, filter options (SQL)
+  const [pageData, setPageData] = useState(null); // the visible page: { rows, total, today } (SQL does filter + search + sort + paging)
   const [loading, setLoading] = useState(true);
+  const [fetching, setFetching] = useState(false); // a later page/filter/sort fetch: keep the old rows on screen meanwhile
   const [error, setError] = useState(null);
   const [filters, setFilters] = useState({ therapist: '', service: '', last: '' });
   const [columns, setColumns] = useState({ visits: true, spent: true, balance: true });
@@ -157,17 +159,34 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
     if (sc) sc.scrollTo({ top: sc.scrollTop + delta }); else window.scrollTo({ top: window.scrollY + delta });
   }, [getScrollEl, edge]);
 
-  const load = useCallback(async () => {
-    if (!branchId) return;
-    if (!hasLoadedRef.current) setLoading(true);
-    setError(null);
-    const result = await getCustomerDirectory({ branchId });
+  // The numbers around the list are org-wide, so they load once (not per branch, page or filter) and again only after a change.
+  const loadSummary = useCallback(async () => {
+    const result = await getCustomerDirectorySummary();
     if (result.error) setError(friendlyError(result.error, 'Failed to load customers.'));
-    else setData(result.data);
+    else setSummary(result.data);
+  }, []);
+  useEffect(() => { loadSummary(); }, [loadSummary]);
+
+  // One page per (tab, segment, filters, search, sort, page). A newer request supersedes an older one that is still in flight.
+  const [therapistFilter, serviceFilter, lastFilter] = [filters.therapist, filters.service, filters.last];
+  const reqRef = useRef(0);
+  const loadPage = useCallback(async () => {
+    const id = ++reqRef.current;
+    if (!hasLoadedRef.current) setLoading(true); else setFetching(true);
+    setError(null);
+    const result = await getCustomerDirectoryPage({
+      search: query, tab, segment, noMember, therapist: therapistFilter, service: serviceFilter, last: lastFilter, sort, dir,
+      limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE,
+    });
+    if (id !== reqRef.current) return;
+    if (result.error) setError(friendlyError(result.error, 'Failed to load customers.'));
+    else setPageData(result.data);
     hasLoadedRef.current = true;
     setLoading(false);
-  }, [branchId]);
-  useEffect(() => { load(); }, [load]);
+    setFetching(false);
+  }, [query, tab, segment, noMember, therapistFilter, serviceFilter, lastFilter, sort, dir, page]);
+  useEffect(() => { loadPage(); }, [loadPage]);
+  const load = useCallback(() => { setPinned(null); loadSummary(); loadPage(); }, [loadSummary, loadPage]);
 
   // Possible-duplicates count (managers see only pairs touching their branch, same as the duplicates panel).
   useEffect(() => {
@@ -195,36 +214,18 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  const customers = data?.customers;
-  const today = data?.today;
-  const counts = useMemo(() => (customers ? tabCounts(customers) : null), [customers]);
-  const mix = useMemo(() => (customers ? lifecycleCounts(customers) : null), [customers]);
-  const therapistOptions = useMemo(() => (data?.therapists || []).map((t) => ({ id: t.id, label: t.name })), [data]);
-  const serviceOptions = useMemo(() => {
-    const all = new Set();
-    (customers || []).forEach((c) => c.services.forEach((s) => all.add(s)));
-    return [...all].sort().map((s) => ({ id: s, label: s }));
-  }, [customers]);
+  const rows = pageData?.rows || EMPTY_ROWS;
+  const filteredCount = pageData?.total ?? 0;
+  const today = pageData?.today || summary?.today;
+  const counts = summary?.tabs || null;
+  const mix = summary?.mix || null;
+  const therapistOptions = useMemo(() => (summary?.therapists || []).map((t) => ({ id: t.id, label: t.name })), [summary]);
+  const serviceOptions = useMemo(() => (summary?.services || []).map((x) => ({ id: x, label: x })), [summary]);
 
-  const filtered = useMemo(() => {
-    if (!customers) return [];
-    const lastOpt = LAST_VISIT_OPTIONS.find((o) => o.id === filters.last);
-    const list = customers.filter((c) => {
-      if (!TABS[tab](c)) return false;
-      if (segment && c.segment !== segment) return false;
-      if (noMember && c.member) return false;
-      if (!matchesSearch(c, query)) return false;
-      if (filters.therapist && !c.therapistIds.includes(filters.therapist)) return false;
-      if (filters.service && !c.services.includes(filters.service)) return false;
-      if (lastOpt && !lastOpt.test(c.lastVisit ? daysBetween(c.lastVisit.date, today) : null)) return false;
-      return true;
-    });
-    return sortCustomers(list, sort, dir);
-  }, [customers, tab, segment, noMember, query, filters, sort, dir, today]);
-
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
-  const rows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  // A page past the end (a filter shrank the list, or a stale URL) lands on the last page.
+  useEffect(() => { if (pageData && page > pageCount) patchParams({ page: pageCount }); }, [pageData, page, pageCount, patchParams]);
 
   const setFilter = (k) => (v) => { setFilters((f) => ({ ...f, [k]: v })); patchParams({ page: 1 }); };
   const onSort = (id) => {
@@ -232,23 +233,34 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
     else patchParams({ sort: id, dir: SORTS[id].dir });
   };
 
-  // ↑/↓ moves between customers while the panel is open (Esc is handled by the panel).
+  // ↑/↓ moves between customers while the panel is open (Esc is handled by the panel). Within the page it is instant; at the
+  // page edge the neighbouring customer is fetched (offset ± 1, same filters/sort) and the list turns to its page.
+  const listArgs = { search: query, tab, segment, noMember, therapist: filters.therapist, service: filters.service, last: filters.last, sort, dir };
+  const navRef = useRef(null);
+  navRef.current = { rows, safePage, pageCount, filteredCount, listArgs };
   useEffect(() => {
     if (!openId) return undefined;
     const onKey = (e) => {
       if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
       if (isTyping(e.target)) return;
       if (document.querySelector('[role="dialog"][aria-modal="true"], .z-modal-overlay')) return; // a modal (e.g. payment) is on top
-      const i = filtered.findIndex((c) => c.id === openId);
+      const { rows: list, safePage: pg, filteredCount: total, listArgs: args } = navRef.current;
+      const i = list.findIndex((c) => c.id === openId);
       if (i < 0) return;
-      const nxt = filtered[i + (e.key === 'ArrowDown' ? 1 : -1)];
-      if (!nxt) return;
+      const down = e.key === 'ArrowDown';
+      const nxt = list[i + (down ? 1 : -1)];
       e.preventDefault();
-      patchParams({ open: nxt.id, page: Math.floor(filtered.indexOf(nxt) / PAGE_SIZE) + 1 });
+      if (nxt) { patchParams({ open: nxt.id }); return; }
+      const offset = down ? pg * PAGE_SIZE : (pg - 1) * PAGE_SIZE - 1;
+      if (offset < 0 || offset >= total) return;
+      getCustomerDirectoryPage({ ...args, limit: 1, offset }).then(({ data: edge }) => {
+        const c = edge?.rows?.[0];
+        if (c) patchParams({ open: c.id, page: down ? pg + 1 : pg - 1 });
+      });
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [openId, filtered, patchParams]);
+  }, [openId, patchParams]);
 
   // Page / tab / segment / filter / sort / search change → back to the list top, but only if the list is scrolled past it.
   const listKey = `${safePage}|${tab}|${segment}|${noMember}|${sort}|${dir}|${query}|${filters.therapist}|${filters.service}|${filters.last}`;
@@ -282,23 +294,45 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
   useEffect(() => { if (keyMounted.current) persist(); else keyMounted.current = true; }, [scrollKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const restored = useRef(false);
   useEffect(() => {
-    if (restored.current || loading || !customers) return;
+    if (restored.current || loading || !pageData) return;
     restored.current = true;
     if (navType !== 'POP' || savedOnMount.current == null) return;
     const y = Number(savedOnMount.current);
     requestAnimationFrame(() => { const sc = getScrollEl(); if (sc) sc.scrollTop = y; else window.scrollTo(0, y); });
-  }, [loading, customers]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loading, pageData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Navigation ────────────────────────────────────────────────────────────────
   const listUrl = `${location.pathname}${location.search}`;
   const openProfile = (c) => navigate(`/${orgSlug}/customers/${c.id}`, { state: { from: listUrl } });
-  const customerOpen = useMemo(() => (openId && customers ? customers.find((c) => c.id === openId) || null : null), [openId, customers]);
+  // The open customer is on the current page in the normal case; a deep link (?open=) or a customer the filters hide is fetched by id.
+  const [pinned, setPinned] = useState(null);
+  const onPage = openId ? rows.find((c) => c.id === openId) || null : null;
+  useEffect(() => {
+    if (!openId || onPage || pinned?.id === openId) return undefined;
+    let off = false;
+    getCustomerDirectoryPage({ onlyId: openId, limit: 1 }).then(({ data: one }) => { if (!off && one?.rows?.[0]) setPinned(one.rows[0]); });
+    return () => { off = true; };
+  }, [openId, onPage, pinned?.id]);
+  const customerOpen = onPage || (openId && pinned?.id === openId ? pinned : null);
   const bookFor = (c) => navigate('?view=new-booking', { state: { prefill: { fullName: c.fullName, phone: c.phone, email: c.email, gender: c.gender } } });
 
-  const exportCsv = () => {
+  // Exports every customer matching the current tab / segment / filters / search / sort (not just the visible page): fetched in
+  // pages of 500 at click time, so it costs nothing until used.
+  const [exporting, setExporting] = useState(false);
+  const exportCsv = async () => {
+    if (exporting) return;
+    setExporting(true);
+    const all = [];
+    for (let offset = 0; offset === 0 || offset < filteredCount; offset += 500) {
+      const { data: chunk, error: exportErr } = await getCustomerDirectoryPage({ ...listArgs, limit: 500, offset });
+      if (exportErr || !chunk) { setError(friendlyError(exportErr, 'Could not export the customers.')); setExporting(false); return; }
+      all.push(...chunk.rows);
+      if (chunk.rows.length < 500) break;
+    }
+    setExporting(false);
     const header = ['Name', 'Phone', 'Email', 'Segment', 'Next booking', 'Last visit', 'Visits', 'Spent', 'Balance'];
     const lines = [header.join(',')];
-    filtered.forEach((c) => lines.push([
+    all.forEach((c) => lines.push([
       c.fullName, c.phone, c.email, c.segment,
       c.nextBooking ? `${c.nextBooking.date} ${c.nextBooking.time}` : '', c.lastVisit?.date || '', c.completedVisits, c.spent, c.balance,
     ].map(csvEscape).join(',')));
@@ -323,7 +357,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
       </h1>
       <div className="flex gap-2">
         {canExport && (
-          <button type="button" onClick={exportCsv} disabled={!filtered.length} className="h-8 px-3 rounded-md border border-border bg-white text-[13px] font-medium inline-flex items-center gap-1.5 hover:bg-[#FAFAF9] disabled:opacity-50">
+          <button type="button" onClick={exportCsv} disabled={!filteredCount || exporting} className="h-8 px-3 rounded-md border border-border bg-white text-[13px] font-medium inline-flex items-center gap-1.5 hover:bg-[#FAFAF9] disabled:opacity-50">
             <Icon name="Download" size={14} />Export
           </button>
         )}
@@ -336,9 +370,9 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
     </div>
   );
 
-  const spotlight = customers && today ? (
+  const spotlight = summary && today ? (
     <CustomersSpotlight
-      customers={customers} today={today} role={role} orgId={profile?.org_id} branchName={branchName}
+      stats={summary.spotlight} today={today} role={role} orgId={profile?.org_id} branchName={branchName}
       onSeeOwes={() => patchParams({ tab: 'owes', segment: '', member: '', page: 1 }, { push: true })}
       onReviewAtRisk={() => patchParams({ segment: 'at-risk', tab: '', member: '', page: 1 }, { push: true })}
       onSeeRegularsNoMember={() => patchParams({ segment: 'regular', member: 'no', tab: '', page: 1 }, { push: true })}
@@ -457,7 +491,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
                   {c.inSpa ? <InSpaTag /> : c.segment === 'new' && <span className="h-5 rounded-full px-[7px] text-[11.5px] font-medium inline-flex items-center bg-[#EEF3EC] text-primary">New</span>}
                   {c.vip && <StarIcon />}
                 </div>
-                <div className="text-[12.5px] text-[#8A8A90] mt-0.5 truncate">{formatPhoneGrouped(c.phone)}</div>
+                <div className="text-[12.5px] text-[#8A8A90] mt-0.5 truncate">{formatPhoneGrouped(c.phone) || 'No phone'}</div>
                 <div className="sm:hidden text-[12.5px] text-[#515152] truncate">{next ? `${relativeDayLabel(next.date, today)} · ${next.time}` : 'No upcoming booking'}</div>
               </div>
             </div>
@@ -533,10 +567,10 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
                 <th className={`h-[34px] w-[88px] border-b border-border bg-white sticky top-[calc(var(--cust-top)+var(--cust-block))] z-[5] ${stuck ? 'shadow-[0_8px_8px_-8px_rgba(14,13,12,.14)]' : ''}`} />
               </tr>
             </thead>
-            <tbody>{body}</tbody>
+            <tbody className={fetching ? 'opacity-60 transition-opacity' : 'transition-opacity'} aria-busy={fetching || undefined}>{body}</tbody>
           </table>
         )}
-        {!loading && !error && filtered.length === 0 && (
+        {!loading && !error && filteredCount === 0 && (
           <div className="text-center py-16">
             <Icon name="Users" size={28} className="text-[#B4B4BA] mx-auto mb-3" />
             <p className="text-[14px] font-medium text-text-primary">{emptyTitle}</p>
@@ -548,7 +582,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
         )}
       </div>
       <div className="flex items-center justify-between h-[52px] text-[12.5px] text-[#8A8A90] border-t border-border">
-        <span className="tabular-nums">{filtered.length === 0 ? '0 customers' : `${(safePage - 1) * PAGE_SIZE + 1}–${Math.min(safePage * PAGE_SIZE, filtered.length)} of ${filtered.length}`}</span>
+        <span className="tabular-nums">{filteredCount === 0 ? '0 customers' : `${(safePage - 1) * PAGE_SIZE + 1}–${Math.min(safePage * PAGE_SIZE, filteredCount)} of ${filteredCount}`}</span>
         <div className="flex gap-1.5">
           <button type="button" aria-label="Previous page" disabled={safePage <= 1} onClick={() => patchParams({ page: safePage - 1 })} className="w-7 h-7 border border-border rounded-md grid place-items-center disabled:opacity-40 hover:bg-[#FAFAF9]"><Icon name="ChevronLeft" size={14} /></button>
           <button type="button" aria-label="Next page" disabled={safePage >= pageCount} onClick={() => patchParams({ page: safePage + 1 })} className="w-7 h-7 border border-border rounded-md grid place-items-center disabled:opacity-40 hover:bg-[#FAFAF9]"><Icon name="ChevronRight" size={14} /></button>

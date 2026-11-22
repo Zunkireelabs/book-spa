@@ -148,11 +148,12 @@ export function offStaffReasons(people, { attendanceMap = {}, shiftsByTherapist 
 const overlapGuests = (a, b) => a.start < b.end && a.end > b.start;
 
 /** { [guestIdx]: { [staffId]: otherGuestIdx } }: staff already held by ANOTHER guest whose time overlaps (they can't be picked again here). */
-export function staffHeldByOthers(guests) {
+export function staffHeldByOthers(guests, { allowOverlap = false } = {}) {
   const out = {};
   for (const g of guests) {
     const held = {};
     for (const o of guests) {
+      if (allowOverlap) break;   // ZNLY-389: the org lets one person hold overlapping bookings
       if (o.idx === g.idx || !o.staffId || !overlapGuests(g, o)) continue;
       if (held[o.staffId] == null) held[o.staffId] = o.idx;
     }
@@ -166,11 +167,12 @@ export function staffHeldByOthers(guests) {
  *  off   = the person is off/on leave that day; busy = an existing booking overlaps the guest's slot;
  *  clash = the same person is held by an earlier guest at an overlapping time (the earlier guest keeps the pick).
  */
-export function pickProblems(guests, { rangesById = {}, offById = {} } = {}) {
+export function pickProblems(guests, { rangesById = {}, offById = {}, allowOverlap = false } = {}) {
   const out = {};
   for (const g of guests) {
     if (!g.staffId) continue;
     if (offById[g.staffId]) { out[g.idx] = { kind: 'off', staffId: g.staffId, reason: offById[g.staffId] }; continue; }
+    if (allowOverlap) continue;   // ZNLY-389: the org lets one person hold overlapping bookings, so busy/clash are not problems
     const hit = (rangesById[g.staffId] || []).filter((r) => overlaps(r, g.start, g.end));
     if (hit.length) { out[g.idx] = { kind: 'busy', staffId: g.staffId, range: { start: Math.min(...hit.map((r) => r.start)), end: Math.max(...hit.map((r) => r.end)) } }; continue; }
     const other = guests.find((o) => o.idx < g.idx && o.staffId === g.staffId && overlapGuests(g, o));

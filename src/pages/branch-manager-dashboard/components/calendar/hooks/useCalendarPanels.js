@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { refreshLight } from '../refreshLight';
 import { useSearchParams } from 'react-router-dom';
 import {
   fetchServices,
@@ -290,14 +291,14 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
             // the refreshed calendar show what actually happened.
             setRebookSource(null);
             failWith(result.error, 'Failed to reschedule.');
-            refreshCalendar();
+            refreshLight(refreshCalendar);
           } else {
             failWith(result.error, 'Failed to reschedule.');
           }
         } else {
           setRebookSource(null);
           showToast('Booking rescheduled successfully.');
-          refreshCalendar();
+          refreshLight(refreshCalendar);
         }
         return;
       }
@@ -338,7 +339,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
           // Rebook isn't atomic: the insert may have committed before the connection dropped, so restoring pick mode would invite a
           // duplicate on retry. Leave pick mode and show the real state.
           failWith(result.error, 'Failed to rebook.');
-          refreshCalendar();
+          refreshLight(refreshCalendar);
         } else {
           failWith(result.error, 'Failed to rebook.');
           // Restore rebook mode on failure so user can retry
@@ -350,7 +351,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
         } else {
           showToast('Rebooked successfully — payment will be collected at the new appointment.');
         }
-        refreshCalendar();
+        refreshLight(refreshCalendar);
       }
       return;
     }
@@ -447,7 +448,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     const r = await submitQuickCreate({ formData, branchId, guard });
     if (r.error) {
       // Part of a group, or a booking whose confirmation could not load, exists already: show the calendar as it really is.
-      if (r.partial || ['BOOKING_CONFIRMATION_UNAVAILABLE', 'BOOKING_NOT_VISIBLE', 'BOOKING_GROUP_PARTIAL'].includes(r.code)) refreshCalendar();
+      if (r.partial || ['BOOKING_CONFIRMATION_UNAVAILABLE', 'BOOKING_NOT_VISIBLE', 'BOOKING_GROUP_PARTIAL'].includes(r.code)) refreshLight(refreshCalendar);
       return { message: r.error, code: r.code, raw: r.raw, partial: r.partial };
     }
     showToast(r.toast.msg, r.toast.type);
@@ -459,7 +460,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       setWaitlistRefreshToken((v) => v + 1);
     }
     setQuickCreateSlot(null);
-    refreshCalendar();
+    refreshLight(refreshCalendar);
     return null;
   }, [branchId, refreshCalendar, guard, bookingWaitlistEntryId, showToast]);
 
@@ -576,14 +577,14 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   const refreshOpenBooking = useCallback(async (bookingId) => {
     const refreshed = await fetchBookingById(bookingId);
     if (!refreshed.error) setSelectedBooking((prev) => ({ ...transformBooking(refreshed.data), availabilityNote: prev?.availabilityNote }));
-    refreshCalendar();
+    refreshLight(refreshCalendar);
   }, [refreshCalendar]);
 
   const handleModalClose = useCallback(() => {
     setModalOpen(false);
     setSelectedBooking(null);
     setPreviewBooking(null);
-    refreshCalendar();
+    refreshLight(refreshCalendar);
   }, [refreshCalendar]);
 
   return {

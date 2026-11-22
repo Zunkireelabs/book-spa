@@ -10,6 +10,7 @@ vi.mock('lib/supabase', () => ({
   supabase: {
     auth: {
       getUser: async () => ({ data: { user: { id: 'u1' } } }),
+      getSession: async () => ({ data: { session: { user: { id: 'u1' }, access_token: 't1' } } }),
     },
     from: () => ({
       select: () => ({

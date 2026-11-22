@@ -1,3 +1,4 @@
+import { NEPAL_TZ } from '../utils/nepalTime';
 // Memberships page (V21): pure logic for the Members / Tiers / Wallet activity tabs — display status, the lifecycle strip, the
 // lead sentence, Needs-you-now, sorting, search, birthdays and the activity feed. No React, no Supabase: `today` is a Nepal
 // 'YYYY-MM-DD' passed in by the caller. Rows are fetchMemberships() rows (status: active / pending / lapsed / depleted).
@@ -281,7 +282,7 @@ export function rangeLead(id, from, to) {
   return rangeLabel(id, from, to);
 }
 
-const TZ = 'Asia/Kathmandu';
+const TZ = NEPAL_TZ;
 /** { day: 'Today' | 'Yesterday' | '16 Oct' | '16 Oct 2025', time: '2:14pm' } in Nepal time. */
 export function whenLabel(ts, today) {
   const dt = new Date(ts);

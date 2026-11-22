@@ -1,3 +1,5 @@
+import { NEPAL_TZ, nepalToday, nepalDateOf, addDays } from '../utils/nepalTime';
+import { getCalendarStatic, setCalendarStatic } from '../lib/calendarStaticCache';
 import { buildQueue, needsOf } from '../lib/dashboardNeeds';
 import { WALLET_MODES, addTender, isTendered, canonicalMode, dayMoneyView, applyRefundsToBuckets } from '../lib/dayMoney';
 import { closeDayBlock } from '../lib/closeDay';
@@ -44,6 +46,14 @@ const staffAvailabilityCache = createEnforcementCache(async (branchId) => {
 });
 // true = the tenant switch is ON: leave/transfer windows are judged by the DB guard only (same code and message everywhere).
 const staffAvailabilityEnforced = (branchId) => staffAvailabilityCache.get(branchId);
+// ZNLY-390: true = this org does NOT require a customer phone (organizations.require_customer_phone = false). Anything unknown or failing reads as
+// "required", the safe default. Cleared when the admin flips the switch.
+const customerPhoneOptionalCache = createEnforcementCache(async (branchId) => {
+  const { data, error } = await supabase.from('branches').select('organizations(require_customer_phone)').eq('id', branchId).maybeSingle();
+  if (error) throw error;
+  return data?.organizations?.require_customer_phone === false;
+});
+const customerPhoneOptional = (branchId) => customerPhoneOptionalCache.get(branchId);
 const overrideReasonOf = (reason) => (typeof reason === 'string' && reason.trim() ? reason.trim() : null);
 // The reason authorises exactly one write; clear it afterwards so it can never be mistaken for a fresh override later.
 async function clearAvailabilityOverride(bookingId) {
@@ -59,6 +69,8 @@ import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideH
 import { getPeriodRange, getTodayISO } from '../utils/periodPresets';
 import { transferOccurrencesForDate } from '../utils/transferOccurrences';
 import { inChunks, failOpenAfter, IN_CHUNK, customerSearchFilter } from './queryHelpers';
+import { isNewTenant } from '../lib/dashboardTenant';
+import { getCachedAuthProfile, setCachedAuthProfile, dropCachedAuthProfile, invalidateAuthenticatedUser } from '../lib/authProfileCache';
 import { buildCustomerDirectory, buildPanelDetail, nepalNow, avgPaidPerVisit } from '../utils/customerDirectory';
 import { addDays as addDaysISO } from '../utils/reportPeriod';
 import { attendanceDays, busyMinutesInSpans } from '../pages/branch-manager-dashboard/components/Performance/therapistInnerView';
@@ -256,21 +268,40 @@ export const staffCanRequestDiscountApproval = DISCOUNT_LIMITS.staff < STAFF_REQ
  * Fetch authenticated user + profile in one call.
  * Returns { user, profile } or a structured error.
  */
-async function getAuthenticatedUser() {
-  const { data: { user } } = await supabase.auth.getUser();
+// The signed-in user + their users row (role, org, branch, visibility flags). ~215 call sites ask for this, often several at once
+// (a branch switch used to fire 4× GET /auth/v1/user and 4× GET users). So:
+//  - the user comes from the local session (getSession: no network; the access token is refreshed when due) instead of
+//    getUser (a round trip to the auth server on every call). RLS still checks the token on every data request;
+//  - the profile is shared between concurrent callers and kept for 30 s (lib/authProfileCache). The cache is keyed by user AND access
+//    token, so a sign-out/sign-in or a token refresh misses it by itself; invalidateAuthenticatedUser() drops it on demand.
+export { invalidateAuthenticatedUser };
+
+async function loadAuthenticatedUser() {
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user || null;
   if (!user) {
     return { user: null, profile: null, error: { code: 'UNAUTHENTICATED', message: 'You must be logged in.' } };
   }
-  const { data: profile, error: profileError } = await supabase
-    .from('users')
-    .select('id, role, branch_id, org_id, calendar_visibility, can_view_customer_details, can_view_prices')
-    .eq('id', user.id)
-    .single();
-
-  if (profileError) {
-    return { user, profile: null, error: { code: 'PROFILE_ERROR', message: 'Could not load user profile.' } };
-  }
-  return { user, profile, error: null };
+  const key = `${user.id}:${session.access_token}`;
+  const cached = getCachedAuthProfile(key);
+  if (cached) return cached;
+  const promise = (async () => {
+    const { data: profile, error: profileError } = await supabase
+      .from('users')
+      .select('id, role, branch_id, org_id, calendar_visibility, can_view_customer_details, can_view_prices')
+      .eq('id', user.id)
+      .single();
+    if (profileError) {
+      dropCachedAuthProfile(promise); // never keep a failure
+      return { user, profile: null, error: { code: 'PROFILE_ERROR', message: 'Could not load user profile.' } };
+    }
+    return { user, profile, error: null };
+  })();
+  setCachedAuthProfile(key, promise);
+  return promise;
+}
+async function getAuthenticatedUser() {
+  return loadAuthenticatedUser();
 }
 
 /**
@@ -669,16 +700,20 @@ export async function fetchNeeds({ branchIds, date }) {
 }
 
 // New-tenant check + setup checklist counts for one branch. firstBookingDate is the earliest booking's date (null when none).
-export async function fetchSetupState({ branchId }) {
+export async function fetchSetupState({ branchId, today }) {
   try {
-    const [sv, rm, th, first] = await Promise.all([
+    // The earliest booking decides whether this is a new tenant; the checklist counts (services, rooms, staff: five requests) are
+    // only worth fetching for one. An established branch costs a single request on every branch switch.
+    const first = await supabase.from('bookings').select('date').eq('branch_id', branchId).order('date', { ascending: true }).limit(1);
+    if (first.error) throw first.error;
+    const firstBookingDate = first.data?.[0]?.date || null;
+    if (today && !isNewTenant(firstBookingDate, today)) return { data: { counts: null, firstBookingDate }, error: null };
+    const [sv, rm, th] = await Promise.all([
       fetchServices(branchId),
       fetchRooms(branchId),
       supabase.from('therapists').select('id', { count: 'exact', head: true }).eq('branch_id', branchId).eq('is_active', true),
-      supabase.from('bookings').select('date').eq('branch_id', branchId).order('date', { ascending: true }).limit(1),
     ]);
-    if (th.error || first.error) throw (th.error || first.error);
-    const firstBookingDate = first.data?.[0]?.date || null;
+    if (th.error) throw th.error;
     return { data: { counts: { services: (sv.data || []).length, rooms: (rm.data || []).length, staff: th.count || 0, bookings: firstBookingDate ? 1 : 0 }, firstBookingDate }, error: null };
   } catch (error) {
     console.error('[API] fetchSetupState error:', error.message);
@@ -814,6 +849,30 @@ export async function setEnforceStaffAvailability({ enabled }) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] setEnforceStaffAvailability error:', error.message);
+    return { data: null, error: plainError(error) };
+  }
+}
+
+// ZNLY-389 / ZNLY-390: per-org booking rules. Admin only (migrations 424 / 425: organizations has no UPDATE policy, so SECURITY DEFINER RPCs).
+export async function setAllowStaffOverlap({ enabled }) {
+  try {
+    const { data, error } = await supabase.rpc('set_allow_staff_overlap', { p_value: !!enabled });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setAllowStaffOverlap error:', error.message);
+    return { data: null, error: plainError(error) };
+  }
+}
+
+export async function setRequireCustomerPhone({ enabled }) {
+  try {
+    const { data, error } = await supabase.rpc('set_require_customer_phone', { p_value: !!enabled });
+    if (error) throw error;
+    customerPhoneOptionalCache.clear();
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setRequireCustomerPhone error:', error.message);
     return { data: null, error: plainError(error) };
   }
 }
@@ -995,6 +1054,23 @@ export async function fetchBookings(branchId, { date, dateFrom, dateTo, status }
     return { data, error: null };
   } catch (error) {
     console.error('[API] fetchBookings error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * True when any booking of the day (for the branch, or org-wide on Overall) is locked ("This day is closed"). A head count
+ * with limit 1: the dashboard banner only needs this yes/no, not the day's bookings.
+ */
+export async function hasLockedBookings(branchId, date) {
+  try {
+    let query = supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('date', date).eq('is_locked', true).limit(1);
+    query = withBranch(query, branchId);
+    const { count, error } = await query;
+    if (error) throw error;
+    return { data: (count || 0) > 0, error: null };
+  } catch (error) {
+    console.error('[API] hasLockedBookings error:', error.message);
     return { data: null, error };
   }
 }
@@ -3605,7 +3681,7 @@ export async function linkWalkInClient({ bookingId, customerId, customerName, cu
       name = c.full_name; phone = c.phone;
     } else {
       if (!String(customerName || '').trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Enter the client\'s name.' } };
-      if (!String(customerPhone || '').trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Enter the client\'s phone number.' } };
+      if (!String(customerPhone || '').trim() && !(await customerPhoneOptional(booking.branch_id))) return { data: null, error: { code: 'INVALID_INPUT', message: 'Enter the client\'s phone number.' } };
       const { data: branch, error: branchError } = await supabase.from('branches').select('org_id').eq('id', booking.branch_id).single();
       if (branchError) throw branchError;
       const { data: resolved, error: resolveError } = await findOrCreateCustomer({
@@ -4027,8 +4103,23 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
 
 /**
  * Fetch bookings with pending discount requests (manager view).
+ * Callers that ask at the same moment (the header feed, the sidebar and the dashboard all do on a branch switch) share one
+ * request. A 'pending-approvals-changed' event (fired after any approve/reject/request) forgets the shared request, so the
+ * refetch that follows it always reads fresh data.
  */
-export async function fetchPendingDiscounts(branchId) {
+const pendingDiscountsInFlight = new Map(); // branchId -> promise
+if (typeof window !== 'undefined') window.addEventListener('pending-approvals-changed', () => pendingDiscountsInFlight.clear());
+export function fetchPendingDiscounts(branchId) {
+  const key = String(branchId);
+  const shared = pendingDiscountsInFlight.get(key);
+  if (shared) return shared;
+  const promise = fetchPendingDiscountsUncached(branchId).finally(() => {
+    if (pendingDiscountsInFlight.get(key) === promise) pendingDiscountsInFlight.delete(key);
+  });
+  pendingDiscountsInFlight.set(key, promise);
+  return promise;
+}
+async function fetchPendingDiscountsUncached(branchId) {
   try {
     const { user, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -5059,7 +5150,7 @@ export async function getTodayInsights(branchId, from, to) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const rangeStart = from || new Date().toISOString().split('T')[0];
+    const rangeStart = from || nepalToday();
     const rangeEnd = to || rangeStart;
 
     // rangeEnd is a Nepal calendar date; the exclusive upper bound used by the
@@ -5901,16 +5992,17 @@ export function exportDailyReportCSV(reportData) {
 // Phase 10D-1: Revenue Intelligence
 // ============================================================
 
+// 'YYYY-MM-DD' of the Monday of the week containing `date` (a date string, or an instant: then its Nepal date). Pure calendar arithmetic.
 function getISOWeekMonday(date) {
-  const d = new Date(date);
-  const day = d.getDay(); // 0=Sun ... 6=Sat
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
-  return new Date(d.setDate(diff)).toISOString().split('T')[0];
+  const ds = typeof date === 'string' ? date.slice(0, 10) : nepalDateOf(date);
+  const [y, m, d] = ds.split('-').map(Number);
+  const day = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Sun ... 6=Sat
+  return addDays(ds, day === 0 ? -6 : 1 - day);
 }
 
 function getMonthStart(date) {
-  const d = new Date(date);
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
+  const ds = typeof date === 'string' ? date.slice(0, 10) : nepalDateOf(date);
+  return `${ds.slice(0, 8)}01`;
 }
 
 async function computeRevenueForRange(branchId, startDate, endDate) {
@@ -6015,8 +6107,8 @@ export async function getRevenueIntelligence({ branchId, date }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const targetDate = date || new Date().toISOString().split('T')[0];
-    const yesterday = new Date(new Date(targetDate).getTime() - 86400000).toISOString().split('T')[0];
+    const targetDate = date || nepalToday();
+    const yesterday = addDays(targetDate, -1);
     const weekStart = getISOWeekMonday(targetDate);
     const monthStart = getMonthStart(targetDate);
 
@@ -6060,7 +6152,7 @@ export async function getUtilizationIntelligence({ branchId, date, from, to }) {
     }
 
     const overall = isOverallBranch(branchId);
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const targetDate = date || nepalToday();
     // Range mode (multi-day period filter): aggregate across [from, to] instead
     // of a single day. Attendance is tracked per-day, so a multi-day window
     // skips the absent/leave exclusion below rather than trying to prorate it —
@@ -6536,29 +6628,36 @@ export async function fetchTransferOccurrences(branchId, startDate, endDate) {
 //  - tags home therapists lent out in the range (transferredOut + window; they never leave the list),
 //  - adds a "visiting" column for every visitor whose window touches the range.
 // Fails open: on any error (including missing tables) returns the therapists unchanged.
-async function applyCalendarTransfers(branchId, startDate, endDate, therapists) {
+// The three staff_transfers reads behind the calendar's transfer layer. Started separately so getCalendarBookings can run them
+// in the same round as therapists / rooms / bookings (they do not depend on the therapist list; only the merge below does).
+function fetchCalendarTransferRows(branchId, startDate, endDate) {
+  const cols = 'id, therapist_id, revert_at, effective_date, start_time, from_display_order, reverted, reverted_at';
+  const therapistCols = 'therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order, branch_id)';
+  // Temporary, applied, non-return-leg windows; still-active ones plus ones that ended within the range.
+  const windowFilter = `reverted.eq.false,and(effective_date.gte.${startDate},effective_date.lte.${endDate})`;
+  return Promise.all([
+    supabase.from('staff_transfers')
+      .select(`${cols}, toBranch:branches!staff_transfers_to_branch_id_fkey(name), fromBranch:branches!staff_transfers_from_branch_id_fkey(name), ${therapistCols}`)
+      .eq('from_branch_id', branchId).eq('applied', true).eq('is_permanent', false).eq('is_return_leg', false)
+      .not('revert_at', 'is', null).or(windowFilter)
+      .order('effective_date').order('start_time'),
+    supabase.from('staff_transfers')
+      .select(`${cols}, toBranch:branches!staff_transfers_to_branch_id_fkey(name), fromBranch:branches!staff_transfers_from_branch_id_fkey(name), ${therapistCols}`)
+      .eq('to_branch_id', branchId).eq('applied', true).eq('is_permanent', false).eq('is_return_leg', false)
+      .not('revert_at', 'is', null).or(windowFilter)
+      .order('effective_date').order('start_time'),
+    supabase.from('staff_transfers')
+      .select('id, therapist_id, effective_date, start_time, revert_at, is_permanent, toBranch:branches!staff_transfers_to_branch_id_fkey(name), fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
+      .eq('from_branch_id', branchId).eq('applied', false)
+      .gte('effective_date', startDate).lte('effective_date', endDate)
+      .order('effective_date').order('start_time'),
+  ]);
+}
+
+// `prefetchedRows`: the promise from fetchCalendarTransferRows when the caller already started it.
+async function applyCalendarTransfers(branchId, startDate, endDate, therapists, prefetchedRows = null) {
   try {
-    const cols = 'id, therapist_id, revert_at, effective_date, start_time, from_display_order, reverted, reverted_at';
-    const therapistCols = 'therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order, branch_id)';
-    // Temporary, applied, non-return-leg windows; still-active ones plus ones that ended within the range.
-    const windowFilter = `reverted.eq.false,and(effective_date.gte.${startDate},effective_date.lte.${endDate})`;
-    const [outRes, inRes, schedRes] = await Promise.all([
-      supabase.from('staff_transfers')
-        .select(`${cols}, toBranch:branches!staff_transfers_to_branch_id_fkey(name), fromBranch:branches!staff_transfers_from_branch_id_fkey(name), ${therapistCols}`)
-        .eq('from_branch_id', branchId).eq('applied', true).eq('is_permanent', false).eq('is_return_leg', false)
-        .not('revert_at', 'is', null).or(windowFilter)
-        .order('effective_date').order('start_time'),
-      supabase.from('staff_transfers')
-        .select(`${cols}, toBranch:branches!staff_transfers_to_branch_id_fkey(name), fromBranch:branches!staff_transfers_from_branch_id_fkey(name), ${therapistCols}`)
-        .eq('to_branch_id', branchId).eq('applied', true).eq('is_permanent', false).eq('is_return_leg', false)
-        .not('revert_at', 'is', null).or(windowFilter)
-        .order('effective_date').order('start_time'),
-      supabase.from('staff_transfers')
-        .select('id, therapist_id, effective_date, start_time, revert_at, is_permanent, toBranch:branches!staff_transfers_to_branch_id_fkey(name), fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
-        .eq('from_branch_id', branchId).eq('applied', false)
-        .gte('effective_date', startDate).lte('effective_date', endDate)
-        .order('effective_date').order('start_time'),
-    ]);
+    const [outRes, inRes, schedRes] = await (prefetchedRows || fetchCalendarTransferRows(branchId, startDate, endDate));
     const err = outRes.error || inRes.error || schedRes.error;
     if (err) {
       if (!isTransferFeatureMissing(err)) console.warn('[API] applyCalendarTransfers:', err.message);
@@ -6700,7 +6799,10 @@ export async function fetchUnassignedBookings({ branchId, fromDate, toDate }) {
   }
 }
 
-export async function getCalendarBookings(branchId, startDate, endDate) {
+// `opts.reuseStatic`: a refresh after a booking change. Re-reads only the bookings (and their extras) and reuses the branch hours,
+// therapists + transfer windows, rooms and check-outs from the last full load of this same branch / range / user / visibility.
+// No saved copy (or it expired, or the user's visibility differs) = the normal full load, so passing it can never return less.
+export async function getCalendarBookings(branchId, startDate, endDate, opts = {}) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);
 
@@ -6724,75 +6826,22 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     // and keeps the intent legible here.
     if (vis.ownBookingsOnly && !vis.therapistId) {
       return {
-        data: { branchHours: { openTime: '09:00:00', closeTime: '21:00:00', timezone: 'Asia/Kathmandu' }, therapists: [], rooms: [], bookings: [], checkedOutByTherapistAndDate: {} },
+        data: { branchHours: { openTime: '09:00:00', closeTime: '21:00:00', timezone: NEPAL_TZ }, therapists: [], rooms: [], bookings: [], checkedOutByTherapistAndDate: {} },
         error: null,
       };
     }
 
-    // 1. Fetch branch hours + timezone
-    const { data: branch, error: branchError } = await supabase
-      .from('branches')
-      .select('open_time, close_time, timezone')
-      .eq('id', resolvedBranchId)
-      .single();
+    const staticKey = [resolvedBranchId, startDate, endDate, profile.id, vis.ownBookingsOnly, vis.canViewCustomerDetails, vis.canViewPrices, vis.therapistId].join('|');
+    const reused = opts.reuseStatic ? getCalendarStatic(staticKey) : null;
 
-    if (branchError) throw branchError;
-
-    // 2. Fetch therapists and rooms for this branch; transfer windows (staff away / visiting / scheduled)
-    //    are layered on by applyCalendarTransfers below.
-    const [
-      therapistsResult, roomsResult, checkedOutResult,
-    ] = await Promise.all([
-      supabase
-        .from('therapists')
-        .select('id, name, gender, specialties, position, is_service_staff, display_order')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true)
-        .order('display_order')
-        .order('name'),
-      supabase
-        .from('rooms')
-        .select('id, name, is_active, display_order, amenities, floor, capacity')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true)
-        .order('display_order')
-        .order('name'),
-      // Therapists who've already checked out (for real, not just marked absent/leave) on
-      // some date in this range — the calendar blocks the rest of that day's column for
-      // them, same as a transfer-out window, so a booking can't be dropped onto someone
-      // who's already gone home. Only Present/Half-day rows can have a check_out_time.
-      supabase
-        .from('therapist_attendance')
-        .select('therapist_id, date, check_out_time')
-        .eq('branch_id', resolvedBranchId)
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .not('check_out_time', 'is', null),
-    ]);
-
-    if (therapistsResult.error) throw therapistsResult.error;
-    if (roomsResult.error) throw roomsResult.error;
-    if (checkedOutResult.error) throw checkedOutResult.error;
-
-    // Keyed "<therapistId>_<date>" -> raw check_out_time (timestamptz), so the calendar
-    // can block each affected day's column independently.
-    const checkedOutByTherapistAndDate = {};
-    (checkedOutResult.data || []).forEach(row => {
-      checkedOutByTherapistAndDate[`${row.therapist_id}_${row.date}`] = row.check_out_time;
-    });
-
-    const mergedTherapists = await applyCalendarTransfers(
-      resolvedBranchId, startDate, endDate,
-      (therapistsResult.data || [])
-        .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name))
-    );
-
-    // 3. Fetch bookings in date range, excluding Cancelled and No Show.
-    // Money and customer-contact columns are left out of the select entirely
-    // when withheld, rather than fetched and blanked after — once a column
-    // never leaves the database, there's nothing for devtools to recover.
-    let bookings = [];
-    {
+    // ONE round trip for everything the grid needs. None of these reads depends on another: the bookings query needs only the branch id
+    // and the visibility flags resolved above (so staff-own / restricted visibility applies exactly as before), the transfer reads need only
+    // the branch and range (the merge with the therapist list happens in memory below). This used to be five hops in a row
+    // (branch hours, then therapists/rooms, then transfers, then bookings), each a full network round trip on prod.
+    const bookingsPromise = (async () => {
+      // Money and customer-contact columns are left out of the select entirely
+      // when withheld, rather than fetched and blanked after — once a column
+      // never leaves the database, there's nothing for devtools to recover.
       const bookingFields = [
         'id', 'booking_number', 'customer_id', 'customer_name', 'is_walk_in', 'walk_in_label', // ZNLY-327
         'customer_phone',   // fetched always; masked below when withheld — see maskPhone
@@ -6822,10 +6871,78 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       // RESTRICTIVE RLS policy already scopes this SELECT to the caller's
       // own bookings when vis.ownBookingsOnly is true.
 
-      const { data: bookingsData, error: bookingsError } = await bookingsQuery;
-      if (bookingsError) throw bookingsError;
-      bookings = bookingsData || [];
+      return bookingsQuery;
+    })();
+    const transferRowsPromise = reused ? null : fetchCalendarTransferRows(resolvedBranchId, startDate, endDate);
+
+    // Branch hours + timezone, therapists and rooms for this branch; transfer windows (staff away / visiting / scheduled)
+    // are layered on by applyCalendarTransfers below.
+    const [
+      branchResult, therapistsResult, roomsResult, checkedOutResult, bookingsResult,
+    ] = reused ? [null, null, null, null, await bookingsPromise] : await Promise.all([
+      supabase
+        .from('branches')
+        .select('open_time, close_time, timezone')
+        .eq('id', resolvedBranchId)
+        .single(),
+      supabase
+        .from('therapists')
+        .select('id, name, gender, specialties, position, is_service_staff, display_order')
+        .eq('branch_id', resolvedBranchId)
+        .eq('is_active', true)
+        .order('display_order')
+        .order('name'),
+      supabase
+        .from('rooms')
+        .select('id, name, is_active, display_order, amenities, floor, capacity')
+        .eq('branch_id', resolvedBranchId)
+        .eq('is_active', true)
+        .order('display_order')
+        .order('name'),
+      // Therapists who've already checked out (for real, not just marked absent/leave) on
+      // some date in this range — the calendar blocks the rest of that day's column for
+      // them, same as a transfer-out window, so a booking can't be dropped onto someone
+      // who's already gone home. Only Present/Half-day rows can have a check_out_time.
+      supabase
+        .from('therapist_attendance')
+        .select('therapist_id, date, check_out_time')
+        .eq('branch_id', resolvedBranchId)
+        .gte('date', startDate)
+        .lte('date', endDate)
+        .not('check_out_time', 'is', null),
+      bookingsPromise,
+    ]);
+
+    if (!reused) {
+      if (branchResult.error) throw branchResult.error;
+      if (therapistsResult.error) throw therapistsResult.error;
+      if (roomsResult.error) throw roomsResult.error;
+      if (checkedOutResult.error) throw checkedOutResult.error;
     }
+    if (bookingsResult.error) throw bookingsResult.error;
+    const branch = reused ? reused.branch : branchResult.data;
+
+    // Keyed "<therapistId>_<date>" -> raw check_out_time (timestamptz), so the calendar
+    // can block each affected day's column independently.
+    let checkedOutByTherapistAndDate = {};
+    let mergedTherapists;
+    if (reused) {
+      ({ checkedOutByTherapistAndDate, mergedTherapists } = reused);
+    } else {
+      (checkedOutResult.data || []).forEach(row => {
+        checkedOutByTherapistAndDate[`${row.therapist_id}_${row.date}`] = row.check_out_time;
+      });
+      mergedTherapists = await applyCalendarTransfers(
+        resolvedBranchId, startDate, endDate,
+        (therapistsResult.data || [])
+          .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name)),
+        transferRowsPromise,
+      );
+      setCalendarStatic(staticKey, { branch, mergedTherapists, rooms: roomsResult.data || [], checkedOutByTherapistAndDate });
+    }
+
+    // Bookings in the date range, excluding Cancelled and No Show.
+    let bookings = bookingsResult.data || [];
 
     // Name and phone are MASKED, not withheld: staff still need to tell two
     // bookings apart and confirm the person in front of them.
@@ -7052,11 +7169,11 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         branchHours: {
           openTime: branch.open_time || '09:00:00',
           closeTime: branch.close_time || '21:00:00',
-          timezone: branch.timezone || 'Asia/Kathmandu',
+          timezone: branch.timezone || NEPAL_TZ,
         },
         // ZNLY-278: an own-only login gets only its own team member back: colleagues' columns would look free while they are busy.
         therapists: calendarColumnsFor(vis.ownBookingsOnly, finalTherapists, vis.therapistId),
-        rooms: roomsResult.data || [],
+        rooms: reused ? reused.rooms : (roomsResult.data || []),
         bookings: bookingsWithNewFlag,
         checkedOutByTherapistAndDate,
       },
@@ -7111,7 +7228,7 @@ export async function createBooking({
   try {
     const availabilityOverride = overrideReasonOf(overrideReason);
     if (isWalkIn) { knownCustomerId = undefined; customerPhone = null; customerEmail = null; }
-    if (!isWalkIn && (!customerPhone || !customerPhone.trim()) && !knownCustomerId) {
+    if (!isWalkIn && (!customerPhone || !customerPhone.trim()) && !knownCustomerId && !(await customerPhoneOptional(resolveBranchId(branchId)))) {
       return { data: null, error: { code: 'PHONE_REQUIRED', message: 'Phone number is required' } };
     }
 
@@ -7149,7 +7266,7 @@ export async function createBooking({
       // customer record can legitimately have neither on file. Fail closed
       // here rather than silently writing a booking with no way to look the
       // customer back up by contact info.
-      if (!customerPhone && !customerEmail) {
+      if (!customerPhone && !customerEmail && !(await customerPhoneOptional(resolveBranchId(branchId)))) {
         return { data: null, error: { code: 'NO_CONTACT_INFO', message: 'This customer has no phone or email on file — add one to their profile before booking.' } };
       }
     } else if (!isWalkIn) {
@@ -9359,7 +9476,7 @@ export async function toggleTherapistActive({ therapistId, isActive }) {
 
     // If deactivating, check for future bookings
     if (!isActive) {
-      const today = new Date().toISOString().split('T')[0];
+      const today = nepalToday();
       const { data: futureBookings, error: bookingsError } = await supabase
         .from('bookings')
         .select('id')
@@ -9714,11 +9831,10 @@ export async function fetchClosedDateRanges(branchId) {
 export async function fetchPublicClosedDateRanges(branchId, { days = 400 } = {}) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);
-    const start = new Date();
-    const end = new Date(start.getTime() + days * 86400000);
-    const iso = (d) => d.toISOString().split('T')[0];
+    const start = nepalToday();
+    const end = addDays(start, days);
     const { data, error } = await supabase.rpc('public_get_closed_dates', {
-      p_branch_id: resolvedBranchId, p_start: iso(start), p_end: iso(end),
+      p_branch_id: resolvedBranchId, p_start: start, p_end: end,
     });
     if (error) throw error;
     const dates = (data || []).map((r) => r.closed_date).sort();
@@ -9808,9 +9924,7 @@ export async function deleteBlock({ blockId, scope, occurrenceDate = null }) {
 
     if (scope === 'following') {
       if (!occurrenceDate) return { data: null, error: { code: 'INVALID_INPUT', message: 'occurrenceDate is required.' } };
-      const dayBefore = new Date(occurrenceDate);
-      dayBefore.setDate(dayBefore.getDate() - 1);
-      const endDateStr = dayBefore.toISOString().split('T')[0];
+      const endDateStr = addDays(occurrenceDate, -1);
 
       const { error } = await supabase
         .from('manual_blocks')
@@ -9894,9 +10008,7 @@ export async function updateBlock({ blockId, scope, occurrenceDate = null, ...fi
 
       // scope === 'following': cap the existing series the day before occurrenceDate, then
       // insert a new row starting at occurrenceDate carrying the edited fields forward.
-      const dayBefore = new Date(occurrenceDate);
-      dayBefore.setDate(dayBefore.getDate() - 1);
-      const endDateStr = dayBefore.toISOString().split('T')[0];
+      const endDateStr = addDays(occurrenceDate, -1);
 
       const { error: capError } = await supabase
         .from('manual_blocks')
@@ -11097,7 +11209,7 @@ export async function toggleServiceActive({ serviceId, isActive }) {
 
     // If deactivating, check for future bookings (within this org's branches)
     if (!isActive) {
-      const today = new Date().toISOString().split('T')[0];
+      const today = nepalToday();
       const { data: futureBookings, error: bookingsError } = await supabase
         .from('bookings')
         .select('id, branches!inner(org_id)')
@@ -12161,7 +12273,7 @@ export async function getCustomerIntelligence({ branchId }) {
     }
 
     // 3. Enrich each customer with stats + loyalty tier
-    const today = new Date().setHours(0, 0, 0, 0);
+    const today = Date.parse(nepalToday()); // UTC midnight of the Nepal day; lastVisitDate below is a date string parsed the same way
 
     const enriched = customers.map(c => {
       const s = statsMap[c.id] || {
@@ -12260,9 +12372,7 @@ export async function getCustomerIntelligence({ branchId }) {
   }
 }
 
-// Customers list (V11): every customer of the org with next/last visit, in-spa flag, balance, spent and a lifecycle segment
-// (derivation in utils/customerDirectory). Org-wide like getCustomerIntelligence. Both big tables are paged with .range() so
-// PostgREST's 1,000-row cap never truncates the list; membership status comes from the existing staff-safe RPC (one call).
+// Pages every row of a big table with .range() so PostgREST's 1,000-row cap never truncates it.
 const pageAllRows = async (buildQuery) => {
   const PAGE = 1000;
   const rows = [];
@@ -12275,50 +12385,46 @@ const pageAllRows = async (buildQuery) => {
   return rows;
 };
 
-export async function getCustomerDirectory({ branchId, now = new Date() }) {
+// The directory is computed in SQL (migration 419: customer_directory_page / customer_directory_summary), org-wide through the
+// caller's RLS. "Today"/"now" come from the server's Nepal clock, never the browser's. The old version downloaded every customer and
+// booking and derived all of this here; utils/customerDirectory.js stays the reference the parity test compares the SQL against.
+const directoryArgs = ({ search, tab, segment, noMember, therapist, service, last, sort, dir, limit = PAGE_SIZE_DEFAULT, offset = 0, onlyId }) => ({
+  p_search: search || null,
+  p_tab: tab || 'all',
+  p_segment: segment || null,
+  p_no_member: !!noMember,
+  p_therapist: therapist || null,
+  p_service: service || null,
+  p_last: last || null,
+  p_sort: sort || 'next',
+  p_dir: dir || null,
+  p_limit: limit,
+  p_offset: offset,
+  p_only_id: onlyId || null,
+  p_with_members: !!MEMBERSHIP_ENABLED,
+});
+const PAGE_SIZE_DEFAULT = 25;
+
+/** One page of the Customers list (filter + search + sort + paging done in SQL). → { rows, total, today } */
+export async function getCustomerDirectoryPage(opts = {}) {
   try {
-    if (!branchId) {
-      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
-    }
-    // Resolve the org (the Overall sentinel has no branches row, so use the logged-in user's profile for it).
-    let orgId;
-    if (isOverallBranch(branchId)) {
-      const { profile, error: authError } = await getAuthenticatedUser();
-      if (authError) return { data: null, error: authError };
-      orgId = profile.org_id;
-    } else {
-      const { data: branch, error: branchErr } = await supabase.from('branches').select('org_id').eq('id', resolveBranchId(branchId)).single();
-      if (branchErr) throw branchErr;
-      orgId = branch.org_id;
-    }
-    const { data: orgBranches, error: orgBranchesErr } = await supabase.from('branches').select('id').eq('org_id', orgId);
-    if (orgBranchesErr) throw orgBranchesErr;
-    const orgBranchIds = (orgBranches || []).map((b) => b.id);
-
-    const [customers, bookings, statusResult] = await Promise.all([
-      pageAllRows(() => supabase.from('customers').select('id, full_name, phone, email, gender, created_at').eq('org_id', orgId).order('id')),
-      pageAllRows(() => supabase.from('bookings')
-        .select('id, customer_id, status, payment_status, final_amount, date, start_time, service_name_snapshot, therapist_id, therapist_name_snapshot, is_locked, payments(amount), payment_refunds(amount)')
-        .not('customer_id', 'is', null)
-        .in('branch_id', orgBranchIds)
-        .order('id')),
-      MEMBERSHIP_ENABLED ? fetchMembershipStatus() : Promise.resolve({ data: [] }),
-    ]);
-
-    const memberIds = new Set((statusResult.data || []).filter((r) => r.status === 'active').map((r) => r.customerId));
-    const { today, hm } = nepalNow(now);
-    const therapists = new Map();
-    for (const b of bookings) if (b.therapist_id && b.therapist_name_snapshot && !therapists.has(b.therapist_id)) therapists.set(b.therapist_id, b.therapist_name_snapshot);
-    return {
-      data: {
-        customers: buildCustomerDirectory({ customers, bookings, memberIds, today, nowHM: hm }),
-        therapists: [...therapists].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
-        today,
-      },
-      error: null,
-    };
+    const { data, error } = await supabase.rpc('customer_directory_page', directoryArgs(opts));
+    if (error) throw error;
+    return { data: { rows: data?.rows || [], total: data?.total || 0, today: data?.today }, error: null };
   } catch (error) {
-    console.error('[API] getCustomerDirectory error:', error.message);
+    console.error('[API] getCustomerDirectoryPage error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Org-wide numbers around the list: tab counts, lifecycle mix, Spotlight inputs, filter options. → { tabs, mix, spotlight, therapists, services, today } */
+export async function getCustomerDirectorySummary() {
+  try {
+    const { data, error } = await supabase.rpc('customer_directory_summary', { p_with_members: !!MEMBERSHIP_ENABLED });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] getCustomerDirectorySummary error:', error.message);
     return { data: null, error };
   }
 }
@@ -12362,13 +12468,13 @@ export async function getRiskIndicators({ branchId, date }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const today = date || new Date().toISOString().split('T')[0];
+    const today = date || nepalToday();
 
     // Date windows
-    const sevenDaysAgo = new Date(new Date(today).getTime() - 7 * 86400000).toISOString().split('T')[0];
-    const fourteenDaysAgo = new Date(new Date(today).getTime() - 14 * 86400000).toISOString().split('T')[0];
-    const thirtyDaysAgo = new Date(new Date(today).getTime() - 30 * 86400000).toISOString().split('T')[0];
-    const sixtyDaysAgo = new Date(new Date(today).getTime() - 60 * 86400000).toISOString().split('T')[0];
+    const sevenDaysAgo = addDays(today, -7);
+    const fourteenDaysAgo = addDays(today, -14);
+    const thirtyDaysAgo = addDays(today, -30);
+    const sixtyDaysAgo = addDays(today, -60);
 
     // 1. Unpaid risk: Confirmed/Completed + unpaid
     let unpaidQuery = supabase
@@ -12595,7 +12701,7 @@ function combineDateTimeKathmandu(date, time) {
 function formatTimeKathmandu(isoTimestamp) {
   if (!isoTimestamp) return null;
   return new Date(isoTimestamp).toLocaleTimeString('en-GB', {
-    timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZone: NEPAL_TZ, hour: '2-digit', minute: '2-digit', hour12: false,
   });
 }
 
@@ -12609,7 +12715,7 @@ export async function fetchAttendance({ branchId, date }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const targetDate = date || nepalToday();
 
     // Parallel: active therapists + attendance records. Attendance is one record per
     // (therapist_id, date) globally — not scoped by branch_id — so it's fetched unfiltered
@@ -12943,7 +13049,7 @@ export async function fetchAttendanceByTherapistIds({ therapistIds, date }) {
   try {
     if (!therapistIds || therapistIds.length === 0) return { data: {}, error: null };
 
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const targetDate = date || nepalToday();
 
     const { data, error } = await supabase
       .from('therapist_attendance')
@@ -12979,7 +13085,7 @@ export async function fetchAttendanceSummary({ branchId, date }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const targetDate = date || nepalToday();
 
     // Attendance is keyed by (therapist_id, date) globally, not branch_id, so it's fetched
     // unfiltered by branch (in parallel with the therapist list) and joined in-memory against
@@ -13266,9 +13372,9 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
     }
 
     const overall = isOverallBranch(branchId);
-    const today = new Date().toISOString().split('T')[0];
+    const today = nepalToday();
     const endDate = toDate || today;
-    const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
+    const startDate = fromDate || addDays(endDate, -30);
 
     // 1. Fetch active therapists + branch hours.
     // Overall: build a branch_id → operating-window map across the org instead of one branch row.
@@ -13431,9 +13537,9 @@ export async function getTherapistOverview({ branchId, therapistId, fromDate, to
       return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = nepalToday();
     const endDate = toDate || today;
-    const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
+    const startDate = fromDate || addDays(endDate, -30);
 
     // Branch hours come from the branchId PARAM (resolveBranchId, same as getTherapistPerformance's
     // non-overall path) — not from the therapist's live branch_id. The bookings/attendance
@@ -13553,9 +13659,9 @@ export async function getTherapistAttendanceDetail({ branchId, therapistId, from
       return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = nepalToday();
     const endDate = toDate || today;
-    const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
+    const startDate = fromDate || addDays(endDate, -30);
 
     // Branch id from the branchId PARAM (resolveBranchId), matching the attendance query's withBranch() scope (see getTherapistOverview).
     const hoursBranch = await hoursBranchOf(branchId, therapistId);
@@ -13682,6 +13788,7 @@ export async function fetchOrganizationBySlug(slug) {
         settings,
         logo_url,
         hero_image_url,
+        require_customer_phone,
         industries (
           id,
           name,
@@ -14609,7 +14716,7 @@ const prevPeriodMonth = (periodMonth) => {
   const [y, m] = periodMonth.split('-').map(Number);
   return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
 };
-const nepalMonthOf = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' }).slice(0, 7);
+const nepalMonthOf = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: NEPAL_TZ }).slice(0, 7);
 
 // What product commission is worked out from, per therapist, for one pay run:
 //   earned   = unrefunded product_sales.total_amount of sales made in [month] (Nepal) at the branch, credited to that therapist, for
@@ -15072,7 +15179,7 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
     }
 
     // 2. Create a fresh customer. A customer profile needs a phone number (customers.phone is required).
-    if (!normalizedPhone) {
+    if (!normalizedPhone && !(await customerPhoneOptional(branchId))) {
       return { data: null, error: { code: 'PHONE_REQUIRED', message: 'A phone number is required to add a customer.' } };
     }
     const { data: created, error: insertErr } = await supabase
@@ -15081,7 +15188,7 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
         org_id: orgId,
         branch_id: branchId,
         full_name: fullName,
-        phone: normalizedPhone,
+        phone: normalizedPhone || null,   // NULL, never a placeholder (org setting require_customer_phone = false)
         email: normalizedEmail,
         gender: normalizedGender,
         date_of_birth: normalizedDob,
@@ -19733,7 +19840,7 @@ async function provisionStaffLogin({ email, fullName, orgId, branchId, role, log
   return { data: created, error: null };
 }
 
-export async function grantStaffAccess({ therapistId, email, loginAccess, role, branchIds, calendarVisibility, canViewCustomerDetails, canViewPrices, password, pin }) {
+async function grantStaffAccessImpl({ therapistId, email, loginAccess, role, branchIds, calendarVisibility, canViewCustomerDetails, canViewPrices, password, pin }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -19871,10 +19978,15 @@ export async function grantStaffAccess({ therapistId, email, loginAccess, role, 
   }
 }
 
+// Editing staff access can change the signed-in user's own role/visibility, so drop the cached profile (see getAuthenticatedUser).
+export async function grantStaffAccess(...args) {
+  try { return await grantStaffAccessImpl(...args); } finally { invalidateAuthenticatedUser(); }
+}
+
 // The inverse of grantStaffAccess: attach an existing login to an existing
 // therapist without changing the account's settings. Rejects if either side
 // is already linked.
-export async function linkStaffToAccount({ therapistId, userId }) {
+async function linkStaffToAccountImpl({ therapistId, userId }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -19922,9 +20034,14 @@ export async function linkStaffToAccount({ therapistId, userId }) {
   }
 }
 
+// Editing staff access can change the signed-in user's own role/visibility, so drop the cached profile (see getAuthenticatedUser).
+export async function linkStaffToAccount(...args) {
+  try { return await linkStaffToAccountImpl(...args); } finally { invalidateAuthenticatedUser(); }
+}
+
 // Unlinking is not deletion: the users row survives, it just stops being
 // anyone's "who am I" link. The therapist goes back to no-login.
-export async function unlinkStaffAccess({ therapistId }) {
+async function unlinkStaffAccessImpl({ therapistId }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -19949,10 +20066,15 @@ export async function unlinkStaffAccess({ therapistId }) {
   }
 }
 
+// Editing staff access can change the signed-in user's own role/visibility, so drop the cached profile (see getAuthenticatedUser).
+export async function unlinkStaffAccess(...args) {
+  try { return await unlinkStaffAccessImpl(...args); } finally { invalidateAuthenticatedUser(); }
+}
+
 // Detail screen's Save: role / login_access / calendar_visibility / branch
 // grants for an already-linked (or account-only) user. Branch grants, when
 // provided, REPLACE the full set — same manual-ticking rule as grantStaffAccess.
-export async function updateStaffAccess({ userId, role, loginAccess, calendarVisibility, branchIds, canViewCustomerDetails, canViewPrices, pin }) {
+async function updateStaffAccessImpl({ userId, role, loginAccess, calendarVisibility, branchIds, canViewCustomerDetails, canViewPrices, pin }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -20048,6 +20170,11 @@ export async function updateStaffAccess({ userId, role, loginAccess, calendarVis
     console.error('[API] updateStaffAccess error:', error.message);
     return { data: null, error: plainError(error) };
   }
+}
+
+// Editing staff access can change the signed-in user's own role/visibility, so drop the cached profile (see getAuthenticatedUser).
+export async function updateStaffAccess(...args) {
+  try { return await updateStaffAccessImpl(...args); } finally { invalidateAuthenticatedUser(); }
 }
 
 // ============================================================
