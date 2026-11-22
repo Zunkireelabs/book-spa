@@ -24,7 +24,8 @@ import { teamMemberLower } from '../../../../../utils/industryTerms';
 // Panel routing for the calendar: which panel is open (booking details, quick-create, block / transfer forms), the
 // dirty-guard refs and open/switch/close helpers, the empty-slot / drag-to-create / new-booking entry points, the
 // rebook "pick and place" mode, and the create / block / transfer-cancel actions those panels trigger.
-export function useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, gridRef, canViewCustomerDetails = true }) {
+export function useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, showGuide, gridRef, canViewCustomerDetails = true }) {
+  const failWith = (error, fallback) => (showGuide ? showGuide(error, {}, 'calendar-place') : showToast(friendlyError(error, fallback), 'error'));
   const [searchParams, setSearchParams] = useSearchParams();
   const { guard } = useAvailabilityGuard();
   const { branches } = useBranch();
@@ -288,10 +289,10 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
             // The request may have committed before the connection dropped and a retry isn't safe: leave pick mode and let
             // the refreshed calendar show what actually happened.
             setRebookSource(null);
-            showToast(NETWORK_CHECK_CALENDAR_COPY, 'error');
+            failWith(result.error, 'Failed to reschedule.');
             refreshCalendar();
           } else {
-            showToast(friendlyError(result.error, 'Failed to reschedule.'), 'error');
+            failWith(result.error, 'Failed to reschedule.');
           }
         } else {
           setRebookSource(null);
@@ -336,10 +337,10 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
         if (isNetworkError(result.error)) {
           // Rebook isn't atomic: the insert may have committed before the connection dropped, so restoring pick mode would invite a
           // duplicate on retry. Leave pick mode and show the real state.
-          showToast(NETWORK_CHECK_CALENDAR_COPY, 'error');
+          failWith(result.error, 'Failed to rebook.');
           refreshCalendar();
         } else {
-          showToast(friendlyError(result.error, 'Failed to rebook.'), 'error');
+          failWith(result.error, 'Failed to rebook.');
           // Restore rebook mode on failure so user can retry
           setRebookSource(source);
         }
@@ -444,7 +445,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
 
   const handleQuickCreateSubmit = useCallback(async (formData) => {
     const r = await submitQuickCreate({ formData, branchId, guard });
-    if (r.error) return { message: r.error, code: r.code };
+    if (r.error) return { message: r.error, code: r.code, raw: r.raw };
     showToast(r.toast.msg, r.toast.type);
     // The booking exists for real: flip the waitlist entry to 'booked'. Best-effort, a failure here never undoes the booking.
     if (bookingWaitlistEntryId && r.bookingId) {

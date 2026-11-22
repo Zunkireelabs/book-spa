@@ -30,10 +30,16 @@ describe('buildAddServiceSlot', () => {
   it('junction-table therapists are read before the primary one', () => {
     expect(sameStaffIfFree(base, [raw({ therapist_id: null, booking_therapists: [{ therapist_id: 't-susan' }] })], 11 * 60 + 50)).toEqual([]);
   });
-  it('rebook: title, service carried over, no time or staff default', () => {
+  it('rebook: title, service carried over, time = original start, same staff if free then', () => {
     const s = buildAddServiceSlot({ booking: { ...base, customerId: 'c1' }, mode: 'rebook' });
-    expect(s).toMatchObject({ title: 'Rebook', defaultServiceId: 'svc-1', openServiceFirst: false, defaultCustomerId: 'c1' });
-    expect(s.hour).toBeUndefined(); expect(s.defaultTherapistIds).toBeUndefined();
+    expect(s).toMatchObject({ title: 'Rebook', defaultServiceId: 'svc-1', openServiceFirst: false, defaultCustomerId: 'c1', hour: 11, minute: 20, defaultTherapistIds: ['t-susan'] });
+  });
+  it.each([
+    ['busy at the original start', [raw({ start_time: '11:00:00', end_time: '12:00:00' })], []],
+    ['free at the original start', [raw({ start_time: '11:30:00', end_time: '12:00:00' })], ['t-susan']],
+    ['the booking itself does not block its own rebook', [raw({ id: 'uuid-1', start_time: '11:20:00', end_time: '11:50:00' })], ['t-susan']],
+  ])('rebook staff default: %s', (_n, rb, want) => {
+    expect(buildAddServiceSlot({ booking: base, mode: 'rebook', rawBookings: rb }).defaultTherapistIds).toEqual(want);
   });
   it('old booking without a record keeps name and split phone for the panel to complete', () => {
     const s = buildAddServiceSlot({ booking: { ...base, customerName: 'Ram', customerPhone: '+9779841000000' }, mode: 'rebook' });

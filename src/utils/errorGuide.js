@@ -7,7 +7,9 @@ import { isNetworkError, friendlyError, NETWORK_CHECK_CALENDAR_COPY } from './fr
 import { fieldForErrorCode } from './quickCreateErrorField';
 import { capture } from '../lib/analytics';
 
-export const SYSTEM_MESSAGE = "This couldn't be saved. Nothing was changed. Try again; if it keeps happening, we've been told.";
+export const SYSTEM_LEAD = "This couldn't be saved.";
+export const SYSTEM_HOW = "Nothing was changed. Try again; if it keeps happening, we've been told.";
+export const SYSTEM_MESSAGE = `${SYSTEM_LEAD} ${SYSTEM_HOW}`;
 export const CONNECTION_LOST_LEAD = 'Connection lost.';
 
 // 'HH:MM' or 'HH:MM:SS' -> '1:30 pm'
@@ -37,7 +39,7 @@ const freeNames = (c) => (c.freeStaff || []).map((s) => s.name.split(' ')[0]).jo
 
 // code -> { kind, field?, build(ctx, err) -> { lead, how, why?, actions? } }
 const fix = (build, field) => ({ kind: 'fix', field, build });
-const system = (lead = SYSTEM_MESSAGE) => ({ kind: 'system', build: () => ({ lead }) });
+const system = () => ({ kind: 'system', build: () => ({ lead: SYSTEM_LEAD }) });
 const availability = (how) => fix((c, e) => ({ lead: safeMsg(e) || `${who(c)} is not available ${when(c)}.`, how, actions: [...timeActions(c), ...altStaff(c), pickStaff] }), 'staff');
 
 export const ERROR_CATALOG = {
@@ -248,7 +250,7 @@ export function describeError(err, context = {}, opts = {}) {
   const entry = code && ERROR_CATALOG[code];
   if (!entry || entry.kind === 'system') {
     return {
-      kind: 'system', code: code || err?.code || 'UNKNOWN', lead: SYSTEM_MESSAGE, how: '', why: '', field: null,
+      kind: 'system', code: code || err?.code || 'UNKNOWN', lead: SYSTEM_LEAD, how: SYSTEM_HOW, why: '', field: null,
       networkLost: false, canRetry: true, ref: (opts.makeRef || makeRef)(), actions: [act('try-again', 'Try again', 'retry')],
     };
   }

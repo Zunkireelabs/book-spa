@@ -8,9 +8,9 @@ import BottomSheet, { useMediaQuery } from './BottomSheet';
 // `onOpenPhone`: phone only, the caller shows the list itself instead of this shell's own bottom sheet.
 // `renderTrigger({ open, toggle, btnRef })` replaces the default full-width row button (e.g. a header "＋ Add client" link); `openSignal` opens the picker
 // from outside whenever it changes to a new positive number.
-const PickShell = ({ tone = 'border-border bg-surface', title = 'Pick', renderPicker, onOpenPhone = null, disabled = false, sheetFooter, belowRow = null, renderTrigger = null, openSignal = 0, children }) => {
+const PickShell = ({ tone = 'border-border bg-surface', title = 'Pick', renderPicker, onOpenPhone = null, disabled = false, sheetFooter, belowRow = null, renderTrigger = null, openSignal = 0, onSignalConsumed = null, children }) => {
   const [open, setOpen] = useState(false);
-  useEffect(() => { if (openSignal > 0) setOpen(true); }, [openSignal]);
+  useEffect(() => { if (openSignal > 0) { setOpen(true); onSignalConsumed?.(); } }, [openSignal]); // eslint-disable-line react-hooks/exhaustive-deps
   const wrapRef = useRef(null);
   const btnRef = useRef(null);
   const popRef = useRef(null);

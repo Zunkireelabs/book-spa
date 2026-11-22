@@ -95,13 +95,13 @@ describe('describeError', () => {
   });
   it('unknown code: system message, Try again, ref, never the raw text', () => {
     const c = describeError({ code: 'XX999', message: 'duplicate key value violates unique constraint "bookings_pkey"' });
-    expect(c.kind).toBe('system'); expect(c.lead).toBe(SYSTEM_MESSAGE);
+    expect(c.kind).toBe('system'); expect(`${c.lead} ${c.how}`).toBe(SYSTEM_MESSAGE);
     expect(c.canRetry).toBe(true); expect(c.actions.map((a) => a.label)).toEqual(['Try again']);
     expect(JSON.stringify(c)).not.toMatch(/bookings_pkey|duplicate key/); expect(c.ref).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{2}$/);
   });
   it('catalog system entries (BOOKING_NOT_FOUND) get no steps', () => {
     const c = describeError({ code: 'BOOKING_NOT_FOUND' });
-    expect(c.kind).toBe('system'); expect(c.how).toBe('');
+    expect(c.kind).toBe('system'); expect(c.lead).toBe("This couldn't be saved.");
   });
   it('network error: connection lost, may have saved, Show on calendar, no Try again, never "nothing was changed"', () => {
     const c = describeError(new TypeError('Failed to fetch'));

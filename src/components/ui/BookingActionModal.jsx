@@ -36,6 +36,8 @@ import { useNavigate } from 'react-router-dom';
 import AvailabilityNoteLine from './AvailabilityNoteLine';
 import { AlertsBlock } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
 import { getBookingStatusColors } from '../../utils/bookingStatusColors';
+import { InlineError, GuideCard } from './GuideCard';
+import { describeError } from '../../utils/errorGuide';
 import { editFormChanged, editFormSeed, editChanges, isClientlessWalkIn } from '../../utils/editDetails';
 import { formatPhoneGrouped } from '../../utils/phone';
 import { parsePhone } from './CountryCodeSelect';
@@ -732,19 +734,44 @@ const BookingActionModal = ({
     }
   }, [showExtendPanel]);
 
+  // ── Error guidance (ZNLY-365): every refused save becomes a ✦ card (or the calm system card); field checks stay plain text ──
+  const errCtx = (extra) => ({
+    staffLabel, staffLabelPlural, hasRooms: (rooms || []).length > 0, staffName: booking?.therapists?.[0]?.name,
+    serviceName: booking?.service, startTime: booking?.startTime?.slice(0, 5), endTime: booking?.endTime?.slice(0, 5),
+    status: booking?.status ? booking.status.charAt(0).toUpperCase() + booking.status.slice(1) : undefined, isPaid: booking?.paymentStatus === 'paid',
+    customerName: booking?.customerName, ...extra,
+  });
+  const guideFor = (error, extra) => describeError(error, errCtx(extra));
+  const retryRef = useRef(null);
+  const [guideNote, setGuideNote] = useState('');
+  // Fix buttons only fill or open something. Nothing here saves.
+  const onGuideAction = (a) => {
+    switch (a.intent) {
+      case 'show-calendar': onClose?.(); break;
+      case 'set-discount-percent': setDiscountType('percentage'); setDiscountValue(String(a.value)); setDiscountError(null); setGuideNote(''); break;
+      case 'explain-manager': setGuideNote('Managers and admins can give a bigger discount. Ask one of them to apply it for you.'); break;
+      case 'explain-admin': setGuideNote('An admin can correct a completed or paid booking. Every change is logged.'); break;
+      case 'open-staff': setActiveTab('assign'); break;
+      case 'retry': { const r = retryRef.current; if (r) r(); break; }
+      default: break;
+    }
+  };
+
   const handleExtendService = async (option) => {
     if (!booking || !onEditBooking) return;
     setExtendError(null);
     setExtendSubmitting(true);
     try {
-      const result = await onEditBooking(booking.bookingId, { serviceId: option.id });
+      const result = await onEditBooking(booking.bookingId, { serviceId: option.id }, { inline: true });
       if (result?.error) {
-        setExtendError(friendlyError(result.error, 'Failed to extend service.'));
+        retryRef.current = () => handleExtendService(option);
+        setExtendError(guideFor(result.error));
       } else {
         setShowExtendPanel(false);
       }
     } catch (error) {
-      setExtendError('An unexpected error occurred.');
+      retryRef.current = () => handleExtendService(option);
+      setExtendError(guideFor(error));
     } finally {
       setExtendSubmitting(false);
     }
@@ -781,14 +808,16 @@ const BookingActionModal = ({
 
     setIsLoading(true);
     try {
-      const result = await onEditBooking(booking.bookingId, updates);
+      const result = await onEditBooking(booking.bookingId, updates, { inline: true });
       if (result?.error) {
-        setEditError(friendlyError(result.error, 'Failed to update booking.'));
+        retryRef.current = () => handleSaveEdit();
+        setEditError(guideFor(result.error));
       } else {
         setIsEditing(false);
       }
     } catch (error) {
-      setEditError('An unexpected error occurred.');
+      retryRef.current = () => handleSaveEdit();
+      setEditError(guideFor(error));
     } finally {
       setIsLoading(false);
     }
@@ -1077,21 +1106,28 @@ const BookingActionModal = ({
               selectedTherapists.slice(1).map(tid => [tid, therapistRoomOverrides[tid] || selectedRoom || null])
             )
           : undefined;
-        await onAssignTherapist(
+        const assigned = await onAssignTherapist(
           booking.bookingId,
           selectedTherapists,
           notes,
           selectedRoom || null,
           overridesToSend,
           isCoupleAssignment ? (companionName.trim() || null) : undefined,
-          isCoupleAssignment ? (companionPhone.value || null) : undefined
+          isCoupleAssignment ? (companionPhone.value || null) : undefined,
+          { inline: true }
         );
+        if (assigned?.error) {
+          retryRef.current = () => handleAssignTherapist();
+          setActionError(guideFor(assigned.error));
+          return;
+        }
       }
       // The panel stays open on the updated booking (like status changes); the modal closes as before.
       if (variant === 'panel') await onRefreshBooking?.(booking.bookingId);
       else onClose();
     } catch (error) {
-      setActionError(friendlyError(error, 'Assignment failed. Please try again.'));
+      retryRef.current = () => handleAssignTherapist();
+      setActionError(guideFor(error));
     } finally {
       setIsLoading(false);
     }
@@ -1103,7 +1139,13 @@ const BookingActionModal = ({
     setActionError(null);
     try {
       if (onUpdateStatus) {
-        await onUpdateStatus(booking.bookingId, newStatus, reason);
+        const updated = await onUpdateStatus(booking.bookingId, newStatus, reason, { inline: true });
+        if (updated?.error) {
+          retryRef.current = () => handleStatusUpdate(newStatus, reason);
+          setActionError(guideFor(updated.error));
+          setPendingStatus(null);
+          return;
+        }
       }
       setPendingStatus(null);
       if (variant === 'panel') {
@@ -1113,7 +1155,8 @@ const BookingActionModal = ({
         onClose();
       }
     } catch (error) {
-      setActionError(friendlyError(error, 'Status update failed. Please try again.'));
+      retryRef.current = () => handleStatusUpdate(newStatus, reason);
+      setActionError(guideFor(error));
     } finally {
       setIsLoading(false);
     }
@@ -1391,7 +1434,7 @@ const BookingActionModal = ({
     setMemberBusy(true);
     setDiscountError(null);
     const { error } = await applyMemberDiscount({ bookingId: booking.bookingId, remove });
-    if (error) setDiscountError(friendlyError(error, 'Could not change the member discount.'));
+    if (error) setDiscountError(guideFor(error));
     await loadMemberCtx();
     await onRefreshBooking?.(booking.bookingId);
     setMemberBusy(false);
@@ -1468,7 +1511,7 @@ const BookingActionModal = ({
     const hardCeiling = userRole === 'staff' ? 50 : 100;
     const maxRowEffPercent = Math.max(...rowPlans.map(r => r.effPercent));
     if (maxRowEffPercent > hardCeiling) {
-      setDiscountError(`Discount cannot exceed ${hardCeiling}%.`);
+      setDiscountError(guideFor({ code: 'DISCOUNT_LIMIT_EXCEEDED' }, { limitPercent: hardCeiling }));
       return;
     }
 
@@ -1478,7 +1521,7 @@ const BookingActionModal = ({
     const exceedsLimit = maxRowEffPercent > maxPercent;
 
     if (exceedsLimit && !selectedApprover) {
-      setDiscountError('Select a manager or admin to send this discount request to.');
+      setDiscountError(guideFor({ code: 'APPROVER_REQUIRED' }));
       return;
     }
 
@@ -1499,7 +1542,7 @@ const BookingActionModal = ({
       }
 
       if (failed) {
-        setDiscountError(friendlyError(lastResult?.error, 'Failed to apply discount.'));
+        setDiscountError(guideFor(lastResult?.error, { limitPercent: discountMaxPercent }));
       } else if (lastResult?.data?.isPending) {
         setDiscountSuccess('pending');
         setDiscountValue('');
@@ -1513,7 +1556,7 @@ const BookingActionModal = ({
         setRowDiscountOverrides({});
       }
     } catch (error) {
-      setDiscountError('An unexpected error occurred.');
+      setDiscountError(guideFor(error));
     } finally {
       setIsLoading(false);
     }
@@ -2532,18 +2575,12 @@ const BookingActionModal = ({
 
                 {/* Action error (status update failures) */}
                 {actionError && !editError && (
-                  <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-error/10 border border-error/20">
-                    <Icon name="AlertTriangle" size={14} className="text-error flex-shrink-0" />
-                    <span className="font-body font-body-normal text-xs text-error">{actionError}</span>
-                  </div>
+                  <><InlineError error={actionError} onAction={onGuideAction} area="booking-panel" />{actionError && guideNote ? <p data-guide-note className="mt-1.5 text-xs text-text-secondary">{guideNote}</p> : null}</>
                 )}
 
                 {/* Edit error */}
                 {editError && (
-                  <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-error/10 border border-error/20">
-                    <Icon name="AlertTriangle" size={14} className="text-error flex-shrink-0" />
-                    <span className="font-body font-body-normal text-xs text-error">{editError}</span>
-                  </div>
+                  <><InlineError error={editError} onAction={onGuideAction} area="booking-panel" />{editError && guideNote ? <p data-guide-note className="mt-1.5 text-xs text-text-secondary">{guideNote}</p> : null}</>
                 )}
               </div>
             )}
@@ -2714,10 +2751,7 @@ const BookingActionModal = ({
                 </div>
 
                 {actionError && (
-                  <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-error/10 border border-error/20">
-                    <Icon name="AlertTriangle" size={14} className="text-error flex-shrink-0" />
-                    <span className="font-body font-body-normal text-xs text-error">{actionError}</span>
-                  </div>
+                  <><InlineError error={actionError} onAction={onGuideAction} area="booking-panel" />{actionError && guideNote ? <p data-guide-note className="mt-1.5 text-xs text-text-secondary">{guideNote}</p> : null}</>
                 )}
               </div>
             )}
@@ -2869,10 +2903,7 @@ const BookingActionModal = ({
                           serviceLabel={[memberCtx.booking.serviceName || booking.service || 'Service', memberCtx.booking.serviceMinutes ? `${memberCtx.booking.serviceMinutes} min` : null].filter(Boolean).join(' · ')}
                           onApply={() => runMember(false)} onDecline={() => runMember(true)} />
                         {discountError && !showManualDiscount && (
-                          <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-error/10 border border-error/20">
-                            <Icon name="AlertTriangle" size={14} className="text-error flex-shrink-0" />
-                            <span className="font-body font-body-normal text-xs text-error">{discountError}</span>
-                          </div>
+                          <><InlineError error={discountError} onAction={onGuideAction} area="booking-panel" />{discountError && guideNote ? <p data-guide-note className="mt-1.5 text-xs text-text-secondary">{guideNote}</p> : null}</>
                         )}
                         <div className="border-t border-border pt-4">
                           <button type="button" onClick={() => setShowManualDiscount((v) => !v)} className="w-full flex items-start gap-2.5 text-left group" aria-expanded={showManualDiscount} data-manual-toggle>
@@ -3103,7 +3134,7 @@ const BookingActionModal = ({
                               discountReason: 'Discount cancelled',
                             });
                             if (result?.error) {
-                              setDiscountError(friendlyError(result.error, 'Failed to cancel discount.'));
+                              setDiscountError(guideFor(result.error));
                             } else {
                               setDiscountSuccess('removed');
                             }
@@ -3154,11 +3185,9 @@ const BookingActionModal = ({
                         </div>
                       )}
                       {discountExceedsCap && (
-                        <p className="text-xs text-error mt-1 flex items-center gap-1">
-                          <Icon name="AlertTriangle" size={12} />
-                          Discount cannot exceed {DISCOUNT_HARD_CAP}%.
-                        </p>
+                        <GuideCard card={guideFor({ code: 'DISCOUNT_LIMIT_EXCEEDED' }, { limitPercent: DISCOUNT_HARD_CAP })} onAction={onGuideAction} className="mt-1.5" />
                       )}
+                      {discountExceedsCap && guideNote && <p className="mt-1.5 text-xs text-text-secondary" data-guide-note>{guideNote}</p>}
                       {discountExceedsLimit && (
                         <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
                           <Icon name="AlertTriangle" size={12} />
@@ -3240,10 +3269,7 @@ const BookingActionModal = ({
 
                     {/* Error / Success */}
                     {discountError && (
-                      <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-error/10 border border-error/20">
-                        <Icon name="AlertTriangle" size={14} className="text-error flex-shrink-0" />
-                        <span className="font-body font-body-normal text-xs text-error">{discountError}</span>
-                      </div>
+                      <><InlineError error={discountError} onAction={onGuideAction} area="booking-panel" />{discountError && guideNote ? <p data-guide-note className="mt-1.5 text-xs text-text-secondary">{guideNote}</p> : null}</>
                     )}
                     {discountSuccess === 'approved' && (
                       <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-success/10 border border-success/20">
@@ -3589,10 +3615,7 @@ const BookingActionModal = ({
                 )}
 
                 {actionError && (
-                  <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-error/10 border border-error/20">
-                    <Icon name="AlertTriangle" size={14} className="text-error flex-shrink-0" />
-                    <span className="font-body font-body-normal text-xs text-error">{actionError}</span>
-                  </div>
+                  <><InlineError error={actionError} onAction={onGuideAction} area="booking-panel" />{actionError && guideNote ? <p data-guide-note className="mt-1.5 text-xs text-text-secondary">{guideNote}</p> : null}</>
                 )}
 
                 {visitProducts.length > 0 && (
@@ -3738,12 +3761,7 @@ const BookingActionModal = ({
                   </button>
                 </div>
 
-                {extendError && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-spa bg-error/10 border border-error/20">
-                    <Icon name="AlertCircle" size={14} className="text-error flex-shrink-0" />
-                    <span className="font-body text-xs text-error">{extendError}</span>
-                  </div>
-                )}
+                <><InlineError error={extendError} onAction={onGuideAction} area="booking-panel" />{extendError && guideNote ? <p data-guide-note className="mt-1.5 text-xs text-text-secondary">{guideNote}</p> : null}</>
 
                 <div className="space-y-2">
                   {extendOptions.map(option => (
@@ -3786,7 +3804,7 @@ const BookingActionModal = ({
             const { error } = await refundProductSale({ saleId: visitProductRefund.id, reason: (note || '').trim() || null });
             setIsLoading(false);
             setVisitProductRefund(null);
-            if (error) { setActionError(friendlyError(error, 'Could not refund the product.')); return; }
+            if (error) { setActionError(guideFor(error)); return; }
             loadVisitProducts();
           }}
         />

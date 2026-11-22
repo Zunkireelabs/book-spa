@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import Icon from '../AppIcon';
+import { reportSystemError } from '../../utils/errorGuide';
 
 // ZNLY-365: the ✦ guidance card for an error the user can fix, and the calm grey card for a system problem.
 // Both render a card model from utils/errorGuide.describeError(). Fix buttons only FILL or OPEN something (the parent maps
@@ -40,7 +42,12 @@ export const GuideCard = ({ card, onAction, className = '' }) => {
 
 // A bug, a server error or a lost connection: no steps. "Try again" only when the server answered with an error
 // (nothing was saved). After a lost connection the save may already have gone through, so the action is Show on calendar.
-export const SystemErrorCard = ({ card, onAction, className = '' }) => {
+export const SystemErrorCard = ({ card, onAction, className = '', area }) => {
+  // Every system error goes to the error log once, with the same reference id the user sees (no-op without a PostHog key).
+  const reported = useRef(null);
+  useEffect(() => {
+    if (card && reported.current !== card.ref) { reported.current = card.ref; reportSystemError(card, area); }
+  }, [card, area]);
   if (!card) return null;
   const actions = card.actions || [];
   return (
@@ -60,11 +67,41 @@ export const SystemErrorCard = ({ card, onAction, className = '' }) => {
 };
 
 // Picks the right card for a describeError() model.
-const ErrorGuide = ({ card, onAction, className }) => {
+const ErrorGuide = ({ card, onAction, className, area }) => {
   if (!card) return null;
   return card.kind === 'system'
-    ? <SystemErrorCard card={card} onAction={onAction} className={className} />
+    ? <SystemErrorCard card={card} onAction={onAction} className={className} area={area} />
     : <GuideCard card={card} onAction={onAction} className={className} />;
 };
 
 export default ErrorGuide;
+
+// An inline error slot that accepts what the modal's error state holds: nothing, a plain string (a field-level check, shown as the old
+// red line) or a describeError() card model (a refused save).
+export const InlineError = ({ error, onAction, area, className = '' }) => {
+  if (!error) return null;
+  if (typeof error === 'string') {
+    return (
+      <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-error/10 border border-error/20 ${className}`}>
+        <Icon name="AlertTriangle" size={14} className="text-error flex-shrink-0" />
+        <span className="font-body font-body-normal text-xs text-error">{error}</span>
+      </div>
+    );
+  }
+  return <ErrorGuide card={error} onAction={onAction} area={area} className={className} />;
+};
+
+// Calendar-level notice for a refused drag / reschedule / status change: the same cards in a floating box with a close button.
+// Only actions the caller can really run are shown (the caller passes `can`, a Set of intents).
+export const GuideNotice = ({ notice, onClose, onAction, can }) => {
+  if (!notice) return null;
+  const card = { ...notice.card, actions: (notice.card.actions || []).filter((a) => !can || can.has(a.intent)) };
+  return (
+    <div className="fixed left-1/2 top-4 z-toast w-[calc(100vw-32px)] max-w-[440px] -translate-x-1/2 shadow-spa-elevated rounded-[8px] bg-surface" data-guide-notice>
+      <div className="relative">
+        <ErrorGuide card={card} onAction={onAction} area={notice.area} />
+        <button type="button" aria-label="Close" onClick={onClose} className="absolute right-1 top-1 grid h-8 w-8 place-items-center text-[#8A8A90]">✕</button>
+      </div>
+    </div>
+  );
+};

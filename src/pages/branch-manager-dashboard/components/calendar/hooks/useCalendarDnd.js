@@ -15,7 +15,9 @@ import { teamMemberLower } from '../../../../../utils/industryTerms';
 
 // Drag-and-drop for the calendar grid: sensors, pointer tracking, drag start/move/over/end, block drag, the
 // cross-column confirm state and its execution.
-export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refreshCalendar, showToast, gridRef, getSelectedBookingsRef }) {
+export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refreshCalendar, showToast, showGuide, gridRef, getSelectedBookingsRef }) {
+  // A refused move: the ✦ guidance card (or the calm system card). Falls back to a toast when no card host is wired.
+  const failWith = (error, fallback) => (showGuide ? showGuide(error, {}, 'calendar-move') : showToast(error?.message || fallback, 'error'));
   const { guard } = useAvailabilityGuard();
   // Drag state
   const [activeDragId, setActiveDragId] = useState(null);
@@ -360,7 +362,7 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
           const results = [];
           for (const run of updates) results.push(await run());
           const failed = results.find(r => r.error);
-          if (failed) showToast(failed.error.message || 'Failed to update.', 'error');
+          if (failed) failWith(failed.error, 'Failed to update.');
           else showToast(`Moved ${selectedBookings.length} selected`, 'success');
           refreshCalendar();
         })();
@@ -418,7 +420,7 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
         // Shared booking time-only reschedule: moves all therapists together
         const result = await guard((overrideReason) => rescheduleBooking({ bookingId, newDate, newStartTime, overrideReason }));
         if (result.error) {
-          showToast(result.error.message || 'Failed to reschedule.', 'error');
+          failWith(result.error, 'Failed to reschedule.');
         } else {
           showToast(`Rescheduled to ${newStartTime}`, 'success');
         }
@@ -434,7 +436,7 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
           const newIds = currentTherapistIds.filter(id => id !== sourceColId);
           const result = await guard((overrideReason) => assignTherapist({ bookingId, therapistIds: newIds, overrideReason }));
           if (result.error) {
-            showToast(result.error.message || 'Failed to consolidate assignment.', 'error');
+            failWith(result.error, 'Failed to consolidate assignment.');
           } else if (result.data?.warning) {
             showToast(`Assignment partially saved: ${result.data.warning}`, 'error');
           } else {
@@ -445,7 +447,7 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
           const newIds = currentTherapistIds.map(id => id === sourceColId ? targetColId : id);
           const result = await guard((overrideReason) => assignTherapist({ bookingId, therapistIds: newIds, overrideReason }));
           if (result.error) {
-            showToast(result.error.message || `Failed to reassign ${teamMemberLower()}.`, 'error');
+            failWith(result.error, `Failed to reassign ${teamMemberLower()}.`);
           } else if (result.data?.warning) {
             showToast(`Assignment partially saved: ${result.data.warning}`, 'error');
           } else {
@@ -482,14 +484,14 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
 
         const result = await guard((overrideReason) => rescheduleBooking({ ...apiParams, overrideReason }));
         if (result.error) {
-          showToast(result.error.message || 'Failed to reassign booking.', 'error');
+          failWith(result.error, 'Failed to reassign booking.');
           refreshCalendar();
         } else {
           showToast(timeOnly ? `Rescheduled to ${newStartTime}` : `Reassigned to ${targetColName}`, 'success');
         }
       }
     } catch (err) {
-      showToast('An error occurred while reassigning.', 'error');
+      failWith(err, 'An error occurred while reassigning.');
       refreshCalendar();
     } finally {
       setIsRescheduling(false);

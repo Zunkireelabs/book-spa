@@ -72,7 +72,7 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
     walkInLabel: formData.walkInLabel || undefined,
     overrideReason,
   }));
-  if (result.error) return { error: friendlyError(result.error, 'Failed to create booking.'), code: result.error.code };
+  if (result.error) return { error: friendlyError(result.error, 'Failed to create booking.'), code: result.error.code, raw: result.error };
 
   if (formData.comboAssignments?.length > 0 && result.data?.id) {
     const comboResult = await createComboBookingItems({

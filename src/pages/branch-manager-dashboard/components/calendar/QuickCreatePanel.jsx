@@ -13,7 +13,10 @@ import ServicePickRow from '../../../../components/ui/ServicePickRow';
 import CustomerPickRow from '../../../../components/ui/CustomerPickRow';
 import { phoneProblem } from '../../../../utils/phone';
 import { customerSavePayload, customerMissing, seedFromSearch, PICK_REASON } from '../../../../utils/customerPick';
-import CustomSelect from '../../../../components/ui/CustomSelect';
+import RoomPickRow from '../../../../components/ui/RoomPickRow';
+import ErrorGuide from '../../../../components/ui/GuideCard';
+import { describeError } from '../../../../utils/errorGuide';
+import { roomStates } from '../../../../utils/roomPick';
 import { parsePhone } from '../../../../components/ui/CountryCodeSelect'
 import PhoneField, { usePhoneState } from '../../../../components/ui/PhoneField';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
@@ -106,6 +109,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const submitInFlightRef = useRef(false);
   const [error, setError] = useState(null);
   const [errorCode, setErrorCode] = useState(null);
+  const [errorCard, setErrorCard] = useState(null);   // the ✦ / system card for the refused save, built once so a system error keeps one reference id
+  const [roomSignal, setRoomSignal] = useState(0);
   const [errorKey, setErrorKey] = useState(null); // snapshot of the form when the rejection came back: the reason stands until something relevant changes
   const nameRef = useRef(null);
   const initialDraftRef = useRef({ date: '', time: '', therapist: '', room: '' });
@@ -324,59 +329,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const formKey = JSON.stringify([bookingMode, bookingDate, bookingTime, serviceId, selectedTherapistIds, roomId, customerName, customerPhone, knownCustomerId, customerKind, walkInLabel,
     people, groupServiceId, groupRoomId, serviceMode, groupType, therapistRoomOverrides, comboTherapistOverrides, comboRoomOverrides]);
 
-  // Parse room capacity from amenities (e.g., "3 Room" → 3, "1 Bed" → 1)
-  const getRoomCapacity = (room) => {
-    if (!room.amenities || room.amenities.length === 0) return 1;
-    const match = room.amenities[0].match(/^(\d+)/);
-    return match ? parseInt(match[1], 10) : 1;
-  };
-
-  const busyResources = useMemo(() => {
-    if (!bookingDate || !bookingTime) return { therapistIds: new Set(), roomBookingCounts: new Map() };
-    const durationMin = selectedService?.duration_minutes || 60;
-    const [sh, sm] = bookingTime.split(':').map(Number);
-    const slotStart = sh * 60 + sm;
-    const slotEnd = slotStart + durationMin;
-
-    const busyTherapists = new Set();
-    const roomBookingCounts = new Map();
-
-    for (const b of bookings) {
-      // calendarData.bookings uses raw DB format (snake_case)
-      const status = (b.status || '').toLowerCase();
-      if (['cancelled', 'no show', 'completed'].includes(status)) continue;
-      if (b.date !== bookingDate) continue;
-
-      // Raw DB: start_time = "HH:MM:SS", end_time = "HH:MM:SS"
-      const startStr = b.start_time || '00:00:00';
-      const endStr = b.end_time;
-      const [bh, bm] = startStr.split(':').map(Number);
-      const bStart = bh * 60 + bm;
-
-      let bEnd;
-      if (endStr) {
-        const [eh, em] = endStr.split(':').map(Number);
-        bEnd = eh * 60 + em;
-      } else {
-        // Fallback: use service duration
-        const svc = (services || []).find((s) => s.id === b.service_id);
-        bEnd = bStart + (svc?.duration_minutes || 60);
-      }
-
-      // Check time overlap: new booking [slotStart, slotEnd) overlaps [bStart, bEnd)
-      if (slotStart < bEnd && slotEnd > bStart) {
-        // Mark all therapists (from junction table or primary) as busy
-        if (b.booking_therapists?.length > 0) {
-          b.booking_therapists.forEach(bt => busyTherapists.add(bt.therapist_id));
-        } else if (b.therapist_id) {
-          busyTherapists.add(b.therapist_id);
-        }
-        if (b.room_id) roomBookingCounts.set(b.room_id, (roomBookingCounts.get(b.room_id) || 0) + 1);
-      }
-    }
-
-    return { therapistIds: busyTherapists, roomBookingCounts };
-  }, [bookings, bookingDate, bookingTime, selectedService, services]);
+  const svcDur = (sid) => (services || []).find((t) => t.id === sid)?.duration_minutes || 60;
 
   // Shared Staff picker input: service staff (plus any selected person the list filter hides), without people who are off on another day.
   const pickerPeople = useMemo(() => {
@@ -698,6 +651,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       const text = friendlyError(err, 'Couldn\'t create the booking. Please try again.');
       setError(text);
       setErrorCode(err?.code || null);
+      setErrorCard(describeError(err?.raw || { code: err?.code, message: err?.message }, guideCtx));
       setErrorKey(formKey);
       setSubmitting(false);
       submitInFlightRef.current = false;
@@ -819,14 +773,90 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     : '';
   const couplePickIncomplete = bookingMode === 'individual' && !comboAllDifferentStaff && staffPickIncomplete({ isCouple: !!selectedService?.is_couple, optional: !serviceRequiresTherapist, count: selectedTherapistIds.length, zeroOk: true });
   const activeError = error && errorKey === formKey ? error : null; // cleared the moment the user changes anything relevant
-  const errField = activeError ? (fieldForErrorCode(errorCode) || errorField(activeError)) : null;
+  // Guidance (ZNLY-365): the refused save's card, or a live card when the calendar already knows the clash (staff off / busy, room full).
+  const activeCard = errorCard && errorKey === formKey && activeError ? errorCard : null;
+  const roomSts = useMemo(() => (rooms && rooms.length && bookingMode === 'individual' ? roomStates({ rooms, bookings, date: bookingDate, startTime: bookingTime, durationMin: draftDuration }) : []), [rooms, bookings, bookingDate, bookingTime, draftDuration, bookingMode]);
+  const addMin = (t, m) => { const x = /^(\d{1,2}):(\d{2})/.exec(t || ''); if (!x) return ''; const v = Number(x[1]) * 60 + Number(x[2]) + m; return `${String(Math.floor(v / 60) % 24).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`; };
+  const roomFreeTimes = [...new Set(roomSts.filter((x) => x.state === 'full' && x.freeFrom).map((x) => x.freeFrom))].sort();
+  // Who is free for the whole slot (the Staff list's own free set, calendar day data), best-ranked first, minus the people already picked.
+  const freeAtSlot = (() => {
+    const s0 = clockToMin(bookingTime); const e0 = clockToMin(pickerSlotEnd);
+    if (bookingMode !== 'individual' || s0 == null || !dayBookings || !bookingDate) return [];
+    const { free } = arrangeByTime(pickerPeople.filter((t) => !selectedTherapistIds.includes(t.id)), {
+      slotStart: s0, slotEnd: e0 > s0 ? e0 : s0 + 60, rangesById: staffDayRanges(dayBookings, { date: bookingDate }), offById: dayOff,
+    });
+    return free.map((x) => ({ id: x.person.id, name: x.person.name }));
+  })();
+  const guideCtx = {
+    staffLabel, staffLabelPlural, hasRooms: !!(rooms && rooms.length), creating: true,
+    startTime: bookingTime, endTime: addMin(bookingTime, draftDuration), serviceName: selectedService?.name,
+    staffName: (therapists || []).find((t) => t.id === selectedTherapistIds[0])?.name,
+    roomName: (rooms || []).find((r) => r.id === roomId)?.name,
+    nextFreeTimes: precheck.nextFree?.length ? precheck.nextFree : roomFreeTimes,
+    freeStaff: freeAtSlot.length ? freeAtSlot : (precheck.otherFree ? [{ id: precheck.otherFree.id, name: precheck.otherFree.name }] : []),
+    otherFreeRooms: roomSts.filter((x) => x.state !== 'full' && x.room.id !== roomId).length,
+    customerName,
+  };
+  // Live cards (no Create press needed). `blocking` = Create must wait: a hard stop. A manager's overridable verdict explains itself
+  // but leaves Create enabled (the save still asks "Book anyway").
+  // The first picked person whose own bookings clash with the slot (from the same day data the Staff row uses).
+  const busyPick = (() => {
+    const s0 = clockToMin(bookingTime); const e0 = clockToMin(pickerSlotEnd);
+    if (bookingMode !== 'individual' || s0 == null || !dayBookings || !bookingDate || !selectedTherapistIds.length) return null;
+    const { busy } = arrangeByTime(pickerPeople.filter((t) => selectedTherapistIds.includes(t.id)), {
+      slotStart: s0, slotEnd: e0 > s0 ? e0 : s0 + 60, rangesById: staffDayRanges(dayBookings, { date: bookingDate }), offById: dayOff,
+    });
+    return busy[0] || null;
+  })();
+  const liveCard = (() => {
+    if (activeCard || bookingMode !== 'individual') return null;
+    if (precheck.verdict) return { ...describeError({ code: precheck.verdict.code, message: precheck.verdict.message }, guideCtx), blocking: !!precheck.blocked };
+    // No precheck verdict (the org's staff-availability rule is off): an overlap the Staff row already shows is still a hard stop, because the
+    // database refuses a double booking (excl_therapist_overlap) and nobody can override it.
+    if (busyPick) {
+      const ctx = { ...guideCtx, staffName: busyPick.person.name, startTime: addMin('00:00', busyPick.busyRange.start), endTime: addMin('00:00', busyPick.busyRange.end), nextFreeTimes: [addMin('00:00', busyPick.busyRange.end)] };
+      return { ...describeError({ code: 'THERAPIST_CONFLICT' }, ctx), blocking: true };
+    }
+    if (!serviceId) return null;
+    if (!roomSts.length || roomSts[0].state == null) return null;
+    const chosen = roomId ? roomSts.find((x) => x.room.id === roomId) : null;
+    if (chosen && chosen.state === 'full') return { ...describeError({ code: 'ROOM_FULL' }, guideCtx), blocking: true };
+    if (!roomId && roomSts.every((x) => x.state === 'full')) return { ...describeError({ code: 'ROOMS_FULL' }, guideCtx), blocking: true };
+    return null;
+  })();
+  const card = activeCard || liveCard;
+  // Bring the card into view the moment it appears (it sits under date/time and can start partly off-screen).
+  const cardRef = useRef(null);
+  const cardKey = card ? `${card.code}${card.ref || ''}` : '';
+  useEffect(() => { if (cardKey) cardRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }); }, [cardKey]);
+  const errField = activeCard ? (activeCard.field || fieldForErrorCode(errorCode) || errorField(activeError)) : activeError ? (fieldForErrorCode(errorCode) || errorField(activeError)) : (liveCard?.field || null);
   const fieldRing = (name) => (errField === name ? 'rounded-spa ring-2 ring-error' : '');
-  const disabledReason = submitting ? '' : activeError ? activeError : precheck.blocked ? `${staffLabel} unavailable at this time` : blockOverlapMsg
+  // Fix buttons only fill or open something. Nothing here saves.
+  const scrollToField = (f) => requestAnimationFrame(() => document.querySelector(`[data-qc-field="${f}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+  const onGuideAction = (a) => {
+    switch (a.intent) {
+      case 'set-time': setBookingTime(a.value); break;
+      case 'set-staff': setSelectedTherapistIds([a.value]); break;
+      case 'set-room-any': setRoomId(''); break;
+      case 'open-room': scrollToField('room'); setRoomSignal(Date.now()); break;
+      case 'open-staff': scrollToField('staff'); break;
+      case 'open-time': scrollToField('time'); break;
+      case 'open-service': scrollToField('service'); break;
+      case 'open-customer': case 'open-customer-pick': scrollToField('customer'); break;
+      case 'set-date': setBookingDate(a.value); break;
+      case 'set-date-tomorrow': { const d = new Date(`${bookingDate}T00:00:00`); d.setDate(d.getDate() + 1); setBookingDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); break; }
+      case 'set-walk-in': setCustomerKind('walkin'); setCustomerName(''); setCustomerPhone(''); setKnownCustomerId(null); scrollToField('customer'); break;
+      case 'show-calendar': requestClose(); break;
+      case 'retry': handleSubmit({ preventDefault() {} }); break;
+      default: break;
+    }
+  };
+  const disabledReason = submitting ? '' : (activeCard?.kind === 'fix' || liveCard?.blocking) ? 'Fix the note above to continue' : activeCard?.networkLost ? 'Check the calendar before trying again' : activeError ? activeError : precheck.blocked ? `${staffLabel} unavailable at this time` : blockOverlapMsg
     ? (/^Overlaps '(Transferred|Visiting)/.test(blockOverlapMsg) ? `${staffLabel} unavailable` : 'Overlaps a block')
     : bookingMode === 'group'
       ? (!groupValid ? groupInvalidReason : groupProblemFooter || (groupStaffIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : ''))
       : !serviceId ? 'Pick a service' : (isCoupleBooking && companionPhone.problem) ? `Companion's phone: ${companionPhone.problem}` : couplePickIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : customerMissing(customerFields);
-  const createDisabled = submitting || !!activeError || !!blockOverlapMsg || precheck.blocked || couplePickIncomplete || (isCoupleBooking && !!companionPhone.problem) || (bookingMode === 'group' && (!!groupProblemFooter || groupStaffIncomplete)) || (bookingMode === 'group' ? !groupValid : (!serviceId || !!customerMissing(customerFields)));
+  const createDisabled = submitting || (!!activeError && !(activeCard?.kind === 'system' && activeCard.canRetry)) || !!liveCard?.blocking || !!blockOverlapMsg || precheck.blocked || couplePickIncomplete || (isCoupleBooking && !!companionPhone.problem) || (bookingMode === 'group' && (!!groupProblemFooter || groupStaffIncomplete)) || (bookingMode === 'group' ? !groupValid : (!serviceId || !!customerMissing(customerFields)));
   const confirmSlotLabel = confirm?.type === 'move'
     ? [therapists.find((d) => d.id === confirm.slot.colId)?.name || rooms.find((c) => c.id === confirm.slot.colId)?.name || confirm.slot.colName,
        confirm.slot.day,
@@ -903,8 +933,14 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         {summaryRow}
 
         <BlockOverlapWarning message={blockOverlapMsg} />
+        {card && (
+          <div ref={cardRef}>
+            <ErrorGuide card={card} onAction={onGuideAction} area="create-booking" />
+            {liveCard && !liveCard.blocking && <p className="mt-1.5 px-0.5 text-xs text-text-secondary">You can still book it; you'll be asked why.</p>}
+          </div>
+        )}
         <AvailabilityNotice
-          precheck={precheck}
+          precheck={{ ...precheck, verdict: null }}
           staffLabel={staffLabel?.toLowerCase()}
           onPickTime={(t) => setBookingTime(t)}
           onPickTherapist={(id) => setSelectedTherapistIds([id])}
@@ -920,7 +956,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                 Service <span className="text-error">*</span>
               </label>
-              <div data-qc-field="service"><ServicePickRow required invalid={flashSvc === 'service' && !serviceId} services={pickerServices} value={serviceId} onChange={setServiceId} branchId={branchId} canViewPrices={canViewPrices} loading={servicesLoading} openSignal={openServiceSignal} title="Service for the booking" sub={svcSubLine} ariaLabel="Service" /></div>
+              <div data-qc-field="service"><ServicePickRow required invalid={flashSvc === 'service' && !serviceId} services={pickerServices} value={serviceId} onChange={setServiceId} branchId={branchId} canViewPrices={canViewPrices} loading={servicesLoading} openSignal={openServiceSignal} onSignalConsumed={() => setOpenServiceSignal(0)} title="Service for the booking" sub={svcSubLine} ariaLabel="Service" /></div>
               {visitorTherapist && visitorServiceNames && (
                 <p className="mt-1.5 text-xs text-text-secondary" data-visitor-services-help>
                   Showing the {pickerServices.length} service{pickerServices.length === 1 ? '' : 's'} {visitorTherapist.name} does at the home {(locationLabel || 'branch').toLowerCase()} that this one also offers.
@@ -934,53 +970,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                   Room
                 </label>
-                <CustomSelect
-                  value={roomId}
-                  onChange={(val) => {
-                    const room = (rooms || []).find(r => r.id === val);
-                    if (room) {
-                      const capacity = getRoomCapacity(room);
-                      const used = busyResources.roomBookingCounts.get(val) || 0;
-                      if (used >= capacity) return; // fully packed, block selection
-                    }
-                    setRoomId(val);
-                  }}
-                  options={[
-                    { value: '', label: 'No room' },
-                    ...(rooms || []).map((r) => {
-                      const capacity = getRoomCapacity(r);
-                      const used = busyResources.roomBookingCounts.get(r.id) || 0;
-                      const remaining = capacity - used;
-                      const amenityStr = r.amenities?.join(', ') || '';
-                      const isFull = used >= capacity;
-
-                      let statusLabel;
-                      if (isFull) {
-                        statusLabel = <span className="text-error font-bold">— Unavailable</span>;
-                      } else if (used > 0 && capacity > 1) {
-                        statusLabel = <span className="text-warning font-bold">— {remaining} left</span>;
-                      } else if (used > 0) {
-                        statusLabel = <span className="text-warning font-bold">— Allocated</span>;
-                      }
-
-                      return {
-                        value: r.id,
-                        label: (
-                          <>
-                            {r.name}
-                            {amenityStr && <span className="text-text-secondary"> ({amenityStr})</span>}
-                            {statusLabel && <> {statusLabel}</>}
-                          </>
-                        ),
-                        searchLabel: r.name,
-                        disabled: isFull,
-                      };
-                    }),
-                  ]}
-                  placeholder="No room"
-                  size="md"
-                  searchable
-                />
+                <RoomPickRow rooms={rooms} bookings={bookings} date={bookingDate} startTime={bookingTime}
+                  durationMin={selectedService?.duration_minutes || dragMinutes || 60} value={roomId} onChange={setRoomId} openSignal={roomSignal} onSignalConsumed={() => setRoomSignal(0)} serviceName={selectedService?.name} title={`Room for ${customerKind === 'walkin' ? `Walk-in${walkInLabel.trim() ? ` · ${walkInLabel.trim()}` : ''}` : (customerName.trim() || 'the booking')}`} />
               </div>
             )}
 
@@ -1043,14 +1034,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     return (
                       <div key={tid} className="flex items-center gap-2">
                         <span className="font-body font-body-medium text-[13px] text-text-primary w-24 truncate flex-shrink-0">{t?.name || 'Companion'}</span>
-                        <CustomSelect
-                          value={therapistRoomOverrides[tid] || ''}
+                        <div className="flex-1 min-w-0"><RoomPickRow rooms={rooms} bookings={bookings} date={bookingDate} startTime={bookingTime}
+                          durationMin={selectedService?.duration_minutes || dragMinutes || 60} value={therapistRoomOverrides[tid] || ''}
                           onChange={(val) => setTherapistRoomOverrides((prev) => ({ ...prev, [tid]: val }))}
-                          options={[{ value: '', label: 'Same room as above' }, ...(rooms || []).map((r) => ({ value: r.id, label: r.name }))]}
-                          placeholder="Same room as above"
-                          size="sm"
-                          className="flex-1"
-                        />
+                          anyLabel="Same room as above" anyHint="Keeps them in the room above" title={`Room for ${t?.name || 'companion'}`} /></div>
                       </div>
                     );
                   })}
@@ -1135,15 +1122,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                               )}
                               {c.defaultSameRoom === false && (
                                 <div className="mt-2">
-                                  <CustomSelect
+                                  <RoomPickRow rooms={rooms} bookings={bookings} date={bookingDate} startTime=""
                                     value={comboRoomOverrides[c.serviceId] || ''}
                                     onChange={(val) => setComboRoomOverrides(prev => ({ ...prev, [c.serviceId]: val }))}
-                                    options={(rooms || []).map(r => ({ value: r.id, label: r.name }))}
-                                    placeholder="Select room"
-                                    size="sm"
-                                    searchable
-                                    menuAlign="right"
-                                  />
+                                    anyLabel="Select room" anyHint="Pick the room for this part" title="Room for this part" />
                                 </div>
                               )}
                             </div>
@@ -1333,31 +1315,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                   Room <span className="text-xs text-text-secondary font-normal">(shared — needs capacity 2)</span>
                 </label>
-                <CustomSelect
-                  value={groupRoomId}
-                  onChange={(val) => setGroupRoomId(val)}
-                  options={[
-                    { value: '', label: 'No room' },
-                    ...(rooms || [])
-                      .filter((r) => getRoomCapacity(r) >= 2)
-                      .map((r) => {
-                        const amenityStr = r.amenities?.join(', ') || '';
-                        return {
-                          value: r.id,
-                          label: (
-                            <>
-                              {r.name}
-                              {amenityStr && <span className="text-text-secondary"> ({amenityStr})</span>}
-                            </>
-                          ),
-                          searchLabel: r.name,
-                        };
-                      }),
-                  ]}
-                  placeholder="No room"
-                  size="md"
-                  searchable
-                />
+                <RoomPickRow rooms={rooms} bookings={bookings} date={bookingDate} startTime={bookingTime} minCapacity={2}
+                  durationMin={svcDur(groupServiceId)} value={groupRoomId} onChange={setGroupRoomId} title="Shared room" />
               </div>
             )}
 
@@ -1522,20 +1481,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   {groupType === 'separate' && rooms && rooms.length > 0 && (
                     <div>
                     <label className="flex items-baseline justify-between font-body font-body-medium text-[13px] text-text-primary mb-1.5">Room <span className="text-xs font-normal text-text-secondary">optional</span></label>
-                    <CustomSelect
-                      value={p.roomId}
-                      onChange={(val) => setPerson(idx, { roomId: val })}
-                      options={[
-                        { value: '', label: 'No room' },
-                        ...(rooms || []).map((r) => ({
-                          value: r.id,
-                          label: r.name,
-                        })),
-                      ]}
-                      placeholder="No room"
-                      size="md"
-                      searchable
-                    />
+                    <RoomPickRow rooms={rooms} bookings={bookings} date={bookingDate} startTime={bookingTime}
+                      durationMin={svcDur(p.serviceId)} value={p.roomId} onChange={(val) => setPerson(idx, { roomId: val })} title={`Room for ${guestLabel(idx)}`} />
                     </div>
                   )}
                 </div>

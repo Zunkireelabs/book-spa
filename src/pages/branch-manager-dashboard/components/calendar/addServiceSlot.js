@@ -42,7 +42,16 @@ export function buildAddServiceSlot({ booking, mode = 'add-service', rawBookings
     slot.minute = endMin % 60;
     slot.defaultTherapistIds = sameStaffIfFree(booking, rawBookings, endMin);
   }
-  if (mode === 'rebook') slot.defaultServiceId = booking.serviceId || '';
+  if (mode === 'rebook') {
+    slot.defaultServiceId = booking.serviceId || '';
+    // Rebook starts from the original booking's own start time (the day is the booking's day until the user picks another).
+    const startMin = toMin(booking.startTime) ?? toMin(booking.time);
+    if (startMin != null) {
+      slot.hour = Math.floor(startMin / 60);
+      slot.minute = startMin % 60;
+      slot.defaultTherapistIds = sameStaffIfFree(booking, rawBookings, startMin);
+    }
+  }
   if (!lockedClient) {
     // Old booking with no client record: carry the name and phone it has; the panel asks for whatever is missing.
     const m = /^(\+\d{1,3})(\d+)$/.exec(booking.customerPhone || '');

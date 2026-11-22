@@ -6,7 +6,8 @@ import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 
 vi.mock('../../../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { role: 'manager' } }) }));
 vi.mock('../../../../hooks/useIndustry', () => ({ useIndustry: () => ({ staffLabel: 'Therapist', staffLabelPlural: 'Therapists', locationLabel: 'Room' }) }));
-vi.mock('../../../../hooks/useAvailabilityPrecheck', () => ({ useAvailabilityPrecheck: () => ({ blocked: false, warn: false }) }));
+const precheckMock = vi.hoisted(() => ({ value: { blocked: false, warn: false } }));
+vi.mock('../../../../hooks/useAvailabilityPrecheck', () => ({ useAvailabilityPrecheck: () => precheckMock.value }));
 vi.mock('../../../../hooks/useBlockOverlap', () => ({ useDayBlocks: () => [] }));
 vi.mock('../../../../services/api', async (importOriginal) => ({
   ...(await importOriginal()),
@@ -35,7 +36,7 @@ beforeAll(() => {
   window.matchMedia = window.matchMedia || ((q) => ({ matches: false, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
   window.HTMLElement.prototype.scrollIntoView = window.HTMLElement.prototype.scrollIntoView || (() => {});
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); precheckMock.value = { blocked: false, warn: false }; });
 
 describe('QuickCreatePanel smoke', () => {
   it('renders closed without crashing', () => {
@@ -139,5 +140,78 @@ describe('QuickCreatePanel smoke', () => {
     render(<QuickCreatePanel {...props} slotInfo={slot} />);
     expect(screen.getByText('Anish Balami')).toBeTruthy();
     expect(screen.getByText('Pick a service')).toBeTruthy();
+  });
+  it('ZNLY-365 live guidance: every room taken at the chosen time shows the ✦ card, outlines the time and blocks Create', () => {
+    const rooms = [{ id: 'r1', name: 'BANGKOK', amenities: ['1 Bed'] }, { id: 'r2', name: 'HUA HIN', amenities: ['1 Bed'] }];
+    const bookings = ['r1', 'r2'].map((room_id) => ({ id: `b-${room_id}`, date: '2026-11-22', status: 'Confirmed', room_id, start_time: '12:00:00', end_time: '14:00:00' }));
+    const slot = { day: '2026-11-22', hour: 12, minute: 0, defaultServiceId: 's1', walkIn: true };
+    const { container } = render(<QuickCreatePanel {...props} rooms={rooms} bookings={bookings} slotInfo={slot} />);
+    const card = container.ownerDocument.querySelector('[data-guide-card="ROOMS_FULL"]');
+    expect(card).toBeTruthy();
+    expect(card.textContent).toMatch(/Every room is taken 12:00 pm–1:00 pm\./);
+    expect(card.textContent).toMatch(/Book at 2:00 pm/);
+    expect(screen.getByRole('button', { name: /create booking/i }).disabled).toBe(true);
+    fireEvent.click(screen.getByText('Book at 2:00 pm'));
+    expect(container.ownerDocument.querySelector('[data-guide-card="ROOMS_FULL"]')).toBeNull();
+  });
+  it('ZNLY-365: a beauty org (no rooms) never sees room wording in a guidance card', () => {
+    const slot = { day: '2026-11-22', hour: 12, minute: 0, defaultServiceId: 's1', walkIn: true };
+    const { container } = render(<QuickCreatePanel {...props} rooms={[]} bookings={[]} slotInfo={slot} />);
+    expect(container.ownerDocument.querySelector('[data-guide-card]')).toBeNull();
+    expect(container.ownerDocument.body.textContent).not.toMatch(/Pick a room|Any available/);
+  });
+  const refusedSave = async (result) => {
+    const onSubmit = vi.fn(async () => result);
+    const slot = { day: '2026-11-22', hour: 12, minute: 0, defaultServiceId: 's1', walkIn: true, defaultTherapistIds: ['t1'] };
+    const { container } = render(<QuickCreatePanel {...props} onSubmit={onSubmit} slotInfo={slot} />);
+    fireEvent.click(screen.getByRole('button', { name: /create booking/i }));
+    await vi.waitFor(() => expect(container.ownerDocument.querySelector('[data-guide-card],[data-system-error]')).toBeTruthy());
+    return { container, onSubmit };
+  };
+  it('ZNLY-365: a refused save shows the ✦ card with a fix button that only fills the form (no second save)', async () => {
+    const { container, onSubmit } = await refusedSave({ message: 'x', code: 'THERAPIST_CONFLICT', raw: { code: 'THERAPIST_CONFLICT', message: 'x' } });
+    expect(container.ownerDocument.querySelector('[data-guide-card="THERAPIST_CONFLICT"]')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /create booking/i }).disabled).toBe(true);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+  it('ZNLY-365: a server error shows the calm grey card with Try again and a Ref; Try again repeats the save', async () => {
+    const { container, onSubmit } = await refusedSave({ message: 'Failed', code: 'XX999', raw: { code: 'XX999', message: 'weird' } });
+    expect(container.ownerDocument.querySelector('[data-system-error]')).toBeTruthy();
+    expect(container.ownerDocument.querySelector('[data-error-ref]').textContent).toMatch(/^Ref: /);
+    fireEvent.click(screen.getByText('Try again'));
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+  });
+  it('ZNLY-365: after a lost connection it says so, offers Show on calendar and no Try again', async () => {
+    const { container } = await refusedSave({ message: "Couldn't reach the server.", code: undefined, raw: new TypeError('Failed to fetch') });
+    expect(screen.getByText('Connection lost.')).toBeTruthy();
+    expect(screen.queryByText('Try again')).toBeNull();
+    expect(screen.getByText('Show on calendar')).toBeTruthy();
+    expect(container.ownerDocument.body.textContent).not.toMatch(/nothing was changed/i);
+  });
+  it('ZNLY-365: a manager picking busy staff sees the ✦ card live (no Create press), with "Give it to <free person>", and Create stays enabled', () => {
+    precheckMock.value = { blocked: false, warn: true, canOverride: true, nextFree: ['13:00'], otherFree: null,
+      verdict: { code: 'OVERLAP', message: 'Tara Gurung already has a booking 12:00 pm–1:00 pm' } };
+    const bookings = [{ id: 'bx', date: '2026-11-22', status: 'Confirmed', therapist_id: 't1', start_time: '12:00:00', end_time: '13:00:00' }];
+    const slot = { day: '2026-11-22', hour: 12, minute: 0, defaultServiceId: 's1', walkIn: true, defaultTherapistIds: ['t1'] };
+    const { container } = render(<QuickCreatePanel {...props} therapists={[{ id: 't1', name: 'Tara Gurung' }, { id: 't2', name: 'Asha Rai' }]} bookings={bookings} offDate="2026-11-22" offStaff={{}} slotInfo={slot} />);
+    const card = container.ownerDocument.querySelector('[data-guide-card="OVERLAP"]');
+    expect(card).toBeTruthy();
+    expect(card.textContent).toMatch(/Give it to Asha/);
+    expect(card.textContent).toMatch(/Book at 13:00|Book at 1:00 pm/);
+    expect(container.ownerDocument.body.textContent).toMatch(/You can still book it; you'll be asked why\./);
+    expect(screen.getByRole('button', { name: /book anyway|create booking/i }).disabled).toBe(false);
+    fireEvent.click(screen.getByText(/Give it to Asha/));
+    expect(container.ownerDocument.body.textContent).toMatch(/Asha Rai/);
+  });
+  it('ZNLY-365: with no precheck verdict (staff-availability rule off) a busy picked person still gets the live ✦ card and Create is disabled', () => {
+    const bookings = [{ id: 'bx', date: '2026-11-22', status: 'Confirmed', therapist_id: 't1', start_time: '12:30:00', end_time: '13:30:00' }];
+    const slot = { day: '2026-11-22', hour: 12, minute: 0, defaultServiceId: 's1', walkIn: true, defaultTherapistIds: ['t1'] };
+    const { container } = render(<QuickCreatePanel {...props} therapists={[{ id: 't1', name: 'Tara Gurung' }, { id: 't2', name: 'Asha Rai' }]} bookings={bookings} offDate="2026-11-22" offStaff={{}} slotInfo={slot} />);
+    const card = container.ownerDocument.querySelector('[data-guide-card="THERAPIST_CONFLICT"]');
+    expect(card).toBeTruthy();
+    expect(card.textContent).toMatch(/Tara Gurung is already booked 12:30 pm–1:30 pm/);
+    expect(card.textContent).toMatch(/Book at 1:30 pm/);
+    expect(card.textContent).toMatch(/Give it to Asha/);
+    expect(screen.getByRole('button', { name: /create booking/i }).disabled).toBe(true);
   });
 });
