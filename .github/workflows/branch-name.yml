@@ -1,0 +1,30 @@
+name: Branch Name
+
+# Developer-workflow SOP §6: branches are feature/<KEY>-123-short-name (or fix/, hotfix/)
+# so time and status per ticket can be read from the branch name. Plane: OPS-80 (parent OPS-76).
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  branch-name:
+    name: Branch Name
+    runs-on: ubuntu-latest
+    steps:
+      - name: Branch must carry a ticket id
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          # Promotion PRs (stage -> main, promote/*) and dependency bots carry no ticket.
+          if [ "$HEAD_REF" = "stage" ] || [[ "$HEAD_REF" == promote/* ]] || [[ "$HEAD_REF" == dependabot/* ]]; then
+            echo "Exempt branch '$HEAD_REF'."
+            exit 0
+          fi
+          if [[ ! "$HEAD_REF" =~ ^(feature|fix|hotfix)/[A-Z]+-[0-9]+ ]]; then
+            echo "::error::Branch '$HEAD_REF' has no ticket id."
+            echo "Name it feature/<KEY>-123-short-name (or fix/, hotfix/), e.g. feature/OPS-80-branch-check."
+            echo "See developer-workflow SOP section 6 (Naming): zunkireelabs-org/SOPs/developer-workflow/README.md"
+            exit 1
+          fi
+          echo "OK: '$HEAD_REF'."
