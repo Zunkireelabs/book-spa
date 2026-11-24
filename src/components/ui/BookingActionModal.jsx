@@ -22,6 +22,12 @@ import { paymentStatusLabel } from '../../utils/paymentStatusLabel';
 const payTone = (b) => ({ success: 'text-success', neutral: 'text-text-secondary', warning: 'text-warning' })[paymentStatusLabel(b).tone];
 import InvoicePrintModal from './InvoicePrintModal';
 import { relatedFetchers } from '../../utils/visitGate';
+import { fetchBookingServices } from '../../services/api';
+import { buildBookingBlock } from '../../utils/bookingBlock';
+import BookingServicesBlock from './BookingServicesBlock';
+import BookingStaffRows, { rowIds, rowRoom, rowChanged } from './BookingStaffRows';
+import BookingDiscountLines from './BookingDiscountLines';
+import { planBookingDiscount } from '../../utils/bookingDiscount';
 import { adminCorrectBooking, correctPaymentMode, adminDeleteBooking, correctPaymentAmount, fetchMemberDiscountContext, applyMemberDiscount,  fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, fetchBookingProductSales, refundProductSale, recordTip, getCustomerFirstBookingFlag, fetchInvoiceByBookingId, staffCanRequestDiscountApproval } from '../../services/api';
 import { excludeRelatedFromPreviousDue, toDbStatus } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
@@ -292,6 +298,7 @@ const BookingActionModal = ({
   // get that affordance (same gate as issue_invoice(), migration-334).
   canViewCustomerDetails = true,
   variant = 'modal',
+  use24h = false,          // calendar's per-user 12h/24h display preference (cosmetic)
   previewBooking = null,   // panel only: the calendar card's already-known data, shown while the full booking loads
   onRefreshBooking,        // panel only: re-fetch the open booking after an in-place action (status change)
   liveBackdrop = false,    // panel on phones: the page behind stays live (calendar): no scrim, no focus trap at half
@@ -424,6 +431,14 @@ const BookingActionModal = ({
 
   // Discount tab: same-day related bookings for combined discount application
   const [relatedBookings, setRelatedBookings] = useState([]);
+  // ZNLY-402 piece 4: every row of this booking (visit_id) for the constant "This booking" block. Only fetched when the org setting is ON.
+  const [blockRows, setBlockRows] = useState([]);
+  const [blockReload, setBlockReload] = useState(0);
+  const [rowBusy, setRowBusy] = useState(null);
+  const [rowPicks, setRowPicks] = useState({});        // Staff tab of a multi-service booking: { [bookingId]: { ids, room } }
+  const [failedName, setFailedName] = useState(null);
+  const [perService, setPerService] = useState(false); // Discount tab: "Set a different discount per service"
+  const pendingTabRef = useRef(null); // a click on another service keeps the tab you are on
   // Every sibling (ZNLY-402 ON: the other bookings of this visit_id; OFF: formal group, or same customer_name+date), any payment_status — display only, never used for
   // bundling (see fetchGroupBookings). Keeps a paid sibling
   // visible from every other sibling's modal instead of silently vanishing.
@@ -514,6 +529,17 @@ const BookingActionModal = ({
     return () => { cancelled = true; };
   }, [booking?.bookingId, booking?.customerId, booking?.date, booking?.startTime]);
 
+  useEffect(() => { setRowPicks({}); setPerService(false); }, [booking?.bookingId]);
+  useEffect(() => {
+    if (!isOpen || !multiServiceBookings || !booking?.visitId) { setBlockRows([]); return undefined; }
+    let cancelled = false;
+    fetchBookingServices({ visitId: booking.visitId, customerId: booking.customerId }).then(({ data }) => { if (!cancelled) setBlockRows(data || []); });
+    return () => { cancelled = true; };
+  }, [isOpen, multiServiceBookings, booking?.visitId, booking?.customerId, booking?.bookingId, booking?.status, booking?.paymentStatus, booking?.finalAmount, booking?.discountAmount, booking?.amountPaid, booking?.therapist?.id, booking?.startTime, blockReload]);
+  const block = useMemo(() => buildBookingBlock(blockRows, booking?.bookingId), [blockRows, booking?.bookingId]);
+  // The multi-service look is ONLY for a booking with 2+ services in an org with the setting ON: every other booking looks exactly as before.
+  const multiView = !!(multiServiceBookings && booking?.visitId && block.show && block.rows.some((r) => r.id === booking?.bookingId));
+
   // Fetch related unpaid bookings when payment tab opens
   useEffect(() => {
     if (isOpen && (activeTab === 'payment' || activeTab === 'discount') && booking) {
@@ -544,7 +570,8 @@ const BookingActionModal = ({
         const resetKey = `${activeTab}:${booking.bookingId}:${isOpen}`;
         if (discountResetKeyRef.current !== resetKey) {
           discountResetKeyRef.current = resetKey;
-          setSelectedDiscountIds(new Set([booking.bookingId]));
+          // ZNLY-402 piece 4: with the setting ON the discount is for the whole booking: every unpaid service is in, no per-service ticking.
+          setSelectedDiscountIds(new Set(multiServiceBookings ? [booking.bookingId, ...related.map(rb => rb.id)] : [booking.bookingId]));
           setSelectedApprover('');
           setDiscountSuccess(false);
           setRowDiscountOverrides({});
@@ -1272,6 +1299,8 @@ const BookingActionModal = ({
     || !!String(discountValue || '').trim() || !!String(discountReason || '').trim()
     || (selectedTherapists.slice().sort().join(',') !== bookingTherapistIdsStr)
     || ((selectedRoom || '') !== (booking.roomId || ''))
+    || (multiView && block.rows.some((r) => rowChanged(r, rowPicks)))
+    || Object.values(rowDiscountOverrides || {}).some((v) => String(v ?? '').trim())
   );
   useEffect(() => {
     if (!guardRef) return undefined;
@@ -1281,7 +1310,7 @@ const BookingActionModal = ({
     };
     return () => { guardRef.current = null; };
   });
-  useEffect(() => { setPanelConfirm(null); setMoreOpen(false); if (booking) setActiveTab(initialTab || 'details'); }, [booking?.bookingId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setPanelConfirm(null); setMoreOpen(false); if (booking) { setActiveTab(pendingTabRef.current || initialTab || 'details'); pendingTabRef.current = null; } }, [booking?.bookingId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!moreOpen) return undefined;
     const onDown = (e) => { if (moreRef.current && !moreRef.current.contains(e.target)) setMoreOpen(false); };
@@ -1398,6 +1427,35 @@ const BookingActionModal = ({
   // Admin correction bypasses this the same way it bypasses the Booking Details fields: its save path goes through adminCorrectBooking
   // (therapist_id/room_id are in its whitelist), not the normal onAssignTherapist call that the DB immutability trigger would reject.
   const isAssignmentBlocked = isViewer || (!showAdminCorrection && (isTerminal || isLocked || isServiceStarted));
+  // Multi-service Staff tab: one Save for every changed service. Saved one service at a time with the SAME assign call as the single-service
+  // tab (no new write path): if one fails the earlier ones stay saved and the screen says which service did not.
+  const multiStaffEditable = (r) => !r.dead && !isViewer && !isLocked && ['pending', 'confirmed'].includes(r.status);
+  const multiStaffChanged = block.rows.filter((r) => multiStaffEditable(r) && rowChanged(r, rowPicks));
+  const multiStaffIncomplete = multiStaffChanged.some((r) => {
+    const optional = rooms.find((x) => x.id === rowRoom(r, rowPicks))?.requires_therapist === false;
+    return staffPickIncomplete({ isCouple: r.isCouple, optional, count: rowIds(r, rowPicks).length });
+  });
+  const handleAssignAll = async () => {
+    if (!multiStaffChanged.length) return;
+    setIsLoading(true); setActionError(null); setFailedName(null);
+    const open = multiStaffChanged.filter((r) => r.id !== booking.bookingId); // open service last: it is the one the panel stays on
+    const ordered = [...open, ...multiStaffChanged.filter((r) => r.id === booking.bookingId)];
+    try {
+      for (const r of ordered) {
+        const res = await onAssignTherapist?.(r.id, rowIds(r, rowPicks), notes, rowRoom(r, rowPicks) || null, undefined, undefined, undefined, { inline: true });
+        if (res?.error) {
+          retryRef.current = () => handleAssignAll();
+          setFailedName(r.name); setActionError(guideFor(res.error));
+          setBlockReload((n) => n + 1);
+          return;
+        }
+      }
+      setRowPicks({});
+      await onRefreshBooking?.(booking.bookingId);
+      setBlockReload((n) => n + 1);
+    } catch (e) { setActionError(guideFor(e)); } finally { setIsLoading(false); }
+  };
+
   // Always "Rebook" — this always creates a brand-new booking with the same
   // customer/service info, leaving the original untouched, regardless of
   // the source booking's status. "Reschedule" would wrongly imply the same
@@ -1453,12 +1511,20 @@ const BookingActionModal = ({
   const discountRowBase = (id) => id === booking.bookingId
     ? (booking.baseAmount || 0)
     : Number(relatedBookings.find(rb => rb.id === id)?.base_amount || 0);
-  const checkedRowIds = [booking.bookingId, ...relatedBookings.map(rb => rb.id)].filter(id => selectedDiscountIds.has(id));
+  // ZNLY-402 piece 4 (v3), setting ON + 2+ services: the lines come from the whole-rupee plan (utils/bookingDiscount.js); only lines with a
+  // discount are applied, the open service LAST (the calendar re-opens the panel on the last row it saved).
+  const mvRows = multiView ? block.rows.filter((r) => !r.dead) : [];
+  const mvEligible = mvRows.filter((r) => r.paymentStatus !== 'paid');
+  const planMV = multiView ? planBookingDiscount({ rows: mvEligible.map((r) => ({ id: r.id, base: r.base })), type: discountType, value: discountValue, perLine: perService ? rowDiscountOverrides : null }) : null;
+  const checkedRowIds = multiView
+    ? [...planMV.lines.filter((l) => l.amount > 0 && l.id !== booking.bookingId), ...planMV.lines.filter((l) => l.amount > 0 && l.id === booking.bookingId)].map((l) => l.id)
+    : [booking.bookingId, ...relatedBookings.map(rb => rb.id)].filter(id => selectedDiscountIds.has(id));
   const overriddenRowIds = checkedRowIds.filter(id => rowDiscountOverrides[id] !== undefined && rowDiscountOverrides[id] !== '');
   const pooledBase = checkedRowIds
     .filter(id => !overriddenRowIds.includes(id))
     .reduce((s, id) => s + discountRowBase(id), 0);
   const resolveRowDiscount = (id) => {
+    if (multiView) { const l = planMV.lines.find((x) => x.id === id); return { value: l?.amount || 0, amount: l?.amount || 0, base: l?.base || 0, effPercent: l?.limitPercent || 0, hasOverride: false }; }
     const rowBase = discountRowBase(id);
     const hasOverride = overriddenRowIds.includes(id);
     const value = Number(hasOverride ? rowDiscountOverrides[id] : discountValue) || 0;
@@ -1487,7 +1553,7 @@ const BookingActionModal = ({
     setDiscountSuccess(false);
 
     if (checkedRowIds.length === 0) {
-      setDiscountError('Select at least one service.');
+      setDiscountError(multiView ? 'Enter a discount first.' : 'Select at least one service.');
       return;
     }
     const rowPlans = checkedRowIds.map(id => ({ id, ...resolveRowDiscount(id) }));
@@ -1525,8 +1591,8 @@ const BookingActionModal = ({
 
       for (const row of rowPlans) {
         const result = await onApplyDiscount(row.id, {
-          discountType: discountType === 'percentage' ? 'percentage' : 'fixed',
-          discountValue: discountType === 'percentage' ? row.value : row.amount,
+          discountType: !multiView && discountType === 'percentage' ? 'percentage' : 'fixed',
+          discountValue: !multiView && discountType === 'percentage' ? row.value : row.amount,
           discountReason: discountReason.trim(),
           requestedTo: exceedsLimit ? selectedApprover : undefined
         });
@@ -1553,6 +1619,22 @@ const BookingActionModal = ({
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Multi-service "Remove the discount": the same single-service cancel call, one service at a time, the open service last.
+  const handleRemoveAllDiscounts = async () => {
+    if (!onApplyDiscount) return;
+    setIsLoading(true); setDiscountError(null);
+    const withDiscount = mvRows.filter((r) => r.discount > 0);
+    const ordered = [...withDiscount.filter((r) => r.id !== booking.bookingId), ...withDiscount.filter((r) => r.id === booking.bookingId)];
+    try {
+      for (const r of ordered) {
+        const res = await onApplyDiscount(r.id, { discountType: 'fixed', discountValue: 0, discountReason: 'Discount cancelled' });
+        if (res?.error) { setDiscountError(guideFor(res.error)); return; }
+      }
+      setDiscountSuccess('removed'); setRowDiscountOverrides({});
+      setBlockReload((n) => n + 1);
+    } catch (e) { setDiscountError(guideFor(e)); } finally { setIsLoading(false); }
   };
 
   const discountEffPercent = checkedRowIds.length > 0
@@ -1667,14 +1749,39 @@ const BookingActionModal = ({
   const futureStart = futureBookingMessage(booking.date, 'start');
   const futureComplete = futureBookingMessage(booking.date, 'complete');
   const futureNoShow = futureBookingMessage(booking.date, 'noshow');
-  const primaryAction = (() => {
+  const primaryAction = multiView ? null : (() => { // 2+ services: Start / Done / Confirm live on each service row, so the footer has no status button
     if (isLocked || isViewer) return null;
     if (booking.status === 'pending') return { key: 'confirm', label: 'Confirm', run: () => handleStatusUpdate('confirmed') };
     if (booking.status === 'confirmed') return { key: 'start', label: 'Start', blocked: futureStart, run: () => handleStatusUpdate('in-progress') };
     if (booking.status === 'in-progress') return { key: 'complete', label: 'Complete', blocked: futureComplete, run: () => handleStatusUpdate('completed') };
-    if (canPay) return { key: 'pay', label: 'Collect payment', run: () => { setActiveTab('payment'); setShowPaymentModal(true); } };
+    if (canPay && !(multiView && activeTab === 'details')) return { key: 'pay', label: 'Collect payment', run: () => { setActiveTab('payment'); setShowPaymentModal(true); } }; // multi-service Details: the block holds the ONE Collect payment
     return null;
   })();
+  // ZNLY-402 piece 4: the "This booking" block's actions. Start / Done go through the SAME status action as the footer, per service
+  // (onUpdateStatus with that service's id). Remove stays out until piece 5 (an atomic, previewed remove): no dead button on screen.
+  const runRowStatus = async (rowId, status) => {
+    if (rowId === booking.bookingId) { await handleStatusUpdate(status); setBlockReload((n) => n + 1); return; }
+    setRowBusy(rowId); setActionError(null);
+    try {
+      const res = await onUpdateStatus?.(rowId, status, undefined, { inline: true });
+      if (res?.error) setActionError(guideFor(res.error));
+      else await onRefreshBooking?.(booking.bookingId);
+    } catch (e) { setActionError(guideFor(e)); }
+    finally { setRowBusy(null); setBlockReload((n) => n + 1); }
+  };
+  const blockRowAction = (r) => {
+    if (isViewer || isLocked || !onUpdateStatus || r.dead) return null;
+    if (r.status === 'confirmed') { const why = futureBookingMessage(r.date, 'start'); return { start: { disabled: !!why, reason: why, run: () => runRowStatus(r.id, 'in-progress') } }; }
+    if (r.status === 'in-progress') { const why = futureBookingMessage(r.date, 'complete'); return { done: { disabled: !!why, reason: why, run: () => runRowStatus(r.id, 'completed') } }; }
+    if (r.status === 'pending') return { confirm: { disabled: false, run: () => runRowStatus(r.id, 'confirmed') } };
+    return null;
+  };
+  const selectBlockRow = (id) => {
+    const go = () => { pendingTabRef.current = activeTab; onViewBooking(id); };
+    if (isDirty) setPanelConfirm({ type: 'switch', action: go }); else go();
+  };
+  const blockPaid = block.allPaid ? { label: 'Paid', cls: 'bg-success/10 text-success' } : block.paid > 0 ? { label: 'Part paid', cls: 'bg-warning/10 text-warning' } : { label: 'Not paid yet', cls: 'bg-warning/10 text-warning' };
+  const blockCollect = canViewPrices && !isViewer && block.toPay > 0 ? { disabled: !canPay, reason: canPay ? null : 'Confirm or complete this service first.', run: () => { setActiveTab('payment'); setShowPaymentModal(true); } } : null;
   // Visible secondary actions (left), in collapse-priority order; disabled ones are not shown here (only in the overflow).
   const secondaryVisible = [
     !isViewer && onAddServiceStart && !isEditing && { key: 'rebook', label: rebookLabel, icon: 'CalendarClock', run: () => onRebookStart?.(booking) },
@@ -1695,9 +1802,9 @@ const BookingActionModal = ({
     ...secondaryVisible.filter((it) => !shownKeys.includes(it.key)),
     onEditBooking && !isMutationBlocked && !isEditing && { key: 'edit', label: 'Edit details', icon: 'Pencil', run: () => { setActiveTab('details'); startEditing(); } },
     onEditBooking && isMutationBlocked && !isEditing && !isTerminal && { key: 'edit', label: 'Edit details', icon: 'Pencil', disabled: true, reason: isLocked ? 'Booking is locked (day closed)' : isSettled ? 'Paid bookings can\'t be edited' : 'Locked once service has started', run: () => {} },
-    canPay && primaryAction?.key !== 'pay' && { key: 'pay', label: 'Collect payment', icon: 'CreditCard', run: () => { setActiveTab('payment'); setShowPaymentModal(true); } },
+    canPay && !multiView && primaryAction?.key !== 'pay' && { key: 'pay', label: 'Collect payment', icon: 'CreditCard', run: () => { setActiveTab('payment'); setShowPaymentModal(true); } },
     // Other status transitions that aren't the primary action (e.g. Pending → Start isn't valid, so only no-show/cancel remain).
-    ...nextStatuses
+    ...(multiView ? [] : nextStatuses)
       .filter((st) => st !== 'cancelled' && st !== 'no show' && st !== primaryStatusTarget)
       .map((st) => ({ key: `st-${st}`, label: st === 'in-progress' ? 'Start' : st.charAt(0).toUpperCase() + st.slice(1), icon: 'ArrowRight', disabled: (st === 'in-progress' && !!futureStart) || (st === 'completed' && !!futureComplete), reason: st === 'completed' ? futureComplete : futureStart, run: () => handleStatusUpdate(st) })),
     // Zennly-only: Reschedule creates a new booking and cancels this one (the caller runs the slot picker).
@@ -1798,8 +1905,8 @@ const BookingActionModal = ({
             )}
           </div>
           <div className="flex-1" />
-          {activeTab === 'assign' && !isAssignmentBlocked ? (
-            <Button variant="primary" size="sm" onClick={handleAssignTherapist} loading={isLoading} disabled={assignIncomplete}>Save assignment</Button>
+          {activeTab === 'assign' && (multiView ? block.rows.some(multiStaffEditable) : !isAssignmentBlocked) ? (
+            <Button variant="primary" size="sm" onClick={multiView ? handleAssignAll : handleAssignTherapist} loading={isLoading} disabled={multiView ? (!multiStaffChanged.length || multiStaffIncomplete) : assignIncomplete}>Save assignment</Button>
           ) : primaryAction ? (
             <Button variant="primary" size="sm" onClick={primaryAction.run} loading={isLoading} disabled={!!primaryAction.blocked} title={primaryAction.blocked || undefined}>{primaryAction.label}</Button>
           ) : null}
@@ -1808,7 +1915,7 @@ const BookingActionModal = ({
     </div>
   );
   // Visible reason next to the disabled Start / Complete / No-show (the same sentence is on their tooltips).
-  const futureNote = !isTerminal && !isLocked && !isViewer && !panelConfirm && !isEditing && ((booking.status === 'confirmed' ? futureStart : booking.status === 'in-progress' ? futureComplete : null) || null);
+  const futureNote = !multiView && !isTerminal && !isLocked && !isViewer && !panelConfirm && !isEditing && ((booking.status === 'confirmed' ? futureStart : booking.status === 'in-progress' ? futureComplete : null) || null);
   const panelFooterWithNote = futureNote ? (<div><p className="px-1 pb-2 text-[12px] text-text-secondary" data-future-note>{futureNote}</p>{panelFooter}</div>) : panelFooter;
 
   // Equal-fit tab bar for the panel: never scrolls horizontally.
@@ -1828,12 +1935,17 @@ const BookingActionModal = ({
             role="tab"
             aria-selected={activeTab === tab.id}
             onClick={() => goTab(tab.id)}
-            className={`h-11 flex items-center justify-center gap-1.5 text-[13px] font-body font-body-medium border-b-2 -mb-px spa-transition-fast whitespace-nowrap ${
+            className={`${multiView ? 'h-12' : 'h-11'} flex items-center justify-center gap-1.5 text-[13px] font-body font-body-medium border-b-2 -mb-px spa-transition-fast whitespace-nowrap ${
               activeTab === tab.id ? 'border-primary text-primary' : 'border-transparent text-text-secondary hover:text-text-primary'
             }`}
           >
             <Icon name={tab.icon} size={14} />
-            <span>{tab.label}</span>
+            {multiView ? (
+              <span className="flex flex-col items-start leading-tight text-left">
+                <span>{tab.label}</span>
+                <span className="text-[10px] font-normal text-text-tertiary">{tab.id === 'details' ? 'All services' : tab.id === 'assign' ? 'Each service' : 'Whole booking'}</span>
+              </span>
+            ) : <span>{tab.label}</span>}
           </button>
         ))}
       </nav>
@@ -1916,6 +2028,22 @@ const BookingActionModal = ({
                   </div>
                 )}
               </div>
+            )}
+
+            {multiView && !(isEditing && activeTab === 'details') && (
+              <BookingServicesBlock
+                block={block}
+                mode={activeTab === 'details' ? 'full' : 'strip'}
+                canViewPrices={canViewPrices}
+                paidState={blockPaid}
+                collect={activeTab === 'details' ? blockCollect : null}
+                use24h={use24h}
+                dateLabel={booking.date && !Number.isNaN(new Date(`${booking.date}T00:00:00`).getTime()) ? new Date(`${booking.date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '') : ''}
+                note={activeTab === 'assign' ? `Tap a service to change its ${(staffLabel || 'team member').toLowerCase()}.` : null}
+                onSelect={onViewBooking ? selectBlockRow : undefined}
+                rowAction={blockRowAction}
+                busyId={rowBusy}
+              />
             )}
 
             {/* Details Tab */}
@@ -2056,7 +2184,7 @@ const BookingActionModal = ({
                   const sectionHead = 'font-body font-medium text-xs uppercase tracking-wider text-text-tertiary whitespace-nowrap';
                   return (
                     <>
-                      <div className="space-y-2" data-booking-summary>
+                      <div className={`space-y-2 ${multiView ? 'hidden' : ''}`} data-booking-summary>
                         <p className="font-body text-[15px] font-semibold text-text-primary">{dateLabel}{range ? ` · ${range}` : ''}</p>
                         <p className="font-body text-[13px] text-text-secondary">{booking.service}{mins ? ` · ${mins} min` : ''}</p>
                         {(dlist.length > 0 || booking.roomName) && (
@@ -2073,7 +2201,7 @@ const BookingActionModal = ({
                             <span className="truncate">{dlist.map((t) => t.name).join(', ')}{booking.roomName ? `${dlist.length ? ' · ' : ''}${booking.roomName}` : ''}</span>
                           </div>
                         )}
-                        {canViewPrices && <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
+                        {canViewPrices && !multiView && <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
                           <span className="font-body text-[13px] font-medium text-text-primary tabular-nums">{npr(booking.finalAmount ?? booking.baseAmount)}</span>
                           <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${pay.cls}`}>{pay.label}</span>
                           {canPay && (
@@ -2541,9 +2669,10 @@ const BookingActionModal = ({
                 {/* Panel meta line: booking number + created-by audit */}
                 {isPanel && !isEditing && (
                   <div className="border-t border-border pt-4 group flex items-center flex-wrap gap-x-1 text-xs text-text-tertiary">
-                    <span className="tabular-nums">{booking.id}</span>
+                    <span className="tabular-nums" data-booking-reference>{multiView ? block.reference : booking.id}</span>
+                    {multiView && block.reference !== booking.id && <span className="tabular-nums text-text-tertiary/80">· this service {booking.id}</span>}
                     {booking.id && (
-                      <button type="button" onClick={() => { try { navigator.clipboard?.writeText(String(booking.id)); } catch (_) { /* clipboard unavailable */ } }}
+                      <button type="button" onClick={() => { try { navigator.clipboard?.writeText(String(multiView ? block.reference : booking.id)); } catch (_) { /* clipboard unavailable */ } }}
                         aria-label="Copy booking number" title="Copy booking number"
                         className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 rounded-spa hover:text-primary hover:bg-background spa-transition-fast">
                         <Icon name="Copy" size={12} />
@@ -2579,7 +2708,29 @@ const BookingActionModal = ({
             )}
 
             {/* Assigned Tab */}
-            {activeTab === 'assign' && (
+            {activeTab === 'assign' && multiView && (
+              <BookingStaffRows
+                rows={block.rows.filter((r) => !r.dead)}
+                picks={rowPicks}
+                setPicks={setRowPicks}
+                editable={multiStaffEditable}
+                therapists={therapists}
+                rooms={rooms}
+                dayBookings={effDayBookings}
+                offStaff={effOffStaff}
+                allowOverlap={allowStaffOverlap}
+                staffLabel={staffLabel}
+                staffLabelPlural={staffLabelPlural}
+                use24h={use24h}
+                notes={notes}
+                setNotes={setNotes}
+                notesDisabled={isViewer || isLocked}
+                error={actionError && (
+                  <><InlineError error={actionError} onAction={onGuideAction} area="booking-panel" />{failedName && <p className="mt-1.5 text-xs text-text-secondary">Not saved for {failedName}. The services above it were saved.</p>}</>
+                )}
+              />
+            )}
+            {activeTab === 'assign' && !multiView && (
               <div className="space-y-4 sm:space-y-6">
                 {isAssignmentBlocked && (
                   <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa ${isLocked ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50 border border-gray-200'}`}>
@@ -2913,6 +3064,22 @@ const BookingActionModal = ({
                       <p className="flex items-center gap-2 text-[12.5px] text-[#8A8A90]" data-member-card="none"><Icon name="Star" size={12} className="fill-current text-[#B4B4BA]" strokeWidth={0} />No {memberMd.tierName} discount on {memberMd.label} services</p>
                     )}
                     {(!memberCardOn || showManualDiscount) && (<>
+                    {multiView ? (
+                      <BookingDiscountLines
+                        rows={mvRows}
+                        plan={planMV}
+                        perService={perService}
+                        onTogglePer={() => { setPerService((v) => !v); setDiscountError(null); }}
+                        type={discountType}
+                        values={rowDiscountOverrides}
+                        onChange={(id, v) => { setRowOverride(id, v); setDiscountError(null); }}
+                        use24h={use24h}
+                        canEdit={!isViewer && !isLocked && mvEligible.length > 0}
+                        existingTotal={mvRows.reduce((sm, r) => sm + r.discount, 0)}
+                        onRemove={handleRemoveAllDiscounts}
+                        removing={isLoading}
+                      />
+                    ) : (<>
                     {/* All bookings pricing summary */}
                     <p className="text-[11.5px] text-[#8A8A90] font-medium uppercase tracking-[.05em] -mb-2 sm:-mb-4">Price</p>
                     <div className="bg-surface border border-border rounded-lg p-3 sm:p-4 space-y-2">
@@ -2935,7 +3102,7 @@ const BookingActionModal = ({
 
                         // Per-row override input, reused for the primary booking and every related row —
                         // lets each checked service get its own rate instead of the shared value above.
-                        const renderOverrideInput = (id) => (
+                        const renderOverrideInput = (id) => multiView ? null : (
                           <div className="pl-5 mt-1 flex items-center gap-1.5">
                             <input
                               type="number"
@@ -2958,7 +3125,7 @@ const BookingActionModal = ({
                             {/* Current booking — checkbox + override only when multiple services */}
                             {multiRow ? (
                               <div className="mb-1">
-                                <label className="flex items-start gap-2 cursor-pointer">
+                                <label className={`flex items-start gap-2 ${multiView ? '' : 'cursor-pointer'}`}>
                                   <input
                                     type="checkbox"
                                     checked={primaryChecked}
@@ -2971,7 +3138,7 @@ const BookingActionModal = ({
                                       });
                                       if (!e.target.checked) clearRowOverride(booking.bookingId);
                                     }}
-                                    className="text-primary focus:ring-primary w-3.5 h-3.5 rounded mt-0.5"
+                                    disabled={multiView} className={`text-primary focus:ring-primary w-3.5 h-3.5 rounded mt-0.5 ${multiView ? 'hidden' : ''}`}
                                   />
                                   <div className="flex-1 min-w-0">
                                     <span className="font-body font-body-medium text-xs text-text-primary">{booking.service}</span>
@@ -2986,7 +3153,7 @@ const BookingActionModal = ({
                               </div>
                             ) : null}
                             <div className="flex items-center justify-between">
-                              <span className="font-body font-body-normal text-xs text-text-secondary">Base Amount</span>
+                              <span className="font-body font-body-normal text-xs text-text-secondary">{multiView ? 'Price' : 'Base Amount'}</span>
                               <span className="font-data text-sm text-text-primary">NPR {base.toLocaleString('en-IN')}</span>
                             </div>
                             {showDiscount && (
@@ -3000,7 +3167,7 @@ const BookingActionModal = ({
                               </div>
                             )}
                             <div className="flex items-center justify-between">
-                              <span className="font-body font-body-normal text-xs text-text-secondary">Subtotal</span>
+                              <span className="font-body font-body-normal text-xs text-text-secondary">{multiView ? 'New price' : 'Subtotal'}</span>
                               <span className={`font-data text-sm ${primaryLive ? 'text-warning' : 'text-text-primary'}`}>
                                 NPR {previewFinal.toLocaleString('en-IN')}
                               </span>
@@ -3034,7 +3201,7 @@ const BookingActionModal = ({
                                   const rbPreviewFinal = Math.max(rbBase - rbPreviewDiscount, 0);
                                   return (
                                     <div key={rb.id} className="space-y-1">
-                                      <label className="flex items-start gap-2 cursor-pointer">
+                                      <label className={`flex items-start gap-2 ${multiView ? '' : 'cursor-pointer'}`}>
                                         <input
                                           type="checkbox"
                                           checked={rbChecked}
@@ -3047,7 +3214,7 @@ const BookingActionModal = ({
                                             });
                                             if (!e.target.checked) clearRowOverride(rb.id);
                                           }}
-                                          className="text-primary focus:ring-primary w-3.5 h-3.5 rounded mt-0.5"
+                                          disabled={multiView} className={`text-primary focus:ring-primary w-3.5 h-3.5 rounded mt-0.5 ${multiView ? 'hidden' : ''}`}
                                         />
                                         <div className="flex-1 min-w-0">
                                           <div className="flex items-center justify-between">
@@ -3063,7 +3230,7 @@ const BookingActionModal = ({
                                       </label>
                                       {rbChecked && renderOverrideInput(rb.id)}
                                       <div className="flex items-center justify-between pl-5">
-                                        <span className="font-body font-body-normal text-xs text-text-secondary">Base</span>
+                                        <span className="font-body font-body-normal text-xs text-text-secondary">{multiView ? 'Price' : 'Base'}</span>
                                         <span className="font-data text-sm text-text-primary">NPR {rbBase.toLocaleString('en-IN')}</span>
                                       </div>
                                       {(rbHasPreview || rbExistingDiscount > 0) && (
@@ -3077,7 +3244,7 @@ const BookingActionModal = ({
                                         </div>
                                       )}
                                       <div className="flex items-center justify-between pl-5">
-                                        <span className="font-body font-body-normal text-xs text-text-secondary">Subtotal</span>
+                                        <span className="font-body font-body-normal text-xs text-text-secondary">{multiView ? 'New price' : 'Subtotal'}</span>
                                         <span className={`font-data text-sm ${rbHasPreview ? 'text-warning' : 'text-text-primary'}`}>
                                           NPR {rbPreviewFinal.toLocaleString('en-IN')}
                                         </span>
@@ -3101,10 +3268,12 @@ const BookingActionModal = ({
                                 anyLive = anyLive || rbLive;
                                 total += rbLive ? Math.max(rbPlan.base - rbPlan.amount, 0) : Number(rb.final_amount || rb.base_amount || 0);
                               });
+                              // ZNLY-402 piece 4: services already paid (not in the list above) still belong to the booking's total, so it equals the block.
+                              if (multiView) total += Math.max(block.total - Number(booking.finalAmount || 0) - relatedBookings.reduce((sum, rb) => sum + Number(rb.final_amount || 0), 0), 0);
                               return (
                                 <div className="flex items-center justify-between border-t border-border pt-2 mt-1">
                                   <span className="font-body font-body-medium text-xs text-text-primary">
-                                    {multiRow ? 'Overall Total' : 'Final Amount'}
+                                    {multiView ? 'Total for the booking' : multiRow ? 'Overall Total' : 'Final Amount'}
                                   </span>
                                   <span className={`font-data font-data-medium text-sm ${anyLive ? 'text-warning' : 'text-primary'}`}>
                                     NPR {total.toLocaleString('en-IN')}
@@ -3140,15 +3309,17 @@ const BookingActionModal = ({
                         </button>
                       )}
                     </div>
+                    </>)}
 
                     {/* Discount type */}
                     <Segmented options={[['percentage', '% Percent'], ['fixed', 'NPR Fixed']]} value={discountType} onChange={setDiscountType} />
 
                     {/* Discount value */}
                     <div className="space-y-1.5 sm:space-y-2">
+                      {!(multiView && perService) && (<>
                       <label className="font-body font-body-medium text-xs sm:text-sm text-text-primary">
                         {discountType === 'percentage' ? 'Discount Percentage' : 'Discount Amount (NPR)'}
-                        {relatedBookings.length > 0 && (
+                        {relatedBookings.length > 0 && !multiView && (
                           <span className="font-body font-body-normal text-text-secondary"> (shared default — override any service above for its own rate)</span>
                         )}
                       </label>
@@ -3156,15 +3327,17 @@ const BookingActionModal = ({
                         type="number"
                         min="0"
                         max={
-                          discountType === 'percentage'
-                            ? Math.min(100, Math.floor(((booking.baseAmount - (booking.amountPaid || 0)) / booking.baseAmount) * 100))
-                            : Math.floor((booking.baseAmount || 0) - (booking.amountPaid || 0))
+                          multiView
+                            ? (discountType === 'percentage' ? 100 : planMV.totalBase)
+                            : discountType === 'percentage'
+                              ? Math.min(100, Math.floor(((booking.baseAmount - (booking.amountPaid || 0)) / booking.baseAmount) * 100))
+                              : Math.floor((booking.baseAmount || 0) - (booking.amountPaid || 0))
                         }
                         step={discountType === 'percentage' ? 1 : 10}
                         value={discountValue}
                         onWheel={(e) => e.target.blur()}
                         onChange={(e) => { setDiscountValue(e.target.value); setDiscountError(null); }}
-                        placeholder={discountType === 'percentage' ? `Max ${discountLimitLabel}` : `Max NPR ${Math.floor((booking.baseAmount || 0) * (userRole === 'admin' ? 1.00 : userRole === 'manager' ? 1.00 : 0.50))}`}
+                        placeholder={discountType === 'percentage' ? `Max ${discountLimitLabel}` : `Max NPR ${Math.floor((multiView ? planMV.totalBase : (booking.baseAmount || 0)) * (userRole === 'admin' ? 1.00 : userRole === 'manager' ? 1.00 : 0.50))}`}
                         className={`w-full px-3 py-2.5 border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast ${
                           discountExceedsCap ? 'border-error' : 'border-border'
                         }`}
@@ -3177,6 +3350,7 @@ const BookingActionModal = ({
                           ))}
                         </div>
                       )}
+                      </>)}
                       {discountExceedsCap && (
                         <GuideCard card={guideFor({ code: 'DISCOUNT_LIMIT_EXCEEDED' }, { limitPercent: DISCOUNT_HARD_CAP })} onAction={onGuideAction} className="mt-1.5" />
                       )}
@@ -3227,7 +3401,7 @@ const BookingActionModal = ({
                           </div>
                           <div className="flex items-center justify-between">
                             <span className="text-text-secondary">Package</span>
-                            <span className="font-body-medium text-text-primary text-right">{booking.service || '—'}</span>
+                            <span className="font-body-medium text-text-primary text-right">{multiView ? `${block.count} services` : (booking.service || '—')}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span className="text-text-secondary">Discount</span>
@@ -3300,7 +3474,7 @@ const BookingActionModal = ({
                     >
                       {discountExceedsLimit
                         ? 'Send Discount Request'
-                        : (checkedRowIds.length > 1 ? `Apply Discount to ${checkedRowIds.length} Services` : 'Apply Discount')}
+                        : (multiView ? 'Apply discount' : checkedRowIds.length > 1 ? `Apply Discount to ${checkedRowIds.length} Services` : 'Apply Discount')}
                     </Button>
                     </>)}
                   </>
@@ -3340,8 +3514,49 @@ const BookingActionModal = ({
 
                 <MembershipWalletCard membership={membership} paidThisVisit={paidThisVisit} />
 
+                {/* ZNLY-402 piece 4: ONE invoice view for the whole booking (2+ services, setting ON): lines, discount, total, paid so far, to pay.
+                    The numbers are the block's, so they equal the rows above. Methods and the one button stay below, as today. */}
+                {multiView && !showAdminCorrection && (
+                  <div className="bg-background rounded-spa p-3 sm:p-4 space-y-2" data-booking-invoice>
+                    {block.rows.map((r) => (
+                      <div key={r.id}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className={`text-[13px] ${r.dead ? 'line-through text-text-tertiary' : 'text-text-primary'}`}>{r.name}</p>
+                            {(r.dead || (r.paid >= r.final && r.final > 0)) && <p className="text-[11px] text-text-secondary">{r.dead ? 'Cancelled' : 'Paid'}</p>}
+                          </div>
+                          <span className={`font-data text-sm tabular-nums flex-shrink-0 ${r.dead ? 'line-through text-text-tertiary' : 'text-text-primary'}`}>NPR {r.base.toLocaleString('en-IN')}</span>
+                        </div>
+                        {!r.dead && r.discount > 0 && (
+                          <div className="flex items-center justify-between pl-3 mt-0.5">
+                            <span className="text-[12px] text-text-secondary">Discount</span>
+                            <span className="font-data text-[12px] text-error tabular-nums">- NPR {r.discount.toLocaleString('en-IN')}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between border-t border-border pt-2">
+                      <span className="text-xs font-medium text-text-primary">Total</span>
+                      <span className="font-data text-sm font-medium text-text-primary tabular-nums" data-invoice-total>NPR {block.total.toLocaleString('en-IN')}</span>
+                    </div>
+                    {block.paid > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-text-secondary">Paid so far</span>
+                        <span className="font-data text-sm text-text-primary tabular-nums">- NPR {block.paid.toLocaleString('en-IN')}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-text-primary">To pay</span>
+                      <span className="flex items-center gap-2">
+                        <span className={`font-data text-sm font-medium tabular-nums ${block.toPay > 0 ? 'text-warning' : 'text-text-primary'}`} data-invoice-topay>NPR {block.toPay.toLocaleString('en-IN')}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${blockPaid.cls}`}>{blockPaid.label}</span>
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Current booking */}
-                <div className="bg-background rounded-spa p-3 sm:p-4 space-y-2">
+                <div className={`bg-background rounded-spa p-3 sm:p-4 space-y-2 ${multiView && !showAdminCorrection ? 'hidden' : ''}`}>
                   {(previousDueBookings.length > 0 || relatedBookings.length > 0) && (
                     <div className="flex items-center gap-2 mb-1">
                       <Icon name="CheckSquare" size={14} className="text-primary" />
@@ -3459,7 +3674,7 @@ const BookingActionModal = ({
                 {/* Related services — same-session bookings discounted together on the
                     Discount tab. Bundled into payment by default (all checked), but staff
                     can uncheck one to pay it later — see combinedTotal/selectedCount above. */}
-                {relatedBookings.length > 0 && (
+                {relatedBookings.length > 0 && !multiView && (
                   <div className="space-y-2">
                     <label className="font-body font-body-medium text-xs text-text-secondary uppercase flex items-center gap-1.5">
                       <Icon name="Layers" size={13} />
@@ -3511,7 +3726,7 @@ const BookingActionModal = ({
                 {/* Group siblings already paid — display only (never bundled), so a paid
                     sibling never silently vanishes just because it's no longer "unpaid".
                     See the BK-20260915-0025/-0026/-0027 incident this closes. */}
-                {groupSiblings.some(gb => gb.payment_status === 'paid') && (
+                {!multiView && groupSiblings.some(gb => gb.payment_status === 'paid') && (
                   <div className="space-y-2">
                     <label className="font-body font-body-medium text-xs text-text-secondary uppercase flex items-center gap-1.5">
                       <Icon name="CheckCircle2" size={13} className="text-success" />
@@ -3594,11 +3809,11 @@ const BookingActionModal = ({
                 )}
 
                 {/* Grand total */}
-                {selectedCount > 0 && (
+                {(multiView ? selectedPreviousDueIds.size > 0 : selectedCount > 0) && (
                   <div className="bg-primary/5 border border-primary/20 rounded-spa p-3">
                     <div className="flex items-center justify-between">
                       <span className="font-body font-body-medium text-sm text-text-primary">
-                        Grand Total ({1 + selectedCount} services)
+                        {multiView ? 'Total with the other unpaid bookings' : `Grand Total (${1 + selectedCount} services)`}
                       </span>
                       <span className="font-data font-data-medium text-base text-primary">
                         NPR {combinedTotal.toLocaleString('en-IN')}
@@ -3632,7 +3847,7 @@ const BookingActionModal = ({
                 )}
 
                 {/* Payment status */}
-                <div className="flex items-center justify-between px-1">
+                <div className={`flex items-center justify-between px-1 ${multiView ? 'hidden' : ''}`}>
                   <span className="font-body font-body-normal text-xs text-text-secondary">Status</span>
                   <span className={`font-body font-body-medium text-sm ${payTone(booking)}`}>
                     {paymentStatusLabel(booking, { partialText: 'Partial' }).label}
@@ -3645,9 +3860,9 @@ const BookingActionModal = ({
                     onClick={() => setShowPaymentModal(true)}
                     iconName="CreditCard"
                     iconPosition="left"
-                    className="w-full sm:w-auto min-h-[44px]"
+                    className={`w-full min-h-[44px] ${multiView ? '' : 'sm:w-auto'}`}
                   >
-                    {selectedCount > 0 ? `Pay ${1 + selectedCount} Services` : 'Record Payment'}
+                    {multiView ? 'Collect payment' : selectedCount > 0 ? `Pay ${1 + selectedCount} Services` : 'Record Payment'}
                   </Button>
                 )}
                 {booking.paymentStatus === 'paid' && (
@@ -4172,12 +4387,12 @@ const BookingActionModal = ({
                   <Button variant="outline" onClick={showAdminCorrection ? requestCorrectionClose : onClose} className="min-h-[44px] sm:min-h-0">
                     Close
                   </Button>
-                  {activeTab === 'assign' && !isAssignmentBlocked && (
+                  {activeTab === 'assign' && (multiView ? block.rows.some(multiStaffEditable) : !isAssignmentBlocked) && (
                     <Button
                       variant="primary"
-                      onClick={handleAssignTherapist}
+                      onClick={multiView ? handleAssignAll : handleAssignTherapist}
                       loading={isLoading}
-                      disabled={assignIncomplete}
+                      disabled={multiView ? (!multiStaffChanged.length || multiStaffIncomplete) : assignIncomplete}
                       className="min-h-[44px] sm:min-h-0"
                     >
                       Save Assignment
