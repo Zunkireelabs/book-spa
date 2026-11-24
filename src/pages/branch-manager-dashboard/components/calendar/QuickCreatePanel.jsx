@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../../../../contexts/AuthContext';
 import { viewerAccess } from '../../../../services/dataMasking';
 import Icon from '../../../../components/AppIcon';
+import { buildEditChanges } from './editBookingSlot';
 import DateTimeRow from '../../../../components/ui/DateTimeRow';
 import { format12h } from '../../../../utils/timeInput';
 import SidePanel, { PANEL_WIDTH_BOOKING } from '../../../../components/ui/SidePanel';
@@ -50,18 +51,24 @@ const LockedClientCard = ({ client, name }) => {
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-semibold text-text-primary">{label}</span>
         <span className="block truncate text-xs text-text-secondary">
-          {client.bookingNumber ? `Same client as ${client.bookingNumber}` : 'Same client'}
+          {client.phone ? client.phone : client.bookingNumber ? `Same client as ${client.bookingNumber}` : 'Same client'}
           {client.kind === 'walkin' && <span className="ml-1.5 rounded-full bg-[#FDF1DC] px-2 py-px text-[11px] font-medium text-secondary">Walk-in</span>}
         </span>
       </span>
-      <span className="flex flex-shrink-0 items-center gap-1 text-[11px] text-[#8A8A90]"><Icon name="Lock" size={12} />same client</span>
+      {!client.phone && <span className="flex flex-shrink-0 items-center gap-1 text-[11px] text-[#8A8A90]"><Icon name="Lock" size={12} />same client</span>}
     </div>
   );
 };
 
 // ── Quick Create Panel ────────────────────────────────────────
 
-const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours, retarget, onDraftChange, columnMode = 'therapist', allTherapists = [], guardRef, offStaff = {}, offDate = null, onRefreshCalendar }) => {
+const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings: bookingsProp = [], onClose, onSubmit, branchId, branchHours, retarget, onDraftChange, columnMode = 'therapist', allTherapists = [], guardRef, offStaff = {}, offDate = null, onRefreshCalendar }) => {
+  const edit = slotInfo?.edit || null;   // ZNLY-402 piece 5: Edit booking = this same form, prefilled with the whole booking
+  // The booking's own rows are not "busy" against themselves.
+  const bookings = useMemo(() => (edit ? bookingsProp.filter((b) => !edit.ownIds.includes(b.id)) : bookingsProp), [bookingsProp, edit]);
+  const [firstEdit, setFirstEdit] = useState(null);   // Edit: the first service's { bookingId, locked, name }
+  const [removedIds, setRemovedIds] = useState([]);    // Edit: services dropped from the form, cancelled by Save changes
+  const editBaselineRef = useRef('');
   const { profile: viewerProfile } = useAuth();
   const { allowStaffOverlap, requireCustomerPhone, multiServiceBookings } = useOrg();   // ZNLY-389 / ZNLY-390: per-org booking rules
   // ZNLY-278: an own-only login books only itself; the data layer hands it a single team member, so that one is the default.
@@ -283,6 +290,14 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       checkPreviousDue(`${slotInfo.defaultCustomerCountryCode || '+977'}${slotInfo.defaultCustomerPhone}`);
     }
     setConfirm(null);
+    setExtraRows([]); setFirstEdit(null); setRemovedIds([]); setErrorRow(null);
+    if (slotInfo?.edit) {
+      const e = slotInfo.edit; const [f, ...rest] = e.rows;
+      const xr = rest.map((r) => ({ key: `e${r.bookingId}`, bookingId: r.bookingId, serviceId: r.serviceId, therapistId: r.therapistId, roomId: r.roomId, start: r.start, locked: r.locked, name: r.name }));
+      setServiceId(f.serviceId); setSelectedTherapistIds(f.therapistId ? [f.therapistId] : []); setRoomId(f.roomId || ''); setBookingTime(f.start);
+      setSpecialRequests(e.specialRequests || ''); setExtraRows(xr); setFirstEdit({ bookingId: f.bookingId, locked: f.locked, name: f.name });
+      editBaselineRef.current = JSON.stringify([slotInfo.day, f.start, f.serviceId, f.therapistId ? [f.therapistId] : [], f.roomId || '', e.specialRequests || '', xr, []]);
+    }
     initialDraftRef.current = {
       date: slotInfo?.day || '',
       time: slotTime,
@@ -441,7 +456,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // dayChecking: the fetch is in flight (show "Checking who's free…"); dayKnown false and not checking = failed / own-only: plain list, no Fill.
   const dayKnown = reuseCalDay || ownDayData.ready;
   const dayChecking = !!bookingDate && !dayKnown && !ownDayData.failed && !viewerAccess(viewerProfile).ownOnly;
-  const dayBookings = reuseCalDay ? bookings : (ownDayData.ready ? ownDayData.bookings : null);
+  const dayBookings = reuseCalDay ? bookings : (ownDayData.ready ? (edit ? ownDayData.bookings.filter((b) => !edit.ownIds.includes(b.id)) : ownDayData.bookings) : null);
   const dayOff = reuseCalDay ? offStaff : (ownDayData.ready ? ownDayData.offById : {});
   const groupRanges = useMemo(() => (bookingMode === 'group' && bookingDate && dayBookings ? staffDayRanges(dayBookings, { date: bookingDate }) : {}), [bookingMode, bookingDate, dayBookings]);
   const groupOff = dayOff;
@@ -653,7 +668,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     submitInFlightRef.current = true;
     setSubmitting(true);
     setError(null);
-    const payload = bookingMode === 'group'
+    const editRows = edit ? [
+      { bookingId: firstEdit?.bookingId || null, serviceId, therapistId: selectedTherapistIds[0] || '', roomId, start: bookingTime },
+      ...extraRows.map((r, i) => ({ bookingId: r.bookingId || null, serviceId: r.serviceId, therapistId: r.therapistId, roomId: r.roomId || '', start: extraTimes[i]?.start || r.start })),
+    ] : [];
+    const payload = edit
+      ? { bookingDate, bookingTime, edit: { visitKey: edit.visitKey, order: editRows.map((r) => r.bookingId), changes: buildEditChanges({ date: bookingDate, specialRequests: specialRequests.trim(), rows: editRows, removed: removedIds }) } }
+      : bookingMode === 'group'
       ? {
           mode: 'group',
           specialRequests: specialRequests.trim() || null,
@@ -696,7 +717,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         };
     const err = await onSubmit(payload);
     if (err) {
-      const text = friendlyError(err, 'Couldn\'t create the booking. Please try again.');
+      const text = friendlyError(err, edit ? 'Nothing was saved. Please try again.' : 'Couldn\'t create the booking. Please try again.');
       setError(text);
       setErrorCode(err?.code || null);
       setErrorCard(describeError(err?.raw || { code: err?.code, message: err?.message }, { ...guideCtx, partial: err?.partial }));
@@ -726,12 +747,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // "Dirty" = the user edited something that is NOT the slot itself. Date, time and column come from the slot (and are
   // moved silently by retargeting); service, customer, contact, notes, group members, referral, and a therapist/room
   // choice that differs from what the slot set all count as an edit.
-  const isDirty = isOpen && (
+  const editSnap = JSON.stringify([bookingDate, bookingTime, serviceId, selectedTherapistIds, roomId, specialRequests, extraRows, removedIds]);
+  const isDirty = isOpen && (edit ? editSnap !== editBaselineRef.current : (
     !!((serviceId && serviceId !== initialDraftRef.current.service) || activeRows.length > 0 || (!slotInfo?.lockedClient && (customerName.trim() || customerPhone.trim() || customerEmail.trim() || customerGender)) || specialRequests.trim()
       || (customerKind === 'walkin' && !slotInfo?.walkIn && !slotInfo?.lockedClient) || (!slotInfo?.lockedClient && walkInLabel.trim()) || groupServiceId || peopleEdited || referringCustomerName)
     || selectedTherapistIds.join(',') !== (initialDraftRef.current.therapist ? initialDraftRef.current.therapist : '')
     || (roomId || '') !== initialDraftRef.current.room
-  );
+  ));
   // Lets the calendar run another panel action (open a booking, …) through this panel's dirty guard.
   useEffect(() => {
     if (!guardRef) return undefined;
@@ -752,7 +774,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     therapistId: bookingMode === 'individual' ? selectedTherapistIds[0] : null, enabled: !!slotInfo,
   });
   useEffect(() => {
-    if (!isOpen) { onDraftChange?.(null); return; }
+    if (!isOpen || edit) { onDraftChange?.(null); return; }   // Edit: the booking's own cards are already on the grid, no ghost
     onDraftChange?.({
       date: bookingDate,
       startTime: bookingTime,
@@ -784,7 +806,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     };
   };
   useEffect(() => {
-    if (!retarget || retarget.nonce === lastRetargetRef.current || !isOpen) return;
+    if (!retarget || retarget.nonce === lastRetargetRef.current || !isOpen || edit) return;
     lastRetargetRef.current = retarget.nonce;
     const s = retarget.slot;
     const curCol = s.colType === 'room' ? (roomId || '') : s.colType === 'therapist' ? (selectedTherapistIds[0] || '') : '';
@@ -966,7 +988,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         className="h-9 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 spa-transition-fast disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
       >
         {submitting && <div className="animate-spin w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full" />}
-        {submitting ? 'Creating...' : bookingMode === 'group' ? `Create ${peopleCount} bookings` : (precheck.warn || anyRowOverride) ? 'Book anyway…' : 'Create booking'}
+        {submitting ? (edit ? 'Saving...' : 'Creating...') : edit ? 'Save changes' : bookingMode === 'group' ? `Create ${peopleCount} bookings` : (precheck.warn || anyRowOverride) ? 'Book anyway…' : 'Create booking'}
       </button>
     </div>
   );
@@ -981,6 +1003,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       branchHours={branchHours}
       timeRingClass={fieldRing('time')}
       timeFieldAttr="time"
+      timeDisabled={!!firstEdit?.locked}
     />
   );
 
@@ -1258,13 +1281,15 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               <ExtraServiceRows
                 rows={activeRows} setRows={setExtraRows} times={extraTimes} services={extraServices} first={selectedService} canAdd={canMulti}
                 firstCard={{
+                  locked: firstEdit?.locked || '',
                   serviceId, therapistId: selectedTherapistIds[0] || '', start: bookingTime, flash: flashSvc === 'service' && !serviceId,
                   firstServices: pickerServices, loading: servicesLoading, openSignal: openServiceSignal, onSignalConsumed: () => setOpenServiceSignal(0),
                   onService: setServiceId, onStaff: (v) => setSelectedTherapistIds(v ? [v] : []), onStart: setBookingTime,
                   // Removing Service 1 promotes Service 2 into the panel's own service (its start only if it was set by hand).
-                  onRemove: (next) => { if (!next) return; setServiceId(next.serviceId); setSelectedTherapistIds(next.therapistId ? [next.therapistId] : []); if (next.start) setBookingTime(next.start); setExtraRows((rs) => rs.slice(1)); },
+                  onRemove: (next) => { if (!next) return; if (firstEdit?.bookingId) setRemovedIds((ids) => [...ids, firstEdit.bookingId]); setFirstEdit(next.bookingId ? { bookingId: next.bookingId, locked: next.locked || '', name: next.name } : null); setServiceId(next.serviceId); setSelectedTherapistIds(next.therapistId ? [next.therapistId] : []); if (next.start) setBookingTime(next.start); setExtraRows((rs) => rs.slice(1)); },
                 }}
                 staffRing={fieldRing('staff')}
+                onRemoved={(id) => setRemovedIds((ids) => [...ids, id])}
                 branchId={branchId} canViewPrices={canViewPrices} pickerPeople={pickerPeople} dayBookings={dayBookings} dayOff={dayOff}
                 branchHours={branchHours} bookingDate={bookingDate} allowStaffOverlap={allowStaffOverlap} staffLabel={staffLabel} staffLabelPlural={staffLabelPlural}
                 problems={rowProblems} ownProblems={ownProblems} onProblem={onRowProblem} errorRow={errorKey === formKey ? errorRow : null} errorText={activeError || ''} flashRow={flashSvc && /^service-x\d+$/.test(flashSvc) ? Number(flashSvc.slice(9)) : null}
@@ -1582,7 +1607,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             </>
             )}
 
-            {CUSTOMER_REFERRALS_ENABLED && customerName.trim() && customerPhone.replace(/\D/g, '').length >= 7 && !isExistingCustomer && (
+            {!edit && CUSTOMER_REFERRALS_ENABLED && customerName.trim() && customerPhone.replace(/\D/g, '').length >= 7 && !isExistingCustomer && (
               <div className="space-y-3">
                 <label className="block font-body font-body-medium text-sm text-text-primary -mb-2">
                   Referred by (customer)
@@ -1635,6 +1660,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   phone number or name and pick them from the suggestions, then choose their reward —
                   it'll be credited once this booking is completed and paid.
                 </p>
+              </div>
+            )}
+
+            {edit?.referredBy && (
+              <div data-edit-referred-by>
+                <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Referred by</label>
+                <p className="px-3 py-2 text-sm rounded-spa bg-[#F4F4F6] text-text-primary">{edit.referredBy}</p>
               </div>
             )}
 

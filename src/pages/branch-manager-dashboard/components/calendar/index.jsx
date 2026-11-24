@@ -20,6 +20,7 @@ import CalendarToolbar from './CalendarToolbar';
 import DragPreviewOverlay from './DragPreviewOverlay';
 import ReassignConfirmDialog from './ReassignConfirmDialog';
 import QuickCreatePanel from './QuickCreatePanel';
+import MoveBookingDialog from '../../../../components/ui/MoveBookingDialog';
 import { GuideNotice } from '../../../../components/ui/GuideCard';
 import { describeError } from '../../../../utils/errorGuide';
 import { useCalendarData } from './hooks/useCalendarData';
@@ -237,10 +238,10 @@ const OperationalCalendar = ({ branchId }) => {
     blockDeleteRequest, setBlockDeleteRequest, lastBlockWasRoomOnly,
     transferModalTarget, setTransferModalTarget, editingTransferTherapist, setEditingTransferTherapist,
     blockPanelOpen, blockRetarget,
-    servicesCache, servicesLoading, rebookSource, rebookCardRef, reschedulePending,
+    servicesCache, servicesLoading, rebookSource, rebookCardRef, reschedulePending, visitMove, setVisitMove, handleRebookCancel,
     waitlistCollapsed, setWaitlistCollapsed, waitlistRefreshToken, handleBookInFromWaitlist,
     openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick,
-    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleAddServiceStart, handleRebookStart, handleRescheduleStart,
+    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleAddServiceStart, handleEditFormStart, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,
   } = useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, showGuide, gridRef, canViewCustomerDetails });
   const waitlist = useWaitlistEntries(branchId, waitlistRefreshToken);
@@ -391,6 +392,12 @@ const OperationalCalendar = ({ branchId }) => {
         onDragCancel={handleDragCancel}
       >
         <div className="bg-surface overflow-clip flex flex-col h-full pb-2">
+          {rebookSource?.visit && (
+            <div role="status" data-pick-new-time className="flex items-center justify-between gap-3 px-4 min-h-11 bg-success/10 text-success text-[13px] font-medium border-b border-success/20">
+              <span>Pick a new time for {String(rebookSource.customerName || 'this').split(' ')[0]}&apos;s booking ({rebookSource.visit.count} services)</span>
+              <button type="button" onClick={handleRebookCancel} aria-label="Stop moving this booking" className="p-1.5 rounded-spa hover:bg-success/10"><Icon name="X" size={16} /></button>
+            </div>
+          )}
           <CalendarToolbar
             staffLabel={staffLabel}
             staffLabelPlural={staffLabelPlural}
@@ -575,6 +582,18 @@ const OperationalCalendar = ({ branchId }) => {
         />
       </DndContext>
 
+      {visitMove && (
+        <MoveBookingDialog
+          visitKey={visitMove.visitKey}
+          date={visitMove.date}
+          startTime={visitMove.startTime}
+          lines={visitMove.lines}
+          canOverride={['manager', 'admin'].includes(profile?.role)}
+          onClose={() => setVisitMove(null)}
+          onDone={() => { setVisitMove(null); handleRebookCancel(); showToast('Booking moved.'); refreshLight(refreshCalendar); }}
+        />
+      )}
+
       {/* Rebook floating cursor card */}
       {rebookSource && (
         <div
@@ -641,6 +660,7 @@ const OperationalCalendar = ({ branchId }) => {
         onAddServiceStart={isOverallBranch(branchId) ? undefined : handleAddServiceStart}
         onRebookStart={isOverallBranch(branchId) ? undefined : handleRebookStart}
         onRescheduleStart={isOverallBranch(branchId) ? undefined : handleRescheduleStart}
+        onEditForm={isOverallBranch(branchId) ? undefined : handleEditFormStart}
         onGroupPaymentRecorded={handleGroupPaymentRecorded}
         canViewCustomerDetails={canViewCustomerDetails}
         onViewBooking={(bookingId) => handleBookingClick({ bookingId })}

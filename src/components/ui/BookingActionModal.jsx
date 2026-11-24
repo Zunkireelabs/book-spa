@@ -24,6 +24,11 @@ import InvoicePrintModal from './InvoicePrintModal';
 import { relatedFetchers } from '../../utils/visitGate';
 import { fetchBookingServices } from '../../services/api';
 import { buildBookingBlock } from '../../utils/bookingBlock';
+import { VisitStatusFlow } from './VisitStatusDialog';
+import RemoveServiceFlow from './RemoveServiceFlow';
+import CreateBookingHost from '../../pages/branch-manager-dashboard/components/calendar/CreateBookingHost';
+import { buildEditSlot } from '../../pages/branch-manager-dashboard/components/calendar/editBookingSlot';
+import { lockReason as lockReasonOf } from '../../pages/branch-manager-dashboard/components/calendar/editBookingSlot';
 import BookingServicesBlock, { waitingNote } from './BookingServicesBlock';
 import BookingStaffRows, { rowIds, rowRoom, rowChanged } from './BookingStaffRows';
 import BookingDiscountLines from './BookingDiscountLines';
@@ -314,6 +319,8 @@ const BookingActionModal = ({
   // caller is expected to create the new booking AND cancel this one, not
   // update it in place.
   onRescheduleStart,
+  // ZNLY-402 piece 5: the pencil opens the shared booking form (prefilled with the whole booking) when the host provides it; else the inline Edit details.
+  onEditForm,
 }) => {
   const { branchId } = useBranch();
   const { org: orgForNav, paymentMethods, orgSettings, staffLabel, staffLabelPlural, allowStaffOverlap, multiServiceBookings } = useOrg();
@@ -352,6 +359,8 @@ const BookingActionModal = ({
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [payTicks, setPayTicks] = useState(null); // checkout of a 2+ service booking: ticked service ids (null = all ticked); reset each time checkout opens
+  useEffect(() => { if (showPaymentModal) setPayTicks(null); }, [showPaymentModal]);
   const [addClientSignal, setAddClientSignal] = useState(0); // ZNLY-327: the Payment tab's "＋ Add client" opens the header's client list
   // Products added to this visit (V26, product_sales.booking_id): read-only lines on the Payment tab; a manager/admin can refund one.
   const [visitProducts, setVisitProducts] = useState([]);
@@ -395,6 +404,8 @@ const BookingActionModal = ({
   const [correctingPayment, setCorrectingPayment] = useState(null);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [actionError, setActionError] = useState(null);
+  const [editSlot, setEditSlot] = useState(null); // the shared booking form (QuickCreatePanel in Edit mode) opened from the pencil / Edit details, for hosts that don't render it themselves
+  const [removeRow, setRemoveRow] = useState(null); // ZNLY-402 piece 5: the service row being removed from this booking (screen D)
   const [pendingStatus, setPendingStatus] = useState(null); // 'cancelled' while confirm dialog is open
 
   // Edit mode state
@@ -540,6 +551,25 @@ const BookingActionModal = ({
   const block = useMemo(() => buildBookingBlock(blockRows, booking?.bookingId), [blockRows, booking?.bookingId]);
   // The multi-service look is ONLY for a booking with 2+ services in an org with the setting ON: every other booking looks exactly as before.
   const multiView = !!(multiServiceBookings && booking?.visitId && block.show && block.rows.some((r) => r.id === booking?.bookingId));
+  // Checkout (ZNLY-402 piece 5, B): every payable service is one equal row; the first TICKED one is the payment's main booking (the opened service when it is ticked).
+  const payOrder = useMemo(() => {
+    if (!multiView) return [];
+    const ids = new Set([booking?.bookingId, ...relatedBookings.filter((rb) => !(multiServiceBookings && rb.status === 'Pending')).map((rb) => rb.id)]);
+    return block.rows.filter((r) => ids.has(r.id) && !r.dead).map((r) => r.id);
+  }, [multiView, block.rows, booking?.bookingId, relatedBookings, multiServiceBookings]);
+  const payTicked = payTicks || new Set(payOrder);
+  const payMainId = !multiView ? booking?.bookingId : (payTicked.has(booking?.bookingId) ? booking.bookingId : (payOrder.find((id) => payTicked.has(id)) || booking?.bookingId));
+  const payNoneTicked = multiView && payOrder.every((id) => !payTicked.has(id));
+  // One service as the checkout wants it (the opened booking, or one of the related raw rows).
+  const payRowView = (id) => {
+    const info = block.rows.find((r) => r.id === id);
+    if (id === booking?.bookingId) return { id: booking.id, bookingId: booking.bookingId, bookingNumber: booking.id, booking_number: booking.id, branchId: booking.branchId, service: booking.service, base_amount: booking.baseAmount, discount_amount: booking.discountAmount, final_amount: booking.finalAmount, amountPaid: booking.amountPaid, dueHolderName: booking.dueHolderName, minutes: info?.minutes, staff: info?.staff?.join(', ') };
+    const rb = relatedBookings.find((x) => x.id === id) || {};
+    return { id: rb.booking_number, bookingId: rb.id, bookingNumber: rb.booking_number, booking_number: rb.booking_number, branchId: booking?.branchId, service: rb.service?.name, base_amount: rb.base_amount, discount_amount: rb.discount_amount, final_amount: rb.final_amount, amountPaid: 0, dueHolderName: booking?.dueHolderName, minutes: info?.minutes, staff: info?.staff?.join(', ') };
+  };
+  const togglePayTick = (id) => setPayTicks((prev) => { const n = new Set(prev || payOrder); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const payMainView = booking ? payRowView(payMainId) : null;
+  const visitStatusFlow = multiView && !!booking?.visitId && (pendingStatus === 'no show' || pendingStatus === 'cancelled');
 
   // Fetch related unpaid bookings when payment tab opens
   useEffect(() => {
@@ -1188,6 +1218,7 @@ const BookingActionModal = ({
 
   const handlePaymentConfirm = async (payload) => {
     const { tenders, additionalAllocations, dueHolderName, notes: paymentNotes, tipSplits } = payload;
+    const payId = payMainId || booking.bookingId;   // the main (first ticked) service pays first, the others follow as allocations
     if (!booking || !onRecordPayment) return { error: { message: 'No payment handler available.' } };
     setPaymentSubmitting(true);
     setActionError(null);
@@ -1202,13 +1233,13 @@ const BookingActionModal = ({
       // Products on the bill (V26) go through the one shared submit (services/checkoutSubmit.js, ZNLY-233): with products it is ONE call
       // (products + stock + treatment payment); without, `treatment` below runs as it always did.
       return await submitCheckout({
-        bookingId: booking.bookingId,
+        bookingId: payId,
         payload,
         onSaved: async () => { if (onGroupPaymentRecorded) onGroupPaymentRecorded(); else await onRefreshBooking?.(booking.bookingId); },
         treatment: async () => {
         if (onGroupPaymentRecorded) {
           const { data, error } = await recordGroupPayment([
-            { bookingId: booking.bookingId, tenders, dueHolderName, notes: paymentNotes },
+            { bookingId: payId, tenders, dueHolderName, notes: paymentNotes },
             ...(additionalAllocations || []).map((alloc) => ({ bookingId: alloc.bookingId, tenders: alloc.tenders, notes: paymentNotes })),
           ]);
           if (error) return { error };
@@ -1220,7 +1251,7 @@ const BookingActionModal = ({
           // the bundle) — a failure here must never undo the payment that already
           // succeeded.
           for (const split of (tipSplits || [])) {
-            const tipResult = await recordTip({ bookingId: booking.bookingId, amount: split.amount, receivedBy: split.receivedBy });
+            const tipResult = await recordTip({ bookingId: payId, amount: split.amount, receivedBy: split.receivedBy });
             if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
           }
 
@@ -1229,7 +1260,7 @@ const BookingActionModal = ({
           return { data: data?.[0], error: null };
         }
 
-        const result = await onRecordPayment(booking.bookingId, { tenders, dueHolderName, notes: paymentNotes, tipSplits });
+        const result = await onRecordPayment(payId, { tenders, dueHolderName, notes: paymentNotes, tipSplits });
         if (result?.error) return result;
 
         // Pay each bundled previous-due/related booking with its own allocated
@@ -1677,7 +1708,14 @@ const BookingActionModal = ({
     </span>
   );
   // Panel header: name + status + pencil + ×, then the customer subline (phone · View profile · birthday). Restricted staff: name + status only.
-  const canEditDetails = !restricted && !isMutationBlocked && !!onEditBooking;
+  const openEdit = () => {
+    const referredBy = booking.referredBy || (customerReferral ? [customerReferral.referrerName, customerReferral.referrerPhone].filter(Boolean).join(' · ') : '');
+    if (onEditForm) { onEditForm(booking, multiView ? block.rows : null, referredBy); return; }
+    setEditSlot(buildEditSlot({ booking, blockRows: multiView ? block.rows : null, referredBy }));
+  };
+  // The shared form handles started / paid services itself (read-only cards), so a 2+ service booking can be edited unless the day is closed.
+  const editAllowed = multiView ? !isLocked : !isMutationBlocked;
+  const canEditDetails = !restricted && editAllowed && !!onEditBooking;
   // ZNLY-327: a walk-in with no client gets "＋ Add client" instead of View profile / phone / birthday; a walk-in that has one keeps a small tag.
   const walkInNoClient = !!booking.isWalkIn && !booking.customerId;
   // Add client changes no money, so it follows the API's own lifecycle rule (a closed day, Cancelled and No Show refuse); a paid, in-progress or Completed booking may still get one.
@@ -1706,7 +1744,7 @@ const BookingActionModal = ({
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           {canEditDetails && (
-            <button type="button" onClick={() => { setActiveTab('details'); startEditing(); }} title="Edit booking details" aria-label="Edit booking details"
+            <button type="button" onClick={openEdit} title="Edit booking details" aria-label="Edit booking details"
               className="w-8 h-8 max-lg:w-11 max-lg:h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background hover:text-primary spa-transition-fast">
               <Icon name="Pencil" size={15} />
             </button>
@@ -1729,7 +1767,7 @@ const BookingActionModal = ({
         <h3 id="booking-panel-title" className="min-w-0 truncate font-heading font-heading-semibold text-[16px] text-text-primary">{booking.customerName}</h3>
         <div className="flex items-center flex-shrink-0">
           {canEditDetails && (
-            <button type="button" onClick={() => { setActiveTab('details'); startEditing(); }} aria-label="Edit booking details"
+            <button type="button" onClick={openEdit} aria-label="Edit booking details"
               className="w-11 h-11 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background hover:text-primary spa-transition-fast">
               <Icon name="Pencil" size={15} />
             </button>
@@ -1786,10 +1824,15 @@ const BookingActionModal = ({
   };
   const blockRowAction = (r) => {
     if (isViewer || isLocked || !onUpdateStatus || r.dead) return null;
-    if (r.status === 'confirmed') { const why = futureBookingMessage(r.date, 'start'); return { start: { disabled: !!why, reason: why, run: () => runRowStatus(r.id, 'in-progress') } }; }
-    if (r.status === 'in-progress') { const why = futureBookingMessage(r.date, 'complete'); return { done: { disabled: !!why, reason: why, run: () => runRowStatus(r.id, 'completed') } }; }
-    if (r.status === 'pending') return { confirm: { disabled: false, run: () => runRowStatus(r.id, 'confirmed') } };
-    return null;
+    // Remove (U12): shown on every live service; the server dry run says whether it may go (started / paid ones give the plain reason).
+    // A started / done / paid service has no Remove: it shows a lock chip with the plain reason instead (the dialog stays the server-side fallback).
+    const lock = lockReasonOf(r);
+    const remove = restricted ? undefined : lock ? undefined : { run: () => setRemoveRow(r) };
+    const lockChip = lock ? lock.replace(' – can\'t change', '') : undefined;
+    if (r.status === 'confirmed') { const why = futureBookingMessage(r.date, 'start'); return { start: { disabled: !!why, reason: why, run: () => runRowStatus(r.id, 'in-progress') }, remove, lock: lockChip }; }
+    if (r.status === 'in-progress') { const why = futureBookingMessage(r.date, 'complete'); return { done: { disabled: !!why, reason: why, run: () => runRowStatus(r.id, 'completed') }, remove, lock: lockChip }; }
+    if (r.status === 'pending') return { confirm: { disabled: false, run: () => runRowStatus(r.id, 'confirmed') }, remove, lock: lockChip };
+    return lock ? { lock: lockChip } : null;
   };
   const selectBlockRow = (id) => {
     const go = () => { pendingTabRef.current = activeTab; onViewBooking(id); };
@@ -1813,10 +1856,12 @@ const BookingActionModal = ({
   });
   const visibleSecondary = secondaryVisible.filter((it) => shownKeys.includes(it.key));
   const noShowGated = !hasBookingStarted(booking);
+  // A 2+ service booking whose opened service already started can still cancel / no-show the services that have not started (the preview lists what stays).
+  const visitCanCancel = multiView && block.rows.some((r) => !r.dead && ['pending', 'confirmed'].includes(r.status) && !lockReasonOf(r));
   const overflowItems = [
     ...secondaryVisible.filter((it) => !shownKeys.includes(it.key)),
-    onEditBooking && !isMutationBlocked && !isEditing && { key: 'edit', label: 'Edit details', icon: 'Pencil', run: () => { setActiveTab('details'); startEditing(); } },
-    onEditBooking && isMutationBlocked && !isEditing && !isTerminal && { key: 'edit', label: 'Edit details', icon: 'Pencil', disabled: true, reason: isLocked ? 'Booking is locked (day closed)' : isSettled ? 'Paid bookings can\'t be edited' : 'Locked once service has started', run: () => {} },
+    onEditBooking && editAllowed && !isEditing && { key: 'edit', label: 'Edit details', icon: 'Pencil', run: openEdit },
+    onEditBooking && !editAllowed && !isEditing && !isTerminal && { key: 'edit', label: 'Edit details', icon: 'Pencil', disabled: true, reason: isLocked ? 'Booking is locked (day closed)' : isSettled ? 'Paid bookings can\'t be edited' : 'Locked once service has started', run: () => {} },
     canPay && !multiView && primaryAction?.key !== 'pay' && { key: 'pay', label: 'Collect payment', icon: 'CreditCard', run: () => { setActiveTab('payment'); setShowPaymentModal(true); } },
     // Other status transitions that aren't the primary action (e.g. Pending → Start isn't valid, so only no-show/cancel remain).
     ...(multiView ? [] : nextStatuses)
@@ -1824,11 +1869,15 @@ const BookingActionModal = ({
       .map((st) => ({ key: `st-${st}`, label: st === 'in-progress' ? 'Start' : st.charAt(0).toUpperCase() + st.slice(1), icon: 'ArrowRight', disabled: (st === 'in-progress' && !!futureStart) || (st === 'completed' && !!futureComplete), reason: st === 'completed' ? futureComplete : futureStart, run: () => handleStatusUpdate(st) })),
     // Zennly-only: Reschedule creates a new booking and cancels this one (the caller runs the slot picker).
     !isViewer && onRescheduleStart && !isTerminal && !isLocked && (() => {
-      const blocked = isServiceStarted || booking.paymentStatus === 'paid';
-      return { key: 'reschedule', label: 'Reschedule', icon: 'CalendarClock', disabled: blocked, reason: booking.paymentStatus === 'paid' ? 'Cannot reschedule a paid booking.' : 'This service has already started.', run: () => onRescheduleStart(booking) };
+      // A 2+ service booking moves its waiting services; started / paid ones stay. Disabled only when nothing can move.
+      const nothingMovable = multiView ? !block.rows.some((r) => !lockReasonOf(r) && !r.dead) : (isServiceStarted || booking.paymentStatus === 'paid');
+      const blocked = nothingMovable;
+      return { key: 'reschedule', label: 'Reschedule', icon: 'CalendarClock', disabled: blocked, reason: multiView ? 'Every service has started or is paid, so nothing can be moved.' : booking.paymentStatus === 'paid' ? 'Cannot reschedule a paid booking.' : 'This service has already started.', run: () => (multiView && booking.visitId
+        ? onRescheduleStart(booking, { visitKey: booking.visitId, count: block.count, minutes: block.live.reduce((m, r) => m + (r.minutes || 0), 0), lines: Object.fromEntries(block.rows.map((r) => [r.id, { name: r.name, price: r.final, minutes: r.minutes, staff: r.staff.join(', ') }])) })
+        : onRescheduleStart(booking)) };
     })(),
-    !isTerminal && !isLocked && nextStatuses.includes('no show') && { key: 'noshow', label: 'Mark no-show', icon: 'UserX', disabled: noShowGated || !!futureNoShow, reason: futureNoShow || "Available after the booking's scheduled time", run: () => setPendingStatus('no show') },
-    !isTerminal && !isLocked && nextStatuses.includes('cancelled') && { key: 'cancel', label: 'Cancel booking', icon: 'XCircle', danger: true, run: () => setPendingStatus('cancelled') },
+    !isTerminal && !isLocked && (nextStatuses.includes('no show') || visitCanCancel) && { key: 'noshow', label: 'Mark no-show', icon: 'UserX', disabled: noShowGated || !!futureNoShow, reason: futureNoShow || "Available after the booking's scheduled time", run: () => setPendingStatus('no show') },
+    !isTerminal && !isLocked && (nextStatuses.includes('cancelled') || visitCanCancel) && { key: 'cancel', label: 'Cancel booking', icon: 'XCircle', danger: true, run: () => setPendingStatus('cancelled') },
   ].filter(Boolean);
 
   const panelFooter = panelConfirm ? (
@@ -2317,9 +2366,9 @@ const BookingActionModal = ({
                       <h3 className={isPanel ? 'font-body font-medium text-xs uppercase tracking-wider text-text-tertiary whitespace-nowrap' : 'font-heading font-heading-medium text-sm sm:text-base text-text-primary'}>
                         {isPanel ? 'Customer' : 'Customer Information'}
                       </h3>
-                      {!isMutationBlocked && !isEditing && !showAdminCorrection && onEditBooking && (
+                      {editAllowed && !isEditing && !showAdminCorrection && onEditBooking && (
                         <button
-                          onClick={startEditing}
+                          onClick={openEdit}
                           className="p-1.5 rounded-spa hover:bg-background spa-transition-fast text-text-secondary hover:text-primary"
                           title="Edit booking details"
                         >
@@ -4037,7 +4086,28 @@ const BookingActionModal = ({
         <InvoicePrintModal bookingId={booking.bookingId} onClose={() => setShowInvoiceModal(false)} />
       )}
       {/* Cancel / No Show confirmation */}
-      {pendingStatus === 'no show' && (
+      {visitStatusFlow && (
+        <VisitStatusFlow
+          visitKey={booking.visitId}
+          kind={pendingStatus}
+          lines={Object.fromEntries(block.rows.map((r) => [r.id, { name: r.name, price: r.final, start: r.start, staff: r.staff.join(', ') }]))}
+          reasonOptions={cancelReasonOptions}
+          onClose={() => setPendingStatus(null)}
+          onDone={async () => { setPendingStatus(null); setBlockReload((n) => n + 1); await onRefreshBooking?.(booking.bookingId); }}
+        />
+      )}
+      {removeRow && (
+        <RemoveServiceFlow
+          row={removeRow}
+          newTotal={Math.max(block.total - removeRow.final, 0)}
+          canViewPrices={canViewPrices}
+          reasonOptions={cancelReasonOptions}
+          onClose={() => setRemoveRow(null)}
+          onCancelWhole={() => setPendingStatus('cancelled')}
+          onDone={async () => { setRemoveRow(null); setBlockReload((n) => n + 1); await onRefreshBooking?.(booking.bookingId); }}
+        />
+      )}
+      {!visitStatusFlow && pendingStatus === 'no show' && (
         <ConfirmDialog
           title="Mark as no-show"
           message={`Mark ${booking.customerName} as a no-show?`}
@@ -4051,7 +4121,7 @@ const BookingActionModal = ({
           onConfirm={(note) => handleStatusUpdate('no show', (note || '').trim() || 'No show')}
         />
       )}
-      {pendingStatus && pendingStatus !== 'no show' && (
+      {!visitStatusFlow && pendingStatus && pendingStatus !== 'no show' && (
         <ConfirmDialog
           title="Cancel Booking"
           message={`This will cancel the booking. This cannot be undone.${hasExistingInvoice ? ' An invoice was issued for this booking: it stays as it is, and no credit note is made.' : ''}`}
@@ -4186,39 +4256,21 @@ const BookingActionModal = ({
       {/* Payment Modal */}
       {showPaymentModal && (
         <PaymentModal
+          key={payMainId}
           savesProducts
-          booking={{
-            id: booking.id,
-            bookingId: booking.bookingId,
-            booking_number: booking.id,
-            branchId: booking.branchId,
-            service: booking.service,
-            base_amount: booking.baseAmount,
-            discount_amount: booking.discountAmount,
-            final_amount: booking.finalAmount,
-            amountPaid: booking.amountPaid,
-            dueHolderName: booking.dueHolderName,
-          }}
+          visitList={multiView}
+          visitOrder={multiView ? payOrder : null}
+          headerNumber={multiView ? block.reference : ''}
+          mainTicked={!payNoneTicked}
+          onVisitToggle={multiView ? togglePayTick : undefined}
+          waitingRows={multiView ? block.rows.filter((r) => !r.dead && r.status === 'pending' && !payOrder.includes(r.id)).map((r) => ({ bookingId: r.id, name: r.name, minutes: r.minutes, staff: r.staff.join(', '), price: r.final })) : []}
+          booking={payMainView}
           addOnCandidates={[
-            ...relatedBookings.filter(rb => !(multiServiceBookings && rb.status === 'Pending')).map(rb => ({
-              bookingId: rb.id,
-              bookingNumber: rb.booking_number,
-              service: rb.service?.name,
-              base_amount: rb.base_amount,
-              discount_amount: rb.discount_amount,
-              final_amount: rb.final_amount,
-            })),
+            ...(multiView ? payOrder.filter((id) => id !== payMainId).map((id) => payRowView(id)) : relatedBookings.filter(rb => !(multiServiceBookings && rb.status === 'Pending')).map(rb => payRowView(rb.id))),
             ...previousDueBookings,
           ]}
           additionalBookings={[
-            ...relatedBookings.filter(rb => selectedRelatedIds.has(rb.id)).map(rb => ({
-              bookingId: rb.id,
-              bookingNumber: rb.booking_number,
-              service: rb.service?.name,
-              base_amount: rb.base_amount,
-              discount_amount: rb.discount_amount,
-              final_amount: rb.final_amount,
-            })),
+            ...(multiView ? payOrder.filter((id) => id !== payMainId && payTicked.has(id)).map((id) => payRowView(id)) : relatedBookings.filter(rb => selectedRelatedIds.has(rb.id)).map(rb => payRowView(rb.id))),
             ...previousDueBookings.filter(pb => selectedPreviousDueIds.has(pb.bookingId)),
           ]}
           dueHolderSuggestions={dueHolderSuggestions}
@@ -4235,6 +4287,17 @@ const BookingActionModal = ({
       )}
     </>
   );
+
+  if (editSlot) {
+    return (
+      <CreateBookingHost
+        slot={editSlot}
+        branchId={booking.branchId || branchId}
+        onClose={() => setEditSlot(null)}
+        onCreated={async () => { setEditSlot(null); setBlockReload((n) => n + 1); await onRefreshBooking?.(booking.bookingId); }}
+      />
+    );
+  }
 
   if (isPanel) {
     if (useSheet) {

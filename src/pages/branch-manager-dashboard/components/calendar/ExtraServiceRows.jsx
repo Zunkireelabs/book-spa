@@ -28,8 +28,9 @@ const ExtraRow = ({
     offById: dayOff, date: bookingDate, today: nepalNow().today, busyOk: allowStaffOverlap,
   });
   const n = i + 1;   // the number shown: Service 1 is the panel's own service, extras follow
-  const pre = useAvailabilityPrecheck({ branchId, date: bookingDate, startTime: t.start, durationMin: svc?.duration_minutes || 0, therapistId: needsStaff ? r.therapistId : null, enabled: !!svc && !isFirst });   // Service 1's verdict is the panel's own card, never doubled here
-  const text = ownProblem || (pre.verdict ? `${pre.verdict.message}` : '') || info.problem || '';
+  const locked = r.locked || '';   // Edit booking: a started / done / paid service is shown read-only with the plain reason
+  const pre = useAvailabilityPrecheck({ branchId, date: bookingDate, startTime: t.start, durationMin: svc?.duration_minutes || 0, therapistId: needsStaff ? r.therapistId : null, enabled: !!svc && !isFirst && !locked });   // Service 1's verdict is the panel's own card, never doubled here
+  const text = locked ? '' : ownProblem || (pre.verdict ? `${pre.verdict.message}` : '') || info.problem || '';
   // A manager / admin may book anyway with a reason when the ONLY problem is an overridable availability verdict (same rule as a single booking).
   const overridable = !ownProblem && !info.problem && !!pre.verdict && pre.warn;
   useEffect(() => { if (!isFirst) onProblem(r.key, text, overridable); }, [text, overridable]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -38,17 +39,20 @@ const ExtraRow = ({
   const shown = text || (refused ? errorText : '');
   const staffShows = !!(svc && needsStaff && r.therapistId && text);   // the staff card itself carries the reason, so it never says "Free" next to it
   return (
-    <div data-qc-field={isFirst ? 'service' : `service-x${i - 1}`} data-row-problem={shown ? 'true' : undefined} className={`rounded-spa-lg border bg-background p-3 space-y-2.5 ${!shown ? 'border-border' : overridable ? 'border-amber-300 ring-2 ring-amber-200' : 'border-error ring-2 ring-error/20'}`}>
+    <div data-qc-field={isFirst ? 'service' : `service-x${i - 1}`} data-row-problem={shown ? 'true' : undefined} className={`rounded-spa-lg border ${locked ? 'bg-[#F4F4F6] opacity-90' : 'bg-background'} p-3 space-y-2.5 ${!shown ? 'border-border' : overridable ? 'border-amber-300 ring-2 ring-amber-200' : 'border-error ring-2 ring-error/20'}`}>
+      {locked && solo && <p className="flex items-center gap-1 text-xs text-text-secondary" data-row-locked><Icon name="Lock" size={12} /> {locked}</p>}
       {!solo && (
         <div className="flex items-center justify-between">
           <p className="font-body font-body-medium text-[13px] text-text-primary">Service {n}</p>
+          {locked ? <span className="inline-flex items-center gap-1 text-xs text-text-secondary" data-row-locked><Icon name="Lock" size={12} /> {locked}</span> : (
           <button type="button" onClick={() => remove(r.key)} aria-label={`Remove service ${n}`}
             className="inline-flex h-8 items-center gap-1 rounded-spa px-2 text-xs text-text-secondary hover:bg-surface hover:text-error spa-transition-fast">
             <Icon name="X" size={14} /> Remove
-          </button>
+          </button>)}
         </div>
       )}
-      <ServicePickRow required invalid={flashRow === (isFirst ? -1 : i - 1) && !r.serviceId} services={services} value={r.serviceId}
+      <p className="font-body font-body-medium text-[13px] text-text-primary -mb-1">Service <span className="text-error">*</span></p>
+      <ServicePickRow required disabled={!!locked} invalid={flashRow === (isFirst ? -1 : i - 1) && !r.serviceId} services={services} value={r.serviceId}
         // Service 1 keeps the staff already picked (e.g. from the calendar column), as the single-service form always did; extras start clean.
         onChange={(val) => patch(r.key, isFirst ? { serviceId: val } : { serviceId: val, therapistId: '' })} branchId={branchId} canViewPrices={canViewPrices}
         title={solo ? 'Service for the booking' : `Service ${n}`} ariaLabel={solo ? 'Service' : undefined}
@@ -57,8 +61,8 @@ const ExtraRow = ({
         <div {...(isFirst ? { 'data-qc-field': 'staff' } : {})} className={isFirst ? staffRing : ''}>
           <p className="flex items-baseline justify-between mb-1.5 font-body font-body-medium text-[13px] text-text-primary">{staffLabel} <span className="text-xs font-normal text-text-secondary">optional</span></p>
           <StaffPickRow
-            people={picked} max={1} statusLine={text ? '' : info.statusLine} pill={text ? null : info.pill} problem={text}
-            emptyLabel={svc ? `Pick ${staffLabel.toLowerCase()}` : 'Pick a service first'} disabled={!svc} title={`${staffLabel} for service ${n}`}
+            people={picked} max={1} statusLine={text || locked ? '' : info.statusLine} pill={text || locked ? null : info.pill} problem={text}
+            emptyLabel={svc ? `Pick ${staffLabel.toLowerCase()}` : 'Pick a service first'} disabled={!svc || !!locked} title={`${staffLabel} for service ${n}`}
             renderPicker={(close) => (
               <StaffPicker
                 people={pickerPeople} selectedIds={r.therapistId ? [r.therapistId] : []} max={1}
@@ -72,7 +76,7 @@ const ExtraRow = ({
               />
             )}
           />
-          {svc && !r.therapistId && <p className="mt-1 text-xs text-text-secondary" data-no-staff-yet>No {staffLabel.toLowerCase()} yet · goes to Unassigned</p>}
+          {svc && !locked && !r.therapistId && <p className="mt-1 text-xs text-text-secondary" data-no-staff-yet>No {staffLabel.toLowerCase()} yet · goes to Unassigned</p>}
         </div>
       )}
       {svc && (
@@ -80,13 +84,13 @@ const ExtraRow = ({
           {!solo && (
           <div className="flex items-center gap-2 text-[13px] text-text-primary">
             <span className="font-body-medium">Starts</span>
-            <div className="w-32"><TimeField time={t.start} onTimeChange={(v) => patch(r.key, { start: v })} branchHours={branchHours} ariaLabel={`Start time of service ${n}`} /></div>
+            <div className="w-32"><TimeField disabled={!!locked} time={t.start} onTimeChange={(v) => patch(r.key, { start: v })} branchHours={branchHours} ariaLabel={`Start time of service ${n}`} /></div>
           </div>
           )}
           <span className="text-xs text-text-secondary">
             {svc.duration_minutes} min · ends {format12h(t.end)}{canViewPrices && (svc.effective_price_npr ?? svc.price_npr) != null ? ` · ${svc.price_type === 'tiered' ? 'from ' : ''}${formatNPR(Number(svc.effective_price_npr ?? svc.price_npr))}` : ''}
           </span>
-          {!isFirst && r.start && <button type="button" onClick={() => patch(r.key, { start: '' })} className="text-xs text-primary underline underline-offset-2">Start after the previous service</button>}
+          {!isFirst && !locked && !r.bookingId && r.start && <button type="button" onClick={() => patch(r.key, { start: '' })} className="text-xs text-primary underline underline-offset-2">Start after the previous service</button>}
         </div>
       )}
       {shown && !staffShows && <p className={`text-xs font-medium ${overridable ? 'text-amber-800' : 'text-error'}`} role="alert" data-row-problem-text>{shown}</p>}
@@ -97,10 +101,10 @@ const ExtraRow = ({
 
 const ExtraServiceRows = ({
   rows, setRows, times, services, first, firstCard, canAdd = true, staffRing = '', branchId, canViewPrices, pickerPeople, dayBookings, dayOff, bookingDate,
-  allowStaffOverlap, staffLabel, staffLabelPlural, branchHours, errorRow = null, errorText = '', flashRow = null, problems = {}, ownProblems = {}, onProblem = () => {},
+  allowStaffOverlap, staffLabel, staffLabelPlural, branchHours, errorRow = null, errorText = '', flashRow = null, problems = {}, ownProblems = {}, onProblem = () => {}, onRemoved = null,
 }) => {
   const patch = (key, p) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
-  const remove = (key) => setRows((rs) => rs.filter((r) => r.key !== key));
+  const remove = (key) => { const gone = rows.find((r) => r.key === key); if (gone?.bookingId) onRemoved?.(gone.bookingId); setRows((rs) => rs.filter((r) => r.key !== key)); };
   const byId = new Map((services || []).map((s) => [s.id, s]));
   const sum = bookingTotal(first, rows, services);
 
@@ -110,7 +114,7 @@ const ExtraServiceRows = ({
   const firstStartMin = (() => { const m = /^(\d{1,2}):(\d{2})/.exec(f?.start || ''); return m ? Number(m[1]) * 60 + Number(m[2]) : 0; })();
   const firstDur = first?.duration_minutes || 0;
   const firstT = { start: f?.start || '', end: minToClock(firstStartMin + firstDur), startMin: firstStartMin, endMin: firstStartMin + firstDur };
-  const firstRow = { key: 'first', serviceId: f?.serviceId || '', therapistId: f?.therapistId || '', start: f?.start || '' };
+  const firstRow = { key: 'first', serviceId: f?.serviceId || '', therapistId: f?.therapistId || '', start: f?.start || '', locked: f?.locked || '' };
   const firstPatch = (_k, p) => {
     if ('serviceId' in p) f.onService(p.serviceId);
     if ('therapistId' in p) f.onStaff(p.therapistId);

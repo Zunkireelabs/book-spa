@@ -282,6 +282,14 @@ const PaymentModal = ({
   // ZNLY-233: true ONLY when the host's onConfirm goes through services/checkoutSubmit (so products on the bill are saved). Without it the
   // "Add a product" block is not offered, so a bill can never say "paid" while the product sale, stock and commission were dropped.
   savesProducts = false,
+  // ZNLY-402 piece 5 (screen B): a 2+ service booking shows ONE list "This booking · N services": every service the same row (service · duration · staff · price),
+  // ticked by default (untick = pay later), services still waiting for confirmation greyed + unticked. `waitingRows` = [{ bookingId, name, minutes, staff, price }].
+  visitList = false,
+  waitingRows = [],
+  visitOrder = null,      // ids of the payable services in display order (the opened one is not always first)
+  mainTicked = true,      // false only when NO service is ticked: nothing to collect
+  headerNumber = '',      // the booking's ONE reference number (the first service's), so the header never changes when the paying service does
+  onVisitToggle = null,   // (bookingId) => the host keeps the ticks; unticking the paying (main) service makes another ticked one the main
 }) => {
   const { paymentMethods, orgName } = useOrg();
   const { treatmentWord, treatmentWordLower } = useIndustry();
@@ -304,6 +312,9 @@ const PaymentModal = ({
     [candidates, checkedAddOns]
   );
   const hasPreviousDue = additionalBookings.length > 0;
+  // Visit mode: the other services of THIS booking sit in the first list; only earlier balances stay under "Add to this payment".
+  const visitCandidates = visitList ? candidates.filter((b) => b.amountDue === undefined || b.amountDue === null) : [];
+  const otherCandidates = visitList ? candidates.filter((b) => !(b.amountDue === undefined || b.amountDue === null)) : candidates;
 
   // Remaining balance for any booking-like object — prefers a precomputed amountDue
   // (e.g. from getCustomerOutstandingBalance) and otherwise derives it from
@@ -321,6 +332,7 @@ const PaymentModal = ({
   // apply_member_discount() only when staff press Collect. `memberOn` is the staff choice per booking (Remove / Add back /
   // Use N% instead); `memberState[id].delta` is how much less that booking costs than its saved amounts.
   const mainBookingId = booking.bookingId || booking.id;
+  const mainOff = visitList && mainTicked === false;
   const memberIds = useMemo(() => [mainBookingId, ...candidates.map((b) => b.bookingId)].filter(Boolean), [mainBookingId, candidates]);
   const memberIdsKey = memberIds.join(',');
   const [memberCtx, setMemberCtx] = useState(null);
@@ -351,11 +363,11 @@ const PaymentModal = ({
 
   const finalAmount = Number(booking.final_amount ?? booking.finalAmount ?? 0);
   const alreadyPaid = round2(booking.amountPaid || booking.amount_paid || 0);
-  const remaining = round2(Math.max(finalAmount - alreadyPaid - memberDelta(mainBookingId), 0));
+  const remaining = mainOff ? 0 : round2(Math.max(finalAmount - alreadyPaid - memberDelta(mainBookingId), 0));
 
   const additionalRemaining = round2(additionalBookings.reduce((s, b) => s + bookingDue(b), 0));
   // "Member saves NPR X" and the struck-through amount: only the bookings in this payment.
-  const includedMemberIds = [mainBookingId, ...additionalBookings.map((b) => b.bookingId)];
+  const includedMemberIds = [...(mainOff ? [] : [mainBookingId]), ...additionalBookings.map((b) => b.bookingId)];
   const memberSavings = round2(includedMemberIds.reduce((s, id) => s + (memberState[id]?.memberAmount || 0), 0));
   const memberDeltaIncluded = round2(includedMemberIds.reduce((s, id) => s + (memberState[id]?.on ? Math.max(0, memberDelta(id)) : 0), 0));
   // Products at checkout (V26): paid first, in full; only the treatment can stay due. `treatmentDue` is what the bookings still owe.
@@ -996,7 +1008,7 @@ const PaymentModal = ({
   const guestName = bookingRowInfo?.customer_name || booking.customerName || '';
   const guestPhone = bookingRowInfo?.customer_phone || booking.customerPhone || '';
   const tierName = membership?.tierName || null;
-  const bookingNumber = booking.booking_number || booking.id;
+  const bookingNumber = headerNumber || booking.booking_number || booking.id;
   const [localBusy, setLocalBusy] = useState(false); // ZNLY-206: Pay is off from the click until the answer, whatever the parent does
   const busy = !!isSubmitting || localBusy;
 
@@ -1262,6 +1274,7 @@ const PaymentModal = ({
   const busyFirst = Object.keys(cp.busy)[0];
   const blockReason = (() => {
     if (memberOnly) return '';
+    if (mainOff && additionalBookings.length === 0) return 'Pick at least one service';
     if (busyFirst) return `Fix ${cp.lines.find((l) => l.variantId === busyFirst)?.name || 'the product'} first`;
     if (referralRewardBlocksPayment) return 'Apply the referral reward first';
     if (tenders.some((t) => !t.paymentMode)) return 'Choose a method for the new row';
@@ -1279,7 +1292,7 @@ const PaymentModal = ({
     return '';
   })();
   const canSubmit = !blockReason && !busy && !paidElsewhere;
-  const primaryLabel = memberOnly ? 'Save member discount' : qrSingle
+  const primaryLabel = mainOff && additionalBookings.length === 0 ? 'Collect payment' : memberOnly ? 'Save member discount' : qrSingle
     ? `Confirm NPR ${fmt(entered)} received${leftover > 0 ? ` · ${fmt(leftover)} due` : ''}`
     : entered > 0 ? (leftover > 0 ? `Collect ${fmt(entered)} · ${fmt(leftover)} due` : `Collect NPR ${fmt(entered)}`) : `Leave NPR ${fmt(leftover)} due`;
 
@@ -1635,10 +1648,12 @@ const PaymentModal = ({
         onClickCapture={(e) => { if (e.target.closest && e.target.closest('button, input, label')) setTouched(true); }}>
         {/* Left: paying for */}
         <div className={`px-6 max-md:px-4 pt-5 ${Number(tip) > 0 ? 'pb-44' : 'pb-5'} min-[960px]:border-r border-b min-[960px]:border-b-0 border-[#E7E8E6] bg-[#FCFCFB] min-[960px]:overflow-y-auto min-[960px]:min-h-0`}>
-          <SectionLabel>Paying for</SectionLabel>
-          <div className="flex items-center gap-2.5 h-[38px]">
-            <Check on disabled />
-            <span className="flex-1 min-w-0 truncate">{svcName(booking)}{bookingRowInfo?.service?.duration_minutes ? ` · ${bookingRowInfo.service.duration_minutes} min` : ''}{bookingRowInfo?.therapist?.name && <small className="text-[#8A8A90] text-[12px]"> · {bookingRowInfo.therapist.name}</small>}</span>
+          <SectionLabel>{visitList ? `This booking · ${1 + visitCandidates.length + waitingRows.length} services` : 'Paying for'}</SectionLabel>
+          {(() => {
+            const mainBlock = (<>
+          <div className={`flex items-center gap-2.5 h-[38px] ${visitList ? 'cursor-pointer' : ''}`} {...(visitList ? { role: 'checkbox', 'aria-checked': !mainOff, tabIndex: 0, onClick: () => onVisitToggle?.(mainBookingId), onKeyDown: (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); onVisitToggle?.(mainBookingId); } }, 'data-visit-line': true } : {})}>
+            <Check on={!mainOff} disabled={!visitList} />
+            <span className="flex-1 min-w-0 truncate">{svcName(booking)}{bookingRowInfo?.service?.duration_minutes ? (visitList ? <small className="text-[#8A8A90] text-[12px]">{` · ${bookingRowInfo.service.duration_minutes} min`}</small> : ` · ${bookingRowInfo.service.duration_minutes} min`) : ''}{bookingRowInfo?.therapist?.name && <small className="text-[#8A8A90] text-[12px]"> · {bookingRowInfo.therapist.name}</small>}</span>
             <span className="font-medium tabular-nums">{fmt(Number(booking.base_amount ?? booking.baseAmount ?? 0) > 0 ? Number(booking.base_amount ?? booking.baseAmount) : finalAmount)}</span>
           </div>
           {Number(booking.discount_amount ?? booking.discountAmount ?? 0) > 0
@@ -1654,10 +1669,42 @@ const PaymentModal = ({
             <div className="flex items-center h-[30px] text-[#8A8A90]"><span className="flex-1 pl-6">Already paid</span><span className="tabular-nums">−{fmt(alreadyPaid)}</span></div>
           )}
 
-          {candidates.length > 0 && (
+            </>);
+            if (!visitList) return mainBlock;
+            const byId = new Map(visitCandidates.map((b) => [b.bookingId, b]));
+            return (visitOrder && visitOrder.length ? visitOrder : [mainBookingId, ...visitCandidates.map((b) => b.bookingId)]).map((id) => {
+              if (id === mainBookingId) return <React.Fragment key={id}>{mainBlock}</React.Fragment>;
+              const b = byId.get(id);
+              if (!b) return null;
+              const on = checkedAddOns.has(b.bookingId);
+              return (
+                <React.Fragment key={b.bookingId}>
+                  <button type="button" role="checkbox" aria-checked={on} onClick={() => { toggleAddOn(b.bookingId); onVisitToggle?.(b.bookingId); }}
+                    className="w-full flex items-center gap-2.5 h-[38px] border-t border-[#F1F1EF] text-left" data-visit-line>
+                    <Check on={on} />
+                    <span className="flex-1 min-w-0 truncate">{svcName(b)}<small className="text-[#8A8A90] text-[12px]">{[b.minutes ? ` · ${b.minutes} min` : '', b.staff ? ` · ${b.staff}` : ''].join('')}</small></span>
+                    <span className={`tabular-nums font-medium ${on ? '' : 'text-[#515152]'}`}>{fmt(bookingDue(b))}</span>
+                  </button>
+                  {on && <MemberLine st={memberState[b.bookingId]} onToggle={(v) => setMemberChoice(b.bookingId, v)} />}
+                </React.Fragment>
+              );
+            });
+          })()}
+          {visitList && waitingRows.map((w) => (
+            <div key={w.bookingId} className="flex items-center gap-2.5 min-h-[38px] py-1 border-t border-[#F1F1EF] opacity-60" data-visit-line data-waiting>
+              <Check on={false} disabled />
+              <span className="flex-1 min-w-0">
+                <span className="block truncate">{w.name}<small className="text-[#8A8A90] text-[12px]">{[w.minutes ? ` · ${w.minutes} min` : '', w.staff ? ` · ${w.staff}` : ''].join('')}</small></span>
+                <small className="block text-[11px] text-[#8A8A90]">Waiting for confirmation – confirm it to pay</small>
+              </span>
+              <span className="tabular-nums font-medium text-[#515152]">{fmt(w.price)}</span>
+            </div>
+          ))}
+
+          {otherCandidates.length > 0 && (
             <div className="mt-5">
               <SectionLabel>Add to this payment</SectionLabel>
-              {candidates.map((b) => {
+              {otherCandidates.map((b) => {
                 const on = checkedAddOns.has(b.bookingId);
                 const earlier = b.amountDue !== undefined && b.amountDue !== null;
                 const d = b.date ? new Date(`${b.date}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';

@@ -1,3 +1,4 @@
+import { visitUpdate } from '../../../../services/visitApi';
 import { createBooking, createBookingGroup, createComboBookingItems, joinVisitOfBooking } from '../../../../services/api';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { wordBranch } from '../../../../utils/industryTerms';
@@ -9,6 +10,24 @@ export async function submitQuickCreate({ formData, branchId, guard, joinVisitOf
   const date = formData.bookingDate;
   const startTime = formData.bookingTime;
   if (!date || !startTime) return { error: 'Date and time are required.' };
+
+  // ZNLY-402 piece 5: Edit booking = ONE all-or-nothing visit_update (nothing is half-saved). A refusal names the service row it is about.
+  if (formData.edit) {
+    const { visitKey, changes, order } = formData.edit;
+    const res = await guard(async (overrideReason) => {
+      const x = await visitUpdate({ visitKey, changes, overrideReason });
+      // Only 'warn' rows (a manager may book anyway with a reason) make the refusal overridable; any 'block' row is final.
+      const rs = x.error?.rows || [];
+      if (x.error && rs.some((r) => r.verdict === 'warn') && !rs.some((r) => r.verdict === 'block')) x.error.overridable = true;
+      return x;
+    });
+    if (res.error) {
+      const bad = (res.error.rows || []).find((r) => r.verdict === 'block' || r.verdict === 'warn');
+      const idx = bad ? order.indexOf(bad.booking_id) : -1;
+      return { error: friendlyError(res.error, 'Nothing was saved. Try again.'), code: res.error.code, raw: res.error, row: idx > 0 ? idx : undefined };
+    }
+    return { toast: { msg: 'Booking updated' }, bookingId: order[0] };
+  }
 
   // Group booking: one booking per person, all sharing one booking_group_id.
   // Created sequentially so each room-capacity check sees prior group members

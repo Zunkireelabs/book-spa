@@ -92,11 +92,12 @@ const BookingServicesBlock = ({
                     <Chip status={r.status} />
                   </button>
                 </div>
-                {acts && (acts.start || acts.done || acts.confirm || acts.remove) && (
+                {acts && (acts.start || acts.done || acts.confirm || acts.remove || acts.lock) && (
                   <div className="flex items-center gap-2 px-3 pb-2.5 -mt-1">
                     {acts.start && <button type="button" disabled={acts.start.disabled || busyId === r.id} title={acts.start.reason || undefined} onClick={acts.start.run} className="h-8 px-3 rounded-spa border border-border text-[12px] font-medium text-text-primary hover:bg-background disabled:opacity-40">Start</button>}
                     {acts.confirm && <button type="button" disabled={acts.confirm.disabled || busyId === r.id} onClick={acts.confirm.run} className="h-8 px-3 rounded-spa border border-border text-[12px] font-medium text-text-primary hover:bg-background disabled:opacity-40">Confirm</button>}
                     {acts.done && <button type="button" disabled={acts.done.disabled || busyId === r.id} title={acts.done.reason || undefined} onClick={acts.done.run} className="h-8 px-3 rounded-spa border border-border text-[12px] font-medium text-text-primary hover:bg-background disabled:opacity-40">Done</button>}
+                    {acts.lock && <span className="inline-flex items-center gap-1 text-[12px] text-text-secondary" data-row-locked><Icon name="Lock" size={12} />{acts.lock}</span>}
                     {acts.remove && <button type="button" disabled={acts.remove.disabled} title={acts.remove.reason || undefined} onClick={acts.remove.run} className="h-8 px-3 rounded-spa text-[12px] text-error hover:bg-error/5 disabled:opacity-40">Remove</button>}
                   </div>
                 )}

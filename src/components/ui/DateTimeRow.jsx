@@ -6,7 +6,7 @@ import { todayStr } from '../../pages/branch-manager-dashboard/components/calend
 import { format12h, parseTimeInput, buildTimeOptions, formatDateChip } from '../../utils/timeInput';
 
 // The time field on its own (typable, 15-minute list, shown as "11:00pm"): the New booking panel's time AND each extra service's start use this one control.
-export const TimeField = ({ time, onTimeChange, branchHours, ringClass = '', fieldAttr, ariaLabel = 'Time' }) => {
+export const TimeField = ({ time, onTimeChange, branchHours, ringClass = '', fieldAttr, ariaLabel = 'Time', disabled = false }) => {
   const [timeOpen, setTimeOpen] = useState(false);
   const timeRef = useRef(null);
   const listRef = useRef(null);
@@ -36,6 +36,7 @@ export const TimeField = ({ time, onTimeChange, branchHours, ringClass = '', fie
         <input
           type="text"
           aria-label={ariaLabel}
+          disabled={disabled}
           value={timeText}
           onChange={(e) => {
             // Reflect whatever is typed; commit only once it parses to a valid time.
@@ -47,7 +48,7 @@ export const TimeField = ({ time, onTimeChange, branchHours, ringClass = '', fie
           onBlur={() => { setTimeText(time ? format12h(time) : ''); }}
           placeholder="--:--"
           autoComplete="off"
-          className="w-full h-9 pl-8 pr-2 text-[13px] font-body text-text-primary bg-surface border border-border rounded-spa focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+          className="w-full h-9 pl-8 pr-2 text-[13px] font-body text-text-primary bg-surface border border-border rounded-spa focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-[#F4F4F6] disabled:text-text-secondary"
         />
         {timeOpen && (
           <div ref={(n) => { listRef.current = n; timeIntoView(n); }} className="absolute top-full left-0 mt-1 w-28 max-h-48 overflow-y-auto bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown">
@@ -71,7 +72,7 @@ export const TimeField = ({ time, onTimeChange, branchHours, ringClass = '', fie
 // ONE date chip + time field row (ZNLY-324), used by New booking (QuickCreatePanel) and Edit details (BookingActionModal).
 // Date: a chip that opens the month calendar. Time: a typable field with a 15-minute list.
 // `time` is "HH:MM" ('' while the typed text is incomplete); the typed text lives here and re-syncs when `time` changes from outside.
-const DateTimeRow = ({ date, time, onDateChange, onTimeChange, branchHours, timeRingClass = '', timeFieldAttr }) => {
+const DateTimeRow = ({ date, time, onDateChange, onTimeChange, branchHours, timeRingClass = '', timeFieldAttr, timeDisabled = false }) => {
   const [dateOpen, setDateOpen] = useState(false);
   const dateIntoView = usePopoverIntoView(dateOpen);
   const dateRef = useRef(null);
@@ -108,7 +109,7 @@ const DateTimeRow = ({ date, time, onDateChange, onTimeChange, branchHours, time
           </div>
         )}
       </div>
-      <TimeField time={time} onTimeChange={onTimeChange} branchHours={branchHours} ringClass={timeRingClass} fieldAttr={timeFieldAttr} />
+      <TimeField time={time} onTimeChange={onTimeChange} branchHours={branchHours} ringClass={timeRingClass} fieldAttr={timeFieldAttr} disabled={timeDisabled} />
     </div>
   );
 };

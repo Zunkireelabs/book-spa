@@ -26,6 +26,7 @@ const ConfirmDialog = ({
   reasonLabel = 'Reason', // label of the optional field (reasonOptional only), e.g. 'Note'
   reasonPlaceholder = 'e.g. Customer changed their mind',
   cancelLabel = 'Back',
+  hideBack = false, // true: a single OK button (information only)
   confirmVariant = 'danger', // 'danger' | 'primary' (a save prompt is not destructive)
   tone = 'danger', // 'danger' | 'warning': header icon colour (warning = a permitted override, not a destructive action)
   secondaryLabel = null, // optional middle button, e.g. 'Discard'
@@ -151,9 +152,11 @@ const ConfirmDialog = ({
         </div>
 
         <div className="flex items-center justify-end space-x-3 p-5 border-t border-border">
-          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
-            {cancelLabel}
-          </Button>
+          {!hideBack && (
+            <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
+              {cancelLabel}
+            </Button>
+          )}
           {secondaryLabel && onSecondary && (
             <Button variant="outline" onClick={onSecondary} disabled={isSubmitting}>
               {secondaryLabel}
