@@ -123,7 +123,7 @@ BEGIN
     AND (SELECT status::text FROM bookings WHERE id = ids[1]) = 'Cancelled' AND (SELECT status::text FROM bookings WHERE id = ids[2]) = 'In-Progress' AND (SELECT status::text FROM bookings WHERE id = ids[3]) = 'Cancelled',
     format('verdicts %s/%s/%s reason2=%s', r->'rows'->0->>'verdict', r->'rows'->1->>'verdict', r->'rows'->2->>'verdict', r->'rows'->1->>'reason'));
   r2 := visit_set_status(vk, 'No Show', '', false);
-  PERFORM pg_temp.rec('S5-4d', 'set_status: reason is required', NOT (r2->>'ok')::boolean AND r2->>'code' = 'REASON_REQUIRED', r2->>'message');
+  PERFORM pg_temp.rec('S5-4d', 'set_status on a booking whose services are all started/done: nothing to change (reason is checked per untouched row, see S5-12b)', NOT (r2->>'ok')::boolean AND r2->>'code' = 'NOTHING_TO_CHANGE', r2->>'message');
 END $$;
 
 -- S5-5 visit_remove_service ----------------------------------------------------------------------------------------------------------------
@@ -450,6 +450,62 @@ BEGIN
   r := visit_apply_discount(vk, jsonb_build_array(jsonb_build_object('booking_id', ids[1], 'type', '%', 'value', 30)), 'big', false, (SELECT id FROM users WHERE email = 'admin@samis-import-qc.test'));
   PERFORM pg_temp.rec('S5-sec-10b', 'visit_apply_discount: the same-business admin approver is accepted, the line goes pending to them', (r->>'ok')::boolean AND (SELECT discount_status::text FROM bookings WHERE id = ids[1]) = 'pending'
     AND (SELECT discount_requested_to FROM bookings WHERE id = ids[1]) = (SELECT id FROM users WHERE email = 'admin@samis-import-qc.test'), format('ok=%s code=%s status=%s', r->>'ok', r->>'code', (SELECT discount_status::text FROM bookings WHERE id = ids[1])));
+END $$;
+
+-- S5-12 a preview (p_dry_run) needs no reason; the real call does, and its refusal names the row ------------------------------------------------------
+SELECT pg_temp.as_user('admin@samis-import-qc.test');
+DO $$ DECLARE f fx; r jsonb; ids uuid[]; vk uuid; h0 text;
+BEGIN
+  SELECT * INTO f FROM fx;
+  PERFORM visit_create(f.on_branch, '{"name":"Test S5 Prev","phone":"+9779800099040"}', jsonb_build_array(
+      jsonb_build_object('service_id', f.svc_a, 'date', '2027-05-10', 'start_time', '10:00', 'therapist_id', f.t1),
+      jsonb_build_object('service_id', f.svc_b, 'date', '2027-05-10', 'start_time', '10:45', 'therapist_id', f.t2)), NULL, false);
+  SELECT array_agg(id ORDER BY start_time) INTO ids FROM bookings WHERE customer_name = 'Test S5 Prev';
+  vk := ids[1]; h0 := pg_temp.h(vk);
+  r := visit_set_status(vk, 'Cancelled', NULL, true);
+  PERFORM pg_temp.rec('S5-12a', 'set_status preview without a reason: ok, 2 would change, nothing changed', (r->>'ok')::boolean AND (r->'totals'->>'change')::int = 2 AND pg_temp.h(vk) = h0, (r->'totals')::text);
+  r := visit_set_status(vk, 'Cancelled', '  ', false);
+  PERFORM pg_temp.rec('S5-12b', 'set_status real call without a reason: REASON_REQUIRED, rows carry booking_id + block + reason, nothing changed', NOT (r->>'ok')::boolean AND r->>'code' = 'REASON_REQUIRED'
+    AND r->'rows'->0->>'verdict' = 'block' AND (r->'rows'->0->>'booking_id')::uuid = ids[1] AND r->'rows'->0->>'reason' IS NOT NULL AND pg_temp.h(vk) = h0, format('code=%s row0=%s', r->>'code', r->'rows'->0));
+  r := visit_remove_service(ids[2], NULL, true);
+  PERFORM pg_temp.rec('S5-12c', 'remove_service preview without a reason: verdict change', (r->>'ok')::boolean AND r->>'verdict' = 'change' AND pg_temp.h(vk) = h0, format('verdict=%s', r->>'verdict'));
+  r := visit_remove_service(ids[2], '', false);
+  PERFORM pg_temp.rec('S5-12d', 'remove_service real call without a reason: refused with the row named', NOT (r->>'ok')::boolean AND r->>'code' = 'REASON_REQUIRED' AND (r->'rows'->0->>'booking_id')::uuid = ids[2] AND pg_temp.h(vk) = h0, r->>'code');
+  r := visit_apply_discount(vk, jsonb_build_array(jsonb_build_object('booking_id', ids[1], 'type', '%', 'value', 10)), NULL, true);
+  PERFORM pg_temp.rec('S5-12e', 'apply_discount preview without a reason: ok', (r->>'ok')::boolean AND pg_temp.h(vk) = h0, (r->'totals')::text);
+  r := visit_apply_discount(vk, jsonb_build_array(jsonb_build_object('booking_id', ids[1], 'type', '%', 'value', 10)), NULL, false);
+  PERFORM pg_temp.rec('S5-12f', 'apply_discount real call without a reason: refused, rows name the row', NOT (r->>'ok')::boolean AND r->>'code' = 'DISCOUNT_REASON_REQUIRED' AND (r->'rows'->0->>'booking_id')::uuid = ids[1] AND r->'rows'->0->>'verdict' = 'block' AND pg_temp.h(vk) = h0, r->>'code');
+  r := visit_update(vk, jsonb_build_object('services', jsonb_build_array(jsonb_build_object('booking_id', ids[2], 'remove', true))), NULL, true);
+  PERFORM pg_temp.rec('S5-12g', 'update preview removing a service without a reason: ok', (r->>'ok')::boolean AND pg_temp.h(vk) = h0, (r->'totals')::text);
+  r := visit_update(vk, jsonb_build_object('services', jsonb_build_array(jsonb_build_object('booking_id', ids[2], 'remove', true))), NULL, false);
+  PERFORM pg_temp.rec('S5-12h', 'update real removal without a reason: refused, row named', NOT (r->>'ok')::boolean AND r->>'code' = 'REASON_REQUIRED' AND (r->'rows'->1->>'booking_id')::uuid = ids[2] AND pg_temp.h(vk) = h0, r->>'code');
+  -- other refusals carry the failing row too (closed day)
+  ALTER TABLE bookings DISABLE TRIGGER trg_enforce_booking_immutability; UPDATE bookings SET is_locked = true WHERE id = ids[2]; ALTER TABLE bookings ENABLE TRIGGER trg_enforce_booking_immutability;
+  r := visit_reschedule(vk, '2027-05-12', '11:00', false);
+  PERFORM pg_temp.rec('S5-12i', 'reschedule refused on a closed day: the failing row has booking_id + block + reason', NOT (r->>'ok')::boolean AND EXISTS (SELECT 1 FROM jsonb_array_elements(r->'rows') e WHERE e->>'verdict' = 'block' AND (e->>'booking_id')::uuid = ids[2] AND e->>'reason' IS NOT NULL), format('code=%s', r->>'code'));
+END $$;
+
+-- S5-13 reschedule preview: a warned row shows the time it WOULD get (not its old time); rows keep the ORIGINAL booking_id + new_booking_id -------------
+SELECT pg_temp.as_user('admin@samis-import-qc.test');
+UPDATE public.organizations SET enforce_staff_availability = false WHERE slug = 'samis-import-qc';
+DO $$ DECLARE f fx; r jsonb; ids uuid[]; vk uuid; rw jsonb; r2 jsonb;
+BEGIN
+  SELECT * INTO f FROM fx;
+  PERFORM visit_create(f.on_branch, '{"name":"Test S5 Warn","phone":"+9779800099050"}', jsonb_build_array(
+      jsonb_build_object('service_id', f.svc_a, 'date', '2027-05-17', 'start_time', '17:30', 'therapist_id', f.t1),
+      jsonb_build_object('service_id', f.svc_b, 'date', '2027-05-17', 'start_time', '18:15', 'therapist_id', f.t1)), NULL, false);
+  SELECT array_agg(id ORDER BY start_time) INTO ids FROM bookings WHERE customer_name = 'Test S5 Warn';
+  vk := ids[1];
+  UPDATE public.organizations SET enforce_staff_availability = true WHERE slug = 'samis-import-qc';
+  -- move to 2027-05-18 18:40: row 1 18:40-19:25, row 2 19:25-20:25 (staff shifts end 20:00) => row 2 warns
+  r := visit_reschedule(vk, '2027-05-18', '18:40', true);
+  rw := (SELECT e FROM jsonb_array_elements(r->'rows') e WHERE e->>'verdict' = 'warn' LIMIT 1);
+  PERFORM pg_temp.rec('S5-13a', 'reschedule preview: the warned row shows the NEW time it would get (19:25), not its old 18:15', rw IS NOT NULL AND rw->>'start' = '19:25' AND (rw->>'booking_id')::uuid = ids[2], format('row=%s code=%s', rw, r->>'code'));
+  rw := (SELECT e FROM jsonb_array_elements(r->'rows') e WHERE e->>'verdict' = 'change' LIMIT 1);
+  PERFORM pg_temp.rec('S5-13b', 'reschedule preview: a moving row keeps the ORIGINAL booking_id (matches the screen) and carries new_booking_id', rw IS NOT NULL AND (rw->>'booking_id')::uuid = ids[1] AND rw ? 'new_booking_id' AND rw->>'start' = '18:40', rw::text);
+  r2 := visit_reschedule(vk, '2027-05-18', '18:40', false, 'agreed with customer');
+  PERFORM pg_temp.rec('S5-13c', 'reschedule with a reason (admin): both rows move; real rows name the original + new ids', (r2->>'ok')::boolean AND (SELECT count(*) FROM bookings WHERE customer_name = 'Test S5 Warn' AND status::text = 'Pending' AND date = '2027-05-18') = 2
+    AND (SELECT count(*) FROM jsonb_array_elements(r2->'rows') e WHERE e ? 'new_booking_id' AND EXISTS (SELECT 1 FROM bookings x WHERE x.id = (e->>'new_booking_id')::uuid)) = 2, format('ok=%s code=%s', r2->>'ok', r2->>'code'));
 END $$;
 
 SELECT n || ' | ' || what || ' | ' || CASE WHEN ok THEN 'PASS' ELSE 'FAIL' END || ' | ' || COALESCE(evidence, '') FROM res ORDER BY n;

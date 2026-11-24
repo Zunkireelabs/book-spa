@@ -513,12 +513,12 @@ BEGIN
         IF s IS NOT NULL AND COALESCE((s->>'remove')::boolean, false) THEN
           IF v_touch IS NOT NULL THEN RAISE EXCEPTION 'BOOKING_IMMUTABLE: %', v_touch; END IF;
           IF b.is_locked THEN RAISE EXCEPTION 'DAY_LOCKED: This day has been closed. No further modifications allowed.'; END IF;
-          IF NULLIF(btrim(COALESCE(s->>'reason', '')), '') IS NULL THEN RAISE EXCEPTION 'REASON_REQUIRED: A reason is required to remove a service.'; END IF;
+          IF NOT p_dry_run AND NULLIF(btrim(COALESCE(s->>'reason', '')), '') IS NULL THEN RAISE EXCEPTION 'REASON_REQUIRED: A reason is required to remove a service.'; END IF;
           SELECT count(*) INTO v_active FROM public.bookings x
            WHERE x.id <> b.id AND ((b.visit_id IS NOT NULL AND x.visit_id = b.visit_id) OR (b.visit_id IS NULL AND false))
              AND x.status::text NOT IN ('Cancelled', 'No Show');
           IF v_active = 0 THEN RAISE EXCEPTION 'LAST_SERVICE: This is the only service. Cancel the whole booking instead.'; END IF;
-          UPDATE public.bookings SET status = 'Cancelled', cancellation_reason = btrim(s->>'reason') WHERE id = b.id;
+          UPDATE public.bookings SET status = 'Cancelled', cancellation_reason = NULLIF(btrim(COALESCE(s->>'reason', '')), '') WHERE id = b.id;
           v_verdict := 'change'; v_reason := 'Removed'; v_changes := v_changes + 1;
         ELSE
           -- a row is "changed" only when a listed field actually differs
@@ -682,9 +682,6 @@ BEGIN
   IF p_status NOT IN ('Cancelled', 'No Show') THEN
     RETURN public._visit_refuse('INVALID_STATUS', 'A booking can be cancelled or marked as no-show here.', p_dry_run);
   END IF;
-  IF NULLIF(btrim(COALESCE(p_reason, '')), '') IS NULL THEN
-    RETURN public._visit_refuse('REASON_REQUIRED', 'A reason is required when cancelling or marking a booking as no-show.', p_dry_run);
-  END IF;
   BEGIN
     FOR b IN SELECT * FROM public._visit_rows(p_visit_key) LOOP
       v_found := true;
@@ -695,7 +692,11 @@ BEGIN
       END IF;
       BEGIN
         IF b.is_locked THEN RAISE EXCEPTION 'DAY_LOCKED: This day has been closed. No further modifications allowed.'; END IF;
-        UPDATE public.bookings SET status = p_status::booking_status, cancellation_reason = btrim(p_reason) WHERE id = b.id;
+        -- the reason is required on the real call only: a preview (p_dry_run) changes nothing and needs none
+        IF NOT p_dry_run AND NULLIF(btrim(COALESCE(p_reason, '')), '') IS NULL THEN
+          RAISE EXCEPTION 'REASON_REQUIRED: A reason is required when cancelling or marking a booking as no-show.';
+        END IF;
+        UPDATE public.bookings SET status = p_status::booking_status, cancellation_reason = NULLIF(btrim(COALESCE(p_reason, '')), '') WHERE id = b.id;
         v_rows := v_rows || public._visit_row_json(b.id, b.booking_number, b.service_name_snapshot, b.start_time, b.therapist_name_snapshot, 'change', NULL);
         v_changed := v_changed + 1;
       EXCEPTION WHEN OTHERS THEN
@@ -736,7 +737,7 @@ BEGIN
     ELSIF b.is_locked THEN
       v_rows := v_rows || public._visit_row_json(b.id, b.booking_number, b.service_name_snapshot, b.start_time, b.therapist_name_snapshot, 'block', 'This day has been closed. No further modifications allowed.');
       v_err := jsonb_build_object('code', 'DAY_LOCKED', 'message', 'This day has been closed. No further modifications allowed.', 'booking_id', b.id);
-    ELSIF NULLIF(btrim(COALESCE(p_reason, '')), '') IS NULL THEN
+    ELSIF NOT p_dry_run AND NULLIF(btrim(COALESCE(p_reason, '')), '') IS NULL THEN
       v_rows := v_rows || public._visit_row_json(b.id, b.booking_number, b.service_name_snapshot, b.start_time, b.therapist_name_snapshot, 'block', 'A reason is required.');
       v_err := jsonb_build_object('code', 'REASON_REQUIRED', 'message', 'A reason is required to remove a service.', 'booking_id', b.id);
     ELSE
@@ -746,7 +747,7 @@ BEGIN
         v_rows := v_rows || public._visit_row_json(b.id, b.booking_number, b.service_name_snapshot, b.start_time, b.therapist_name_snapshot, 'last', 'This is the only service. Cancel the whole booking instead.');
         v_err := jsonb_build_object('code', 'LAST_SERVICE', 'message', 'This is the only service. Cancel the whole booking instead.', 'booking_id', b.id);
       ELSE
-        UPDATE public.bookings SET status = 'Cancelled', cancellation_reason = btrim(p_reason) WHERE id = b.id;
+        UPDATE public.bookings SET status = 'Cancelled', cancellation_reason = NULLIF(btrim(COALESCE(p_reason, '')), '') WHERE id = b.id;
         v_rows := v_rows || public._visit_row_json(b.id, b.booking_number, b.service_name_snapshot, b.start_time, b.therapist_name_snapshot, 'change', NULL);
       END IF;
     END IF;
@@ -792,6 +793,7 @@ BEGIN
         v_rows := v_rows || public._visit_row_json(b.id, b.booking_number, b.service_name_snapshot, b.start_time, b.therapist_name_snapshot, 'keep', v_touch);
         CONTINUE;
       END IF;
+      v_new_start := ((b.start_datetime + v_delta) AT TIME ZONE 'Asia/Kathmandu')::time;
       BEGIN
         IF b.is_locked THEN RAISE EXCEPTION 'DAY_LOCKED: This day has been closed. No further modifications allowed.'; END IF;
         IF EXISTS (SELECT 1 FROM public.booking_combo_items ci WHERE ci.booking_id = b.id) THEN
@@ -799,12 +801,14 @@ BEGIN
         v_new_start := ((b.start_datetime + v_delta) AT TIME ZONE 'Asia/Kathmandu')::time;
         v_res := public.reschedule_booking(b.id, ((b.start_datetime + v_delta) AT TIME ZONE 'Asia/Kathmandu')::date, v_new_start,
                                            b.therapist_id, b.room_id, COALESCE(p_reason, 'Rescheduled'), v_ov);
-        v_rows := v_rows || public._visit_row_json((v_res->>'id')::uuid, v_res->>'booking_number', b.service_name_snapshot, v_new_start, b.therapist_name_snapshot, 'change', NULL);
+        -- booking_id stays the ORIGINAL row (so a preview can be matched to what the screen shows); the replacement is new_booking_id
+        v_rows := v_rows || (public._visit_row_json(b.id, v_res->>'booking_number', b.service_name_snapshot, v_new_start, b.therapist_name_snapshot, 'change', NULL)
+                             || jsonb_build_object('new_booking_id', (v_res->>'id')::uuid));
         v_moved := v_moved + 1;
       EXCEPTION WHEN OTHERS THEN
         v_cls := public._visit_classify(SQLSTATE, SQLERRM);
         v_verdict := CASE WHEN (v_cls->>'overridable')::boolean AND v_ov IS NULL THEN 'warn' ELSE 'block' END;
-        v_rows := v_rows || public._visit_row_json(b.id, b.booking_number, b.service_name_snapshot, b.start_time, b.therapist_name_snapshot, v_verdict, v_cls->>'message');
+        v_rows := v_rows || public._visit_row_json(b.id, b.booking_number, b.service_name_snapshot, COALESCE(v_new_start, b.start_time), b.therapist_name_snapshot, v_verdict, v_cls->>'message');
         IF v_err IS NULL THEN
           v_err := jsonb_build_object('code', CASE WHEN v_verdict = 'warn' THEN 'NEEDS_OVERRIDE' ELSE v_cls->>'code' END,
                                       'message', v_cls->>'message', 'booking_id', b.id, 'underlying_code', v_cls->>'code');
@@ -898,7 +902,7 @@ BEGIN
           END IF;
           v_pct := v_amt / b.base_amount;
           IF v_pct > v_ceiling + 1e-9 THEN RAISE EXCEPTION 'DISCOUNT_LIMIT_EXCEEDED: Discount cannot exceed % percent.', round(v_ceiling * 100); END IF;
-          IF v_reason IS NULL THEN RAISE EXCEPTION 'DISCOUNT_REASON_REQUIRED: A reason is required when applying a discount.'; END IF;
+          IF v_reason IS NULL AND NOT p_dry_run THEN RAISE EXCEPTION 'DISCOUNT_REASON_REQUIRED: A reason is required when applying a discount.'; END IF;
           v_over := v_pct > v_limit + 1e-9 OR v_total_over;
           IF v_over AND p_requested_to IS NULL THEN RAISE EXCEPTION 'APPROVER_REQUIRED: Select a manager or admin to send this discount request to.'; END IF;
           -- the approver must be one the picker offers (same business, active, admin or a manager of the caller's location, with a PIN)
