@@ -39,6 +39,8 @@ export function buildAddServiceSlot({ booking, mode = 'add-service', rawBookings
     lockedClient,
     openServiceFirst: mode === 'add-service',
     sourceBookingId: booking.bookingId,
+    // ZNLY-402: only "+ Service" joins the source booking's visit (orgs with the setting ON). Rebook is a new, separate booking.
+    ...(mode === 'add-service' ? { joinVisitOfBookingId: booking.bookingId } : {}),
   };
   if (mode === 'add-service' && endMin != null) {
     slot.hour = Math.floor(endMin / 60);

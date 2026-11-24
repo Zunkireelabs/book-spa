@@ -1,10 +1,10 @@
-import { createBooking, createComboBookingItems } from '../../../../services/api';
+import { createBooking, createComboBookingItems, joinVisitOfBooking } from '../../../../services/api';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { wordBranch } from '../../../../utils/industryTerms';
 
 // Create the booking(s) from the QuickCreatePanel form. Shared by the Calendar and the Dashboard so both host the panel identically.
 // Resolves { error } (a message: the panel stays open) or { toast: { msg, type? } } (done: the caller closes the panel and refreshes).
-export async function submitQuickCreate({ formData, branchId, guard }) {
+export async function submitQuickCreate({ formData, branchId, guard, joinVisitOfBookingId = null }) {
   if (!branchId) return { error: `Missing ${wordBranch()} info.` };
   const date = formData.bookingDate;
   const startTime = formData.bookingTime;
@@ -48,8 +48,17 @@ export async function submitQuickCreate({ formData, branchId, guard }) {
     return { toast: { msg: `${created} bookings created for ${people[0]?.customerName || 'the group'}` } };
   }
 
+  // ZNLY-402: "+ Service" joins the source booking's visit (ON orgs; the source is stamped first when it has none). OFF org / no source: visitId stays null.
+  let visitId = null;
+  if (joinVisitOfBookingId) {
+    const joined = await joinVisitOfBooking({ sourceBookingId: joinVisitOfBookingId, branchId });
+    if (joined.error) return { error: friendlyError(joined.error, 'Could not add this service to the booking.'), code: joined.error.code, raw: joined.error };
+    visitId = joined.data || null;
+  }
+
   const result = await guard((overrideReason) => createBooking({
     branchId,
+    visitId: visitId || undefined,
     serviceId: formData.serviceId,
     date,
     startTime,

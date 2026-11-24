@@ -54,6 +54,42 @@ const customerPhoneOptionalCache = createEnforcementCache(async (branchId) => {
   return data?.organizations?.require_customer_phone === false;
 });
 const customerPhoneOptional = (branchId) => customerPhoneOptionalCache.get(branchId);
+// ZNLY-402 / ZNLY-423: true = this org has "Several services in one booking" ON (organizations.multi_service_bookings, migration 428). Every creation path
+// writes bookings.visit_id ONLY when this is true; unknown / unreadable / OFF reads as false (nothing is written, exactly as before). Cleared when the admin flips the switch.
+const multiServiceCache = createEnforcementCache(async (branchId) => {
+  const { data, error } = await supabase.from('branches').select('organizations(multi_service_bookings)').eq('id', branchId).maybeSingle();
+  if (error) throw error;
+  return data?.organizations?.multi_service_bookings === true;
+});
+const newVisitId = () => ((typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : null);
+
+/**
+ * ZNLY-402: "+ Service" joins the visit of the booking it was opened from. Resolves { data: visitId | null, error }.
+ * OFF org -> { data: null } (nothing is written). ON org -> the source booking's visit_id; when the source has none, a new id is stamped on the
+ * source FIRST (a normal update, so it is audited like any user action) and returned. If the new service then fails to create, the source keeping
+ * a visit_id of its own is harmless: a visit of one booking looks exactly like a booking with no visit.
+ */
+export async function joinVisitOfBooking({ sourceBookingId, branchId }) {
+  try {
+    if (!sourceBookingId || !(await multiServiceCache.get(branchId))) return { data: null, error: null };
+    const { data: src, error: readErr } = await supabase.from('bookings').select('id, visit_id').eq('id', sourceBookingId).maybeSingle();
+    if (readErr) throw readErr;
+    if (!src) return { data: null, error: { code: 'SOURCE_NOT_FOUND', message: 'Could not find the booking to add this service to.' } };
+    if (src.visit_id) return { data: src.visit_id, error: null };
+    const visitId = newVisitId();
+    if (!visitId) return { data: null, error: null };
+    const { data: stamped, error: stampErr } = await supabase.from('bookings').update({ visit_id: visitId }).eq('id', sourceBookingId).is('visit_id', null).select('visit_id');
+    if (stampErr) throw stampErr;
+    if (stamped && stamped.length) return { data: visitId, error: null };
+    // Someone stamped it between our read and write: use theirs.
+    const { data: again, error: againErr } = await supabase.from('bookings').select('visit_id').eq('id', sourceBookingId).maybeSingle();
+    if (againErr) throw againErr;
+    return { data: again?.visit_id || null, error: null };
+  } catch (error) {
+    console.error('[API] joinVisitOfBooking error:', error.message);
+    return { data: null, error: plainError(error, 'Could not add this service to the booking. Please try again.') };
+  }
+}
 const overrideReasonOf = (reason) => (typeof reason === 'string' && reason.trim() ? reason.trim() : null);
 // The reason authorises exactly one write; clear it afterwards so it can never be mistaken for a fresh override later.
 async function clearAvailabilityOverride(bookingId) {
@@ -870,6 +906,7 @@ export async function setMultiServiceBookings({ enabled }) {
   try {
     const { data, error } = await supabase.rpc('set_multi_service_bookings', { p_value: !!enabled });
     if (error) throw error;
+    multiServiceCache.clear();
     return { data, error: null };
   } catch (error) {
     console.error('[API] setMultiServiceBookings error:', error.message);
@@ -7274,6 +7311,7 @@ export async function createBooking({
   companionName,
   companionPhone,
   bookingGroupId,
+  visitId,   // ZNLY-402: bookings.visit_id; callers pass it only for orgs with the setting ON (createBookingGroup, "+ Service")
   referringCustomerId,
   referringRewardType,
   referringRewardAmount,
@@ -7767,6 +7805,7 @@ export async function createBooking({
       special_requests: specialRequests || null,
       created_by: authUser?.id || null,
       booking_group_id: bookingGroupId || null,
+      ...(visitId ? { visit_id: visitId } : {}),
       referral_source: referralSource || null,
       referral_source_detail: referralSourceDetail || null,
       client_request_id: clientRequestId,
@@ -7977,6 +8016,8 @@ export async function createBookingGroup({ services, date, startTime, therapistI
   const bookingGroupId = (typeof crypto !== 'undefined' && crypto.randomUUID)
     ? crypto.randomUUID()
     : `grp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  // ZNLY-402: one person, several services, one Save = one visit (ON orgs only; the booking_group_id above stays as before).
+  const visitId = (await multiServiceCache.get(common.branchId)) ? newVisitId() : null;
 
   // Lay the services out back-to-back so each row gets its own real slot.
   let cursor = startTime;
@@ -7996,6 +8037,7 @@ export async function createBookingGroup({ services, date, startTime, therapistI
       startTime: slotStart,
       therapistId,
       bookingGroupId,
+      visitId,
     });
 
     if (error) {

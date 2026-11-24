@@ -445,7 +445,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   }, [searchParams, branchId, currentDate, handleEmptySlotClick, openQuickCreateForSlot, setSearchParams]);
 
   const handleQuickCreateSubmit = useCallback(async (formData) => {
-    const r = await submitQuickCreate({ formData, branchId, guard });
+    const r = await submitQuickCreate({ formData, branchId, guard, joinVisitOfBookingId: quickCreateSlotRef.current?.joinVisitOfBookingId || null });
     if (r.error) {
       // Part of a group, or a booking whose confirmation could not load, exists already: show the calendar as it really is.
       if (r.partial || ['BOOKING_CONFIRMATION_UNAVAILABLE', 'BOOKING_NOT_VISIBLE', 'BOOKING_GROUP_PARTIAL'].includes(r.code)) refreshLight(refreshCalendar);
