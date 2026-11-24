@@ -68,3 +68,16 @@ describe('several services: override parity (ZNLY-402 3b)', () => {
     expect(r.error).toBeTruthy();
   });
 });
+
+import { refusedRow } from './quickCreateSubmit';
+describe('refusedRow (Edit refusal -> the service card that failed)', () => {
+  it('picks the block row with a reason; ignores change / keep rows', () => {
+    const rows = [{ booking_id: 'a', verdict: 'keep', reason: 'Already started' }, { booking_id: 'b', verdict: 'change' }, { booking_id: 'c', verdict: 'block', reason: 'Rojina K is busy 11:30–12:00. Pick another staff.' }];
+    expect(refusedRow(rows).booking_id).toBe('c');
+  });
+  it('falls back to warn, then to any non-change row with a reason; none -> null', () => {
+    expect(refusedRow([{ booking_id: 'a', verdict: 'warn', reason: 'shift ends 8pm' }]).booking_id).toBe('a');
+    expect(refusedRow([{ booking_id: 'a', verdict: 'change' }])).toBeNull();
+    expect(refusedRow(undefined)).toBeNull();
+  });
+});

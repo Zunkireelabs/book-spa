@@ -9,7 +9,7 @@ import { staffDayRanges, pickedRowStatusMulti, rangeLabel } from '../../../../ut
 import { nepalNow } from '../../../../utils/customerDirectory';
 import { format12h } from '../../../../utils/timeInput';
 import { formatNPR } from '../../../../services/bookingTransformers';
-import { bookingTotal, newRow, minToClock } from './multiServiceRows';
+import { bookingTotal, newRow, minToClock, staffRowProblem } from './multiServiceRows';
 
 // ZNLY-402 piece 3b: "+ Add another service" under the first Service / Staff rows of the New booking panel (Individual mode, org setting ON).
 // Same pickers as the first row (ServicePickRow, StaffPickRow + StaffPicker). Each row: service, staff, start (defaults to when the previous service
@@ -17,7 +17,7 @@ import { bookingTotal, newRow, minToClock } from './multiServiceRows';
 // One extra service. It runs the SAME live checks as a single booking (shift / break / leave / blocked / clash, from the availability rule and the day's
 // bookings) for ITS OWN staff and time, and reports the reason upward, so Create stays off with the reason on THIS row (nothing is made before every row passes).
 const ExtraRow = ({
-  r, i, t, svc, patch, remove, problem, ownProblem, onProblem, errorRow, errorText, flashRow, isFirst = false, solo = false, first1 = null, staffRing = '',
+  r, i, t, svc, patch, remove, problem, ownProblem, onProblem, errorRow, errorText, flashRow, editMode = false, errorStaff = false, isFirst = false, solo = false, first1 = null, staffRing = '',
   services, branchId, canViewPrices, pickerPeople, dayBookings, dayOff, bookingDate, allowStaffOverlap, staffLabel, staffLabelPlural, branchHours,
 }) => {
   const needsStaff = !svc || svc.requires_therapist !== false;
@@ -35,9 +35,11 @@ const ExtraRow = ({
   const overridable = !ownProblem && !info.problem && !!pre.verdict && pre.warn;
   useEffect(() => { if (!isFirst) onProblem(r.key, text, overridable); }, [text, overridable]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { if (!isFirst) onProblem(r.key, '', false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const refused = !isFirst && errorRow === i;
+  const refused = (!isFirst || editMode) && errorRow === i;
   const shown = text || (refused ? errorText : '');
-  const staffShows = !!(svc && needsStaff && r.therapistId && text);   // the staff card itself carries the reason, so it never says "Free" next to it
+  // A refusal about THIS card's staff (busy / off shift / not in this branch) is shown by the staff row itself (never "Free" next to it), until the staff or time changes.
+  const staffText = staffRowProblem({ liveText: text, refused, errorStaff, hasStaff: !!(svc && needsStaff && r.therapistId), errorText });
+  const staffShows = !!(svc && needsStaff && r.therapistId && staffText);   // the staff card itself carries the reason, so it never says "Free" next to it
   return (
     <div data-qc-field={isFirst ? 'service' : `service-x${i - 1}`} data-row-problem={shown ? 'true' : undefined} className={`rounded-spa-lg border ${locked ? 'bg-[#F4F4F6] opacity-90' : 'bg-background'} p-3 space-y-2.5 ${!shown ? 'border-border' : overridable ? 'border-amber-300 ring-2 ring-amber-200' : 'border-error ring-2 ring-error/20'}`}>
       {locked && solo && <p className="flex items-center gap-1 text-xs text-text-secondary" data-row-locked><Icon name="Lock" size={12} /> {locked}</p>}
@@ -61,7 +63,7 @@ const ExtraRow = ({
         <div {...(isFirst ? { 'data-qc-field': 'staff' } : {})} className={isFirst ? staffRing : ''}>
           <p className="flex items-baseline justify-between mb-1.5 font-body font-body-medium text-[13px] text-text-primary">{staffLabel} <span className="text-xs font-normal text-text-secondary">optional</span></p>
           <StaffPickRow
-            people={picked} max={1} statusLine={text || locked ? '' : info.statusLine} pill={text || locked ? null : info.pill} problem={text}
+            people={picked} max={1} statusLine={staffText || locked ? '' : info.statusLine} pill={staffText || locked ? null : info.pill} problem={staffText}
             emptyLabel={svc ? `Pick ${staffLabel.toLowerCase()}` : 'Pick a service first'} disabled={!svc || !!locked} title={`${staffLabel} for service ${n}`}
             renderPicker={(close) => (
               <StaffPicker
@@ -101,7 +103,7 @@ const ExtraRow = ({
 
 const ExtraServiceRows = ({
   rows, setRows, times, services, first, firstCard, canAdd = true, staffRing = '', branchId, canViewPrices, pickerPeople, dayBookings, dayOff, bookingDate,
-  allowStaffOverlap, staffLabel, staffLabelPlural, branchHours, errorRow = null, errorText = '', flashRow = null, problems = {}, ownProblems = {}, onProblem = () => {}, onRemoved = null,
+  allowStaffOverlap, staffLabel, staffLabelPlural, branchHours, errorRow = null, errorText = '', flashRow = null, problems = {}, ownProblems = {}, onProblem = () => {}, onRemoved = null, editMode = false, errorStaff = false,
 }) => {
   const patch = (key, p) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
   const remove = (key) => { const gone = rows.find((r) => r.key === key); if (gone?.bookingId) onRemoved?.(gone.bookingId); setRows((rs) => rs.filter((r) => r.key !== key)); };
@@ -123,13 +125,13 @@ const ExtraServiceRows = ({
   return (
     <div className="space-y-3" data-extra-services>
       {f && (
-        <ExtraRow key="first" isFirst solo={rows.length === 0} first1={f} staffRing={staffRing} r={firstRow} i={0} t={firstT} svc={first || null} patch={firstPatch} remove={() => f.onRemove(rows[0])}
-          problem="" ownProblem="" onProblem={onProblem} errorRow={null} errorText="" flashRow={f.flash ? -1 : null} {...shared} services={f.firstServices && rows.length === 0 ? f.firstServices : services} />
+        <ExtraRow key="first" isFirst editMode={editMode} errorStaff={errorStaff} errorRow={errorRow} errorText={errorText} solo={rows.length === 0} first1={f} staffRing={staffRing} r={firstRow} i={0} t={firstT} svc={first || null} patch={firstPatch} remove={() => f.onRemove(rows[0])}
+          problem="" ownProblem="" onProblem={onProblem} flashRow={f.flash ? -1 : null} {...shared} services={f.firstServices && rows.length === 0 ? f.firstServices : services} />
       )}
       {rows.map((r, i) => (
         <ExtraRow key={r.key} r={r} i={i + 1} t={times[i]} svc={byId.get(r.serviceId) || null} patch={patch} remove={remove}
           problem={problems[r.key] || ''} ownProblem={ownProblems[i + 1] || ''} onProblem={onProblem}
-          errorRow={errorRow} errorText={errorText} flashRow={flashRow}
+          errorRow={errorRow} errorText={errorText} errorStaff={errorStaff} flashRow={flashRow}
           {...shared} />
       ))}
       {canAdd && <button type="button" onClick={() => setRows((rs) => [...rs, newRow()])}

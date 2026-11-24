@@ -41,3 +41,15 @@ describe('multi-service rows (ZNLY-402 3b)', () => {
     expect(ownOverlaps([{ ids: ['t1'], startMin: 600, endMin: 645 }, { ids: ['t1'], startMin: 645, endMin: 660 }])).toEqual({});
   });
 });
+
+import { staffRowProblem } from './multiServiceRows';
+describe('staffRowProblem (refusal vs the staff chip)', () => {
+  const base = { refused: true, errorStaff: true, hasStaff: true, errorText: 'Rojina K is now busy 11:30–12:00. Pick another staff.' };
+  it('a refusal about the card\'s staff replaces the Free chip', () => { expect(staffRowProblem(base)).toBe(base.errorText); });
+  it('not about staff / not this card / no staff picked: the normal chip stays', () => {
+    expect(staffRowProblem({ ...base, errorStaff: false })).toBe('');
+    expect(staffRowProblem({ ...base, refused: false })).toBe('');
+    expect(staffRowProblem({ ...base, hasStaff: false })).toBe('');
+  });
+  it('the live problem wins', () => { expect(staffRowProblem({ ...base, liveText: 'on leave' })).toBe('on leave'); });
+});

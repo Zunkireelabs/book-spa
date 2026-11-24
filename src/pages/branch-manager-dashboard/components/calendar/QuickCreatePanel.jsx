@@ -722,7 +722,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       setErrorCode(err?.code || null);
       setErrorCard(describeError(err?.raw || { code: err?.code, message: err?.message }, { ...guideCtx, partial: err?.partial }));
       setErrorKey(formKey);
-      setErrorRow(Number.isInteger(err?.row) && err.row > 0 ? err.row : null);
+      setErrorRow(Number.isInteger(err?.row) && err.row >= (edit ? 0 : 1) ? err.row : null);
       setSubmitting(false);
       submitInFlightRef.current = false;
       // Bring the field the reason is about into view (the footer already shows the reason itself).
@@ -902,7 +902,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   })();
   // ZNLY-402 3b: a refusal about an extra service: its fix buttons would act on the FIRST service's staff / time, so they are not offered; the row carries the reason.
   const rowRefused = errorRow != null && errorKey === formKey && !!activeError;
-  const card = rowRefused && activeCard ? { ...activeCard, actions: [] } : (activeCard || liveCard);
+  // Edit: a refusal that names a service shows ONLY on that service's card (no generic card on top); any other card drops the "move the date" fixes (they would book a different day).
+  const card = edit && rowRefused ? null
+    : rowRefused && activeCard ? { ...activeCard, actions: [] }
+      : (() => { const c = activeCard || liveCard; return edit && c ? { ...c, actions: (c.actions || []).filter((a) => !/^set-date/.test(a.intent || '')) } : c; })();
   // Bring the card into view the moment it appears (it sits under date/time and can start partly off-screen).
   const cardRef = useRef(null);
   const cardKey = card ? `${card.code}${card.ref || ''}` : '';
@@ -1292,7 +1295,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 onRemoved={(id) => setRemovedIds((ids) => [...ids, id])}
                 branchId={branchId} canViewPrices={canViewPrices} pickerPeople={pickerPeople} dayBookings={dayBookings} dayOff={dayOff}
                 branchHours={branchHours} bookingDate={bookingDate} allowStaffOverlap={allowStaffOverlap} staffLabel={staffLabel} staffLabelPlural={staffLabelPlural}
-                problems={rowProblems} ownProblems={ownProblems} onProblem={onRowProblem} errorRow={errorKey === formKey ? errorRow : null} errorText={activeError || ''} flashRow={flashSvc && /^service-x\d+$/.test(flashSvc) ? Number(flashSvc.slice(9)) : null}
+                problems={rowProblems} ownProblems={ownProblems} onProblem={onRowProblem} errorRow={errorKey === formKey ? errorRow : null} errorText={activeError || ''} errorStaff={errField === 'staff'} editMode={!!edit} flashRow={flashSvc && /^service-x\d+$/.test(flashSvc) ? Number(flashSvc.slice(9)) : null}
               />
             )}
             {useCard && visitorTherapist && visitorServiceNames && (

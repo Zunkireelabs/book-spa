@@ -71,3 +71,6 @@ export function ownOverlaps(slots, nameOf = () => 'This person') {
   }
   return out;
 }
+
+/** What the STAFF row of a service card must say: its own live problem, else a refusal about this card's staff (so it never shows "Free" next to a "busy" refusal). '' = show the normal Free / Busy chip. */
+export const staffRowProblem = ({ liveText = '', refused = false, errorStaff = false, hasStaff = false, errorText = '' }) => liveText || (refused && errorStaff && hasStaff ? errorText : '');

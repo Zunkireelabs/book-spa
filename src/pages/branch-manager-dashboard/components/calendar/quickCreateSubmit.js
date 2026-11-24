@@ -3,6 +3,12 @@ import { createBooking, createBookingGroup, createComboBookingItems, joinVisitOf
 import { friendlyError } from '../../../../utils/friendlyError';
 import { wordBranch } from '../../../../utils/industryTerms';
 
+/** The row a refusal is about: first row the server marks block / warn, else any row with a reason that is not a plain change / keep. */
+export const refusedRow = (rows) => {
+  const rs = (rows || []).filter((r) => r.booking_id && r.reason);
+  return rs.find((r) => r.verdict === 'block') || rs.find((r) => r.verdict === 'warn') || rs.find((r) => r.verdict !== 'change' && r.verdict !== 'keep') || null;
+};
+
 // Create the booking(s) from the QuickCreatePanel form. Shared by the Calendar and the Dashboard so both host the panel identically.
 // Resolves { error } (a message: the panel stays open) or { toast: { msg, type? } } (done: the caller closes the panel and refreshes).
 export async function submitQuickCreate({ formData, branchId, guard, joinVisitOfBookingId = null }) {
@@ -22,9 +28,10 @@ export async function submitQuickCreate({ formData, branchId, guard, joinVisitOf
       return x;
     });
     if (res.error) {
-      const bad = (res.error.rows || []).find((r) => r.verdict === 'block' || r.verdict === 'warn');
+      // The refused service: the row the server names (booking_id + reason). Its reason is shown on THAT card (index 0 = the first service).
+      const bad = refusedRow(res.error.rows);
       const idx = bad ? order.indexOf(bad.booking_id) : -1;
-      return { error: friendlyError(res.error, 'Nothing was saved. Try again.'), code: res.error.code, raw: res.error, row: idx > 0 ? idx : undefined };
+      return { error: bad?.reason || friendlyError(res.error, 'Nothing was saved. Try again.'), code: res.error.code, raw: res.error, row: idx >= 0 ? idx : undefined };
     }
     return { toast: { msg: 'Booking updated' }, bookingId: order[0] };
   }
