@@ -44,9 +44,9 @@ describe('QuickCreatePanel smoke', () => {
   it('renders closed without crashing', () => {
     expect(() => render(<QuickCreatePanel {...props} slotInfo={null} />)).not.toThrow();
   });
-  it('renders open, with Create disabled and the "Pick a service" hint', () => {
+  it('renders open, with Create disabled and the first hint naming the customer (customer comes first)', () => {
     render(<QuickCreatePanel {...props} slotInfo={{ day: '2026-11-20', hour: 17, minute: 20, colType: 'therapist', colId: 't1', dragMinutes: 0 }} />);
-    expect(screen.getByText('Pick a service')).toBeTruthy();
+    expect(screen.getAllByText(/Pick a customer/).length).toBeGreaterThan(1); // the row and the footer reason
     expect(screen.getByRole('button', { name: /create booking/i }).disabled).toBe(true);
   });
   it('opens slot-less from a prefill (?view=new-booking): name, phone, email and gender are filled, service preselected', () => {

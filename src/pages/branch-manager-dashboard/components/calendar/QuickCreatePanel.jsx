@@ -794,9 +794,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // Couple rule (same helper as the booking panel): 0 picks saves unassigned, 2 is fine, 1 is not.
   // Reasons follow form order (ZNLY-322): the service row sits above the contact card, so a missing service is named first.
   const groupServiceMissing = serviceMode === 'same' ? !groupServiceId : people.some((q) => !q.serviceId);
-  const groupInvalidReason = groupServiceMissing
-    ? (serviceMode === 'same' ? 'Pick a service' : `Pick a service for ${people.findIndex((q) => !q.serviceId) === 0 ? 'the booking contact' : `Person ${people.findIndex((q) => !q.serviceId) + 1}`}`)
-    : !people[0]?.kind ? PICK_REASON : (people[0].kind === 'new' && people[0].name?.trim() && contactPhoneProblem) ? contactPhoneProblem : guestPhoneProblem ? guestPhoneProblem : 'Add the booking contact';
+  const groupInvalidReason = !people[0]?.kind ? PICK_REASON : (people[0].kind === 'new' && people[0].name?.trim() && contactPhoneProblem) ? contactPhoneProblem
+    : groupServiceMissing
+      ? (serviceMode === 'same' ? 'Pick a service' : `Pick a service for ${people.findIndex((q) => !q.serviceId) === 0 ? 'the booking contact' : `Person ${people.findIndex((q) => !q.serviceId) + 1}`}`)
+      : guestPhoneProblem ? guestPhoneProblem : 'Add the booking contact';
   // ZNLY-322: tapping the "Pick a service" footer reason scrolls to the first empty service row and rings it for 3 s.
   const [flashSvc, setFlashSvc] = useState(null);
   const firstEmptySvcField = bookingMode === 'individual' ? (serviceId ? (extraIncomplete ? `service-x${activeRows.findIndex((r) => !r.serviceId)}` : null) : 'service')
@@ -806,7 +807,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // ZNLY-327: the customer reason works the same way, after the service (form order).
   const customerUnpicked = bookingMode === 'individual' ? !customerKind : !people[0]?.kind;
   const phoneBad = bookingMode === 'individual' ? customerKind === 'new' && !!customerName.trim() && !!phoneProblem(customerCountryCode, customerPhone) : people[0]?.kind === 'new' && !!contactPhoneProblem;
-  const firstEmptyField = firstEmptySvcField || (customerUnpicked ? 'customer' : phoneBad ? 'phone' : null);
+  const firstEmptyField = (customerUnpicked ? 'customer' : phoneBad ? 'phone' : null) || firstEmptySvcField;   // customer first, then services (the form's order)
   const tapPickService = () => {
     if (!firstEmptyField) return;
     setFlashSvc(firstEmptyField);
@@ -908,7 +909,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     ? (/^Overlaps '(Transferred|Visiting)/.test(blockOverlapMsg) ? `${staffLabel} unavailable` : 'Overlaps a block')
     : bookingMode === 'group'
       ? (!groupValid ? groupInvalidReason : groupProblemFooter || (groupStaffIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : ''))
-      : !serviceId ? 'Pick a service' : extraIncomplete ? extraIncomplete : firstRowProblem ? firstRowProblem : (isCoupleBooking && companionPhone.problem) ? `Companion's phone: ${companionPhone.problem}` : couplePickIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : customerMissing(customerFields);
+      : customerMissing(customerFields) ? customerMissing(customerFields) : !serviceId ? 'Pick a service' : extraIncomplete ? extraIncomplete : firstRowProblem ? firstRowProblem : (isCoupleBooking && companionPhone.problem) ? `Companion's phone: ${companionPhone.problem}` : couplePickIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : '';
   const createDisabled = submitting || (!!activeError && !(activeCard?.kind === 'system' && activeCard.canRetry)) || !!liveCard?.blocking || !!blockOverlapMsg || precheck.blocked || couplePickIncomplete || (isCoupleBooking && !!companionPhone.problem) || (bookingMode === 'group' && (!!groupProblemFooter || groupStaffIncomplete)) || (bookingMode === 'individual' && (!!extraIncomplete || !!firstRowProblem)) || (bookingMode === 'group' ? !groupValid : (!serviceId || !!customerMissing(customerFields)));
   const confirmSlotLabel = confirm?.type === 'move'
     ? [therapists.find((d) => d.id === confirm.slot.colId)?.name || rooms.find((c) => c.id === confirm.slot.colId)?.name || confirm.slot.colName,
@@ -1004,6 +1005,114 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
             {bookingMode === 'individual' && (
             <>
+            {/* Customer: one closed row (ZNLY-327), like Service and Staff */}
+            <div data-qc-field="customer" className={fieldRing('customer')}>
+              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                Customer <span className="text-error">*</span>
+                {customerKind === 'existing' && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
+              </label>
+              {slotInfo?.lockedClient ? <LockedClientCard client={slotInfo.lockedClient} name={customerName} /> : <CustomerPickRow invalid={flashSvc === 'customer' && !customerKind} kind={customerKind} name={customerName} phone={customerPhone ? `${customerCountryCode}${customerPhone}` : ''} sub={svcSubLine} branchId={branchId} onPick={handleCustomerPick} />}
+            </div>
+
+            {customerKind === 'walkin' && !slotInfo?.lockedClient && (
+              <div>
+                <label className="flex items-baseline justify-between font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                  <span>Name</span><span className="text-xs font-normal text-text-secondary">optional</span>
+                </label>
+                <input type="text" value={walkInLabel} onChange={(e) => setWalkInLabel(e.target.value)} placeholder="First name, e.g. Ram" maxLength={40}
+                  className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                <p className="mt-1.5 text-xs text-text-secondary">No customer profile is created. You can add the client later from the booking.</p>
+              </div>
+            )}
+
+            {customerKind === 'existing' && canViewPrices && <EarlierBalanceNotice name={customerName} due={previousDue} />}
+
+            {customerKind === 'new' && (
+            <>
+            {/* Customer name */}
+            <div>
+              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                Name <span className="text-error">*</span>
+              </label>
+              <CustomerAutocomplete
+                value={customerName}
+                onChange={handleCustomerNameChange}
+                onSelect={handleCustomerSelect}
+                branchId={branchId}
+                inputRef={nameRef}
+                required
+              />
+            </div>
+
+            {/* Phone */}
+            <div data-qc-field="phone" className={flashSvc === 'phone' ? 'rounded-spa ring-2 ring-error' : ''}>
+              <PhoneField
+                label="Phone" required={requireCustomerPhone} id="qc-phone" walkInHint
+                dial={customerCountryCode} national={customerPhone}
+                onChange={({ dial, national }) => { if (dial !== customerCountryCode) setCustomerCountryCode(dial); if (national !== customerPhone) handleCustomerPhoneChange(national); }}
+                renderInput={(r) => (
+                  <CustomerAutocomplete
+                    id={r.id}
+                    value={r.value}
+                    onChange={r.onValueChange}
+                    onSelect={handleCustomerSelect}
+                    onBlur={() => checkPreviousDue(`${customerCountryCode}${customerPhone.replace(/\D/g, '')}`)}
+                    branchId={branchId}
+                    searchBy="phone"
+                    required={requireCustomerPhone}
+                    inputMode={r.inputMode}
+                    inputClassName={r.className}
+                  />
+                )}
+              />
+            </div>
+
+            {canViewPrices && <EarlierBalanceNotice name={customerName} due={previousDue} />}
+
+            </>
+            )}
+
+            {/* Email (an existing customer's profile that has none) */}
+            {(customerKind === 'new' || (customerKind === 'existing' && profileMissing.email)) && (
+            <div>
+              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                Email
+              </label>
+              <input
+                type="email"
+                value={customerEmail}
+                onChange={(e) => setCustomerEmail(e.target.value)}
+                placeholder="customer@email.com"
+                className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+              />
+            </div>
+            )}
+
+            {/* Gender */}
+            {(customerKind === 'new' || (customerKind === 'existing' && profileMissing.gender)) && (
+            <div>
+              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                Gender
+              </label>
+              <div className="flex gap-2">
+                {['Male', 'Female'].map((g) => (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => setCustomerGender(customerGender === g.toLowerCase() ? '' : g.toLowerCase())}
+                    className={`px-4 py-2 text-sm border rounded-spa transition-colors ${
+                      customerGender === g.toLowerCase()
+                        ? 'border-primary bg-primary/10 text-primary font-medium'
+                        : 'border-border bg-surface text-text-secondary hover:bg-background'
+                    }`}
+                  >
+                    {g}
+                  </button>
+                ))}
+              </div>
+            </div>
+            )}
+
             {/* Service (with 2+ services, Service 1 is drawn as the same card as the others, below) */}
             {!(canMulti && activeRows.length > 0) && (
             <div>
@@ -1209,118 +1318,36 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               </div>
             )}
 
-            {/* Customer: one closed row (ZNLY-327), like Service and Staff */}
-            <div data-qc-field="customer" className={fieldRing('customer')}>
-              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                Customer <span className="text-error">*</span>
-                {customerKind === 'existing' && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
-              </label>
-              {slotInfo?.lockedClient ? <LockedClientCard client={slotInfo.lockedClient} name={customerName} /> : <CustomerPickRow invalid={flashSvc === 'customer' && !customerKind} kind={customerKind} name={customerName} phone={customerPhone ? `${customerCountryCode}${customerPhone}` : ''} sub={svcSubLine} branchId={branchId} onPick={handleCustomerPick} />}
-            </div>
-
-            {customerKind === 'walkin' && !slotInfo?.lockedClient && (
-              <div>
-                <label className="flex items-baseline justify-between font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                  <span>Name</span><span className="text-xs font-normal text-text-secondary">optional</span>
-                </label>
-                <input type="text" value={walkInLabel} onChange={(e) => setWalkInLabel(e.target.value)} placeholder="First name, e.g. Ram" maxLength={40}
-                  className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
-                <p className="mt-1.5 text-xs text-text-secondary">No customer profile is created. You can add the client later from the booking.</p>
-              </div>
-            )}
-
-            {customerKind === 'existing' && canViewPrices && <EarlierBalanceNotice name={customerName} due={previousDue} />}
-
-            {customerKind === 'new' && (
-            <>
-            {/* Customer name */}
-            <div>
-              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                Name <span className="text-error">*</span>
-              </label>
-              <CustomerAutocomplete
-                value={customerName}
-                onChange={handleCustomerNameChange}
-                onSelect={handleCustomerSelect}
-                branchId={branchId}
-                inputRef={nameRef}
-                required
-              />
-            </div>
-
-            {/* Phone */}
-            <div data-qc-field="phone" className={flashSvc === 'phone' ? 'rounded-spa ring-2 ring-error' : ''}>
-              <PhoneField
-                label="Phone" required={requireCustomerPhone} id="qc-phone" walkInHint
-                dial={customerCountryCode} national={customerPhone}
-                onChange={({ dial, national }) => { if (dial !== customerCountryCode) setCustomerCountryCode(dial); if (national !== customerPhone) handleCustomerPhoneChange(national); }}
-                renderInput={(r) => (
-                  <CustomerAutocomplete
-                    id={r.id}
-                    value={r.value}
-                    onChange={r.onValueChange}
-                    onSelect={handleCustomerSelect}
-                    onBlur={() => checkPreviousDue(`${customerCountryCode}${customerPhone.replace(/\D/g, '')}`)}
-                    branchId={branchId}
-                    searchBy="phone"
-                    required={requireCustomerPhone}
-                    inputMode={r.inputMode}
-                    inputClassName={r.className}
-                  />
-                )}
-              />
-            </div>
-
-            {canViewPrices && <EarlierBalanceNotice name={customerName} due={previousDue} />}
-
-            </>
-            )}
-
-            {/* Email (an existing customer's profile that has none) */}
-            {(customerKind === 'new' || (customerKind === 'existing' && profileMissing.email)) && (
-            <div>
-              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                Email
-              </label>
-              <input
-                type="email"
-                value={customerEmail}
-                onChange={(e) => setCustomerEmail(e.target.value)}
-                placeholder="customer@email.com"
-                className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-              />
-            </div>
-            )}
-
-            {/* Gender */}
-            {(customerKind === 'new' || (customerKind === 'existing' && profileMissing.gender)) && (
-            <div>
-              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                Gender
-              </label>
-              <div className="flex gap-2">
-                {['Male', 'Female'].map((g) => (
-                  <button
-                    key={g}
-                    type="button"
-                    onClick={() => setCustomerGender(customerGender === g.toLowerCase() ? '' : g.toLowerCase())}
-                    className={`px-4 py-2 text-sm border rounded-spa transition-colors ${
-                      customerGender === g.toLowerCase()
-                        ? 'border-primary bg-primary/10 text-primary font-medium'
-                        : 'border-border bg-surface text-text-secondary hover:bg-background'
-                    }`}
-                  >
-                    {g}
-                  </button>
-                ))}
-              </div>
-            </div>
-            )}
             </>
             )}
 
             {bookingMode === 'group' && (
             <>
+            {(() => { const p = people[0] || {}; return (
+            <>
+            {(
+              <div data-qc-field="customer" className={fieldRing('customer')}>
+                <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                  Customer <span className="text-error">*</span>
+                  {p.kind === 'existing' && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
+                </label>
+                <CustomerPickRow invalid={flashSvc === 'customer' && !p.kind} kind={p.kind} name={p.name} phone={p.phone ? `${p.countryCode || '+977'}${p.phone}` : ''} sub={svcSubLine} branchId={branchId} onPick={handleContactPick} />
+              </div>
+            )}
+            {p.kind === 'walkin' && (
+              <div>
+                <label className="flex items-baseline justify-between font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                  <span>Name</span><span className="text-xs font-normal text-text-secondary">optional</span>
+                </label>
+                <input type="text" value={p.label || ''} onChange={(e) => setPerson(0, { label: e.target.value })} placeholder="First name, e.g. Ram" maxLength={40}
+                  className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                <p className="mt-1.5 text-xs text-text-secondary">No customer profile is created. Guests left blank are walk-ins too.</p>
+              </div>
+            )}
+            {p.kind === 'existing' && canViewPrices && <EarlierBalanceNotice name={p.name} due={p.previousDue} />}
+            </>
+            ); })()}
+
             {/* Couple | Separate (+ How many? on the same row) */}
             <div>
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Group type</label>
@@ -1426,26 +1453,6 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     {idx > 0 && <span className="text-xs text-text-secondary md:text-right">optional · blank uses the contact's details</span>}
                   </div>
 
-                  {idx === 0 && (
-                    <div data-qc-field="customer" className={fieldRing('customer')}>
-                      <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                        Customer <span className="text-error">*</span>
-                        {p.kind === 'existing' && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
-                      </label>
-                      <CustomerPickRow invalid={flashSvc === 'customer' && !p.kind} kind={p.kind} name={p.name} phone={p.phone ? `${p.countryCode || '+977'}${p.phone}` : ''} sub={svcSubLine} branchId={branchId} onPick={handleContactPick} />
-                    </div>
-                  )}
-                  {idx === 0 && p.kind === 'walkin' && (
-                    <div>
-                      <label className="flex items-baseline justify-between font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                        <span>Name</span><span className="text-xs font-normal text-text-secondary">optional</span>
-                      </label>
-                      <input type="text" value={p.label || ''} onChange={(e) => setPerson(0, { label: e.target.value })} placeholder="First name, e.g. Ram" maxLength={40}
-                        className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
-                      <p className="mt-1.5 text-xs text-text-secondary">No customer profile is created. Guests left blank are walk-ins too.</p>
-                    </div>
-                  )}
-                  {idx === 0 && p.kind === 'existing' && canViewPrices && <EarlierBalanceNotice name={p.name} due={p.previousDue} />}
 
                   {(idx > 0 || p.kind === 'new') && (
                   <>
