@@ -116,8 +116,10 @@ export const VisitStatusFlow = ({ visitKey, kind, lines, reasonOptions, onClose,
   const status = kind === 'no show' ? 'No Show' : 'Cancelled';
   React.useEffect(() => {
     let off = false;
-    visitSetStatus({ visitKey, status, reason: 'Preview', dryRun: true }).then(({ data, error: e }) => {
+    visitSetStatus({ visitKey, status, dryRun: true }).then(({ data, error: e }) => {
       if (off) return;
+      // Nothing left to change (every service started / done / paid): the "nothing can be cancelled" dialog (C3), listing what stays.
+      if (e && e.code === 'NOTHING_TO_CHANGE') { setPreview(splitStatusPreview({ rows: e.rows || [] }, lines)); return; }
       if (e) { setError(friendlyError(e, 'Could not check this booking. Try again.')); return; }
       setPreview(splitStatusPreview(data, lines));
     });

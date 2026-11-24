@@ -66,8 +66,8 @@ const MoveBookingDialog = ({ visitKey, date, startTime, lines, canOverride, onCl
           <p className="text-sm text-text-secondary">{dayLabel(date)} · from {time12(startTime)}</p>
           <div className="border border-border rounded-spa">
             {moving.map((r) => {
-              // A moved service becomes a NEW booking row (new id), so the preview row is matched to its line by id, else by service name.
-              const l = lines?.[r.booking_id] || Object.values(lines || {}).find((x) => x.name === r.service) || {};
+              // booking_id is the ORIGINAL row (what the screen shows); the replacement is new_booking_id. r.start is the NEW start time.
+              const l = lines?.[r.booking_id] || {};
               const start = r.start || startTime;
               const range = l.minutes ? `${time12(start)}–${time12(addMin(String(start).slice(0, 5), l.minutes))}` : time12(start);
               const v = r.verdict;

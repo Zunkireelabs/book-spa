@@ -13,7 +13,7 @@ const RemoveServiceFlow = ({ row, newTotal, canViewPrices = true, reasonOptions,
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let off = false;
-    visitRemoveService({ bookingId: row.id, reason: 'Preview', dryRun: true }).then(({ data, error: e }) => {
+    visitRemoveService({ bookingId: row.id, dryRun: true }).then(({ data, error: e }) => {
       if (off) return;
       // The server answers a refusal as an error with the per-row verdict: LAST_SERVICE = the only live service (offer to cancel the booking).
       if (e) {
