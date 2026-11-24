@@ -3622,6 +3622,26 @@ export async function fetchGroupBookings({ bookingGroupId, customerName, date, e
   }
 }
 
+// ZNLY-402 piece 4 (org setting multi_service_bookings ON): EVERY row of one booking (bookings.visit_id), cancelled rows included, any payment state.
+// Read-only, for the "This booking" block in the booking panel. No visit_id = its own booking: nothing to fetch (the block stays hidden).
+// customerId is the same safety check as above: a visit never spans two customers.
+export async function fetchBookingServices({ visitId, customerId }) {
+  try {
+    if (!visitId) return { data: [], error: null };
+    let query = supabase
+      .from('bookings')
+      .select('id, booking_number, customer_id, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service_id, room_id, therapist_id, service_name_snapshot, service:services(name, duration_minutes, is_couple), room:rooms(name), therapist:therapists(name), booking_therapists(therapist_id, therapist:therapists(name)), payments(amount), payment_refunds(amount)')
+      .eq('visit_id', visitId);
+    if (customerId) query = query.eq('customer_id', customerId);
+    const { data, error } = await query.order('start_time');
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchBookingServices error:', error.message);
+    return { data: [], error };
+  }
+}
+
 // ZNLY-402 (org setting multi_service_bookings ON; OFF orgs use fetchRelatedUnpaidBookings above): "related" = the OTHER bookings of the SAME VISIT (bookings.visit_id, migration-427; one person, one Save), unpaid only: this is
 // "what to bundle into a payment". A booking with no visit_id is its own visit, so it has no related bookings: there is no fallback to
 // booking_group_id (a party of several people) or to customer_name + date (the old guess that merged two separate visits). customerId

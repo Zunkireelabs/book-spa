@@ -618,6 +618,7 @@ const OperationalCalendar = ({ branchId }) => {
       <BookingActionModal
         variant="panel"
         liveBackdrop
+        use24h={use24h}
         initialTab={openTab}
         isOpen={modalOpen}
         previewBooking={previewBooking}
