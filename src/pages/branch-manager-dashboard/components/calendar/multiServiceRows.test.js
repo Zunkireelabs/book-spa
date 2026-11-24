@@ -53,3 +53,11 @@ describe('staffRowProblem (refusal vs the staff chip)', () => {
   });
   it('the live problem wins', () => { expect(staffRowProblem({ ...base, liveText: 'on leave' })).toBe('on leave'); });
 });
+
+describe('staffRowProblem with a staff name (group guests / combo steps)', () => {
+  const base = { refused: true, errorStaff: true, hasStaff: true, errorText: 'Rojina K is now busy 11:30–12:00.' };
+  it('only the picker whose person the refusal names shows it', () => {
+    expect(staffRowProblem({ ...base, staffName: 'Rojina K' })).toBe(base.errorText);
+    expect(staffRowProblem({ ...base, staffName: 'Jayanti R.' })).toBe('');
+  });
+});

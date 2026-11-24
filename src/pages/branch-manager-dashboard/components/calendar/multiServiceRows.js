@@ -73,4 +73,10 @@ export function ownOverlaps(slots, nameOf = () => 'This person') {
 }
 
 /** What the STAFF row of a service card must say: its own live problem, else a refusal about this card's staff (so it never shows "Free" next to a "busy" refusal). '' = show the normal Free / Busy chip. */
-export const staffRowProblem = ({ liveText = '', refused = false, errorStaff = false, hasStaff = false, errorText = '' }) => liveText || (refused && errorStaff && hasStaff ? errorText : '');
+export const staffRowProblem = ({ liveText = '', refused = false, errorStaff = false, hasStaff = false, errorText = '', staffName = '' }) => {
+  if (liveText) return liveText;
+  if (!(refused && errorStaff && hasStaff && errorText)) return '';
+  // Pickers that cannot tell which one the refusal is about (group guests, combo steps) match the refusal text to the picked person's name.
+  if (staffName && !errorText.toLowerCase().includes(String(staffName).toLowerCase())) return '';
+  return errorText;
+};

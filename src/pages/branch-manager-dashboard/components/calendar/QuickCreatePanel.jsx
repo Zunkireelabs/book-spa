@@ -38,7 +38,7 @@ import { shouldShowFillFree } from '../../../../utils/serviceCatalog';
 import { fieldForErrorCode } from '../../../../utils/quickCreateErrorField';
 import { useOrg } from '../../../../contexts/OrgContext';
 import ExtraServiceRows from './ExtraServiceRows';
-import { rowTimes, rowsIncompleteReason, toGroupServices, ownOverlaps } from './multiServiceRows';
+import { rowTimes, rowsIncompleteReason, toGroupServices, ownOverlaps, staffRowProblem } from './multiServiceRows';
 
 
 // ZNLY-365: the client row when the panel was opened from a booking ("+ Service" / Rebook). Not editable: same client as that booking.
@@ -911,6 +911,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const cardKey = card ? `${card.code}${card.ref || ''}` : '';
   useEffect(() => { if (cardKey) cardRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }); }, [cardKey]);
   const errField = activeCard ? (activeCard.field || fieldForErrorCode(errorCode) || errorField(activeError)) : activeError ? (fieldForErrorCode(errorCode) || errorField(activeError)) : (liveCard?.field || null);
+  // A refusal about staff: the staff row it is about shows it (and no Free chip) until the form changes.
+  const refusedStaff = (staffName, hasStaff = true, liveText = '') => staffRowProblem({ liveText, refused: !!activeError, errorStaff: errField === 'staff', hasStaff, errorText: activeError || '', staffName });
   const fieldRing = (name) => (errField === name && !rowRefused ? 'rounded-spa ring-2 ring-error' : '');
   // Fix buttons only fill or open something. Nothing here saves.
   const scrollToField = (f) => requestAnimationFrame(() => document.querySelector(`[data-qc-field="${f}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
@@ -1252,7 +1254,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     max={maxPick}
                     statusLine={info.statusLine}
                     pill={info.pill}
-                    problem={info.problem}
+                    problem={refusedStaff(picked[0]?.name, picked.length > 0, info.problem)}
                     emptyLabel={`Pick ${staffLabel.toLowerCase()}`}
                     title={`${lbl} for the booking`}
                     renderPicker={(close) => (
@@ -1377,7 +1379,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                                   <StaffPickRow
                                     id={comboTherapistOverrides[c.serviceId] || null}
                                     {...comboPick(index)}
-                                    problem={comboProblemText(index)}
+                                    problem={refusedStaff(comboPick(index).name, !!comboPick(index).name, comboProblemText(index))}
                                     emptyLabel={`Pick ${staffLabel.toLowerCase()}`}
                                     title={`${staffLabel} for step ${index + 1}`}
                                     renderPicker={(close) => (
@@ -1571,7 +1573,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     <StaffPickRow
                       id={p.therapistId}
                       {...guestPick(idx)}
-                      problem={problemText(idx)}
+                      problem={refusedStaff(guestPick(idx).name, !!guestPick(idx).name, problemText(idx))}
                       emptyLabel={`Pick ${staffLabel.toLowerCase()}`}
                       title={`${staffLabel} for ${guestLabel(idx)}`}
                       renderPicker={(close) => (
