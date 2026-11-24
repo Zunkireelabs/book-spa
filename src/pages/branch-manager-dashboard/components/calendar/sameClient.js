@@ -1,15 +1,6 @@
-import { visitKey } from '../../../../utils/visit';
-
-// ZNLY-281 / ZNLY-402: client + visit highlighting on the calendar. Pure helpers, one pass per render.
-// Two levels, both keyed on ids only (never the name):
-//   'visit'  = a card of the SAME VISIT as the active booking (strong brand outline). The visit is bookings.visit_id (utils/visit.js); a booking
-//              with no visit_id is its own visit, so it lights only itself, and a lone card is never outlined.
-//   'client' = the SAME CLIENT (customerId) but another visit (faint outline), behind SHOW_CLIENT_OTHER_VISITS: set it to false to switch the
-//              faint outline off in one line. A walk-in (no customerId) never matches by client.
-// Cancelled / No-show cards stay in the highlight (they are on screen) but a cancelled booking is not counted in "Also booked today".
-
-/** One line to switch the faint "same client, other visit" outline off. */
-export const SHOW_CLIENT_OTHER_VISITS = true;
+// ZNLY-281: "same client" highlighting on the calendar. Pure helpers, one pass per render.
+// Match on customerId ONLY (never the name); a booking with no customerId (walk-in) matches nothing.
+// Cancelled / No-show cards stay in the highlight (they are on screen) but a cancelled booking is not counted in "N bookings today".
 
 const isCancelled = (b) => String(b.status || '').toLowerCase() === 'cancelled';
 // The grid hands over both shapes: raw calendar rows (customer_id, start_time) and transformed bookings (customerId, startTime).
@@ -18,68 +9,47 @@ const startOf = (b) => b?.startTime || b?.start_time || null;
 const endOf = (b) => b?.endTime || b?.end_time || null;
 const hhmm = (t) => (t ? String(t).slice(0, 5) : null);
 
-/**
- * bookings -> { visits: Map(visitKey -> Set(bookingId)), clients: Map(customerId -> { keys: Set(bookingId), days: Map(date -> [{ vk, st, en }]) }) }.
- * Copies of one booking (shared/combo) count once. `days` holds only non-cancelled rows (what "Also booked today" counts).
- */
+/** bookings -> Map(customerId -> { keys: Set(bookingId), days: Map(date -> { count, first, last }) }). Copies of one booking (shared/combo) count once. */
 export function buildClientIndex(bookings) {
-  const visits = new Map();
-  const clients = new Map();
+  const index = new Map();
   const seen = new Set();
   for (const b of bookings || []) {
-    const key = b?.bookingId || b?.id;
-    const vk = visitKey(b);
-    if (!key || !vk) continue;
-    const vdedupe = `${vk}|${key}`;
-    if (!seen.has(vdedupe)) {
-      seen.add(vdedupe);
-      if (!visits.has(vk)) visits.set(vk, new Set());
-      visits.get(vk).add(key);
-    }
     const cid = cidOf(b);
-    if (!cid) continue;
+    const key = b?.bookingId || b?.id;
+    if (!cid || !key) continue;
     const dedupe = `${cid}|${key}`;
     if (seen.has(dedupe)) continue;
     seen.add(dedupe);
-    let entry = clients.get(cid);
-    if (!entry) { entry = { keys: new Set(), days: new Map() }; clients.set(cid, entry); }
+    let entry = index.get(cid);
+    if (!entry) { entry = { keys: new Set(), days: new Map() }; index.set(cid, entry); }
     entry.keys.add(key);
     if (isCancelled(b) || !b.date) continue;
-    const rows = entry.days.get(b.date) || [];
-    rows.push({ vk, st: hhmm(startOf(b)), en: hhmm(endOf(b)) });
-    entry.days.set(b.date, rows);
+    const day = entry.days.get(b.date) || { count: 0, first: null, last: null };
+    day.count += 1;
+    const st = hhmm(startOf(b)); const en = hhmm(endOf(b));
+    if (st && (!day.first || st < day.first)) day.first = st;
+    if (en && (!day.last || en > day.last)) day.last = en;
+    entry.days.set(b.date, day);
   }
-  return { visits, clients };
+  return index;
 }
 
-/** The booking with this key, or null. */
-export const bookingOf = (bookings, key) => (key ? (bookings || []).find((b) => (b.bookingId || b.id) === key) || null : null);
-
 /** customerId of the booking with this key, or null. */
-export const customerIdOf = (bookings, key) => cidOf(bookingOf(bookings, key));
-
-/** How should `booking` be outlined while `active` is the hovered / focused / open booking? 'visit' | 'client' | null. */
-export const highlightLevel = (index, active, booking) => {
-  if (!active || !booking) return null;
-  const av = visitKey(active);
-  if (av && visitKey(booking) === av) return (index.visits.get(av)?.size || 0) >= 2 ? 'visit' : null;
-  if (!SHOW_CLIENT_OTHER_VISITS) return null;
-  const cid = cidOf(active);
-  if (!cid || cidOf(booking) !== cid) return null;
-  return (index.clients.get(cid)?.keys.size || 0) >= 2 ? 'client' : null;
+export const customerIdOf = (bookings, key) => {
+  if (!key) return null;
+  const hit = (bookings || []).find((b) => (b.bookingId || b.id) === key);
+  return cidOf(hit);
 };
 
-/** { count, first, last } of the client's OTHER bookings that day (not this booking's own visit, not cancelled), or null when there are none. */
+/** Should this booking be outlined while `activeCustomerId` is active? Needs 2+ bookings of that client on screen. */
+export const isSameClient = (index, activeCustomerId, booking) => {
+  if (!activeCustomerId || cidOf(booking) !== activeCustomerId) return false;
+  return (index.get(activeCustomerId)?.keys.size || 0) >= 2;
+};
+
+/** { count, first, last } for that booking's client on that booking's day, or null when fewer than 2. */
 export const clientDayInfo = (index, booking) => {
   const cid = cidOf(booking);
-  const own = visitKey(booking);
-  const rows = cid && booking?.date ? index.clients.get(cid)?.days.get(booking.date) : null;
-  const others = (rows || []).filter((r) => r.vk !== own);
-  if (!others.length) return null;
-  let first = null; let last = null;
-  for (const r of others) {
-    if (r.st && (!first || r.st < first)) first = r.st;
-    if (r.en && (!last || r.en > last)) last = r.en;
-  }
-  return { count: others.length, first, last };
+  const day = cid && booking?.date ? index.get(cid)?.days.get(booking.date) : null;
+  return day && day.count >= 2 ? day : null;
 };

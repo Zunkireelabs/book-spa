@@ -7,6 +7,7 @@ import { formatPhoneGrouped } from '../../../../utils/phone';
 import { initials } from '../../../../utils/customerDirectory';
 import { formatLate, groupInfo, visitCount } from '../../../../utils/bookingsList';
 import { teamMemberWord } from '../../../../utils/industryTerms';
+import { useOrg } from '../../../../contexts/OrgContext';
 
 export const COLUMN_DEFS = [
   { id: 'service', label: 'Service' },
@@ -45,7 +46,8 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
   const edge = unread ? '#2D5A27' : color;
   const people = b.therapists || [];
   const grp = groupInfo(b, all);
-  const vis = visitCount(b, all);
+  const { multiServiceBookings } = useOrg();
+  const vis = multiServiceBookings ? visitCount(b, all) : 1;   // ZNLY-402: "N services" only for orgs with the visit model ON
   const mins = minutesOf(b);
   const isOnline = b.createdBy == null;
   const bg = selected ? 'bg-[#F2F6F0]' : unread ? 'bg-[#F7FAF6] hover:bg-[#F2F6F0]' : 'hover:bg-[#FAFAF9]';

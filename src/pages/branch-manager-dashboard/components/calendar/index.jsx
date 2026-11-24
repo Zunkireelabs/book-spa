@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { refreshLight } from './refreshLight';
-import { buildClientIndex, clientDayInfo } from './sameClient';
+import { clientRules } from '../../../../utils/visitGate';
 import { viewerAccess } from 'services/dataMasking';
 import UnlinkedLoginNotice from 'components/ui/UnlinkedLoginNotice';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -47,7 +47,7 @@ import { offStaffReasons } from '../../../../utils/staffFit';
 
 const OperationalCalendar = ({ branchId }) => {
   const { profile } = useAuth();
-  const { orgSettings, enforceStaffAvailability } = useOrg();
+  const { orgSettings, enforceStaffAvailability, multiServiceBookings } = useOrg();
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   // Deep link from the Therapists list ("See on calendar"): ?view=calendar&therapist=<id> shows only that person's column.
@@ -327,10 +327,13 @@ const OperationalCalendar = ({ branchId }) => {
   // ── Derived data ───────────────────────────────────────────
 
   // ZNLY-281: "N bookings today for this client" in the open panel / sheet (same index the grid uses).
-  const clientIndexAll = useMemo(() => buildClientIndex(calendarData?.bookings), [calendarData?.bookings]);
+  // ZNLY-402: "Also booked today" (visit rules) only for orgs with "Several services in one booking" ON; others keep "N bookings today for this client".
+  const clientIndexAll = useMemo(() => clientRules(multiServiceBookings).buildIndex(calendarData?.bookings), [calendarData?.bookings, multiServiceBookings]);
   const selectedClientDay = useMemo(
-    () => (selectedBooking ? clientDayInfo(clientIndexAll, selectedBooking) : null),
-    [clientIndexAll, selectedBooking]
+    () => (selectedBooking
+      ? clientRules(multiServiceBookings).dayInfo(clientIndexAll, selectedBooking)
+      : null),
+    [clientIndexAll, selectedBooking, multiServiceBookings]
   );
   // People who are off / on leave on the shown day (the Staff picker lists them under "Off today", not selectable). Day view only:
   // the attendance + shift data is for one day, so other views keep the old rule of hiding them.

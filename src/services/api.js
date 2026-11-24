@@ -865,6 +865,18 @@ export async function setAllowStaffOverlap({ enabled }) {
   }
 }
 
+// ZNLY-402 / ZNLY-423: per-org "Several services in one booking" (migration 428). Admin only, SECURITY DEFINER RPC like the two above.
+export async function setMultiServiceBookings({ enabled }) {
+  try {
+    const { data, error } = await supabase.rpc('set_multi_service_bookings', { p_value: !!enabled });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setMultiServiceBookings error:', error.message);
+    return { data: null, error: plainError(error) };
+  }
+}
+
 export async function setRequireCustomerPhone({ enabled }) {
   try {
     const { data, error } = await supabase.rpc('set_require_customer_phone', { p_value: !!enabled });
@@ -3496,12 +3508,89 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
   }
 }
 
-// ZNLY-402: "related" = the OTHER bookings of the SAME VISIT (bookings.visit_id, migration-427; one person, one Save), unpaid only: this is
+// bookingGroupId (bookings.booking_group_id, migration-030) is the real,
+// authoritative link between siblings created together as one group booking
+// — when present, match on it instead of the customer_name+date heuristic,
+// so bundling is exact rather than fuzzy-matched by name/date. Still scoped
+// to payment_status='unpaid' — this is "what to bundle into a payment", not
+// "everything in this group" (see fetchGroupBookings below for the latter).
+// customerId (when known) additionally restricts results to the requesting
+// booking's own customer — a booking_group_id link only means "created
+// together" (e.g. a walk-in group under one shared name), not "same
+// customer", so without this a sibling belonging to a genuinely different
+// customer row could get bundled into a membership/wallet payment that's
+// scoped to one customer (see the BK-20261011-0033/-0034 incident).
+export async function fetchRelatedUnpaidBookings({ customerName, date, excludeBookingId, bookingGroupId, customerId }) {
+  try {
+    let query = supabase
+      .from('bookings')
+      .select('id, booking_number, customer_id, customer_name, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service:services(name, duration_minutes), room:rooms(name), therapist:therapists(name), payments(amount), payment_refunds(amount)')
+      .not('status', 'in', '("Cancelled","No Show")')
+      .neq('id', excludeBookingId);
+
+    query = bookingGroupId
+      ? query.eq('booking_group_id', bookingGroupId)
+      : query.eq('customer_name', customerName).eq('date', date);
+
+    if (customerId) {
+      query = query.eq('customer_id', customerId);
+    }
+
+    const { data, error } = await query.order('start_time');
+
+    if (error) throw error;
+    // "Unpaid" = nothing held on it (payments − refunds = 0), decided from the payments like every other money figure — the same rule the
+    // calendar's Prev. due uses to drop these siblings, so the two can never disagree.
+    return { data: (data || []).filter((b) => paidPaisa(b) === 0), error: null };
+  } catch (error) {
+    console.error('[API] fetchRelatedUnpaidBookings error:', error.message);
+    return { data: [], error };
+  }
+}
+
+// Every sibling in a group booking, regardless of payment_status — unlike
+// fetchRelatedUnpaidBookings above, this is purely for DISPLAY (so a sibling
+// that's already been paid never silently disappears from another sibling's
+// modal — see the BK-20260915-0025/-0026/-0027 incident, where paying 0025
+// made it drop out of every other sibling's "related" view since that query
+// filtered on payment_status='unpaid'). Never used to decide what to bundle
+// into a payment — only fetchRelatedUnpaidBookings governs that.
+// Falls back to the customer_name+date heuristic when bookingGroupId is
+// absent — same dual-matching strategy as fetchRelatedUnpaidBookings, so
+// the "don't hide a paid sibling" display fix covers non-group bookings
+// too, not just formal group bookings (a real gap: two separate walk-in
+// bookings for the same customer/day, never linked via booking_group_id,
+// had no equivalent of this panel).
+export async function fetchGroupBookings({ bookingGroupId, customerName, date, excludeBookingId }) {
+  try {
+    if (!bookingGroupId && !(customerName && date)) return { data: [], error: null };
+
+    let query = supabase
+      .from('bookings')
+      .select('id, booking_number, payment_status, status, final_amount, service:services(name)')
+      .not('status', 'in', '("Cancelled","No Show")')
+      .neq('id', excludeBookingId);
+
+    query = bookingGroupId
+      ? query.eq('booking_group_id', bookingGroupId)
+      : query.eq('customer_name', customerName).eq('date', date);
+
+    const { data, error } = await query.order('booking_number');
+
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchGroupBookings error:', error.message);
+    return { data: [], error };
+  }
+}
+
+// ZNLY-402 (org setting multi_service_bookings ON; OFF orgs use fetchRelatedUnpaidBookings above): "related" = the OTHER bookings of the SAME VISIT (bookings.visit_id, migration-427; one person, one Save), unpaid only: this is
 // "what to bundle into a payment". A booking with no visit_id is its own visit, so it has no related bookings: there is no fallback to
 // booking_group_id (a party of several people) or to customer_name + date (the old guess that merged two separate visits). customerId
 // (when known) stays as a safety check: a visit never spans two customers, so a stray row of another customer is never bundled into a
 // membership/wallet payment scoped to one customer (see the BK-20261011-0033/-0034 incident). Same unpaid / non-cancelled filters as before.
-export async function fetchRelatedUnpaidBookings({ excludeBookingId, visitId, customerId }) {
+export async function fetchVisitRelatedUnpaidBookings({ excludeBookingId, visitId, customerId }) {
   try {
     if (!visitId) return { data: [], error: null };
     let query = supabase
@@ -3522,16 +3611,16 @@ export async function fetchRelatedUnpaidBookings({ excludeBookingId, visitId, cu
     // calendar's Prev. due uses to drop these siblings, so the two can never disagree.
     return { data: (data || []).filter((b) => paidPaisa(b) === 0), error: null };
   } catch (error) {
-    console.error('[API] fetchRelatedUnpaidBookings error:', error.message);
+    console.error('[API] fetchVisitRelatedUnpaidBookings error:', error.message);
     return { data: [], error };
   }
 }
 
-// Every other booking of the same visit, regardless of payment_status — unlike fetchRelatedUnpaidBookings above, this is purely for
+// Every other booking of the same visit, regardless of payment_status — unlike fetchVisitRelatedUnpaidBookings above, this is purely for
 // DISPLAY (so a sibling that's already been paid never silently disappears from another sibling's modal — see the
 // BK-20260915-0025/-0026/-0027 incident, where paying 0025 made it drop out of every other sibling's "related" view). Never used to decide
-// what to bundle into a payment — only fetchRelatedUnpaidBookings governs that. Same visit rule as above (ZNLY-402): no visit_id = no siblings.
-export async function fetchGroupBookings({ visitId, excludeBookingId, customerId }) {
+// what to bundle into a payment — only fetchVisitRelatedUnpaidBookings governs that. Same visit rule as above (ZNLY-402): no visit_id = no siblings.
+export async function fetchVisitSiblings({ visitId, excludeBookingId, customerId }) {
   try {
     if (!visitId) return { data: [], error: null };
 
@@ -3548,7 +3637,7 @@ export async function fetchGroupBookings({ visitId, excludeBookingId, customerId
     if (error) throw error;
     return { data: data || [], error: null };
   } catch (error) {
-    console.error('[API] fetchGroupBookings error:', error.message);
+    console.error('[API] fetchVisitSiblings error:', error.message);
     return { data: [], error };
   }
 }
@@ -6828,8 +6917,8 @@ export async function getCalendarBookings(branchId, startDate, endDate, opts = {
         'status', 'payment_status',
         'date', 'start_time', 'end_time', 'start_datetime', 'end_datetime', 'created_at', 'created_by',
         'therapist_id', 'room_id',
-        // ZNLY-402: visit link. Restricted logins read the masked view bookings_safe, which does not carry it yet: they see each booking as its own visit.
-        !isReadingViaSafeViews() && 'visit_id',
+        // ZNLY-402: visit link (migration 427; bookings_safe carries it since migration 428). Only read when the org setting multi_service_bookings is ON.
+        'visit_id',
         vis.canViewPrices && 'base_amount, discount_amount, final_amount',
         'special_requests', 'referred_by',
         'service:services(name, duration_minutes, requires_therapist)',

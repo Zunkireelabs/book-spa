@@ -21,7 +21,8 @@ import TimeBoxInput from './TimeBoxInput';
 import { paymentStatusLabel } from '../../utils/paymentStatusLabel';
 const payTone = (b) => ({ success: 'text-success', neutral: 'text-text-secondary', warning: 'text-warning' })[paymentStatusLabel(b).tone];
 import InvoicePrintModal from './InvoicePrintModal';
-import { adminCorrectBooking, correctPaymentMode, adminDeleteBooking, correctPaymentAmount, fetchMemberDiscountContext, applyMemberDiscount, fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, fetchBookingProductSales, refundProductSale, recordTip, getCustomerFirstBookingFlag, fetchInvoiceByBookingId, staffCanRequestDiscountApproval } from '../../services/api';
+import { relatedFetchers } from '../../utils/visitGate';
+import { adminCorrectBooking, correctPaymentMode, adminDeleteBooking, correctPaymentAmount, fetchMemberDiscountContext, applyMemberDiscount,  fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, fetchBookingProductSales, refundProductSale, recordTip, getCustomerFirstBookingFlag, fetchInvoiceByBookingId, staffCanRequestDiscountApproval } from '../../services/api';
 import { excludeRelatedFromPreviousDue, toDbStatus } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
@@ -308,7 +309,7 @@ const BookingActionModal = ({
   onRescheduleStart,
 }) => {
   const { branchId } = useBranch();
-  const { org: orgForNav, paymentMethods, orgSettings, staffLabel, staffLabelPlural, allowStaffOverlap } = useOrg();
+  const { org: orgForNav, paymentMethods, orgSettings, staffLabel, staffLabelPlural, allowStaffOverlap, multiServiceBookings } = useOrg();
   const navigate = useNavigate();
   const cancelReasonOptions = orgSettings?.cancellation_reasons?.length
     ? orgSettings.cancellation_reasons
@@ -423,7 +424,7 @@ const BookingActionModal = ({
 
   // Discount tab: same-day related bookings for combined discount application
   const [relatedBookings, setRelatedBookings] = useState([]);
-  // Every other booking of this visit (ZNLY-402: same visit_id), any payment_status — display only, never used for
+  // Every sibling (ZNLY-402 ON: the other bookings of this visit_id; OFF: formal group, or same customer_name+date), any payment_status — display only, never used for
   // bundling (see fetchGroupBookings). Keeps a paid sibling
   // visible from every other sibling's modal instead of silently vanishing.
   const [groupSiblings, setGroupSiblings] = useState([]);
@@ -516,18 +517,12 @@ const BookingActionModal = ({
   // Fetch related unpaid bookings when payment tab opens
   useEffect(() => {
     if (isOpen && (activeTab === 'payment' || activeTab === 'discount') && booking) {
-      // ZNLY-402: "related" = the rest of THIS visit (booking.visitId); a booking with no visit has none.
-      const relatedPromise = fetchRelatedUnpaidBookings({
-        excludeBookingId: booking.bookingId,
-        visitId: booking.visitId,
-        customerId: booking.customerId,
-      });
+      // ZNLY-402: orgs with "Several services in one booking" ON: "related" = the rest of THIS visit (booking.visitId); no visit = none.
+      // Every other org keeps the original rule: the booking group, else the same customer name + date.
+      const fetchers = relatedFetchers(multiServiceBookings);
+      const relatedPromise = fetchers.related(booking);
       if (activeTab === 'payment') {
-        fetchGroupBookings({
-          visitId: booking.visitId,
-          excludeBookingId: booking.bookingId,
-          customerId: booking.customerId,
-        }).then(({ data }) => setGroupSiblings(data || []));
+        fetchers.siblings(booking).then(({ data }) => setGroupSiblings(data || []));
       } else {
         setGroupSiblings([]);
       }
@@ -584,7 +579,7 @@ const BookingActionModal = ({
     } else if (isOpen && activeTab === 'payment') {
       setMembership(null);
     }
-  }, [activeTab, booking?.bookingId, booking?.visitId, booking?.paymentStatus, booking?.customerPhone, branchId, isOpen]);
+  }, [activeTab, booking?.bookingId, booking?.visitId, booking?.paymentStatus, booking?.customerPhone, branchId, isOpen, multiServiceBookings]);
 
   const loadVisitProducts = useCallback(async () => {
     if (!booking?.bookingId) { setVisitProducts([]); return; }
@@ -3520,7 +3515,7 @@ const BookingActionModal = ({
                   <div className="space-y-2">
                     <label className="font-body font-body-medium text-xs text-text-secondary uppercase flex items-center gap-1.5">
                       <Icon name="CheckCircle2" size={13} className="text-success" />
-                      Already paid in this visit
+                      {multiServiceBookings ? 'Already paid in this visit' : (booking?.bookingGroupId ? 'Already paid in this group' : 'Already paid for this customer today')}
                     </label>
                     <div className="border border-success/20 bg-success/5 rounded-spa divide-y divide-success/10 overflow-hidden">
                       {groupSiblings.filter(gb => gb.payment_status === 'paid').map(gb => (
