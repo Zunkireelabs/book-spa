@@ -8062,7 +8062,9 @@ export async function createBookingGroup({ services, date, startTime, therapistI
       therapistId: service.therapistIds ? undefined : therapistId,
       therapistIds: service.therapistIds || undefined,
       overrideReason: service.overrideReason,   // only the rows that needed it (staff multi-service); the online flow passes none
-      bookingGroupId,
+      // ZNLY-402 (A5): the desk's one-person visit on an ON org carries ONLY visit_id. booking_group_id means a party of several people.
+      // The online flow keeps it: its rollback RPC (public_cancel_booking_group) finds the rows by it.
+      bookingGroupId: staffRollback && visitId ? null : bookingGroupId,
       visitId,
     });
 

@@ -17,7 +17,7 @@ import { bookingTotal, newRow, minToClock } from './multiServiceRows';
 // One extra service. It runs the SAME live checks as a single booking (shift / break / leave / blocked / clash, from the availability rule and the day's
 // bookings) for ITS OWN staff and time, and reports the reason upward, so Create stays off with the reason on THIS row (nothing is made before every row passes).
 const ExtraRow = ({
-  r, i, t, svc, patch, remove, problem, ownProblem, onProblem, errorRow, errorText, flashRow, isFirst = false,
+  r, i, t, svc, patch, remove, problem, ownProblem, onProblem, errorRow, errorText, flashRow, isFirst = false, solo = false, first1 = null, staffRing = '',
   services, branchId, canViewPrices, pickerPeople, dayBookings, dayOff, bookingDate, allowStaffOverlap, staffLabel, staffLabelPlural, branchHours,
 }) => {
   const needsStaff = !svc || svc.requires_therapist !== false;
@@ -39,17 +39,22 @@ const ExtraRow = ({
   const staffShows = !!(svc && needsStaff && r.therapistId && text);   // the staff card itself carries the reason, so it never says "Free" next to it
   return (
     <div data-qc-field={isFirst ? 'service' : `service-x${i - 1}`} data-row-problem={shown ? 'true' : undefined} className={`rounded-spa-lg border bg-background p-3 space-y-2.5 ${!shown ? 'border-border' : overridable ? 'border-amber-300 ring-2 ring-amber-200' : 'border-error ring-2 ring-error/20'}`}>
-      <div className="flex items-center justify-between">
-        <p className="font-body font-body-medium text-[13px] text-text-primary">Service {n}</p>
-        <button type="button" onClick={() => remove(r.key)} aria-label={`Remove service ${n}`}
-          className="inline-flex h-8 items-center gap-1 rounded-spa px-2 text-xs text-text-secondary hover:bg-surface hover:text-error spa-transition-fast">
-          <Icon name="X" size={14} /> Remove
-        </button>
-      </div>
+      {!solo && (
+        <div className="flex items-center justify-between">
+          <p className="font-body font-body-medium text-[13px] text-text-primary">Service {n}</p>
+          <button type="button" onClick={() => remove(r.key)} aria-label={`Remove service ${n}`}
+            className="inline-flex h-8 items-center gap-1 rounded-spa px-2 text-xs text-text-secondary hover:bg-surface hover:text-error spa-transition-fast">
+            <Icon name="X" size={14} /> Remove
+          </button>
+        </div>
+      )}
       <ServicePickRow required invalid={flashRow === (isFirst ? -1 : i - 1) && !r.serviceId} services={services} value={r.serviceId}
-        onChange={(val) => patch(r.key, { serviceId: val, therapistId: '' })} branchId={branchId} canViewPrices={canViewPrices} title={`Service ${n}`} />
+        // Service 1 keeps the staff already picked (e.g. from the calendar column), as the single-service form always did; extras start clean.
+        onChange={(val) => patch(r.key, isFirst ? { serviceId: val } : { serviceId: val, therapistId: '' })} branchId={branchId} canViewPrices={canViewPrices}
+        title={solo ? 'Service for the booking' : `Service ${n}`} ariaLabel={solo ? 'Service' : undefined}
+        loading={isFirst && first1?.loading} openSignal={isFirst ? first1?.openSignal || 0 : 0} onSignalConsumed={isFirst ? first1?.onSignalConsumed : null} />
       {svc && needsStaff && (
-        <div>
+        <div {...(isFirst ? { 'data-qc-field': 'staff' } : {})} className={isFirst ? staffRing : ''}>
           <p className="flex items-baseline justify-between mb-1.5 font-body font-body-medium text-[13px] text-text-primary">{staffLabel} <span className="text-xs font-normal text-text-secondary">optional</span></p>
           <StaffPickRow
             people={picked} max={1} statusLine={text ? '' : info.statusLine} pill={text ? null : info.pill} problem={text}
@@ -72,10 +77,12 @@ const ExtraRow = ({
       )}
       {svc && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          {!solo && (
           <div className="flex items-center gap-2 text-[13px] text-text-primary">
             <span className="font-body-medium">Starts</span>
             <div className="w-32"><TimeField time={t.start} onTimeChange={(v) => patch(r.key, { start: v })} branchHours={branchHours} ariaLabel={`Start time of service ${n}`} /></div>
           </div>
+          )}
           <span className="text-xs text-text-secondary">
             {svc.duration_minutes} min · ends {format12h(t.end)}{canViewPrices && (svc.effective_price_npr ?? svc.price_npr) != null ? ` · ${svc.price_type === 'tiered' ? 'from ' : ''}${formatNPR(Number(svc.effective_price_npr ?? svc.price_npr))}` : ''}
           </span>
@@ -89,7 +96,7 @@ const ExtraRow = ({
 };
 
 const ExtraServiceRows = ({
-  rows, setRows, times, services, first, firstCard, branchId, canViewPrices, pickerPeople, dayBookings, dayOff, bookingDate,
+  rows, setRows, times, services, first, firstCard, canAdd = true, staffRing = '', branchId, canViewPrices, pickerPeople, dayBookings, dayOff, bookingDate,
   allowStaffOverlap, staffLabel, staffLabelPlural, branchHours, errorRow = null, errorText = '', flashRow = null, problems = {}, ownProblems = {}, onProblem = () => {},
 }) => {
   const patch = (key, p) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
@@ -112,8 +119,8 @@ const ExtraServiceRows = ({
   return (
     <div className="space-y-3" data-extra-services>
       {f && (
-        <ExtraRow key="first" isFirst r={firstRow} i={0} t={firstT} svc={first || null} patch={firstPatch} remove={() => f.onRemove(rows[0])}
-          problem="" ownProblem="" onProblem={onProblem} errorRow={null} errorText="" flashRow={f.flash ? -1 : null} {...shared} />
+        <ExtraRow key="first" isFirst solo={rows.length === 0} first1={f} staffRing={staffRing} r={firstRow} i={0} t={firstT} svc={first || null} patch={firstPatch} remove={() => f.onRemove(rows[0])}
+          problem="" ownProblem="" onProblem={onProblem} errorRow={null} errorText="" flashRow={f.flash ? -1 : null} {...shared} services={f.firstServices && rows.length === 0 ? f.firstServices : services} />
       )}
       {rows.map((r, i) => (
         <ExtraRow key={r.key} r={r} i={i + 1} t={times[i]} svc={byId.get(r.serviceId) || null} patch={patch} remove={remove}
@@ -121,10 +128,10 @@ const ExtraServiceRows = ({
           errorRow={errorRow} errorText={errorText} flashRow={flashRow}
           {...shared} />
       ))}
-      <button type="button" onClick={() => setRows((rs) => [...rs, newRow()])}
+      {canAdd && <button type="button" onClick={() => setRows((rs) => [...rs, newRow()])}
         className="inline-flex h-10 items-center gap-1.5 rounded-spa border border-dashed border-border px-3 text-[13px] font-body-medium text-primary hover:bg-background spa-transition-fast" data-add-service>
         <Icon name="Plus" size={15} /> Add another service
-      </button>
+      </button>}
       {sum.count > 1 && (
         <div className="flex items-baseline justify-between rounded-spa bg-primary/[0.07] px-3 py-2 text-[13px] font-medium text-[#1f3f1b]" data-booking-total>
           <span>{sum.count} services</span>

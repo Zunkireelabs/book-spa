@@ -321,6 +321,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const isCoupleBooking = bookingMode === 'individual' && selectedTherapistIds.length > 1 && !!selectedService?.is_couple;
   // ZNLY-402 3b: "+ Add another service" needs the setting ON, Individual mode and a plain first service (a combo or couple service keeps its own flow).
   const canMulti = !!multiServiceBookings && bookingMode === 'individual' && !!selectedService && !selectedService.is_combo && !selectedService.is_couple;
+  // ZNLY-402 U10: every business gets the same grey service card from the FIRST service (Individual mode). A combo / couple service keeps its own
+  // layout (its staff and schedule rules differ). Only an ON org gets "Add another service" (canMulti).
+  const useCard = bookingMode === 'individual' && !selectedService?.is_combo && !selectedService?.is_couple;
   const activeRows = canMulti ? extraRows : [];
   const extraServices = useMemo(() => pickerServices.filter((x) => !x.is_combo && !x.is_couple), [pickerServices]);
   const extraTimes = useMemo(() => rowTimes(activeRows, services, bookingTime, selectedService?.duration_minutes), [activeRows, services, bookingTime, selectedService]);
@@ -981,6 +984,69 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     />
   );
 
+  // Name / Phone / Email / Gender of one person. Guests use it in their card; the lead's (a NEW customer) lives in the Customer block, not a second "contact" card.
+  const personFields = (p, idx) => (
+  <>
+                  <div>
+                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                      Name {idx === 0 && <span className="text-error">*</span>}
+                      {p.customerId && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
+                    </label>
+                    <CustomerAutocomplete
+                      value={p.name}
+                      onChange={(v) => setPerson(idx, { name: v, customerId: null, previousDue: null })}
+                      onSelect={(c) => handleGuestCustomerSelect(idx, c)}
+                      branchId={branchId}
+                      searchBy="any"
+                      placeholder={idx === 0 ? 'Search or type a name' : `Name (blank = ${contactFirst}'s)`}
+                    />
+                  </div>
+
+                  <div {...(idx === 0 ? { 'data-qc-field': 'phone' } : {})} className={idx === 0 && flashSvc === 'phone' ? 'rounded-spa ring-2 ring-error' : ''}>
+                    <PhoneField
+                      label="Phone" required={idx === 0 && requireCustomerPhone} id={`qc-person-${idx}-phone`} walkInHint
+                      dial={p.countryCode || '+977'} national={p.phone || ''}
+                      placeholder={idx === 0 ? '98XXXXXXXX' : `Blank = ${contactFirst}'s`}
+                      showProblem={idx === 0 ? p.kind === 'new' : !p.customerId}
+                      onChange={({ dial, national }) => (dial !== (p.countryCode || '+977') ? setPerson(idx, { countryCode: dial }) : setPerson(idx, { phone: national, customerId: null, previousDue: null }))}
+                    />
+                  </div>
+
+                  {canViewPrices && <EarlierBalanceNotice name={p.name} due={p.previousDue} />}
+
+                  <div>
+                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Email</label>
+                    <input
+                      type="email"
+                      value={p.email}
+                      onChange={(e) => setPerson(idx, { email: e.target.value })}
+                      placeholder={idx === 0 ? 'customer@email.com' : `Blank = ${contactFirst}'s`}
+                      className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Gender</label>
+                    <div className="flex gap-2">
+                      {['Male', 'Female'].map((g) => (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={() => setPerson(idx, { gender: p.gender === g.toLowerCase() ? '' : g.toLowerCase() })}
+                          className={`px-4 py-2 text-sm border rounded-spa transition-colors ${
+                            p.gender === g.toLowerCase()
+                              ? 'border-primary bg-primary/10 text-primary font-medium'
+                              : 'border-border bg-surface text-text-secondary hover:bg-background'
+                          }`}
+                        >
+                          {g}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+  </>
+  );
+
   return (
     <SidePanel isOpen={isOpen} width={PANEL_WIDTH_BOOKING} title={slotInfo?.title || 'New booking'} onClose={requestClose} footer={footerNode}>
       <form id="quick-create-form" onSubmit={handleSubmit} className="px-5 py-5 space-y-4">
@@ -1114,7 +1180,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             )}
 
             {/* Service (with 2+ services, Service 1 is drawn as the same card as the others, below) */}
-            {!(canMulti && activeRows.length > 0) && (
+            {!useCard && (
             <div>
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                 Service <span className="text-error">*</span>
@@ -1140,7 +1206,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             )}
 
             {/* Therapist(s): hidden for a combo whose every component needs its own staff, and for self-service amenities */}
-            {!comboAllDifferentStaff && serviceRequiresTherapist && !(canMulti && activeRows.length > 0) && (
+            {!comboAllDifferentStaff && serviceRequiresTherapist && !useCard && (
             <div data-qc-field="staff" className={fieldRing('staff')}>
             {(() => {
               const s0 = clockToMin(bookingTime); const e0 = clockToMin(pickerSlotEnd);
@@ -1188,19 +1254,26 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             )}
 
             {/* ZNLY-402 3b: more services for the same person in one booking (org setting ON; nothing is drawn otherwise) */}
-            {canMulti && (
+            {useCard && (
               <ExtraServiceRows
-                rows={extraRows} setRows={setExtraRows} times={extraTimes} services={extraServices} first={selectedService}
-                firstCard={activeRows.length > 0 ? {
+                rows={activeRows} setRows={setExtraRows} times={extraTimes} services={extraServices} first={selectedService} canAdd={canMulti}
+                firstCard={{
                   serviceId, therapistId: selectedTherapistIds[0] || '', start: bookingTime, flash: flashSvc === 'service' && !serviceId,
-                  onService: (v) => { setServiceId(v); setSelectedTherapistIds([]); }, onStaff: (v) => setSelectedTherapistIds(v ? [v] : []), onStart: setBookingTime,
+                  firstServices: pickerServices, loading: servicesLoading, openSignal: openServiceSignal, onSignalConsumed: () => setOpenServiceSignal(0),
+                  onService: setServiceId, onStaff: (v) => setSelectedTherapistIds(v ? [v] : []), onStart: setBookingTime,
                   // Removing Service 1 promotes Service 2 into the panel's own service (its start only if it was set by hand).
                   onRemove: (next) => { if (!next) return; setServiceId(next.serviceId); setSelectedTherapistIds(next.therapistId ? [next.therapistId] : []); if (next.start) setBookingTime(next.start); setExtraRows((rs) => rs.slice(1)); },
-                } : null}
+                }}
+                staffRing={fieldRing('staff')}
                 branchId={branchId} canViewPrices={canViewPrices} pickerPeople={pickerPeople} dayBookings={dayBookings} dayOff={dayOff}
                 branchHours={branchHours} bookingDate={bookingDate} allowStaffOverlap={allowStaffOverlap} staffLabel={staffLabel} staffLabelPlural={staffLabelPlural}
                 problems={rowProblems} ownProblems={ownProblems} onProblem={onRowProblem} errorRow={errorKey === formKey ? errorRow : null} errorText={activeError || ''} flashRow={flashSvc && /^service-x\d+$/.test(flashSvc) ? Number(flashSvc.slice(9)) : null}
               />
+            )}
+            {useCard && visitorTherapist && visitorServiceNames && (
+              <p className="-mt-1 text-xs text-text-secondary" data-visitor-services-help>
+                Showing the {pickerServices.length} service{pickerServices.length === 1 ? '' : 's'} {visitorTherapist.name} does at the home {(locationLabel || 'branch').toLowerCase()} that this one also offers.
+              </p>
             )}
 
             {/* Couple — separate rooms & companion; only for a couple service with 2+ therapists */}
@@ -1345,6 +1418,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               </div>
             )}
             {p.kind === 'existing' && canViewPrices && <EarlierBalanceNotice name={p.name} due={p.previousDue} />}
+            {p.kind === 'new' && personFields(p, 0)}
             </>
             ); })()}
 
@@ -1447,74 +1521,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 <div key={idx} className="border border-border rounded-[14px] p-3.5 space-y-3 bg-surface">
                   <div className="flex flex-col gap-0.5 md:flex-row md:items-baseline md:justify-between md:gap-2">
                     <span className="whitespace-nowrap text-sm font-body font-body-semibold text-text-primary">
-                      {idx === 0 ? 'Booking contact' : `Person ${idx + 1}`}
-                      {idx === 0 && <span className="text-error"> *</span>}
+                      {`Person ${idx + 1}`}
                     </span>
-                    {idx > 0 && <span className="text-xs text-text-secondary md:text-right">optional · blank uses the contact's details</span>}
+                    <span className="text-xs text-text-secondary md:text-right">{idx > 0 ? "optional · blank uses the contact's details" : 'the customer above'}</span>
                   </div>
 
 
-                  {(idx > 0 || p.kind === 'new') && (
-                  <>
-                  <div>
-                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                      Name {idx === 0 && <span className="text-error">*</span>}
-                      {p.customerId && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
-                    </label>
-                    <CustomerAutocomplete
-                      value={p.name}
-                      onChange={(v) => setPerson(idx, { name: v, customerId: null, previousDue: null })}
-                      onSelect={(c) => handleGuestCustomerSelect(idx, c)}
-                      branchId={branchId}
-                      searchBy="any"
-                      placeholder={idx === 0 ? 'Search or type a name' : `Name (blank = ${contactFirst}'s)`}
-                    />
-                  </div>
-
-                  <div {...(idx === 0 ? { 'data-qc-field': 'phone' } : {})} className={idx === 0 && flashSvc === 'phone' ? 'rounded-spa ring-2 ring-error' : ''}>
-                    <PhoneField
-                      label="Phone" required={idx === 0 && requireCustomerPhone} id={`qc-person-${idx}-phone`} walkInHint
-                      dial={p.countryCode || '+977'} national={p.phone || ''}
-                      placeholder={idx === 0 ? '98XXXXXXXX' : `Blank = ${contactFirst}'s`}
-                      showProblem={idx === 0 ? p.kind === 'new' : !p.customerId}
-                      onChange={({ dial, national }) => (dial !== (p.countryCode || '+977') ? setPerson(idx, { countryCode: dial }) : setPerson(idx, { phone: national, customerId: null, previousDue: null }))}
-                    />
-                  </div>
-
-                  {canViewPrices && <EarlierBalanceNotice name={p.name} due={p.previousDue} />}
-
-                  <div>
-                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Email</label>
-                    <input
-                      type="email"
-                      value={p.email}
-                      onChange={(e) => setPerson(idx, { email: e.target.value })}
-                      placeholder={idx === 0 ? 'customer@email.com' : `Blank = ${contactFirst}'s`}
-                      className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Gender</label>
-                    <div className="flex gap-2">
-                      {['Male', 'Female'].map((g) => (
-                        <button
-                          key={g}
-                          type="button"
-                          onClick={() => setPerson(idx, { gender: p.gender === g.toLowerCase() ? '' : g.toLowerCase() })}
-                          className={`px-4 py-2 text-sm border rounded-spa transition-colors ${
-                            p.gender === g.toLowerCase()
-                              ? 'border-primary bg-primary/10 text-primary font-medium'
-                              : 'border-border bg-surface text-text-secondary hover:bg-background'
-                          }`}
-                        >
-                          {g}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  </>
-                  )}
+                  {idx > 0 && personFields(p, idx)}
 
                   {serviceMode === 'different' && (
                     <div data-qc-field={`service-${idx}`}>
