@@ -46,7 +46,7 @@ export const CreateBookingHost = ({ slot, branchId, onClose, onCreated }) => {
       onClose={onClose}
       onSubmit={async (formData) => {
         const r = await submitQuickCreate({ formData, branchId, guard, joinVisitOfBookingId: slot?.joinVisitOfBookingId || null });
-        if (r.error) return { message: r.error, code: r.code, raw: r.raw, partial: r.partial };
+        if (r.error) return { message: r.error, code: r.code, raw: r.raw, partial: r.partial, row: r.row };
         // A walk-in is already at the desk, so it starts Confirmed (never "late"); a failed confirm leaves a normal Pending booking.
         if (slot?.walkIn && r.bookingId) await updateBookingStatus({ bookingId: r.bookingId, newStatus: 'Confirmed' });
         onCreated?.(r.toast, { bookingId: r.bookingId, bookingNumber: r.bookingNumber, bookingDate: formData.bookingDate });

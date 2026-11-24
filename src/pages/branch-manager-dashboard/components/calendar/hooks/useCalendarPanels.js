@@ -449,7 +449,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     if (r.error) {
       // Part of a group, or a booking whose confirmation could not load, exists already: show the calendar as it really is.
       if (r.partial || ['BOOKING_CONFIRMATION_UNAVAILABLE', 'BOOKING_NOT_VISIBLE', 'BOOKING_GROUP_PARTIAL'].includes(r.code)) refreshLight(refreshCalendar);
-      return { message: r.error, code: r.code, raw: r.raw, partial: r.partial };
+      return { message: r.error, code: r.code, raw: r.raw, partial: r.partial, row: r.row };
     }
     showToast(r.toast.msg, r.toast.type);
     // The booking exists for real: flip the waitlist entry to 'booked'. Best-effort, a failure here never undoes the booking.

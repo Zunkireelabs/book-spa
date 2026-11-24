@@ -1,4 +1,4 @@
-import { createBooking, createComboBookingItems, joinVisitOfBooking } from '../../../../services/api';
+import { createBooking, createBookingGroup, createComboBookingItems, joinVisitOfBooking } from '../../../../services/api';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { wordBranch } from '../../../../utils/industryTerms';
 
@@ -54,6 +54,39 @@ export async function submitQuickCreate({ formData, branchId, guard, joinVisitOf
     const joined = await joinVisitOfBooking({ sourceBookingId: joinVisitOfBookingId, branchId });
     if (joined.error) return { error: friendlyError(joined.error, 'Could not add this service to the booking.'), code: joined.error.code, raw: joined.error };
     visitId = joined.data || null;
+  }
+
+  // ZNLY-402: several services for one person (org setting ON): one Save makes every row with ONE visit_id. createBookingGroup does the work and, when a
+  // later row is refused, cancels the rows already made (staffRollback), so nothing is left half-made; the refused row's number comes back as `row`.
+  if (formData.multiServices?.length > 1) {
+    // A manager / admin can book anyway with a reason (same prompt, same record as a single booking). It is asked ONCE, before anything is created:
+    // the first attempt reports the overridable problem without creating, the guard asks for the reason, and the second attempt applies it only to the rows that need it.
+    const needing = formData.multiServices.findIndex((s) => s.overrideNeeded);
+    const multi = await guard((overrideReason) => (needing >= 0 && !overrideReason
+      ? Promise.resolve({ data: null, error: { overridable: true, code: 'OVERRIDE_NEEDED', message: `${needing === 0 ? 'Service 1' : `Service ${needing + 1}`}: ${formData.multiServices[needing].overrideNote || 'outside the usual availability'}` } })
+      : createBookingGroup({
+      branchId,
+      date,
+      startTime,
+      staffRollback: true,
+      visitId: visitId || undefined,
+      customerName: formData.customerName,
+      customerPhone: formData.customerPhone,
+      customerEmail: formData.customerEmail,
+      customerGender: formData.customerGender,
+      specialRequests: formData.specialRequests,
+      roomId: formData.roomId || undefined,
+      referringCustomerId: formData.referringCustomerId,
+      referringRewardType: formData.referringRewardType,
+      referringRewardAmount: formData.referringRewardAmount,
+      knownCustomerId: formData.knownCustomerId || undefined,
+      isWalkIn: formData.isWalkIn || undefined,
+      walkInLabel: formData.walkInLabel || undefined,
+      services: formData.multiServices.map((s) => (s.overrideNeeded ? { ...s, overrideReason } : s)),
+    })));
+    if (multi.error) return { error: friendlyError(multi.error, 'Failed to create booking.'), code: multi.error.code, raw: multi.error, row: multi.error.failedRow, partial: multi.error.partial };
+    const first = multi.data?.bookings?.[0];
+    return { toast: { msg: `Booking created: ${multi.data.bookings.length} services` }, bookingId: first?.id, bookingNumber: first?.booking_number };
   }
 
   const result = await guard((overrideReason) => createBooking({

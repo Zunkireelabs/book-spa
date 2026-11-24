@@ -146,3 +146,7 @@ Noting the gap repeatedly is not the same as closing it.
 - Correction (owner): "is this mockup actually how our UI is? I can't approve a mockup if I don't see how it will actually look."
 - Cause: the Gate 3 mockup reused our colour tokens but invented the layout (centred modal, plain calendar, no sidebar/avatars, wrong card style). Lead did not compare it with the running app before presenting it.
 - Rule: before showing ANY mockup, the lead screenshots the real screen (agent-browser on the local app) and compares it with the mockup. A mockup must reuse the real markup/classes/stylesheet of the screen it changes (right-side slide-over, sidebar, toolbar, staff header, card style), show CURRENT next to NEW, and mark only the real changes as NEW.
+
+## 2026-11-24: repeated rows must be compared side by side (ZNLY-402, piece 3b)
+- Correction (owner): "service 1 and 2 should be the same UI. Why should I be the one saying this?"
+- Rule: whenever a screen repeats a unit (service rows, staff rows, lines), the lead compares row 1 vs row 2 side by side (layout, labels, controls, order) before passing it. Also compare the same data across tabs (count, order, labels).

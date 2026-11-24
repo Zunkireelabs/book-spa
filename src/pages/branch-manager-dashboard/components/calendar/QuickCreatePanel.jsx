@@ -36,6 +36,8 @@ import { friendlyError } from '../../../../utils/friendlyError';
 import { shouldShowFillFree } from '../../../../utils/serviceCatalog';
 import { fieldForErrorCode } from '../../../../utils/quickCreateErrorField';
 import { useOrg } from '../../../../contexts/OrgContext';
+import ExtraServiceRows from './ExtraServiceRows';
+import { rowTimes, rowsIncompleteReason, toGroupServices, ownOverlaps } from './multiServiceRows';
 
 
 // ZNLY-365: the client row when the panel was opened from a booking ("+ Service" / Rebook). Not editable: same client as that booking.
@@ -61,11 +63,14 @@ const LockedClientCard = ({ client, name }) => {
 
 const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours, retarget, onDraftChange, columnMode = 'therapist', allTherapists = [], guardRef, offStaff = {}, offDate = null, onRefreshCalendar }) => {
   const { profile: viewerProfile } = useAuth();
-  const { allowStaffOverlap, requireCustomerPhone } = useOrg();   // ZNLY-389 / ZNLY-390: per-org booking rules
+  const { allowStaffOverlap, requireCustomerPhone, multiServiceBookings } = useOrg();   // ZNLY-389 / ZNLY-390: per-org booking rules
   // ZNLY-278: an own-only login books only itself; the data layer hands it a single team member, so that one is the default.
   const defaultTherapistId = viewerAccess(viewerProfile).ownOnly && therapists?.length === 1 ? therapists[0].id : null;
   const canViewPrices = viewerAccess(viewerProfile).canViewPrices; // ZNLY-235: no prices for this login
   const [serviceId, setServiceId] = useState('');
+  // ZNLY-402 piece 3b: extra services of the same booking (only when the org setting is ON; [] otherwise and the panel is exactly as before).
+  const [extraRows, setExtraRows] = useState([]);
+  const [errorRow, setErrorRow] = useState(null);   // which service (1 = the second) the refused save was about
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerCountryCode, setCustomerCountryCode] = useState('+977');
@@ -314,6 +319,29 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // Self-service amenity (sauna/steam/locker): no therapist picker; staff just allocate a room if one applies.
   const serviceRequiresTherapist = selectedService ? selectedService.requires_therapist !== false : true;
   const isCoupleBooking = bookingMode === 'individual' && selectedTherapistIds.length > 1 && !!selectedService?.is_couple;
+  // ZNLY-402 3b: "+ Add another service" needs the setting ON, Individual mode and a plain first service (a combo or couple service keeps its own flow).
+  const canMulti = !!multiServiceBookings && bookingMode === 'individual' && !!selectedService && !selectedService.is_combo && !selectedService.is_couple;
+  const activeRows = canMulti ? extraRows : [];
+  const extraServices = useMemo(() => pickerServices.filter((x) => !x.is_combo && !x.is_couple), [pickerServices]);
+  const extraTimes = useMemo(() => rowTimes(activeRows, services, bookingTime, selectedService?.duration_minutes), [activeRows, services, bookingTime, selectedService]);
+  const extraIncomplete = rowsIncompleteReason(activeRows);
+  // Live checks per extra row, reported by the rows themselves (shift / break / leave / clash: the same rule as a single booking). Nothing is created until every row passes.
+  const [rowProblems, setRowProblems] = useState({});
+  const onRowProblem = useCallback((key, text, overridable = false) => setRowProblems((p) => ((p[key]?.text || '') === (text || '') && !!p[key]?.overridable === !!overridable ? p : { ...p, [key]: { text: text || '', overridable: !!overridable } })), []);
+  const ownProblems = useMemo(() => {
+    if (!activeRows.length || allowStaffOverlap) return {};
+    const nm = (id) => (therapists || []).find((x) => x.id === id)?.name || 'This person';
+    const f0 = clockToMin(bookingTime);
+    const slots = [{ ids: selectedTherapistIds, startMin: f0 ?? 0, endMin: (f0 ?? 0) + (selectedService?.duration_minutes || 60) }, ...activeRows.map((r, i) => ({ ids: r.therapistId ? [r.therapistId] : [], startMin: extraTimes[i].startMin, endMin: extraTimes[i].endMin }))];
+    return ownOverlaps(slots, nm);
+  }, [activeRows, allowStaffOverlap, therapists, bookingTime, selectedTherapistIds, selectedService, extraTimes]);
+  const firstRowProblem = (() => {
+    for (let i = 0; i < activeRows.length; i += 1) { const p = rowProblems[activeRows[i].key]; if (p?.text && !p.overridable) return `Service ${i + 2}: ${p.text}`; }
+    return '';
+  })();
+  // Rows whose only problem is an overridable availability verdict: a manager / admin may book anyway with a reason (asked once, before anything is created).
+  const rowOverrides = activeRows.map((r) => !!rowProblems[r.key]?.overridable);
+  const anyRowOverride = rowOverrides.some(Boolean);
   // Group booking creates one independent booking per person, so a couple service would bill the combined price to each.
   const groupServices = (services || []).filter((s) => !s.is_couple);
   // Warn (and disable Create) when the booking interval overlaps a manual block. Client-side only.
@@ -339,7 +367,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   // Everything a rejection could depend on. A saved rejection stays (and Create stays off) only while this is unchanged.
   const formKey = JSON.stringify([bookingMode, bookingDate, bookingTime, serviceId, selectedTherapistIds, roomId, customerName, customerPhone, knownCustomerId, customerKind, walkInLabel,
-    people, groupServiceId, groupRoomId, serviceMode, groupType, therapistRoomOverrides, comboTherapistOverrides, comboRoomOverrides]);
+    people, groupServiceId, groupRoomId, serviceMode, groupType, therapistRoomOverrides, comboTherapistOverrides, comboRoomOverrides, extraRows]);
 
   const svcDur = (sid) => (services || []).find((t) => t.id === sid)?.duration_minutes || 60;
 
@@ -614,6 +642,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     e.preventDefault();
     if (bookingMode === 'group' ? !groupValid : (!serviceId || customerMissing(customerFields))) return;
     if (blockOverlapMsg) return;
+    if (bookingMode === 'individual' && (extraIncomplete || firstRowProblem)) return;
     // Synchronous re-entry guard: the `submitting` state disables the button
     // only after a re-render, so a fast double-click can fire two submits and
     // create duplicate bookings. The ref blocks the second call immediately.
@@ -650,6 +679,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 roomId: c.defaultSameRoom !== false ? (roomId && roomId !== 'none' ? roomId : null) : (comboRoomOverrides[c.serviceId] || null),
               }))
             : undefined,
+          // ZNLY-402 3b: several services for one person: the first service plus each extra row, each with its own start and staff.
+          multiServices: activeRows.length > 0
+            ? toGroupServices({ first: selectedService, firstStart: bookingTime, firstTherapistIds: selectedTherapistIds, rows: activeRows, services, overrides: [!!precheck.warn, ...rowOverrides], overrideNotes: [precheck.verdict?.message, ...activeRows.map((r) => rowProblems[r.key]?.text)] })
+            : undefined,
           bookingDate,
           bookingTime,
           referringCustomerId: (!isExistingCustomer && referringCustomerId) || undefined,
@@ -665,6 +698,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       setErrorCode(err?.code || null);
       setErrorCard(describeError(err?.raw || { code: err?.code, message: err?.message }, { ...guideCtx, partial: err?.partial }));
       setErrorKey(formKey);
+      setErrorRow(Number.isInteger(err?.row) && err.row > 0 ? err.row : null);
       setSubmitting(false);
       submitInFlightRef.current = false;
       // Bring the field the reason is about into view (the footer already shows the reason itself).
@@ -690,7 +724,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // moved silently by retargeting); service, customer, contact, notes, group members, referral, and a therapist/room
   // choice that differs from what the slot set all count as an edit.
   const isDirty = isOpen && (
-    !!((serviceId && serviceId !== initialDraftRef.current.service) || (!slotInfo?.lockedClient && (customerName.trim() || customerPhone.trim() || customerEmail.trim() || customerGender)) || specialRequests.trim()
+    !!((serviceId && serviceId !== initialDraftRef.current.service) || activeRows.length > 0 || (!slotInfo?.lockedClient && (customerName.trim() || customerPhone.trim() || customerEmail.trim() || customerGender)) || specialRequests.trim()
       || (customerKind === 'walkin' && !slotInfo?.walkIn && !slotInfo?.lockedClient) || (!slotInfo?.lockedClient && walkInLabel.trim()) || groupServiceId || peopleEdited || referringCustomerName)
     || selectedTherapistIds.join(',') !== (initialDraftRef.current.therapist ? initialDraftRef.current.therapist : '')
     || (roomId || '') !== initialDraftRef.current.room
@@ -765,7 +799,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     : !people[0]?.kind ? PICK_REASON : (people[0].kind === 'new' && people[0].name?.trim() && contactPhoneProblem) ? contactPhoneProblem : guestPhoneProblem ? guestPhoneProblem : 'Add the booking contact';
   // ZNLY-322: tapping the "Pick a service" footer reason scrolls to the first empty service row and rings it for 3 s.
   const [flashSvc, setFlashSvc] = useState(null);
-  const firstEmptySvcField = bookingMode === 'individual' ? (serviceId ? null : 'service')
+  const firstEmptySvcField = bookingMode === 'individual' ? (serviceId ? (extraIncomplete ? `service-x${activeRows.findIndex((r) => !r.serviceId)}` : null) : 'service')
     : serviceMode === 'same' ? (groupServiceId ? null : 'service')
       : (() => { const k = people.findIndex((q) => !q.serviceId); return k < 0 ? null : `service-${k}`; })();
   useEffect(() => { if (!flashSvc) return undefined; const t = setTimeout(() => setFlashSvc(null), 3000); return () => clearTimeout(t); }, [flashSvc]);
@@ -840,13 +874,15 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     if (!roomId && roomSts.every((x) => x.state === 'full')) return { ...describeError({ code: 'ROOMS_FULL' }, guideCtx), blocking: true };
     return null;
   })();
-  const card = activeCard || liveCard;
+  // ZNLY-402 3b: a refusal about an extra service: its fix buttons would act on the FIRST service's staff / time, so they are not offered; the row carries the reason.
+  const rowRefused = errorRow != null && errorKey === formKey && !!activeError;
+  const card = rowRefused && activeCard ? { ...activeCard, actions: [] } : (activeCard || liveCard);
   // Bring the card into view the moment it appears (it sits under date/time and can start partly off-screen).
   const cardRef = useRef(null);
   const cardKey = card ? `${card.code}${card.ref || ''}` : '';
   useEffect(() => { if (cardKey) cardRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }); }, [cardKey]);
   const errField = activeCard ? (activeCard.field || fieldForErrorCode(errorCode) || errorField(activeError)) : activeError ? (fieldForErrorCode(errorCode) || errorField(activeError)) : (liveCard?.field || null);
-  const fieldRing = (name) => (errField === name ? 'rounded-spa ring-2 ring-error' : '');
+  const fieldRing = (name) => (errField === name && !rowRefused ? 'rounded-spa ring-2 ring-error' : '');
   // Fix buttons only fill or open something. Nothing here saves.
   const scrollToField = (f) => requestAnimationFrame(() => document.querySelector(`[data-qc-field="${f}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
   const onGuideAction = (a) => {
@@ -872,8 +908,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     ? (/^Overlaps '(Transferred|Visiting)/.test(blockOverlapMsg) ? `${staffLabel} unavailable` : 'Overlaps a block')
     : bookingMode === 'group'
       ? (!groupValid ? groupInvalidReason : groupProblemFooter || (groupStaffIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : ''))
-      : !serviceId ? 'Pick a service' : (isCoupleBooking && companionPhone.problem) ? `Companion's phone: ${companionPhone.problem}` : couplePickIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : customerMissing(customerFields);
-  const createDisabled = submitting || (!!activeError && !(activeCard?.kind === 'system' && activeCard.canRetry)) || !!liveCard?.blocking || !!blockOverlapMsg || precheck.blocked || couplePickIncomplete || (isCoupleBooking && !!companionPhone.problem) || (bookingMode === 'group' && (!!groupProblemFooter || groupStaffIncomplete)) || (bookingMode === 'group' ? !groupValid : (!serviceId || !!customerMissing(customerFields)));
+      : !serviceId ? 'Pick a service' : extraIncomplete ? extraIncomplete : firstRowProblem ? firstRowProblem : (isCoupleBooking && companionPhone.problem) ? `Companion's phone: ${companionPhone.problem}` : couplePickIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : customerMissing(customerFields);
+  const createDisabled = submitting || (!!activeError && !(activeCard?.kind === 'system' && activeCard.canRetry)) || !!liveCard?.blocking || !!blockOverlapMsg || precheck.blocked || couplePickIncomplete || (isCoupleBooking && !!companionPhone.problem) || (bookingMode === 'group' && (!!groupProblemFooter || groupStaffIncomplete)) || (bookingMode === 'individual' && (!!extraIncomplete || !!firstRowProblem)) || (bookingMode === 'group' ? !groupValid : (!serviceId || !!customerMissing(customerFields)));
   const confirmSlotLabel = confirm?.type === 'move'
     ? [therapists.find((d) => d.id === confirm.slot.colId)?.name || rooms.find((c) => c.id === confirm.slot.colId)?.name || confirm.slot.colName,
        confirm.slot.day,
@@ -926,7 +962,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         className="h-9 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 spa-transition-fast disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
       >
         {submitting && <div className="animate-spin w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full" />}
-        {submitting ? 'Creating...' : bookingMode === 'group' ? `Create ${peopleCount} bookings` : precheck.warn ? 'Book anyway…' : 'Create booking'}
+        {submitting ? 'Creating...' : bookingMode === 'group' ? `Create ${peopleCount} bookings` : (precheck.warn || anyRowOverride) ? 'Book anyway…' : 'Create booking'}
       </button>
     </div>
   );
@@ -968,7 +1004,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
             {bookingMode === 'individual' && (
             <>
-            {/* Service */}
+            {/* Service (with 2+ services, Service 1 is drawn as the same card as the others, below) */}
+            {!(canMulti && activeRows.length > 0) && (
             <div>
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                 Service <span className="text-error">*</span>
@@ -980,6 +1017,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 </p>
               )}
             </div>
+            )}
 
             {/* Room */}
             {rooms && rooms.length > 0 && (
@@ -993,7 +1031,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             )}
 
             {/* Therapist(s): hidden for a combo whose every component needs its own staff, and for self-service amenities */}
-            {!comboAllDifferentStaff && serviceRequiresTherapist && (
+            {!comboAllDifferentStaff && serviceRequiresTherapist && !(canMulti && activeRows.length > 0) && (
             <div data-qc-field="staff" className={fieldRing('staff')}>
             {(() => {
               const s0 = clockToMin(bookingTime); const e0 = clockToMin(pickerSlotEnd);
@@ -1038,6 +1076,22 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               );
             })()}
             </div>
+            )}
+
+            {/* ZNLY-402 3b: more services for the same person in one booking (org setting ON; nothing is drawn otherwise) */}
+            {canMulti && (
+              <ExtraServiceRows
+                rows={extraRows} setRows={setExtraRows} times={extraTimes} services={extraServices} first={selectedService}
+                firstCard={activeRows.length > 0 ? {
+                  serviceId, therapistId: selectedTherapistIds[0] || '', start: bookingTime, flash: flashSvc === 'service' && !serviceId,
+                  onService: (v) => { setServiceId(v); setSelectedTherapistIds([]); }, onStaff: (v) => setSelectedTherapistIds(v ? [v] : []), onStart: setBookingTime,
+                  // Removing Service 1 promotes Service 2 into the panel's own service (its start only if it was set by hand).
+                  onRemove: (next) => { if (!next) return; setServiceId(next.serviceId); setSelectedTherapistIds(next.therapistId ? [next.therapistId] : []); if (next.start) setBookingTime(next.start); setExtraRows((rs) => rs.slice(1)); },
+                } : null}
+                branchId={branchId} canViewPrices={canViewPrices} pickerPeople={pickerPeople} dayBookings={dayBookings} dayOff={dayOff}
+                branchHours={branchHours} bookingDate={bookingDate} allowStaffOverlap={allowStaffOverlap} staffLabel={staffLabel} staffLabelPlural={staffLabelPlural}
+                problems={rowProblems} ownProblems={ownProblems} onProblem={onRowProblem} errorRow={errorKey === formKey ? errorRow : null} errorText={activeError || ''} flashRow={flashSvc && /^service-x\d+$/.test(flashSvc) ? Number(flashSvc.slice(9)) : null}
+              />
             )}
 
             {/* Couple — separate rooms & companion; only for a couple service with 2+ therapists */}

@@ -7996,7 +7996,11 @@ export async function createBooking({
 // mid-way failure cancels whatever was already created so the customer is never left
 // silently half-booked. The residual window is small but real, and cancelled rows do
 // remain visible to staff — that trade is deliberate.
-export async function createBookingGroup({ services, date, startTime, therapistId, ...common }) {
+// Staff multi-service booking ("Several services in one booking", ZNLY-402): every service may carry its own `startTime` and `therapistIds`
+// (default: back-to-back from `startTime` with `therapistId`, as for the online flow). `staffRollback: true` (the desk, a signed-in user): the rows made so far
+// are cancelled when a later one fails, because public_cancel_booking_group only releases anonymous online rows (created_by IS NULL). `visitId` may be passed
+// (e.g. "+ Service" joining an existing visit); otherwise an ON org gets a new one. A failure carries `failedRow` (index of the service that failed).
+export async function createBookingGroup({ services, date, startTime, therapistId, staffRollback = false, ...common }) {
   if (!services || services.length === 0) {
     return { data: null, error: { code: 'NO_SERVICES', message: 'Select at least one service.' } };
   }
@@ -8017,25 +8021,27 @@ export async function createBookingGroup({ services, date, startTime, therapistI
     ? crypto.randomUUID()
     : `grp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   // ZNLY-402: one person, several services, one Save = one visit (ON orgs only; the booking_group_id above stays as before).
-  const visitId = (await multiServiceCache.get(common.branchId)) ? newVisitId() : null;
+  const visitId = common.visitId || ((await multiServiceCache.get(common.branchId)) ? newVisitId() : null);
 
-  // Lay the services out back-to-back so each row gets its own real slot.
+  // Lay the services out back-to-back so each row gets its own real slot (unless the caller gave a row its own start time).
   let cursor = startTime;
   const planned = services.map((service) => {
-    const slot = { service, startTime: cursor };
-    cursor = addMinutesToTime(cursor, service.duration_minutes);
+    const slot = { service, startTime: service.startTime || cursor };
+    cursor = addMinutesToTime(slot.startTime, service.duration_minutes);
     return slot;
   });
 
   const created = [];
-  for (const { service, startTime: slotStart } of planned) {
+  for (const [rowIndex, { service, startTime: slotStart }] of planned.entries()) {
     // eslint-disable-next-line no-await-in-loop
     const { data, error } = await createBooking({
       ...common,
       serviceId: service.id,
       date,
       startTime: slotStart,
-      therapistId,
+      therapistId: service.therapistIds ? undefined : therapistId,
+      therapistIds: service.therapistIds || undefined,
+      overrideReason: service.overrideReason,   // only the rows that needed it (staff multi-service); the online flow passes none
       bookingGroupId,
       visitId,
     });
@@ -8048,8 +8054,10 @@ export async function createBookingGroup({ services, date, startTime, therapistI
       if (created.length > 0) {
         try {
           // eslint-disable-next-line no-await-in-loop
-          const { error: rollbackError } = await supabase
-            .rpc('public_cancel_booking_group', { p_booking_group_id: bookingGroupId });
+          const { error: rollbackError } = staffRollback
+            // The desk: a signed-in user made these rows (created_by is set), which the anonymous RPC deliberately ignores, so cancel them directly.
+            ? await supabase.from('bookings').update({ status: 'Cancelled', cancellation_reason: 'Not created: the booking could not be completed.' }).in('id', created.map((b) => b.id))
+            : await supabase.rpc('public_cancel_booking_group', { p_booking_group_id: bookingGroupId });
           if (rollbackError) throw rollbackError;
         } catch (cancelError) {
           // Surfaced loudly: the customer now holds bookings they weren't told about.
@@ -8058,6 +8066,8 @@ export async function createBookingGroup({ services, date, startTime, therapistI
             data: null,
             error: {
               code: 'BOOKING_GROUP_PARTIAL',
+              failedRow: rowIndex,
+              partial: true,
               message: `${service.name} could not be booked, and we could not automatically release the services booked before it. Please contact the ${wordBranch()} to confirm what is reserved.`,
             },
           };
@@ -8067,7 +8077,8 @@ export async function createBookingGroup({ services, date, startTime, therapistI
         data: null,
         error: {
           ...error,
-          message: `${service.name}: ${error.message || 'could not be booked.'}${created.length > 0 ? ' Your other services were released — please pick another time.' : ''}`,
+          failedRow: rowIndex,
+          message: `${service.name}: ${error.message || 'could not be booked.'}${created.length > 0 && !staffRollback ? ' Your other services were released — please pick another time.' : ''}`,
         },
       };
     }
