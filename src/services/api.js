@@ -8318,6 +8318,119 @@ export async function rescheduleBookingAsNewBooking({ bookingId, date, startTime
   }
 }
 
+// ── ZNLY-402 piece 5: booking-level, all-or-nothing calls (migration 430). One exported function per server function. ─────────────────────────────
+// Every call returns { data, error }. A refusal is error { code, message, rows, overridable } with a plain-language message (never SQL text);
+// `data` still carries the per-row verdicts ({ ok, dry_run, rows:[{booking_id, booking_number, service, start, staff, verdict, reason}], totals }).
+// dryRun: true changes nothing and returns exactly what WOULD happen. code NEEDS_OVERRIDE = a manager/admin may repeat the call with overrideReason.
+// visit_update / visit_set_staff answer COMBO_USE_SINGLE_EDIT / MULTI_STAFF_USE_SINGLE_EDIT for a booking they cannot cover yet; the wrappers then run
+// TODAY'S single-booking paths (updateBookingDetails / assignTherapist / updateBookingStatus) so editing is never worse than before.
+const VISIT_SINGLE_EDIT_CODES = ['COMBO_USE_SINGLE_EDIT', 'MULTI_STAFF_USE_SINGLE_EDIT'];
+async function visitCall(fn, args) {
+  try {
+    const { data, error } = await supabase.rpc(fn, args);
+    if (error) return { data: null, error: plainError(error) };
+    if (data && data.ok === false) {
+      const e = data.error || {};
+      return {
+        data,
+        error: {
+          code: e.code || data.code || 'REFUSED',
+          message: e.message || data.message || 'This could not be saved. Nothing was changed.',
+          rows: data.rows || [],
+          overridable: (e.code || data.code) === 'NEEDS_OVERRIDE',
+          plain: true,
+        },
+      };
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error(`[API] ${fn} error:`, error.message);
+    return { data: null, error: plainError(error) };
+  }
+}
+
+export function visitCreate({ branchId, customer, services, overrideReason = null, dryRun = false }) {
+  const c = { ...(customer || {}) };
+  if (c.phone) c.phone = toE164(c.phone);
+  const svcs = (services || []).map((s) => ({ ...s, override_reason: overrideReasonOf(s.override_reason) || undefined }));
+  return visitCall('visit_create', { p_branch_id: resolveBranchId(branchId), p_customer: c, p_services: svcs, p_override_reason: overrideReasonOf(overrideReason), p_dry_run: !!dryRun });
+}
+
+export async function visitUpdate({ visitKey, changes, overrideReason = null, dryRun = false }) {
+  const res = await visitCall('visit_update', { p_visit_key: visitKey, p_changes: changes, p_override_reason: overrideReasonOf(overrideReason), p_dry_run: !!dryRun });
+  if (res.error && VISIT_SINGLE_EDIT_CODES.includes(res.error.code)) {
+    if (dryRun) return { data: { ok: true, dry_run: true, routed: 'single', rows: [], totals: {} }, error: null };
+    return visitUpdateViaSingleEdits({ changes, overrideReason });
+  }
+  return res;
+}
+
+// Today's per-booking path for a combo / multi-staff booking: the same calls the old Edit form made, one booking at a time.
+async function visitUpdateViaSingleEdits({ changes, overrideReason }) {
+  for (const line of changes?.services || []) {
+    if (!line.booking_id) return { data: null, error: { code: 'ADD_NOT_ALLOWED', message: 'A service cannot be added to this kind of booking here.', plain: true } };
+    if (line.remove) {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await updateBookingStatus({ bookingId: line.booking_id, newStatus: 'Cancelled', reason: line.remove_reason || line.reason });
+      if (r.error) return r;
+      continue;
+    }
+    // eslint-disable-next-line no-await-in-loop
+    const d = await updateBookingDetails({
+      bookingId: line.booking_id, serviceId: line.service_id || undefined, date: line.date || changes.date || undefined, startTime: line.start_time || undefined,
+      specialRequests: changes.special_requests, referredBy: changes.referred_by, overrideReason,
+    });
+    if (d.error) return d;
+    if (line.therapist_ids !== undefined || line.room_id !== undefined) {
+      // eslint-disable-next-line no-await-in-loop
+      const a = await assignTherapist({
+        bookingId: line.booking_id, therapistIds: line.therapist_ids || [],
+        roomId: line.room_id === undefined ? undefined : (line.room_id === 'none' ? null : line.room_id), overrideReason,
+      });
+      if (a.error) return a;
+    }
+  }
+  return { data: { ok: true, dry_run: false, routed: 'single', rows: [], totals: {} }, error: null };
+}
+
+export const visitSetStatus = ({ visitKey, status, reason = null, dryRun = false }) =>
+  visitCall('visit_set_status', { p_visit_key: visitKey, p_status: status, p_reason: reason, p_dry_run: !!dryRun });
+
+export const visitRemoveService = ({ bookingId, reason = null, dryRun = false }) =>
+  visitCall('visit_remove_service', { p_booking_id: bookingId, p_reason: reason, p_dry_run: !!dryRun });
+
+export const visitReschedule = ({ visitKey, date, startTime, overrideReason = null, reason = 'Rescheduled', dryRun = false }) =>
+  visitCall('visit_reschedule', { p_visit_key: visitKey, p_date: date, p_start_time: startTime, p_override_reason: overrideReasonOf(overrideReason), p_reason: reason, p_dry_run: !!dryRun });
+
+// lines: [{ booking_id, type: '%' | 'NPR', value }]; value 0 / blank clears that row. requestedTo = the approver when a line is over the role's limit.
+export const visitApplyDiscount = ({ visitKey, lines, reason, requestedTo = null, dryRun = false }) =>
+  visitCall('visit_apply_discount', { p_visit_key: visitKey, p_lines: lines, p_reason: reason ?? null, p_requested_to: requestedTo, p_dry_run: !!dryRun });
+
+// lines: [{ booking_id, therapist_id, room_id }]; notes (when not undefined) replaces the special requests of the whole booking.
+export async function visitSetStaff({ visitKey, lines, notes, overrideReason = null, dryRun = false }) {
+  const res = await visitCall('visit_set_staff', { p_visit_key: visitKey, p_lines: lines, p_notes: notes === undefined ? null : notes, p_override_reason: overrideReasonOf(overrideReason), p_dry_run: !!dryRun });
+  if (res.error && VISIT_SINGLE_EDIT_CODES.includes(res.error.code)) {
+    if (dryRun) return { data: { ok: true, dry_run: true, routed: 'single', rows: [], totals: {} }, error: null };
+    for (const line of lines || []) {
+      // eslint-disable-next-line no-await-in-loop
+      const a = await assignTherapist({
+        bookingId: line.booking_id, therapistIds: line.therapist_id ? [line.therapist_id] : [],
+        roomId: line.room_id === undefined ? undefined : (line.room_id === 'none' ? null : line.room_id), overrideReason,
+      });
+      if (a.error) return a;
+    }
+    if (notes !== undefined) {
+      for (const line of lines || []) {
+        // eslint-disable-next-line no-await-in-loop
+        const d = await updateBookingDetails({ bookingId: line.booking_id, specialRequests: notes });
+        if (d.error) return d;
+      }
+    }
+    return { data: { ok: true, dry_run: false, routed: 'single', rows: [], totals: {} }, error: null };
+  }
+  return res;
+}
+
 // Public/customer-facing referral lookup — exact phone match, scoped to the org by
 // slug, returns a masked display name (e.g. "Sita K."). Used by the public booking
 // flow's "Referred by a friend?" field before calling createBooking().
