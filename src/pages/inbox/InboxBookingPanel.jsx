@@ -104,7 +104,7 @@ const InboxBookingPanel = ({ bookingId, onClose, onChanged }) => {
   const handleApplyDiscount = async (id, { discountType, discountValue, discountReason, requestedTo }) => {
     const r = await applyDiscount({ bookingId: id, discountType, discountValue, discountReason, requestedTo });
     if (r.error) return { error: r.error };
-    showToast(r.data?.isPending ? 'Discount request sent for approval' : 'Discount applied successfully');
+    showToast(r.data?.isPending ? 'Discount request sent for approval' : Number(discountValue) === 0 ? 'Discount removed' : 'Discount applied successfully');
     await after(id);
     return { data: r.data };
   };

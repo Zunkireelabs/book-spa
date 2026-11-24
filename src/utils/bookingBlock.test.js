@@ -28,4 +28,19 @@ describe('buildBookingBlock', () => {
     const b = buildBookingBlock([row({ id: 'a', service: { name: 'X' } }), row({ id: 'b' })], 'a');
     expect(b.rows[0].minutes).toBe(60);
   });
+  it('A3: a Pending service is not payable: toPay counts only the payable lines, total keeps the whole booking', () => {
+    const b = buildBookingBlock([row({ id: 'a' }), row({ id: 'b', status: 'Pending', start_time: '11:00:00', final_amount: 500 })], 'a');
+    expect(b.total).toBe(1500);
+    expect(b.waiting).toBe(1);
+    expect(b.toPay).toBe(1000);
+  });
+  it('A3: no Pending service = unchanged (waiting 0, toPay = total - paid)', () => {
+    const b = buildBookingBlock([row({ id: 'a', payments: [{ amount: 400 }] }), row({ id: 'b', start_time: '11:00:00' })], 'a');
+    expect(b.waiting).toBe(0);
+    expect(b.toPay).toBe(1600);
+  });
+  it('A3: payable line already part paid, Pending line ignored', () => {
+    const b = buildBookingBlock([row({ id: 'a', payments: [{ amount: 400 }] }), row({ id: 'b', status: 'Pending', start_time: '11:00:00' })], 'a');
+    expect(b.toPay).toBe(600);
+  });
 });

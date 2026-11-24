@@ -6,11 +6,14 @@ import { formatClockTime } from '../../pages/branch-manager-dashboard/components
 // "Set a different discount per service" turns each line into its own field (same % / NPR choice as the whole-booking one).
 const npr = (n) => `NPR ${Math.round(Number(n) || 0).toLocaleString('en-IN')}`;
 
+// A line planned at 0 while another line has a discount, and that already carries one: Apply CLEARS it (ZNLY-402 A2), the preview says so.
+const planOn = (plan) => (plan?.total || 0) > 0;
 const BookingDiscountLines = ({ rows, plan, perService, onTogglePer, type, values, onChange, use24h, canEdit, existingTotal, onRemove, removing }) => {
+  const cleared = (r, l) => planOn(plan) && l.amount === 0 && r.discount > 0;
   const byId = Object.fromEntries((plan?.lines || []).map((l) => [l.id, l]));
   const newTotal = rows.reduce((s, r) => {
     const l = byId[r.id];
-    return s + (l && l.amount > 0 ? l.base - l.amount : r.final);
+    return s + (l && l.amount > 0 ? l.base - l.amount : l && cleared(r, l) ? r.base : r.final);
   }, 0);
   return (
     <div className="space-y-3" data-discount-lines>
@@ -18,9 +21,10 @@ const BookingDiscountLines = ({ rows, plan, perService, onTogglePer, type, value
         {rows.map((r) => {
           const l = byId[r.id];
           const editable = canEdit && !!l; // paid services are not in the plan: they cannot be discounted
-          const preview = l && l.amount > 0;
-          const disc = preview ? l.amount : r.discount;
-          const showDisc = disc > 0;
+          const clearing = !!l && cleared(r, l);
+          const preview = (l && l.amount > 0) || clearing;
+          const disc = clearing ? 0 : preview ? l.amount : r.discount;
+          const showDisc = disc > 0 || clearing;
           return (
             <div key={r.id} className="px-3 py-2.5" data-discount-line={r.id}>
               <div className="flex items-start justify-between gap-3">
@@ -47,7 +51,7 @@ const BookingDiscountLines = ({ rows, plan, perService, onTogglePer, type, value
               {!l && r.paymentStatus === 'paid' && <p className="mt-1 text-[12px] text-text-secondary">Paid, so its price cannot change.</p>}
               {showDisc && (
                 <div className="mt-1.5 space-y-0.5 text-[12px]">
-                  <div className="flex justify-between"><span className="text-text-secondary">Discount</span><span className={`tabular-nums ${preview ? 'text-warning' : 'text-error'}`}>− {npr(disc)}</span></div>
+                  <div className="flex justify-between"><span className="text-text-secondary">{clearing ? 'Discount removed' : 'Discount'}</span><span className={`tabular-nums ${preview ? 'text-warning' : 'text-error'}`}>{clearing ? `was − ${npr(r.discount)}` : `− ${npr(disc)}`}</span></div>
                   <div className="flex justify-between"><span className="text-text-secondary">New price</span><span className={`tabular-nums ${preview ? 'text-warning' : 'text-text-primary'}`}>{npr(preview ? l.base - l.amount : r.final)}</span></div>
                 </div>
               )}

@@ -62,6 +62,10 @@ export function buildBookingBlock(rawRows, openId) {
   const total = r2(live.reduce((s, r) => s + r.final, 0));
   const paid = r2(live.reduce((s, r) => s + r.paid, 0));
   const discount = r2(live.reduce((s, r) => s + r.discount, 0));
+  // A service still Pending (waiting for confirmation) is never bundled into a payment: to pay = the payable lines only.
+  const payable = live.filter((r) => r.status !== 'pending');
+  const waiting = live.length - payable.length;
+  const payableToPay = r2(payable.reduce((s, r) => s + Math.max(r.final - r.paid, 0), 0));
   return {
     show: rows.length >= 2,
     rows,
@@ -71,7 +75,8 @@ export function buildBookingBlock(rawRows, openId) {
     base: r2(live.reduce((s, r) => s + r.base, 0)),
     discount,
     paid,
-    toPay: Math.max(r2(total - paid), 0),
+    toPay: waiting > 0 ? payableToPay : Math.max(r2(total - paid), 0),
+    waiting,
     openId,
     // The one reference number of the booking = the first service's number (U5).
     reference: (live[0] || rows[0])?.number || '',

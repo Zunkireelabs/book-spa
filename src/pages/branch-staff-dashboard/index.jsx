@@ -443,7 +443,7 @@ const BranchStaffDashboard = () => {
     if (result.error) {
       return { error: result.error };
     }
-    showSuccess(result.data?.isPending ? 'Discount request sent for approval' : 'Discount applied successfully');
+    showSuccess(result.data?.isPending ? 'Discount request sent for approval' : Number(discountValue) === 0 ? 'Discount removed' : 'Discount applied successfully');
     await loadData();
     return { data: result.data };
   };
