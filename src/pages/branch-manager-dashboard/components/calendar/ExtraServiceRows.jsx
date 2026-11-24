@@ -53,26 +53,26 @@ const ExtraRow = ({
         onChange={(val) => patch(r.key, isFirst ? { serviceId: val } : { serviceId: val, therapistId: '' })} branchId={branchId} canViewPrices={canViewPrices}
         title={solo ? 'Service for the booking' : `Service ${n}`} ariaLabel={solo ? 'Service' : undefined}
         loading={isFirst && first1?.loading} openSignal={isFirst ? first1?.openSignal || 0 : 0} onSignalConsumed={isFirst ? first1?.onSignalConsumed : null} />
-      {svc && needsStaff && (
+      {needsStaff && (svc || isFirst) && (
         <div {...(isFirst ? { 'data-qc-field': 'staff' } : {})} className={isFirst ? staffRing : ''}>
           <p className="flex items-baseline justify-between mb-1.5 font-body font-body-medium text-[13px] text-text-primary">{staffLabel} <span className="text-xs font-normal text-text-secondary">optional</span></p>
           <StaffPickRow
             people={picked} max={1} statusLine={text ? '' : info.statusLine} pill={text ? null : info.pill} problem={text}
-            emptyLabel={`Pick ${staffLabel.toLowerCase()}`} title={`${staffLabel} for service ${n}`}
+            emptyLabel={svc ? `Pick ${staffLabel.toLowerCase()}` : 'Pick a service first'} disabled={!svc} title={`${staffLabel} for service ${n}`}
             renderPicker={(close) => (
               <StaffPicker
                 people={pickerPeople} selectedIds={r.therapistId ? [r.therapistId] : []} max={1}
                 onChange={(ids) => { patch(r.key, { therapistId: ids[0] || '' }); close(); }}
                 onNone={() => { patch(r.key, { therapistId: '' }); close(); }}
                 noneLabel={`No ${staffLabel.toLowerCase()} · assign later`}
-                header={{ title: `${staffLabel} for service ${n}`, sub: [svc.name, rangeLabel(t.startMin, t.endMin)].filter(Boolean).join(' · ') }}
+                header={{ title: `${staffLabel} for service ${n}`, sub: [svc?.name, rangeLabel(t.startMin, t.endMin)].filter(Boolean).join(' · ') }}
                 staffLabel={staffLabel} staffLabelPlural={staffLabelPlural}
                 slot={bookingDate ? { date: bookingDate, start: t.start, end: t.end } : null}
-                serviceId={svc.id} bookings={dayBookings} offById={dayOff}
+                serviceId={svc?.id} bookings={dayBookings} offById={dayOff}
               />
             )}
           />
-          {!r.therapistId && <p className="mt-1 text-xs text-text-secondary" data-no-staff-yet>No {staffLabel.toLowerCase()} yet · goes to Unassigned</p>}
+          {svc && !r.therapistId && <p className="mt-1 text-xs text-text-secondary" data-no-staff-yet>No {staffLabel.toLowerCase()} yet · goes to Unassigned</p>}
         </div>
       )}
       {svc && (
