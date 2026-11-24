@@ -329,7 +329,7 @@ const OperationalCalendar = ({ branchId }) => {
   // ZNLY-281: "N bookings today for this client" in the open panel / sheet (same index the grid uses).
   const clientIndexAll = useMemo(() => buildClientIndex(calendarData?.bookings), [calendarData?.bookings]);
   const selectedClientDay = useMemo(
-    () => (selectedBooking ? clientDayInfo(clientIndexAll, { customerId: selectedBooking.customerId, date: selectedBooking.date }) : null),
+    () => (selectedBooking ? clientDayInfo(clientIndexAll, selectedBooking) : null),
     [clientIndexAll, selectedBooking]
   );
   // People who are off / on leave on the shown day (the Staff picker lists them under "Off today", not selectable). Day view only:

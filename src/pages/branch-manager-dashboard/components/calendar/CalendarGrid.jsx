@@ -1,4 +1,4 @@
-import { buildClientIndex, customerIdOf, isSameClient, clientDayInfo } from './sameClient';
+import { buildClientIndex, bookingOf, highlightLevel, clientDayInfo } from './sameClient';
 import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
@@ -254,7 +254,7 @@ const CalendarGrid = ({
   const popoverBookingId = useHoverCardBookingId();
   const activeSharedId = hoverSharedId || popoverBookingId || selectedBookingId || null;
   const clientIndex = useMemo(() => buildClientIndex(bookings), [bookings]); // one map customerId -> bookings for the whole render, no per-card scans
-  const activeCustomerId = useMemo(() => customerIdOf(bookings, hoverClientId || popoverBookingId || selectedBookingId || null), [bookings, hoverClientId, popoverBookingId, selectedBookingId]);
+  const activeBooking = useMemo(() => bookingOf(bookings, hoverClientId || popoverBookingId || selectedBookingId || null), [bookings, hoverClientId, popoverBookingId, selectedBookingId]);
   // Hide the connector of the booking being dragged (its copies are mid-move); it redraws from fresh data on drop.
   const draggingSharedId = activeDragId ? String(activeDragId).split('__')[0] : null;
 
@@ -648,6 +648,7 @@ const CalendarGrid = ({
         companionName: b.companion_name || null, // couple: the second guest's name
         isWalkIn: !!b.is_walk_in, // ZNLY-327: customerName already reads "Walk-in · <label>"
         customerId: b.customer_id || null, // ZNLY-281: same-client highlight matches on this id only
+        visitId: b.visit_id || null, // ZNLY-402: same-visit link (NULL = its own visit); utils/visit.js
         serviceName: b.service?.name || 'Service',
         serviceDuration: b.service?.duration_minutes || null,
         status: b.status,
@@ -1758,7 +1759,7 @@ const CalendarGrid = ({
                 onSharedDeactivate={deactivateShared}
                 onClientActivate={activateClient}
                 onClientDeactivate={deactivateClient}
-                sameClient={isSameClient(clientIndex, activeCustomerId, booking)}
+                sameClient={highlightLevel(clientIndex, activeBooking, booking)}
                 key={cardKey}
                 booking={(() => {
                   const info = clientDayInfo(clientIndex, booking);

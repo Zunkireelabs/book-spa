@@ -52,3 +52,11 @@ describe('excludeRelatedFromPreviousDue', () => {
     expect(excludeRelatedFromPreviousDue(previousDue, null)).toEqual(previousDue);
   });
 });
+
+describe('visitId (ZNLY-402)', () => {
+  it('maps visit_id to visitId; missing = null (own visit)', async () => {
+    const { transformBooking } = await import('./bookingTransformers');
+    expect(transformBooking({ id: 'x', visit_id: 'v1' }).visitId).toBe('v1');
+    expect(transformBooking({ id: 'x' }).visitId).toBeNull();
+  });
+});

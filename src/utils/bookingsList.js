@@ -1,5 +1,6 @@
 // Pure helpers for the Bookings list (V15): date ranges, view-chip classification, row signals (late / now line / dimming),
 // search, sorting and day grouping. Everything takes the spa's local (Nepal) `today` / `nowHM` explicitly — never the browser clock.
+import { visitMembers } from './visit';
 import { futureBookingMessage } from '../services/bookingTransformers';
 import { classifyBooking } from './bookingMoney';
 import { phoneSearchDigits } from './customerDirectory';
@@ -256,6 +257,10 @@ export function groupByDay(rows) {
   return groups;
 }
 
+/** ZNLY-402: number of bookings in this booking's VISIT (visit_id; no visit_id = its own visit = 1). The row label "N services" shows when > 1. */
+export const visitCount = (b, all) => visitMembers(all, b).length;
+
+/** Party size (booking_group_id: a group booking of several people). Not a visit: kept for the "Group of N" label. */
 export const groupInfo = (b, all) => {
   if (!b.bookingGroupId) return 0;
   return all.filter((x) => x.bookingGroupId === b.bookingGroupId).length;

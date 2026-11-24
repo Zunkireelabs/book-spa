@@ -423,8 +423,7 @@ const BookingActionModal = ({
 
   // Discount tab: same-day related bookings for combined discount application
   const [relatedBookings, setRelatedBookings] = useState([]);
-  // Every sibling (formal group, or same customer_name+date when there's no
-  // booking_group_id), any payment_status — display only, never used for
+  // Every other booking of this visit (ZNLY-402: same visit_id), any payment_status — display only, never used for
   // bundling (see fetchGroupBookings). Keeps a paid sibling
   // visible from every other sibling's modal instead of silently vanishing.
   const [groupSiblings, setGroupSiblings] = useState([]);
@@ -517,19 +516,17 @@ const BookingActionModal = ({
   // Fetch related unpaid bookings when payment tab opens
   useEffect(() => {
     if (isOpen && (activeTab === 'payment' || activeTab === 'discount') && booking) {
+      // ZNLY-402: "related" = the rest of THIS visit (booking.visitId); a booking with no visit has none.
       const relatedPromise = fetchRelatedUnpaidBookings({
-        customerName: booking.customerName,
-        date: booking.date,
         excludeBookingId: booking.bookingId,
-        bookingGroupId: booking.bookingGroupId,
+        visitId: booking.visitId,
         customerId: booking.customerId,
       });
       if (activeTab === 'payment') {
         fetchGroupBookings({
-          bookingGroupId: booking.bookingGroupId,
-          customerName: booking.customerName,
-          date: booking.date,
+          visitId: booking.visitId,
           excludeBookingId: booking.bookingId,
+          customerId: booking.customerId,
         }).then(({ data }) => setGroupSiblings(data || []));
       } else {
         setGroupSiblings([]);
@@ -560,7 +557,7 @@ const BookingActionModal = ({
 
         if (activeTab === 'payment') {
           // Exclude any booking already shown under "Related Services" — a real
-          // booking_group_id sibling that's unpaid always also matches
+          // same-visit sibling that's unpaid always also matches
           // getCustomerOutstandingBalance's phone-wide criteria, so without this it would be
           // double-counted in the Grand Total (see BK-20260908-0011/-0012 incident).
           const bookings = excludeRelatedFromPreviousDue(dueResult.data?.bookings, related);
@@ -587,7 +584,7 @@ const BookingActionModal = ({
     } else if (isOpen && activeTab === 'payment') {
       setMembership(null);
     }
-  }, [activeTab, booking?.bookingId, booking?.paymentStatus, booking?.customerPhone, branchId, isOpen]);
+  }, [activeTab, booking?.bookingId, booking?.visitId, booking?.paymentStatus, booking?.customerPhone, branchId, isOpen]);
 
   const loadVisitProducts = useCallback(async () => {
     if (!booking?.bookingId) { setVisitProducts([]); return; }
@@ -3523,7 +3520,7 @@ const BookingActionModal = ({
                   <div className="space-y-2">
                     <label className="font-body font-body-medium text-xs text-text-secondary uppercase flex items-center gap-1.5">
                       <Icon name="CheckCircle2" size={13} className="text-success" />
-                      {booking?.bookingGroupId ? 'Already paid in this group' : 'Already paid for this customer today'}
+                      Already paid in this visit
                     </label>
                     <div className="border border-success/20 bg-success/5 rounded-spa divide-y divide-success/10 overflow-hidden">
                       {groupSiblings.filter(gb => gb.payment_status === 'paid').map(gb => (
