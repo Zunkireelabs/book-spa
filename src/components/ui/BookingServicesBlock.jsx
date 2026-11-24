@@ -18,6 +18,8 @@ const CHIP = {
   'no show': ['No show', 'bg-gray-100 text-gray-500'],
 };
 
+export const waitingNote = (n) => `${n} service${n === 1 ? ' is' : 's are'} waiting for confirmation: confirm ${n === 1 ? 'it' : 'them'} to include ${n === 1 ? 'it' : 'them'} in the payment.`;
+
 const Chip = ({ status }) => {
   const [label, cls] = CHIP[status] || [status, 'bg-gray-100 text-gray-500'];
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium flex-shrink-0 ${cls}`}>{label}</span>;
@@ -115,6 +117,7 @@ const BookingServicesBlock = ({
               {paidState && <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${paidState.cls}`}>{paidState.label}</span>}
             </span>
           </div>
+          {block.waiting > 0 && <p className="text-[12px] text-warning" data-block-waiting>{waitingNote(block.waiting)}</p>}
           {collect && (
             <div className="pt-2">
               <button type="button" disabled={collect.disabled} title={collect.reason || undefined} onClick={collect.run}

@@ -394,7 +394,7 @@ const BookingsViewPanel = ({ branchId }) => {
   const handleApplyDiscount = async (bookingId, { discountType, discountValue, discountReason, requestedTo }) => {
     const result = await applyDiscount({ bookingId, discountType, discountValue, discountReason, requestedTo });
     if (result.error) return { error: result.error };
-    showToast(result.data?.isPending ? 'Discount request sent for approval' : 'Discount applied successfully');
+    showToast(result.data?.isPending ? 'Discount request sent for approval' : Number(discountValue) === 0 ? 'Discount removed' : 'Discount applied successfully');
     await load();
     await refreshSelected(bookingId);
     return { data: result.data };

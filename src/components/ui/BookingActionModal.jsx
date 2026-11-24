@@ -24,7 +24,7 @@ import InvoicePrintModal from './InvoicePrintModal';
 import { relatedFetchers } from '../../utils/visitGate';
 import { fetchBookingServices } from '../../services/api';
 import { buildBookingBlock } from '../../utils/bookingBlock';
-import BookingServicesBlock from './BookingServicesBlock';
+import BookingServicesBlock, { waitingNote } from './BookingServicesBlock';
 import BookingStaffRows, { rowIds, rowRoom, rowChanged } from './BookingStaffRows';
 import BookingDiscountLines from './BookingDiscountLines';
 import { planBookingDiscount } from '../../utils/bookingDiscount';
@@ -439,6 +439,7 @@ const BookingActionModal = ({
   const [failedName, setFailedName] = useState(null);
   const [perService, setPerService] = useState(false); // Discount tab: "Set a different discount per service"
   const pendingTabRef = useRef(null); // a click on another service keeps the tab you are on
+  const holdTabRef = useRef(null);    // ZNLY-402 A4: Apply / Remove discount re-opens the panel on each saved row; this keeps the Discount tab through the whole loop
   // Every sibling (ZNLY-402 ON: the other bookings of this visit_id; OFF: formal group, or same customer_name+date), any payment_status — display only, never used for
   // bundling (see fetchGroupBookings). Keeps a paid sibling
   // visible from every other sibling's modal instead of silently vanishing.
@@ -542,7 +543,9 @@ const BookingActionModal = ({
 
   // Fetch related unpaid bookings when payment tab opens
   useEffect(() => {
-    if (isOpen && (activeTab === 'payment' || activeTab === 'discount') && booking) {
+    // ZNLY-402 A1: with the setting ON the Details "Collect payment" opens the same checkout, so the related services load as soon as the panel opens (not only on the Payment / Discount tab): one source for both entry points.
+    const loadsRelated = activeTab === 'payment' || activeTab === 'discount' || (multiServiceBookings && !!booking?.visitId);
+    if (isOpen && loadsRelated && booking) {
       // ZNLY-402: orgs with "Several services in one booking" ON: "related" = the rest of THIS visit (booking.visitId); no visit = none.
       // Every other org keeps the original rule: the booking group, else the same customer name + date.
       const fetchers = relatedFetchers(multiServiceBookings);
@@ -565,7 +568,8 @@ const BookingActionModal = ({
         setRelatedBookings(related);
         // Auto-bundled by default — staff can uncheck individual items, same
         // as previous-due below.
-        setSelectedRelatedIds(new Set(related.map(rb => rb.id)));
+        // ZNLY-402 A3 (setting ON): a service still Pending is not bundled into the payment (the discount still covers it).
+        setSelectedRelatedIds(new Set(related.filter(rb => !(multiServiceBookings && rb.status === 'Pending')).map(rb => rb.id)));
 
         const resetKey = `${activeTab}:${booking.bookingId}:${isOpen}`;
         if (discountResetKeyRef.current !== resetKey) {
@@ -1310,7 +1314,7 @@ const BookingActionModal = ({
     };
     return () => { guardRef.current = null; };
   });
-  useEffect(() => { setPanelConfirm(null); setMoreOpen(false); if (booking) { setActiveTab(pendingTabRef.current || initialTab || 'details'); pendingTabRef.current = null; } }, [booking?.bookingId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setPanelConfirm(null); setMoreOpen(false); if (booking) { setActiveTab(holdTabRef.current || pendingTabRef.current || initialTab || 'details'); pendingTabRef.current = null; } }, [booking?.bookingId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!moreOpen) return undefined;
     const onDown = (e) => { if (moreRef.current && !moreRef.current.contains(e.target)) setMoreOpen(false); };
@@ -1519,6 +1523,8 @@ const BookingActionModal = ({
   const checkedRowIds = multiView
     ? [...planMV.lines.filter((l) => l.amount > 0 && l.id !== booking.bookingId), ...planMV.lines.filter((l) => l.amount > 0 && l.id === booking.bookingId)].map((l) => l.id)
     : [booking.bookingId, ...relatedBookings.map(rb => rb.id)].filter(id => selectedDiscountIds.has(id));
+  // A3/A2: with ONE or more lines carrying a discount, a line planned at 0 (typed 0 or left blank) that already has a discount is CLEARED.
+  const mvClearIds = multiView && planMV.total > 0 ? planMV.lines.filter((l) => l.amount === 0 && (mvRows.find((r) => r.id === l.id)?.discount || 0) > 0).map((l) => l.id) : [];
   const overriddenRowIds = checkedRowIds.filter(id => rowDiscountOverrides[id] !== undefined && rowDiscountOverrides[id] !== '');
   const pooledBase = checkedRowIds
     .filter(id => !overriddenRowIds.includes(id))
@@ -1589,14 +1595,21 @@ const BookingActionModal = ({
       let lastResult = null;
       let failed = false;
 
-      for (const row of rowPlans) {
-        const result = await onApplyDiscount(row.id, {
-          discountType: !multiView && discountType === 'percentage' ? 'percentage' : 'fixed',
-          discountValue: !multiView && discountType === 'percentage' ? row.value : row.amount,
-          discountReason: discountReason.trim(),
-          requestedTo: exceedsLimit ? selectedApprover : undefined
-        });
-        lastResult = result;
+      // Lines to clear go with the others; the open service is always saved last (the calendar re-opens the panel on the last row it saved).
+      const clearPlans = mvClearIds.map((id) => ({ id, clear: true }));
+      const allPlans = [...rowPlans, ...clearPlans];
+      const orderedPlans = [...allPlans.filter((r) => r.id !== booking.bookingId), ...allPlans.filter((r) => r.id === booking.bookingId)];
+      holdTabRef.current = activeTab;
+      for (const row of orderedPlans) {
+        const result = await onApplyDiscount(row.id, row.clear
+          ? { discountType: 'fixed', discountValue: 0, discountReason: 'Discount cancelled' }
+          : {
+            discountType: !multiView && discountType === 'percentage' ? 'percentage' : 'fixed',
+            discountValue: !multiView && discountType === 'percentage' ? row.value : row.amount,
+            discountReason: discountReason.trim(),
+            requestedTo: exceedsLimit ? selectedApprover : undefined
+          });
+        lastResult = row.clear && !result?.error && lastResult ? lastResult : result;
         if (result?.error) { failed = true; break; }
       }
 
@@ -1617,6 +1630,7 @@ const BookingActionModal = ({
     } catch (error) {
       setDiscountError(guideFor(error));
     } finally {
+      setTimeout(() => { holdTabRef.current = null; }, 800);
       setIsLoading(false);
     }
   };
@@ -1627,6 +1641,7 @@ const BookingActionModal = ({
     setIsLoading(true); setDiscountError(null);
     const withDiscount = mvRows.filter((r) => r.discount > 0);
     const ordered = [...withDiscount.filter((r) => r.id !== booking.bookingId), ...withDiscount.filter((r) => r.id === booking.bookingId)];
+    holdTabRef.current = activeTab;
     try {
       for (const r of ordered) {
         const res = await onApplyDiscount(r.id, { discountType: 'fixed', discountValue: 0, discountReason: 'Discount cancelled' });
@@ -1634,7 +1649,7 @@ const BookingActionModal = ({
       }
       setDiscountSuccess('removed'); setRowDiscountOverrides({});
       setBlockReload((n) => n + 1);
-    } catch (e) { setDiscountError(guideFor(e)); } finally { setIsLoading(false); }
+    } catch (e) { setDiscountError(guideFor(e)); } finally { setTimeout(() => { holdTabRef.current = null; }, 800); setIsLoading(false); }
   };
 
   const discountEffPercent = checkedRowIds.length > 0
@@ -1781,7 +1796,7 @@ const BookingActionModal = ({
     if (isDirty) setPanelConfirm({ type: 'switch', action: go }); else go();
   };
   const blockPaid = block.allPaid ? { label: 'Paid', cls: 'bg-success/10 text-success' } : block.paid > 0 ? { label: 'Part paid', cls: 'bg-warning/10 text-warning' } : { label: 'Not paid yet', cls: 'bg-warning/10 text-warning' };
-  const blockCollect = canViewPrices && !isViewer && block.toPay > 0 ? { disabled: !canPay, reason: canPay ? null : 'Confirm or complete this service first.', run: () => { setActiveTab('payment'); setShowPaymentModal(true); } } : null;
+  const blockCollect = canViewPrices && !isViewer && (block.toPay > 0 || block.waiting > 0) ? { disabled: !canPay, reason: canPay ? null : 'Confirm or complete this service first.', run: () => { setActiveTab('payment'); setShowPaymentModal(true); } } : null;
   // Visible secondary actions (left), in collapse-priority order; disabled ones are not shown here (only in the overflow).
   const secondaryVisible = [
     !isViewer && onAddServiceStart && !isEditing && { key: 'rebook', label: rebookLabel, icon: 'CalendarClock', run: () => onRebookStart?.(booking) },
@@ -3545,6 +3560,7 @@ const BookingActionModal = ({
                         <span className="font-data text-sm text-text-primary tabular-nums">- NPR {block.paid.toLocaleString('en-IN')}</span>
                       </div>
                     )}
+                    {block.waiting > 0 && <p className="text-[12px] text-warning" data-invoice-waiting>{waitingNote(block.waiting)}</p>}
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium text-text-primary">To pay</span>
                       <span className="flex items-center gap-2">
@@ -4184,7 +4200,7 @@ const BookingActionModal = ({
             dueHolderName: booking.dueHolderName,
           }}
           addOnCandidates={[
-            ...relatedBookings.map(rb => ({
+            ...relatedBookings.filter(rb => !(multiServiceBookings && rb.status === 'Pending')).map(rb => ({
               bookingId: rb.id,
               bookingNumber: rb.booking_number,
               service: rb.service?.name,
