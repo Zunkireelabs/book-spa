@@ -141,3 +141,8 @@ Noting the gap repeatedly is not the same as closing it.
 - ZNLY-358: PR #469 passed build/test/check-migrations, but the staging deploy failed at `scripts/check-rls-initplan.sh` (migration 411 policy called `auth.uid()` unwrapped). The frontend did not deploy.
 - Rule: before committing any migration, run every check the deploy workflow runs against a DB (`grep -n "scripts/" .github/workflows/deploy*.yml`), including check-rls-initplan.sh, against the local DB with the migration applied.
 - macOS bash 3.2 can't run `migrate-apply.sh` (`declare -A`). Run it in a container: `docker run --rm -v "$PWD":/w:ro -w /w -e PGHOST=host.docker.internal -e PGPORT=56422 -e PGUSER=postgres -e PGPASSWORD=postgres -e PGDATABASE=postgres -e PGSSLMODE=disable postgres:16 bash scripts/migrate-apply.sh local --dry-run`.
+
+## 2026-11-24: a mockup must be built from the real app, not from tokens (ZNLY-401/402)
+- Correction (owner): "is this mockup actually how our UI is? I can't approve a mockup if I don't see how it will actually look."
+- Cause: the Gate 3 mockup reused our colour tokens but invented the layout (centred modal, plain calendar, no sidebar/avatars, wrong card style). Lead did not compare it with the running app before presenting it.
+- Rule: before showing ANY mockup, the lead screenshots the real screen (agent-browser on the local app) and compares it with the mockup. A mockup must reuse the real markup/classes/stylesheet of the screen it changes (right-side slide-over, sidebar, toolbar, staff header, card style), show CURRENT next to NEW, and mark only the real changes as NEW.
