@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
+import { useClock } from '../../../hooks/useUse24h';
 
 // Static status styles to avoid Tailwind dynamic class purging
 const STATUS_STYLES = {
@@ -12,6 +13,7 @@ const STATUS_STYLES = {
 };
 
 const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignTherapist }) => {
+  const clock = useClock();
   const [selectedTimeSlot, setSelectedTimeSlot] = useState('current');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
@@ -38,14 +40,7 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isDropdownOpen]);
 
-  const formatTime = (timeString) => {
-    if (!timeString) return '';
-    return new Date(`2024-01-01 ${timeString}`).toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
-  };
+  const formatTime = clock;
 
   return (
     <div className="space-y-3">

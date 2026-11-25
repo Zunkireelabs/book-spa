@@ -4,7 +4,7 @@ import Button from './Button';
 import ModalShell from './ModalShell';
 import { visitReschedule } from '../../services/visitApi';
 import { friendlyError } from '../../utils/friendlyError';
-import { time12 } from '../../utils/visitPreview';
+import { useClock } from '../../hooks/useUse24h';
 
 // ZNLY-402 piece 5 (screen E2/E3): "Move this booking?". visit_reschedule dry run gives each service its verdict at the picked time:
 //   'change' = free, 'warn' = overridable (a manager books anyway with a reason), 'block' = a hard no, 'keep' = already started, stays.
@@ -14,6 +14,7 @@ const addMin = (t, m) => { const [h, mm] = String(t).split(':').map(Number); con
 const dayLabel = (d) => { try { return new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', ''); } catch { return d; } };
 
 const MoveBookingDialog = ({ visitKey, date, startTime, lines, canOverride, onClose, onDone }) => {
+  const clock = useClock();
   const [preview, setPreview] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -63,13 +64,13 @@ const MoveBookingDialog = ({ visitKey, date, startTime, lines, canOverride, onCl
           <button onClick={onClose} disabled={busy} aria-label="Close" className="p-2 rounded-spa hover:bg-background spa-transition-fast spa-touch-target"><Icon name="X" size={20} className="text-text-secondary" /></button>
         </div>
         <div className="p-5 space-y-4">
-          <p className="text-sm text-text-secondary">{dayLabel(date)} · from {time12(startTime)}</p>
+          <p className="text-sm text-text-secondary">{dayLabel(date)} · from {clock(startTime)}</p>
           <div className="border border-border rounded-spa">
             {moving.map((r) => {
               // booking_id is the ORIGINAL row (what the screen shows); the replacement is new_booking_id. r.start is the NEW start time.
               const l = lines?.[r.booking_id] || {};
               const start = r.start || startTime;
-              const range = l.minutes ? `${time12(start)}–${time12(addMin(String(start).slice(0, 5), l.minutes))}` : time12(start);
+              const range = l.minutes ? `${clock(start)}–${clock(addMin(String(start).slice(0, 5), l.minutes))}` : clock(start);
               const v = r.verdict;
               return (
                 <div key={r.booking_id} className="flex items-start gap-2.5 px-3 py-2 border-b border-border last:border-b-0">

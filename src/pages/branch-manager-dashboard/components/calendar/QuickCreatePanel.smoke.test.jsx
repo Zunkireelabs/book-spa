@@ -163,10 +163,10 @@ describe('QuickCreatePanel smoke', () => {
     const { container } = render(<QuickCreatePanel {...props} rooms={rooms} bookings={bookings} slotInfo={slot} />);
     const card = container.ownerDocument.querySelector('[data-guide-card="ROOMS_FULL"]');
     expect(card).toBeTruthy();
-    expect(card.textContent).toMatch(/Every room is taken 12:00 pm–1:00 pm\./);
-    expect(card.textContent).toMatch(/Book at 2:00 pm/);
+    expect(card.textContent).toMatch(/Every room is taken 12:00pm–1:00pm\./);
+    expect(card.textContent).toMatch(/Book at 2:00pm/);
     expect(screen.getByRole('button', { name: /create booking/i }).disabled).toBe(true);
-    fireEvent.click(screen.getByText('Book at 2:00 pm'));
+    fireEvent.click(screen.getByText('Book at 2:00pm'));
     expect(container.ownerDocument.querySelector('[data-guide-card="ROOMS_FULL"]')).toBeNull();
   });
   it('ZNLY-365: a beauty org (no rooms) never sees room wording in a guidance card', () => {
@@ -205,14 +205,14 @@ describe('QuickCreatePanel smoke', () => {
   });
   it('ZNLY-365: a manager picking busy staff sees the ✦ card live (no Create press), with "Give it to <free person>", and Create stays enabled', () => {
     precheckMock.value = { blocked: false, warn: true, canOverride: true, nextFree: ['13:00'], otherFree: null,
-      verdict: { code: 'OVERLAP', message: 'Tara Gurung already has a booking 12:00 pm–1:00 pm' } };
+      verdict: { code: 'OVERLAP', message: 'Tara Gurung already has a booking 12:00pm–1:00pm' } };
     const bookings = [{ id: 'bx', date: '2026-11-22', status: 'Confirmed', therapist_id: 't1', start_time: '12:00:00', end_time: '13:00:00' }];
     const slot = { day: '2026-11-22', hour: 12, minute: 0, defaultServiceId: 's1', walkIn: true, defaultTherapistIds: ['t1'] };
     const { container } = render(<QuickCreatePanel {...props} therapists={[{ id: 't1', name: 'Tara Gurung' }, { id: 't2', name: 'Asha Rai' }]} bookings={bookings} offDate="2026-11-22" offStaff={{}} slotInfo={slot} />);
     const card = container.ownerDocument.querySelector('[data-guide-card="OVERLAP"]');
     expect(card).toBeTruthy();
     expect(card.textContent).toMatch(/Give it to Asha/);
-    expect(card.textContent).toMatch(/Book at 13:00|Book at 1:00 pm/);
+    expect(card.textContent).toMatch(/Book at 13:00|Book at 1:00pm/);
     expect(container.ownerDocument.body.textContent).toMatch(/You can still book it; you'll be asked why\./);
     expect(screen.getByRole('button', { name: /book anyway|create booking/i }).disabled).toBe(false);
     fireEvent.click(screen.getByText(/Give it to Asha/));
@@ -224,8 +224,8 @@ describe('QuickCreatePanel smoke', () => {
     const { container } = render(<QuickCreatePanel {...props} therapists={[{ id: 't1', name: 'Tara Gurung' }, { id: 't2', name: 'Asha Rai' }]} bookings={bookings} offDate="2026-11-22" offStaff={{}} slotInfo={slot} />);
     const card = container.ownerDocument.querySelector('[data-guide-card="THERAPIST_CONFLICT"]');
     expect(card).toBeTruthy();
-    expect(card.textContent).toMatch(/Tara Gurung is already booked 12:30 pm–1:30 pm/);
-    expect(card.textContent).toMatch(/Book at 1:30 pm/);
+    expect(card.textContent).toMatch(/Tara Gurung is already booked 12:30pm–1:30pm/);
+    expect(card.textContent).toMatch(/Book at 1:30pm/);
     expect(card.textContent).toMatch(/Give it to Asha/);
     expect(screen.getByRole('button', { name: /create booking/i }).disabled).toBe(true);
   });

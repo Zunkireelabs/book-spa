@@ -4,21 +4,18 @@ import path from 'node:path';
 
 const capture = vi.fn();
 vi.mock('../lib/analytics', () => ({ capture: (...a) => capture(...a) }));
-import { describeError, ERROR_CATALOG, SYSTEM_MESSAGE, makeRef, reportSystemError, fmt12 } from './errorGuide';
+import { describeError, ERROR_CATALOG, SYSTEM_MESSAGE, makeRef, reportSystemError } from './errorGuide';
 import { NETWORK_CHECK_CALENDAR_COPY } from './friendlyError';
 import { directDiscountPercent } from '../services/discountLimits';
 
-describe('fmt12', () => {
-  it.each([['12:00', '12:00 pm'], ['13:30:00', '1:30 pm'], ['00:05', '12:05 am'], ['09:00', '9:00 am']])('%s', (i, o) => expect(fmt12(i)).toBe(o));
-});
 
 describe('describeError', () => {
   const ctx = { startTime: '12:00', endTime: '14:00', serviceName: 'ENERGISE BODY', staffName: 'Susan Nagarkoti', nextFreeTimes: ['13:30', '14:00'], freeStaff: [{ id: 's2', name: 'Aksa Rasaili Sunar' }], roomName: 'HUA HIN', otherFreeRooms: 3, hasRooms: true };
   it('rooms full: bold fact, time buttons that only fill, a room picker', () => {
     const c = describeError({ code: 'ROOMS_FULL' }, ctx);
     expect(c.kind).toBe('fix'); expect(c.field).toBe('time');
-    expect(c.lead).toBe('Every room is taken 12:00 pm–2:00 pm.');
-    expect(c.actions.map((a) => a.label)).toEqual(['Book at 1:30 pm', 'Book at 2:00 pm', 'Pick a room']);
+    expect(c.lead).toBe('Every room is taken 12:00pm–2:00pm.');
+    expect(c.actions.map((a) => a.label)).toEqual(['Book at 1:30pm', 'Book at 2:00pm', 'Pick a room']);
     expect(c.actions[0]).toMatchObject({ intent: 'set-time', value: '13:30' });
   });
   it('availability refusal: the server sentence always ends with a full stop before the how', () => {
@@ -33,7 +30,7 @@ describe('describeError', () => {
   });
   it('chosen room full', () => {
     const c = describeError({ code: 'ROOM_FULL' }, ctx);
-    expect(c.lead).toBe('HUA HIN is full 12:00 pm–2:00 pm.'); expect(c.how).toBe('3 other rooms are free then.');
+    expect(c.lead).toBe('HUA HIN is full 12:00pm–2:00pm.'); expect(c.how).toBe('3 other rooms are free then.');
     expect(c.actions.map((a) => a.intent)).toEqual(['set-room-any', 'open-room']);
   });
   it('discount over the limit (scene 6)', () => {
@@ -47,8 +44,8 @@ describe('describeError', () => {
     expect(c.lead).toBe("This booking is completed, so it can't be edited."); expect(c.how).toMatch(/admin/); expect(c.actions[0].label).toBe('Ask an admin');
   });
   it('availability codes reuse the guard message', () => {
-    const c = describeError({ code: 'ON_BREAK', message: 'Susan is on a break 1:00 pm–2:00 pm' }, ctx);
-    expect(c.lead).toBe('Susan is on a break 1:00 pm–2:00 pm.'); expect(c.field).toBe('staff');
+    const c = describeError({ code: 'ON_BREAK', message: 'Susan is on a break 1:00pm–2:00pm' }, ctx);
+    expect(c.lead).toBe('Susan is on a break 1:00pm–2:00pm.'); expect(c.field).toBe('staff');
   });
   it('a code only named in the text still resolves', () => {
     expect(describeError({ message: 'ROOM_AT_CAPACITY: full' }, ctx).code).toBe('ROOM_AT_CAPACITY');

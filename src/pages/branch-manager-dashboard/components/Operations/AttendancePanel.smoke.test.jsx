@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-// 10:45 am Kathmandu on Wed 28 Oct 2026
+// 10:45am Kathmandu on Wed 28 Oct 2026
 const NOW = new Date('2026-10-28T05:00:00Z');
 const today = '2026-10-28';
 const NP = (d, t) => `${d}T${t}:00+05:45`;
@@ -125,7 +125,7 @@ describe('AttendancePanel, switch OFF (present by default)', () => {
   it('end-of-day bar (past day): Confirm all present saves status-only records via save_attendance, source bulk, with the reason', async () => {
     mount();
     await waitFor(() => expect(screen.getByText('Asha')).toBeTruthy());
-    expect(screen.queryByTestId('eod-bar')).toBeNull();                      // 10:45 am: shifts are not over
+    expect(screen.queryByTestId('eod-bar')).toBeNull();                      // 10:45am: shifts are not over
     fireEvent.click(screen.getByLabelText('Previous day'));
     await waitFor(() => expect(screen.getByTestId('eod-bar')).toBeTruthy());
     expect(screen.getByTestId('eod-bar').textContent).toContain('no attendance saved for Tue 27 Oct');
@@ -182,7 +182,7 @@ describe('AttendancePanel', () => {
     mocks.punches = [{ id: 'p2', therapistId: 'gov', branchId: 'b2', checkIn: '10:13', checkOut: null }];
     mount();
     await waitFor(() => expect(screen.getByText('Govind V')).toBeTruthy());
-    expect(document.querySelector('[data-attendance-row="gov"]').textContent).toContain('Late 1h 13m (due 9:00 am at Lazimpat)');
+    expect(document.querySelector('[data-attendance-row="gov"]').textContent).toContain('Late 1h 13m (due 9:00am at Lazimpat)');
   });
 
   it('the ⋯ menu has Add punch… (opens the new-punch box), and a punch edit keeps its Reason inside the box, cleared once typed', async () => {

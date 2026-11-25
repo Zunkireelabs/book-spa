@@ -1,14 +1,17 @@
+import { readUse24h } from './clockPref';
 // Time-aware staff list for the shared Staff picker (ZNLY-300). Pure: callers pass already-fetched data.
 // Minutes are Nepal-local minutes since midnight for ONE day. "Assigned" never appears here: it only ever means "on this booking".
 const ACTIVE = (b) => !['cancelled', 'no show', 'completed'].includes(String(b.status || '').toLowerCase());
 const mins = (t) => { if (t == null || t === '') return null; const [h, m] = String(t).slice(0, 5).split(':').map(Number); return h * 60 + (m || 0); };
 
 /** "1:15pm" / "1–2:30" helpers for the pill and group headings. */
-export const clockShort = (m) => { const h = Math.floor(m / 60) % 24; return `${h % 12 === 0 ? 12 : h % 12}:${String(m % 60).padStart(2, '0')}`; };
-const ap = (m) => (Math.floor(m / 60) % 24 >= 12 ? 'pm' : 'am');
+export const clockShort = (m) => { if (readUse24h()) return hhmm(m); const h = Math.floor(m / 60) % 24; return `${h % 12 === 0 ? 12 : h % 12}:${String(m % 60).padStart(2, '0')}`; };
+const hhmm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+const ap = (m) => (readUse24h() ? '' : Math.floor(m / 60) % 24 >= 12 ? 'pm' : 'am');
 const trim0 = (s) => s.replace(/:00$/, '');
 /** "1–2:30pm", "11:30am–12:15pm" */
 export function rangeLabel(a, b) {
+  if (readUse24h()) return `${hhmm(a)}–${hhmm(b)}`;
   const sa = trim0(clockShort(a)); const sb = trim0(clockShort(b));
   return ap(a) === ap(b) ? `${sa}–${sb}${ap(b)}` : `${sa}${ap(a)}–${sb}${ap(b)}`;
 }

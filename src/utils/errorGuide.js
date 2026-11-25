@@ -8,20 +8,14 @@ import { localizeTerms, wordBranch } from './industryTerms';
 import { directDiscountPercent } from '../services/discountLimits';
 import { fieldForErrorCode } from './quickCreateErrorField';
 import { capture } from '../lib/analytics';
+import { formatClockNow } from './clockTime';
 
 export const SYSTEM_LEAD = "This couldn't be saved.";
 export const SYSTEM_HOW = "Nothing was changed. Try again; if it keeps happening, we've been told.";
 export const SYSTEM_MESSAGE = `${SYSTEM_LEAD} ${SYSTEM_HOW}`;
 export const CONNECTION_LOST_LEAD = 'Connection lost.';
 
-// 'HH:MM' or 'HH:MM:SS' -> '1:30 pm'
-export const fmt12 = (t) => {
-  const m = /^(\d{1,2}):(\d{2})/.exec(t || '');
-  if (!m) return t || '';
-  const h = Number(m[1]);
-  return `${h % 12 || 12}:${m[2]} ${h >= 12 ? 'pm' : 'am'}`;
-};
-const range = (c) => (c.startTime && c.endTime ? `${fmt12(c.startTime)}–${fmt12(c.endTime)}` : c.startTime ? `at ${fmt12(c.startTime)}` : 'at this time');
+const range = (c) => (c.startTime && c.endTime ? `${formatClockNow(c.startTime)}–${formatClockNow(c.endTime)}` : c.startTime ? `at ${formatClockNow(c.startTime)}` : 'at this time');
 const when = (c) => (c.startTime && c.endTime ? range(c) : 'at that time');
 // The org's own word for staff (Therapist, Stylist, Doctor...) from useIndustry; "team member" only when none is given.
 const staffOne = (c) => (c.staffLabel ? String(c.staffLabel).toLowerCase() : 'team member');
@@ -33,7 +27,7 @@ const safeMsg = (e) => (e?.message ? friendlyError(e.message, '') : '');
 const act = (id, label, intent, value) => ({ id, label, intent, ...(value !== undefined ? { value } : {}) });
 
 // "Book at 1:30 pm" style actions from the next free times the calendar already knows.
-const timeActions = (c, max = 2) => (c.nextFreeTimes || []).slice(0, max).map((t) => act(`time-${t}`, `Book at ${fmt12(t)}`, 'set-time', t));
+const timeActions = (c, max = 2) => (c.nextFreeTimes || []).slice(0, max).map((t) => act(`time-${t}`, `Book at ${formatClockNow(t)}`, 'set-time', t));
 const pickStaff = act('pick-staff', 'Pick staff', 'open-staff');
 const pickRoom = act('pick-room', 'Pick a room', 'open-room');
 const altStaff = (c) => (c.freeStaff && c.freeStaff[0] ? [act(`staff-${c.freeStaff[0].id}`, `Give it to ${c.freeStaff[0].name.split(' ')[0]}`, 'set-staff', c.freeStaff[0].id)] : []);
@@ -78,7 +72,7 @@ export const ERROR_CATALOG = {
   INVALID_HOURS: fix((c) => ({
     lead: `${c.branchName || 'The branch'} is closed at that time.`,
     how: 'Pick a time inside opening hours.',
-    actions: c.latestStart ? [act('latest', `Book at ${fmt12(c.latestStart)} (latest start)`, 'set-time', c.latestStart)] : [act('pick-time', 'Pick a time', 'open-time')],
+    actions: c.latestStart ? [act('latest', `Book at ${formatClockNow(c.latestStart)} (latest start)`, 'set-time', c.latestStart)] : [act('pick-time', 'Pick a time', 'open-time')],
   }), 'time'),
   // ---- who ----
   THERAPIST_CONFLICT: fix((c) => ({

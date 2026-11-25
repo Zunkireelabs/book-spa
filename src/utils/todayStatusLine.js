@@ -11,6 +11,8 @@
 //   -> { key, row, full, parts: [title, sub], short, dot: 'grey'|'amber'|'green'|'purple', tone }
 import { timeToMinutes, hoursFromShiftRow } from './staffDay';
 import { wordBranch, wordBranchCap } from './industryTerms';
+import { readUse24h } from './clockPref';
+import { formatClockRange } from './clockTime';
 
 const LEAVE_STATUSES = new Set(['Leave', 'Annual Leave', 'Sick Leave']);
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -19,10 +21,11 @@ export const STATUS_DOT_COLOR = { grey: '#B8B8BD', amber: '#F59E0B', green: '#2D
 
 const hhmm = (min) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 const range = (a, b) => `${a}–${b}`;
-const h12 = (min) => { const h = Math.floor(min / 60) % 24; return `${h % 12 === 0 ? 12 : h % 12}:${String(min % 60).padStart(2, '0')}`; };
-const ampm = (min) => (Math.floor(min / 60) % 24 >= 12 ? 'pm' : 'am');
+const h12 = (min) => { if (readUse24h()) return hhmm(min); const h = Math.floor(min / 60) % 24; return `${h % 12 === 0 ? 12 : h % 12}:${String(min % 60).padStart(2, '0')}`; };
+const ampm = (min) => (readUse24h() ? '' : Math.floor(min / 60) % 24 >= 12 ? 'pm' : 'am');
 /** "6:55 – 9:55 pm" (am/pm shown once when both ends agree). */
-const range12 = (a, b) => (ampm(a) === ampm(b) ? `${h12(a)} – ${h12(b)} ${ampm(b)}` : `${h12(a)} ${ampm(a)} – ${h12(b)} ${ampm(b)}`);
+const t12 = (min) => (readUse24h() ? hhmm(min) : `${h12(min)} ${ampm(min)}`);
+const range12 = (a, b) => formatClockRange(hhmm(a % 1440), hhmm(b % 1440), readUse24h());
 const weekdayOf = (dateStr) => {
   const [y, m, d] = dateStr.split('-').map(Number);
   return WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
@@ -102,7 +105,7 @@ export function todayStatusLine({ hours, attendance = null, nowMin = 0, branchCl
     const next = spans.find(([a]) => a > nowMin);
     const text = spans.map(([a, z]) => range12(a, z)).join(', ');
     if (cur) return line('visiting', checkedIn ? 3 : 1, [checkedIn ? `Checked in ${checkedIn}` : null, `Here ${range12(cur[0], cur[1])}`], `Here ${range12(cur[0], cur[1])}`, 'green', 'shift');
-    if (next) return line('visiting-upcoming', 1, [`Here ${range12(next[0], next[1])}`], `Here ${h12(next[0])} ${ampm(next[0])}`, 'grey', 'shift');
+    if (next) return line('visiting-upcoming', 1, [`Here ${range12(next[0], next[1])}`], `Here ${t12(next[0])}`, 'grey', 'shift');
     return line('finished', 5, [text ? `Visit ended (${text})` : 'Visit ended'], 'Finished', 'grey', 'off');
   }
 

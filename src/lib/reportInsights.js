@@ -5,6 +5,7 @@
 
 import { durationText } from 'utils/durationText';
 import { wordBranch } from 'utils/industryTerms';
+import { formatClockIsoNow } from '../utils/clockTime';
 
 export const REPORT_INSIGHT_MAX = 3;
 
@@ -17,7 +18,7 @@ export const hasPreviousData = (data) => {
 const pct = (share) => Math.round(Number(share) * 100);
 const hrs = durationText;
 const money = (n) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 });
-const clock = (iso) => { const d = iso ? new Date(iso) : null; return d && !Number.isNaN(d.getTime()) ? d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : null; };
+const clock = (iso) => formatClockIsoNow(iso) || null;
 
 const sourceLine = (what, periodLabel, data) => [what, periodLabel, clock(data?.computed_at) && `computed ${clock(data.computed_at)}`].filter(Boolean).join(' · ');
 

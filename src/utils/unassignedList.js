@@ -1,3 +1,4 @@
+import { formatClockNow } from './clockTime';
 // ZNLY-299: the calendar's "Assign" list. Pure helpers (rows are the raw calendar / fetchUnassignedBookings rows, snake_case).
 // Today = late first (red "Late"), then by time. Upcoming = the next 7 days by date then time. Online = no created_by.
 
@@ -45,8 +46,7 @@ export function buildAssignList(rows, { today, realToday = today, nowHm, days = 
 /** "10:00" -> "10:00am"; "16:15" -> "4:15pm". */
 export function clock12(t) {
   const m = mins(t); if (m == null) return '';
-  const h = Math.floor(m / 60) % 24;
-  return `${h % 12 === 0 ? 12 : h % 12}:${String(m % 60).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`;
+  return formatClockNow(`${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
 }
 
 /** 45 -> "45 min", 120 -> "2 h", 90 -> "1 h 30 min". */

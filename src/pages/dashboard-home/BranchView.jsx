@@ -20,6 +20,7 @@ import { foldDayMoney } from '../../lib/dayMoney';
 import { npr, plural, shortDay, clock12, LoadError, Card, Row, SuggestionsCard, Tile, sharePct } from './dashKit';
 import { dayStatus, nextClient } from '../../lib/dashboardMyDay';
 import { ofKind } from '../../lib/dashboardNeeds';
+import { formatClockIsoNow } from '../../utils/clockTime';
 
 const WEEKDAY = new Date().toLocaleDateString('en-GB', { weekday: 'short', timeZone: NEPAL_TZ });
 // Delta vs the same weekday last week: green up / red down, plain "—" when there is no data to compare.
@@ -243,7 +244,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
                   <div className="flex justify-between py-2"><b>Cash expected in the drawer</b><b className="font-data">{npr(data.money.cash_expected)}</b></div>
                 </div>
                 {closed ? (
-                  <p className="text-sm text-success font-medium mt-2">Closed at {new Date(closed.closed_at).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: NEPAL_TZ })}{closed.closer?.full_name ? ` by ${closed.closer.full_name}` : ''} ✓</p>
+                  <p className="text-sm text-success font-medium mt-2">Closed at {formatClockIsoNow(closed.closed_at)}{closed.closer?.full_name ? ` by ${closed.closer.full_name}` : ''} ✓</p>
                 ) : canAct && (
                   <Button className="mt-3 max-md:min-h-11" onClick={() => setClosing((v) => !v)}>{closing ? 'Hide closing' : 'Close the day'}</Button>
                 )}

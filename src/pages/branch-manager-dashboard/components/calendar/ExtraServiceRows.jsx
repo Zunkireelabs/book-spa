@@ -7,9 +7,9 @@ import StaffPickRow from '../../../../components/ui/StaffPickRow';
 import StaffPicker from '../../../../components/ui/StaffPicker';
 import { staffDayRanges, pickedRowStatusMulti, rangeLabel } from '../../../../utils/staffFit';
 import { nepalNow } from '../../../../utils/customerDirectory';
-import { format12h } from '../../../../utils/timeInput';
 import { formatNPR } from '../../../../services/bookingTransformers';
 import { bookingTotal, newRow, minToClock, staffRowProblem } from './multiServiceRows';
+import { useClock } from '../../../../hooks/useUse24h';
 
 // ZNLY-402 piece 3b: "+ Add another service" under the first Service / Staff rows of the New booking panel (Individual mode, org setting ON).
 // Same pickers as the first row (ServicePickRow, StaffPickRow + StaffPicker). Each row: service, staff, start (defaults to when the previous service
@@ -20,6 +20,7 @@ const ExtraRow = ({
   r, i, t, svc, patch, remove, problem, ownProblem, onProblem, errorRow, errorText, flashRow, editMode = false, errorStaff = false, isFirst = false, solo = false, first1 = null, staffRing = '',
   services, branchId, canViewPrices, pickerPeople, dayBookings, dayOff, bookingDate, allowStaffOverlap, staffLabel, staffLabelPlural, branchHours,
 }) => {
+  const clock = useClock();
   const needsStaff = !svc || svc.requires_therapist !== false;
   const picked = r.therapistId ? [pickerPeople.find((p) => p.id === r.therapistId) || { id: r.therapistId, name: 'Selected' }] : [];
   const info = pickedRowStatusMulti(picked, {
@@ -93,7 +94,7 @@ const ExtraRow = ({
           </div>
           )}
           <span className="text-xs text-text-secondary">
-            {svc.duration_minutes} min · ends {format12h(t.end)}{canViewPrices && (svc.effective_price_npr ?? svc.price_npr) != null ? ` · ${svc.price_type === 'tiered' ? 'from ' : ''}${formatNPR(Number(svc.effective_price_npr ?? svc.price_npr))}` : ''}
+            {svc.duration_minutes} min · ends {clock(t.end)}{canViewPrices && (svc.effective_price_npr ?? svc.price_npr) != null ? ` · ${svc.price_type === 'tiered' ? 'from ' : ''}${formatNPR(Number(svc.effective_price_npr ?? svc.price_npr))}` : ''}
           </span>
           {!isFirst && !locked && !r.bookingId && r.start && <button type="button" onClick={() => patch(r.key, { start: '' })} className="text-xs text-primary underline underline-offset-2">Start after the previous service</button>}
         </div>

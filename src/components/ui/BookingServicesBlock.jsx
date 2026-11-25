@@ -1,6 +1,7 @@
 import React from 'react';
 import Icon from '../AppIcon';
 import { formatClockTime } from '../../pages/branch-manager-dashboard/components/calendar/timeFormat';
+import { useUse24h } from '../../hooks/useUse24h';
 
 // ZNLY-402 piece 4: the constant "This booking" block of the booking panel (org setting multi_service_bookings ON, 2+ services).
 // Pure display: the numbers come from utils/bookingBlock.js, the actions from the panel. Words (U1): "booking" and "services" only.
@@ -45,11 +46,13 @@ const BookingServicesBlock = ({
   onSelect,         // (bookingId) => switch the panel to that service; undefined = rows are not clickable
   rowAction,        // (row) => { start?: {disabled, reason, run}, done?: {...}, remove?: {...} } for the full mode
   busyId = null,
-  use24h = false,
+  use24h: use24hProp,
   dateLabel = '',
   collect,          // { disabled, reason, run } | null: the ONE main button of the Details home
   note,             // small hint under the list (Staff tab)
 }) => {
+  const [use24hPref] = useUse24h();
+  const use24h = use24hProp ?? use24hPref;
   if (!block?.show) return null;
   // Staff / Discount / Payment: just ONE plain summary line (the tab body lists the services itself, with that tab's control on each row).
   if (mode === 'strip') {

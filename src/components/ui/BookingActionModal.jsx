@@ -1,4 +1,6 @@
 import { NEPAL_TZ, nepalToday } from '../../utils/nepalTime';
+import { formatClockTime, formatClockIsoNow, formatClockRange } from '../../utils/clockTime';
+import { useUse24h } from '../../hooks/useUse24h';
 import { futureBookingMessage } from '../../services/bookingTransformers';
 import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -83,24 +85,12 @@ function hasBookingStarted(booking) {
   return getNepalNow() >= start;
 }
 
-// Convert "HH:MM" or "HH:MM:SS" to 12h format
-function to12h(timeStr) {
-  if (!timeStr) return '';
-  const [h, m] = timeStr.split(':').map(Number);
-  const period = h >= 12 ? 'pm' : 'am';
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
-}
-
-// Format an ISO timestamp as "5 Jun 2026, 2:14 pm"
+// An ISO timestamp as "5 Jun 2026, 2:14pm" (Nepal time; the clock part follows the 12h/24h choice).
 function formatCreatedAt(iso) {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString('en-GB', {
-    day: 'numeric', month: 'short', year: 'numeric',
-    hour: 'numeric', minute: '2-digit', hour12: true,
-  });
+  return `${d.toLocaleDateString('en-GB', { timeZone: NEPAL_TZ, day: 'numeric', month: 'short', year: 'numeric' })}, ${formatClockIsoNow(iso)}`;
 }
 
 // Status badge styles
@@ -113,7 +103,7 @@ const whenShort = (ts) => {
   if (!ts) return '';
   const d = new Date(ts);
   const day = d.toLocaleDateString('en-CA', { timeZone: NEPAL_TZ });
-  const t = d.toLocaleTimeString('en-US', { timeZone: NEPAL_TZ, hour: 'numeric', minute: '2-digit' }).replace(' ', '').toLowerCase();
+  const t = formatClockIsoNow(ts);
   return `${day === nepalNow().today ? 'today' : d.toLocaleDateString('en-GB', { timeZone: NEPAL_TZ, day: 'numeric', month: 'short' })} ${t}`;
 };
 const MemberDiscountCard = ({ md, ctx, serviceLabel, busy, onApply, onDecline }) => {
@@ -303,7 +293,7 @@ const BookingActionModal = ({
   // get that affordance (same gate as issue_invoice(), migration-334).
   canViewCustomerDetails = true,
   variant = 'modal',
-  use24h = false,          // calendar's per-user 12h/24h display preference (cosmetic)
+  use24h: use24hProp,      // optional override; by default the staff member's own 12h/24h choice (useUse24h)
   previewBooking = null,   // panel only: the calendar card's already-known data, shown while the full booking loads
   onRefreshBooking,        // panel only: re-fetch the open booking after an in-place action (status change)
   liveBackdrop = false,    // panel on phones: the page behind stays live (calendar): no scrim, no focus trap at half
@@ -322,6 +312,9 @@ const BookingActionModal = ({
   // ZNLY-402 piece 5: the pencil opens the shared booking form (prefilled with the whole booking) when the host provides it; else the inline Edit details.
   onEditForm,
 }) => {
+  const [use24hPref] = useUse24h();
+  const use24h = use24hProp ?? use24hPref;
+  const clock = (t) => formatClockTime(t, use24h);
   const { branchId } = useBranch();
   const { org: orgForNav, paymentMethods, orgSettings, staffLabel, staffLabelPlural, allowStaffOverlap, multiServiceBookings } = useOrg();
   const navigate = useNavigate();
@@ -890,13 +883,6 @@ const BookingActionModal = ({
     }
     return opts;
   }, [branchHours]);
-
-  const format12h = (time24) => {
-    const [h, m] = time24.split(':').map(Number);
-    const suffix = h >= 12 ? 'pm' : 'am';
-    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-    return `${h12}:${String(m).padStart(2, '0')} ${suffix}`;
-  };
 
   // TimeBoxInput lets staff type any time, unlike the old dropdown which only
   // ever offered times inside branch hours — not a hard rule (nothing blocks
@@ -2113,7 +2099,7 @@ const BookingActionModal = ({
             {/* Details Tab */}
             {activeTab === 'details' && (
               <div className={isPanel ? 'space-y-5' : 'space-y-4 sm:space-y-6'}>
-                <ClientDayLine info={clientDay} range={clientDay ? compactRange(clientDay.first, clientDay.last) : ''} />
+                <ClientDayLine info={clientDay} range={clientDay ? compactRange(clientDay.first, clientDay.last, use24h) : ''} />
                 {/* Lock / Immutability Banner — payment-aware on Completed so it complements the Record Payment button */}
                 {isMutationBlocked && (() => {
                   const banner = isLocked
@@ -2222,15 +2208,9 @@ const BookingActionModal = ({
                   const mins = parseInt(booking.duration, 10) || 0;
                   const [sh, sm] = (booking.time || booking.startTime || '').slice(0, 5).split(':').map(Number);
                   const startM = Number.isFinite(sh) ? sh * 60 + (sm || 0) : null;
-                  const fmt = (m) => `${(Math.floor(m / 60) % 12) || 12}:${String(m % 60).padStart(2, '0')}`;
-                  const ap = (m) => (Math.floor(m / 60) % 24 >= 12 ? 'pm' : 'am');
+                  const hhmm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
                   let range = '';
-                  if (startM !== null) {
-                    const endM = startM + mins;
-                    range = !mins ? `${fmt(startM)}${ap(startM)}`
-                      : ap(startM) === ap(endM) ? `${fmt(startM)}–${fmt(endM)}${ap(endM)}`
-                      : `${fmt(startM)}${ap(startM)}–${fmt(endM)}${ap(endM)}`;
-                  }
+                  if (startM !== null) range = mins ? compactRange(hhmm(startM), hhmm(startM + mins), use24h) : clock(hhmm(startM));
                   const dObj = booking.date ? new Date(`${booking.date}T00:00:00`) : null;
                   const dateLabel = dObj && !Number.isNaN(dObj.getTime())
                     ? dObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '')
@@ -2318,7 +2298,7 @@ const BookingActionModal = ({
                       />
                       {editForm.startTime && !isWithinBranchHours(editForm.startTime) && (
                         <p className="font-caption text-[11px] text-warning mt-1.5">
-                          Outside branch hours ({format12h(branchHours?.openTime?.slice(0, 5) || '09:00')} – {format12h(branchHours?.closeTime?.slice(0, 5) || '21:00')})
+                          Outside branch hours ({formatClockRange(branchHours?.openTime?.slice(0, 5) || '09:00', branchHours?.closeTime?.slice(0, 5) || '21:00', use24h)})
                         </p>
                       )}
                       <BlockOverlapWarning message={editBlockMsg} className="mt-2" />
@@ -2535,7 +2515,7 @@ const BookingActionModal = ({
                             />
                             {editForm.startTime && !isWithinBranchHours(editForm.startTime) && (
                               <p className="font-caption text-[11px] text-warning">
-                                Outside branch hours ({format12h(branchHours?.openTime?.slice(0, 5) || '09:00')} – {format12h(branchHours?.closeTime?.slice(0, 5) || '21:00')})
+                                Outside branch hours ({formatClockRange(branchHours?.openTime?.slice(0, 5) || '09:00', branchHours?.closeTime?.slice(0, 5) || '21:00', use24h)})
                               </p>
                             )}
                           </div>
@@ -2543,7 +2523,7 @@ const BookingActionModal = ({
                         {isEditing ? (
                           <BlockOverlapWarning message={editBlockMsg} className="mt-2" />
                         ) : (
-                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.date} at {to12h(booking.time || booking.startTime)}</p>
+                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.date} at {clock(booking.time || booking.startTime)}</p>
                         )}
                       </div>
 {canViewPrices && <div>
@@ -3207,7 +3187,7 @@ const BookingActionModal = ({
                                   <div className="flex-1 min-w-0">
                                     <span className="font-body font-body-medium text-xs text-text-primary">{booking.service}</span>
                                     <div className="font-caption text-[10px] text-text-secondary flex flex-wrap gap-x-2">
-                                      {booking.time && <span>{to12h(booking.startTime || booking.time)}{booking.startTime && booking.startTime !== booking.time ? '' : ''}</span>}
+                                      {booking.time && <span>{clock(booking.startTime || booking.time)}{booking.startTime && booking.startTime !== booking.time ? '' : ''}</span>}
                                       {booking.therapist?.name && <span>· {booking.therapist.name}</span>}
                                       {booking.roomName && <span>· {booking.roomName}</span>}
                                     </div>
@@ -3286,7 +3266,7 @@ const BookingActionModal = ({
                                             <span className="font-caption text-[10px] text-text-secondary">{rb.booking_number}</span>
                                           </div>
                                           <div className="font-caption text-[10px] text-text-secondary flex flex-wrap gap-x-2">
-                                            {rb.start_time && <span>{to12h(rb.start_time)}{rb.end_time ? ` – ${to12h(rb.end_time)}` : ''}</span>}
+                                            {rb.start_time && <span>{clock(rb.start_time)}{rb.end_time ? ` – ${clock(rb.end_time)}` : ''}</span>}
                                             {rb.therapist?.name && <span>· {rb.therapist.name}</span>}
                                             {rb.room?.name && <span>· {rb.room.name}</span>}
                                           </div>
@@ -3766,7 +3746,7 @@ const BookingActionModal = ({
                             <div className="flex-1 min-w-0">
                               <div className="font-body text-sm text-text-primary">{rb.service?.name || 'Service'}</div>
                               <div className="font-caption text-xs text-text-secondary">
-                                #{rb.booking_number} · {to12h(rb.start_time)}
+                                #{rb.booking_number} · {clock(rb.start_time)}
                                 {Number(rb.discount_amount) > 0 && ` · discount -NPR ${Number(rb.discount_amount).toLocaleString('en-IN')}`}
                               </div>
                             </div>

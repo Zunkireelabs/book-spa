@@ -4,7 +4,6 @@ import { viewerAccess } from '../../../../services/dataMasking';
 import Icon from '../../../../components/AppIcon';
 import { buildEditChanges } from './editBookingSlot';
 import DateTimeRow from '../../../../components/ui/DateTimeRow';
-import { format12h } from '../../../../utils/timeInput';
 import SidePanel, { PANEL_WIDTH_BOOKING } from '../../../../components/ui/SidePanel';
 import BlockOverlapWarning from '../../../../components/ui/BlockOverlapWarning';
 import AvailabilityNotice from '../../../../components/ui/AvailabilityNotice';
@@ -32,13 +31,15 @@ import { ExistingCustomerTag, EarlierBalanceNotice } from '../../../../component
 import { nepalNow } from '../../../../utils/customerDirectory';
 import { useDayAvailability } from '../../../../hooks/useDayAvailability';
 import StaffPickRow from '../../../../components/ui/StaffPickRow';
-import { staffPickIncomplete, staffDayRanges, arrangeByTime, staffHeldByOthers, pickProblems, fillFreeStaff, undoFill, rangeLabel, rangeClock, pillRange, clockShort, pickedRowStatus, pickedRowStatusMulti, clockToMin } from '../../../../utils/staffFit';
+import { staffPickIncomplete, staffDayRanges, arrangeByTime, staffHeldByOthers, pickProblems, fillFreeStaff, undoFill, rangeLabel, rangeClock, pillRange, clockShort, clockAmPm, pickedRowStatus, pickedRowStatusMulti, clockToMin } from '../../../../utils/staffFit';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { shouldShowFillFree } from '../../../../utils/serviceCatalog';
 import { fieldForErrorCode } from '../../../../utils/quickCreateErrorField';
 import { useOrg } from '../../../../contexts/OrgContext';
 import ExtraServiceRows from './ExtraServiceRows';
 import { rowTimes, rowsIncompleteReason, toGroupServices, ownOverlaps, staffRowProblem } from './multiServiceRows';
+import { useClock, useUse24h } from '../../../../hooks/useUse24h';
+import { formatClockRange } from '../../../../utils/clockTime';
 
 
 // ZNLY-365: the client row when the panel was opened from a booking ("+ Service" / Rebook). Not editable: same client as that booking.
@@ -63,6 +64,8 @@ const LockedClientCard = ({ client, name }) => {
 // ── Quick Create Panel ────────────────────────────────────────
 
 const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings: bookingsProp = [], onClose, onSubmit, branchId, branchHours, retarget, onDraftChange, columnMode = 'therapist', allTherapists = [], guardRef, offStaff = {}, offDate = null, onRefreshCalendar }) => {
+  const clock = useClock();
+  const [use24h] = useUse24h();
   const edit = slotInfo?.edit || null;   // ZNLY-402 piece 5: Edit booking = this same form, prefilled with the whole booking
   // The booking's own rows are not "busy" against themselves.
   const bookings = useMemo(() => (edit ? bookingsProp.filter((b) => !edit.ownIds.includes(b.id)) : bookingsProp), [bookingsProp, edit]);
@@ -586,7 +589,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     return () => { cancelled = true; };
   }, [isComboService, serviceId, bookingMode]);
 
-  const svcSubLine = [bookingDate ? new Date(`${bookingDate}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '', bookingTime ? format12h(bookingTime) : ''].filter(Boolean).join(' · ');
+  const svcSubLine = [bookingDate ? new Date(`${bookingDate}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '', bookingTime ? clock(bookingTime) : ''].filter(Boolean).join(' · ');
 
   // Close the people-count dropdown on outside click
   useEffect(() => {
@@ -843,7 +846,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const groupReadyNote = bookingMode === 'group' && groupValid && !groupProblemFooter && !groupStaffIncomplete && bookingTime
     ? (people.some((q) => !q.therapistId) ? `${staffLabel} is optional`
       : groupType === 'couple' ? `Couple · 2 ${staffLabelPlural.toLowerCase()} picked`
-        : `${peopleCount} bookings · ${clockShort(guestSlots[0]?.start ?? 0)}`.replace(/(\d+):(\d\d)$/, (m0, h, mm) => `${h}:${mm}${(guestSlots[0]?.start ?? 0) >= 720 ? 'pm' : 'am'}`))
+        : `${peopleCount} bookings · ${clockAmPm(guestSlots[0]?.start ?? 0)}`)
     : '';
   const couplePickIncomplete = bookingMode === 'individual' && !comboAllDifferentStaff && staffPickIncomplete({ isCouple: !!selectedService?.is_couple, optional: !serviceRequiresTherapist, count: selectedTherapistIds.length, zeroOk: true });
   const activeError = error && errorKey === formKey ? error : null; // cleared the moment the user changes anything relevant
@@ -945,7 +948,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const confirmSlotLabel = confirm?.type === 'move'
     ? [therapists.find((d) => d.id === confirm.slot.colId)?.name || rooms.find((c) => c.id === confirm.slot.colId)?.name || confirm.slot.colName,
        confirm.slot.day,
-       format12h(`${String(confirm.slot.hour).padStart(2, '0')}:${String(confirm.slot.minute).padStart(2, '0')}`)].filter(Boolean).join(' · ')
+       clock(`${String(confirm.slot.hour).padStart(2, '0')}:${String(confirm.slot.minute).padStart(2, '0')}`)].filter(Boolean).join(' · ')
     : '';
 
   const footerNode = confirm ? (
@@ -1354,7 +1357,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   ) : (
                     <div className="relative space-y-3.5">
                       {comboSchedule.map((c, index) => {
-                        const toClock = (min) => format12h(minToHHMM(c.base + min));
+                        const toClock = (min) => clock(minToHHMM(c.base + min));
                         const heldFor = comboHeld[index] || {};
                         return (
                           <div key={c.componentId} className="flex items-start gap-3">
@@ -1366,7 +1369,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
                                   <p className="font-body font-body-medium text-[13px] text-text-primary leading-tight">{c.service?.name || 'Service'}</p>
-                                  <p className="font-data text-xs text-text-secondary mt-0.5">{toClock(c.start)} – {toClock(c.end)} <span className="text-text-tertiary">· {c.duration}min</span></p>
+                                  <p className="font-data text-xs text-text-secondary mt-0.5">{formatClockRange(minToHHMM(c.base + c.start), minToHHMM(c.base + c.end), use24h)} <span className="text-text-tertiary">· {c.duration}min</span></p>
                                 </div>
                                 {c.defaultSameStaff && (
                                   <span className="flex-shrink-0 inline-flex items-center gap-1 text-[11px] text-text-secondary bg-background border border-border rounded-full px-2 py-0.5">

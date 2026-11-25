@@ -1,3 +1,5 @@
+import { formatClockNow } from './clockTime';
+import { readUse24h } from './clockPref';
 // Client-side check: does a proposed booking interval overlap a manual block?
 // `blocks` are occurrence rows from fetchBlocksForRange (recurrence already expanded through
 // blockRecurrence.js): { date, startTime, endTime, therapistId, roomId, description, ... }.
@@ -10,15 +12,11 @@ const toMin = (t) => {
 };
 
 // 'HH:MM[:SS]' -> '1:30pm'; compact range '1:00–1:30pm' (period shown once when shared).
-const to12 = (t) => {
-  const [h0, m] = String(t).split(':').map(Number);
-  const h = h0 >= 24 ? 0 : h0; // '24:00' (end of day) reads as 12:00am
-  return `${h % 12 === 0 ? 12 : h % 12}:${String(m || 0).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`;
-};
+const to12 = (t) => { const [h0, m] = String(t).split(':').map(Number); return formatClockNow(`${String(h0 >= 24 ? 0 : h0).padStart(2, '0')}:${String(m || 0).padStart(2, '0')}`); }; // '24:00' (end of day) reads as 12:00am
 export function formatBlockRange(startTime, endTime) {
   const a = to12(startTime);
   const b = to12(endTime);
-  return a.slice(-2) === b.slice(-2) ? `${a.slice(0, -2)}–${b}` : `${a}–${b}`;
+  return !readUse24h() && a.slice(-2) === b.slice(-2) ? `${a.slice(0, -2)}–${b}` : `${a}–${b}`;
 }
 
 // query: { date, startTime, endTime | durationMinutes, therapistId, therapistIds, roomId }

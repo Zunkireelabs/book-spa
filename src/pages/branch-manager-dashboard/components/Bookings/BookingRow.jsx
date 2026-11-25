@@ -2,12 +2,13 @@ import React from 'react';
 import { nameForList } from '../../../../services/dataMasking';
 import Icon from '../../../../components/AppIcon';
 import { getBookingStatusColors } from '../../../../utils/bookingStatusColors';
-import { isNoShow, toDbStatus, to12h } from '../../../../services/bookingTransformers';
+import { isNoShow, toDbStatus } from '../../../../services/bookingTransformers';
 import { formatPhoneGrouped } from '../../../../utils/phone';
 import { initials } from '../../../../utils/customerDirectory';
 import { formatLate, groupInfo, visitCount } from '../../../../utils/bookingsList';
 import { teamMemberWord } from '../../../../utils/industryTerms';
 import { useOrg } from '../../../../contexts/OrgContext';
+import { useClock } from '../../../../hooks/useUse24h';
 
 export const COLUMN_DEFS = [
   { id: 'service', label: 'Service' },
@@ -42,6 +43,7 @@ const AmountCell = ({ a }) => {
 };
 
 const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, action, busy, suggestion, onSuggest, bp, onOpen, onAction, onNav, scrollMargin }) => {
+  const clock = useClock();
   const color = getBookingStatusColors(isNoShow(b) ? 'No Show' : toDbStatus(b.status)).bar;
   const edge = unread ? '#2D5A27' : color;
   const people = b.therapists || [];
@@ -63,7 +65,7 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
       }}
       style={{ scrollMarginTop: scrollMargin }} className={`group cursor-pointer ${bg}`}>
       <td className={`${cell} pl-2 pr-2 ${dim ? 'opacity-[.55]' : ''}`} style={{ boxShadow: `inset 3px 0 0 0 ${edge}` }}>
-        <div className="pl-2 text-[13px] font-medium tabular-nums whitespace-nowrap">{b.time ? to12h(b.time) : '—'}</div>
+        <div className="pl-2 text-[13px] font-medium tabular-nums whitespace-nowrap">{b.time ? clock(b.time) : '—'}</div>
         {mins != null && <div className="pl-2 text-[12px] text-[#8A8A90] tabular-nums">{mins} min</div>}
       </td>
       <td className={`${cell} pr-3 ${dim ? 'opacity-[.55]' : ''}`}>

@@ -6,8 +6,10 @@ import { formatMinutes, dayWorkingMinutes, DB_DOW_LABELS } from '../../../utils/
 import { SHADE_STYLES } from '../../../services/availabilityShading';
 import { useOrg } from '../../../contexts/OrgContext';
 import { useIndustry } from '../../../hooks/useIndustry';
+import { formatClockNow, formatClockRange } from '../../../utils/clockTime';
+import { readUse24h } from '../../../utils/clockPref';
 
-const short = (t) => String(t || '').slice(0, 5);
+const short = (t) => formatClockNow(String(t || '').slice(0, 5));
 
 const dayParts = (dateStr) => {
   const d = new Date(`${dateStr}T00:00:00Z`);
@@ -27,7 +29,7 @@ const HoursView = ({ rows }) => {
           <div key={r.dayOfWeek} className={`grid grid-cols-[56px_1fr_auto] gap-3 py-2.5 border-b border-border/60 text-sm items-baseline ${working ? '' : 'text-text-secondary'}`}>
             <span className="font-medium">{DB_DOW_LABELS[r.dayOfWeek].slice(0, 3)}</span>
             <span className="tabular-nums">
-              {working ? <>{short(r.startTime)} – {short(r.endTime)}{breaks.length > 0 && <span style={{ color: SHADE_STYLES.break.color }}> · {breaks.map((b) => `${(b.name || 'break').toLowerCase()} ${short(b.startTime)}–${short(b.endTime)}`).join(', ')}</span>}</> : 'Day off'}
+              {working ? <>{formatClockRange(String(r.startTime || '').slice(0, 5), String(r.endTime || '').slice(0, 5), readUse24h())}{breaks.length > 0 && <span style={{ color: SHADE_STYLES.break.color }}> · {breaks.map((b) => `${(b.name || 'break').toLowerCase()} ${short(b.startTime)}–${short(b.endTime)}`).join(', ')}</span>}</> : 'Day off'}
             </span>
             <span className="text-right text-text-secondary tabular-nums">{working ? formatMinutes(dayWorkingMinutes(r)) : ''}</span>
           </div>
@@ -72,7 +74,7 @@ const HoursSection = ({
               <div key={o.date} className="flex items-center gap-3 py-2.5 border-b border-border/60">
                 <div className="w-11 text-center"><b className="block text-base font-semibold leading-tight">{p.day}</b><span className="text-xs font-semibold tracking-wide text-text-secondary">{p.month}</span></div>
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-text-primary">{p.weekday} · {o.isDayOff ? 'Day off' : `${short(o.startTime)} – ${short(o.endTime)}`}</p>
+                  <p className="text-sm font-medium text-text-primary">{p.weekday} · {o.isDayOff ? 'Day off' : `${formatClockRange(String(o.startTime || '').slice(0, 5), String(o.endTime || '').slice(0, 5), readUse24h())}`}</p>
                   <p className="text-xs text-text-secondary">{o.isDayOff ? 'Instead of the usual hours' : `${formatMinutes(dayWorkingMinutes(o))} that day, instead of the usual hours`}</p>
                 </div>
               </div>

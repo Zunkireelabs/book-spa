@@ -1,14 +1,14 @@
-import { NEPAL_TZ } from '../../utils/nepalTime';
 import React from 'react';
 import { dayMoneyView } from '../../lib/dayMoney';
 import Icon from '../AppIcon';
-
-const clock = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: NEPAL_TZ }) : '');
+import { formatClockIso } from '../../utils/clockTime';
+import { useUse24h } from '../../hooks/useUse24h';
 
 // The payment rows of a day's reconciliation (ZNLY-234). Open day: methods, refunds, cash expected. Closed day: "At close", "After close", "Now".
 const SOURCES = [['product', 'Products', 'Package'], ['voucher', 'Voucher sales', 'Ticket'], ['membership', 'Membership deposits', 'Wallet'], ['package', 'Package sales', 'Gift']];
 
 const DayMoneyRows = ({ data, fmt, lab, val }) => {
+  const [use24h] = useUse24h();
   const v = dayMoneyView(data);
   // "of which" source lines: same row rhythm as every money line, no hairline of their own.
   const sourceLines = SOURCES.filter(([k]) => Number(data?.sources?.[k]) > 0).map(([k, label, icon]) => (
@@ -44,7 +44,7 @@ const DayMoneyRows = ({ data, fmt, lab, val }) => {
   const nothingAfter = v.after.amount === 0 && v.after.cash === 0;
   // One green band per panel, always on the cash figure the manager acts on: at close if nothing came in since, otherwise the drawer now.
   return (<>
-    {section('at-close', <>At close{v.closedAt ? ` (${clock(v.closedAt)})` : ''}</>)}
+    {section('at-close', <>At close{v.closedAt ? ` (${formatClockIso(v.closedAt, use24h)})` : ''}</>)}
     {methods(v.at)}
     <div className="border-t border-border mt-1" />
     {row('taken-at-close', 'Taken at close', fmt(v.at.taken), { strong: true })}

@@ -18,9 +18,9 @@ import PhoneField, { phoneFieldProblem, phoneFieldValue } from '../../../../comp
 import TimeBoxInput from '../../../../components/ui/TimeBoxInput';
 import { PanelShell, FormBody, Field, TextInput, SelectField, DateField, InlineError, CONTROL } from '../../../../components/ui/PanelFormKit';
 import { fetchWaitlist, addToWaitlist, updateWaitlistEntry, removeFromWaitlist, isOverallBranch } from '../../../../services/api';
-import { to12h } from '../../../../services/bookingTransformers';
 import { nepalNow } from '../../../../utils/customerDirectory';
 import { useIndustry } from '../../../../hooks/useIndustry';
+import { useClock } from '../../../../hooks/useUse24h';
 
 const SORT_OPTIONS = [
   { value: 'oldest', label: 'Oldest first' },
@@ -224,12 +224,13 @@ const ICON_BTN = 'w-[34px] h-9 flex items-center justify-center rounded-spa bord
 const PHONE_BTN = 'w-11 h-11 flex items-center justify-center rounded-spa border border-border text-text-secondary hover:bg-background flex-shrink-0';
 
 const WaitlistCard = ({ entry, therapistName, staffLabel, overall, canBook, phone, onBookIn, onEdit, onRemove }) => {
+  const clock = useClock();
   const [more, setMore] = useState(false);
   const withWho = entry.preferred_therapist_id && therapistName[entry.preferred_therapist_id];
   // Same three slots as the board: day · time · who. An empty slot reads "Any …" so the line never looks half-filled.
   const detail = [
     entry.preferred_date ? format(parseISO(entry.preferred_date), 'EEE d MMM') : 'Any day',
-    entry.preferred_time ? to12h(entry.preferred_time) : 'Any time',
+    entry.preferred_time ? clock(entry.preferred_time) : 'Any time',
     withWho ? `with ${withWho}` : `Any ${staffLabel.toLowerCase()}`,
   ].join(' · ');
   const added = formatDistanceToNow(new Date(entry.created_at), { addSuffix: true });

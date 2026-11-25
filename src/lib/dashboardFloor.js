@@ -1,4 +1,6 @@
 import { dayProgress } from './dayProgress';
+import { formatClockNow, formatClockRange } from '../utils/clockTime';
+import { readUse24h } from '../utils/clockPref';
 // Pure helpers for the dashboard's floor and pulse (V36c). Times are minutes since midnight, Nepal day.
 
 /** 90 -> '1h 30m', 45 -> '45m', 120 -> '2h'. */
@@ -12,17 +14,17 @@ export function fmtDuration(min) {
 
 /** 930 -> '3:30 pm'. */
 export function fmtClock(min) {
+  if (readUse24h()) return formatClockNow(`${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`);
   const h24 = Math.floor(min / 60) % 24;
   const m = min % 60;
   const h = h24 % 12 || 12;
   return `${h}${m ? `:${String(m).padStart(2, '0')}` : ''} ${h24 < 12 ? 'am' : 'pm'}`;
 }
 
-/** 245,360 -> '4:05–6 pm' (the am/pm shows once when both ends share it). */
+const minHm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+/** 245,360 -> '4:05–6:00am' (the am/pm shows once when both ends share it; same look as every other range). */
 export function fmtRange(from, to) {
-  const a = fmtClock(from);
-  const b = fmtClock(to);
-  return a.slice(-2) === b.slice(-2) ? `${a.slice(0, -3)}–${b}` : `${a}–${b}`;
+  return formatClockRange(minHm(from), minHm(to), readUse24h());
 }
 
 /** Gaps still ahead of `nowMin` (clipped to it) that are at least an hour. nowMin = null keeps every gap (Prep). */

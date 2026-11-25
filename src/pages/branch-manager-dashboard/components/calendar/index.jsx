@@ -18,6 +18,7 @@ import MonthGridView from './MonthGridView';
 import PrintReportModal from './PrintReportModal';
 import CalendarToolbar from './CalendarToolbar';
 import DragPreviewOverlay from './DragPreviewOverlay';
+import { useUse24h } from '../../../../hooks/useUse24h';
 import ReassignConfirmDialog from './ReassignConfirmDialog';
 import QuickCreatePanel from './QuickCreatePanel';
 import MoveBookingDialog from '../../../../components/ui/MoveBookingDialog';
@@ -93,12 +94,7 @@ const OperationalCalendar = ({ branchId }) => {
     writePref('hide_sensitive', next ? '1' : '0');
     return next;
   });
-  const [use24h, setUse24hState] = useState(() => readPref('use24h', null) === '1');
-  const setUse24h = (updater) => setUse24hState((prev) => {
-    const next = typeof updater === 'function' ? updater(prev) : updater;
-    writePref('use24h', next ? '1' : '0');
-    return next;
-  });
+  const [use24h, setUse24h] = useUse24h();
   const isPhoneView = useViewportWidth() <= PHONE_MAX;
   const [zoomSaved, setZoomScaleState] = useState(() => {
     const raw = parseFloat(readPref('zoom', null));

@@ -44,7 +44,7 @@ describe('roomStates', () => {
     expect(st.cm).toMatchObject({ state: 'few', remaining: 1, capacity: 3 });
     expect(st.hh).toMatchObject({ state: 'full', freeFrom: '14:00' });
     expect(statusText(st.cm)).toBe('1 of 3 places left');
-    expect(statusText(st.hh)).toBe('Full · free from 2:00 pm');
+    expect(statusText(st.hh)).toBe('Full · free from 2:00pm');
     expect(statusText(st.bkk)).toBe('Free');
   });
   it('a booking that ends exactly at the start, or starts exactly at the end, does not overlap', () => {

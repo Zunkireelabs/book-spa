@@ -1,6 +1,7 @@
 import React from 'react';
 import Icon from '../../../../components/AppIcon';
-import { formatTimeDisplay } from './calendarDates';
+import { formatClockRange } from '../../../../utils/clockTime';
+import { readUse24h } from '../../../../utils/clockPref';
 
 // Confirmation for a drag that changes a booking's column (reassign / consolidate) or reschedules a shared booking.
 const ReassignConfirmDialog = ({ pendingReassign, calendarData, staffLabel, locationLabel, onCancel, onConfirm }) => (
@@ -33,7 +34,7 @@ const ReassignConfirmDialog = ({ pendingReassign, calendarData, staffLabel, loca
       )}
       {pendingReassign.timeChanged && (
         <p className="font-body text-xs text-text-secondary mb-3">
-          {pendingReassign.timeOnly ? 'New time' : 'Time'}: {formatTimeDisplay(pendingReassign.newStartTime)} – {formatTimeDisplay(pendingReassign.newEndTime)}
+          {pendingReassign.timeOnly ? 'New time' : 'Time'}: {formatClockRange(pendingReassign.newStartTime, pendingReassign.newEndTime, readUse24h())}
           {pendingReassign.newDate !== pendingReassign.booking.date && (
             <span> on {pendingReassign.newDate}</span>
           )}

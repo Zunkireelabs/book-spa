@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import { fetchCustomerLog } from '../../../services/api';
+import { formatStampNow } from '../../../utils/clockTime';
 
 const FIELD_LABELS = {
   full_name: 'Name',
@@ -37,9 +38,7 @@ function formatValue(field, value) {
 }
 
 function formatDateTime(iso) {
-  return new Date(iso).toLocaleString('en-GB', {
-    day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit',
-  });
+  return formatStampNow(iso);
 }
 
 function EntryBody({ entry }) {

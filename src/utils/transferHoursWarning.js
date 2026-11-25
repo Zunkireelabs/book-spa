@@ -3,15 +3,12 @@
 // branch (ZNLY-113 A+), so this only tells the manager what will actually be bookable. Pure; the form passes in the data.
 import { dbDowOfDate, timeToMinutes } from './staffDay';
 import { wordBranch } from './industryTerms';
+import { formatClockRange } from './clockTime';
 
-const h12 = (min) => { const h = Math.floor(min / 60) % 24; const m = min % 60; return `${h % 12 === 0 ? 12 : h % 12}${m ? `:${String(m).padStart(2, '0')}` : ''}`; };
-const ap = (min) => (Math.floor(min / 60) % 24 >= 12 ? 'pm' : 'am');
-const t12 = (min) => `${h12(min)} ${ap(min)}`;
 const t24 = (min) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
-/** "6:55 – 9:55 pm" / "9 am – 6 pm" ("18:55 – 21:55" when use24h). */
+/** "6:55–9:55pm" / "9:00am–6:00pm" ("18:55–21:55" when use24h); an end of 1440 reads as midnight. */
 export function spanText(a, b, use24h = false) {
-  if (use24h) return `${t24(a)} – ${t24(b === 1440 ? 1439 : b)}`;
-  return ap(a) === ap(b) && !(b === 1440) ? `${h12(a)} – ${h12(b)} ${ap(b)}` : `${t12(a)} – ${t12(b === 1440 ? 0 : b)}`;
+  return formatClockRange(t24(a), t24(b === 1440 ? (use24h ? 1439 : 0) : b), use24h);
 }
 
 const pad = (n) => String(n).padStart(2, '0');

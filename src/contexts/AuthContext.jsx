@@ -7,6 +7,7 @@ import { setRestrictedReads } from '../lib/restrictedReads';
 import { invalidateAuthenticatedUser } from '../lib/authProfileCache';
 import { clearCalendarStatic } from '../lib/calendarStaticCache';
 import { isRestricted } from '../services/dataMasking';
+import { setClockProfile } from '../utils/clockPref';
 
 // Ceiling on how long the profile fetch may run before we give up and treat it
 // as "service unavailable" rather than leaving the app on a spinner forever.
@@ -161,6 +162,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  setClockProfile(profile);
   // True once supabase has reported the stored session (INITIAL_SESSION), so "no user yet" can be told apart from "no session".
   const [sessionResolved, setSessionResolved] = useState(false);
   // True when we have an authenticated session but the profile could not be

@@ -46,7 +46,8 @@ import TransferManagementModal from '../../components/ui/TransferManagementModal
 import TransferPill from '../../components/ui/TransferPill';
 import { describeTransfer, transferState } from '../../utils/transferText';
 import { toKathmanduParts } from '../branch-manager-dashboard/components/calendar/calendarDates';
-import { formatClockTime } from '../branch-manager-dashboard/components/calendar/timeFormat';
+import { formatClockTime } from '../../utils/clockTime';
+import { useUse24h } from '../../hooks/useUse24h';
 import { Problem, Loading, Section, EditBar } from './sections/ui';
 
 const EMPTY_FORM = { name: '', gender: 'Male', positions: [], specialties: '', isServiceStaff: true, photoUrl: '', bio: '', experienceYears: '', rating: '', phone: '', countryCode: '+977', address: '', city: '', email: '', pronouns: '' };
@@ -286,7 +287,7 @@ const StaffDetailPage = () => {
   // Transfers: the open one drives the banner and Today's slot; the panel is the same docked panel as the calendar's.
   const [transfers, setTransfers] = useState([]);
   const [transferPanel, setTransferPanel] = useState(false);
-  const use24h = (() => { try { return localStorage.getItem(`bookspa_calendar_use24h_${profile?.org_id}_${profile?.id}`) === '1'; } catch { return false; } })();
+  const [use24h] = useUse24h();
   const loadTransfers = useCallback(async () => {
     if (!isEdit) return;
     const r = await profileApi.fetchTherapistTransfers({ therapistId: staffId });

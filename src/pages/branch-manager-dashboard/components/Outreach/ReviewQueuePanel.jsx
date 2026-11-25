@@ -8,10 +8,11 @@ import {
   bulkApproveOutreach,
 } from '../../../../services/api';
 import { htmlToText } from '../../../../utils/htmlToText';
+import { formatStampNow } from '../../../../utils/clockTime';
 
 function formatDateTime(d) {
   if (!d) return '—';
-  return new Date(d).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return formatStampNow(d);
 }
 
 // Edits made with "Done editing" are kept client-side (the API only takes edits as part of an approval:

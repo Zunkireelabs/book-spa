@@ -1,14 +1,14 @@
 import React from 'react';
 import { paymentStatusLabel } from '../../../utils/paymentStatusLabel';
 import { shortDate } from '../../../utils/customerDirectory';
-import { format12h } from '../../../components/ui/PanelFormKit';
+import { formatClockNow } from '../../../utils/clockTime';
 
 export const npr = (n) => `NPR ${Number(n || 0).toLocaleString('en-IN')}`;
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const dayDate = (iso) => { const d = new Date(`${iso}T00:00:00`); return `${DOW[d.getDay()]} ${shortDate(iso)}`; };
 export const longDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 // One 12-hour clock for the whole page: the same formatter the booking form's time field uses ("5:50pm").
-export const clock = format12h;
+export const clock = formatClockNow;
 
 export const STATUS_TONE = { Completed: 'bg-success/10 text-success', Confirmed: 'bg-primary/10 text-primary', Pending: 'bg-warning/10 text-warning', 'In-Progress': 'bg-primary/10 text-primary', Cancelled: 'bg-error/10 text-error', 'No Show': 'bg-background text-text-secondary' };
 const TONE = { success: 'text-success', warning: 'text-warning', neutral: 'text-text-secondary' };

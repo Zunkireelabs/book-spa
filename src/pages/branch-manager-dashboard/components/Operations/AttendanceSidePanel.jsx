@@ -59,9 +59,9 @@ export const lineOf = (g, fmt) => {
     }
   });
   Object.values(byPunch).forEach(({ check_in: i, check_out: o, old }) => {
-    if (old && i && i.old_value == null && i.new_value != null) { parts.push(`Imported check-in ${tm(i.new_value)}${o && o.new_value ? ` – ${tm(o.new_value)}` : ''} (from the old record)`); return; }
-    if (i && i.new_value == null) { parts.push(`Check-in ${tm(i.old_value)}${o && o.old_value ? ` – ${tm(o.old_value)}` : ''} removed`); return; }
-    if (i && i.old_value == null) { parts.push(`Check-in ${tm(i.new_value)}${o && o.new_value ? ` – ${tm(o.new_value)}` : ''}`); return; }
+    if (old && i && i.old_value == null && i.new_value != null) { parts.push(`Imported check-in ${tm(i.new_value)}${o && o.new_value ? `–${tm(o.new_value)}` : ''} (from the old record)`); return; }
+    if (i && i.new_value == null) { parts.push(`Check-in ${tm(i.old_value)}${o && o.old_value ? `–${tm(o.old_value)}` : ''} removed`); return; }
+    if (i && i.old_value == null) { parts.push(`Check-in ${tm(i.new_value)}${o && o.new_value ? `–${tm(o.new_value)}` : ''}`); return; }
     const bits = [];
     if (o) bits.push(o.old_value == null ? `check-out ${tm(o.new_value)}` : o.new_value == null ? 'check-out removed' : `check-out ${arrow(tm(o.old_value), tm(o.new_value))}`);
     if (i) bits.push(`check-in ${arrow(tm(i.old_value), tm(i.new_value))}`);
@@ -75,7 +75,7 @@ export const lineOf = (g, fmt) => {
  * `person`: { therapistId, name, status, checkIn, checkOut, offStart, offEnd, notes, lateMin }; `shift`: { start, end } | null.
  * `onSave({ next, reason })` resolves { error } — the page does the write (save_attendance) and the leave/booking check.
  */
-const AttendanceSidePanel = ({ open, onClose, person, date, today, shift, initialMode, initialAdd = false, focus, forceReason, onSave, staffLabel = 'Therapist', canEdit = true, fmt = (t) => t, punches = [], branchId = null, branchNameById = {}, punchOps = null }) => {
+const AttendanceSidePanel = ({ open, onClose, person, date, today, shift, initialMode, initialAdd = false, focus, forceReason, onSave, staffLabel = 'Therapist', canEdit = true, fmt = (t) => t, fmtRange = (a, b) => `${fmt(a)}–${fmt(b)}`, punches = [], branchId = null, branchNameById = {}, punchOps = null }) => {
   const existing = useMemo(() => (person && person.status ? {
     status: person.status || '', offStart: person.offStart || null, offEnd: person.offEnd || null, notes: person.notes || null,
   } : null), [person]);
@@ -189,7 +189,7 @@ const AttendanceSidePanel = ({ open, onClose, person, date, today, shift, initia
     if (err.code === 'PUNCH_OVERLAP') {
       const a = toMin(inHM); const z = outHM ? toMin(outHM) : Infinity;
       const o = punches.find((q) => q.id !== skipId && a < (q.checkOut ? toMin(q.checkOut) : Infinity) && toMin(q.checkIn) < z);
-      return o ? `Overlaps ${fmt(o.checkIn)} – ${o.checkOut ? fmt(o.checkOut) : 'still in'}` : 'That time overlaps another check-in.';
+      return o ? `Overlaps ${o.checkOut ? fmtRange(o.checkIn, o.checkOut) : `${fmt(o.checkIn)} – still in`}` : 'That time overlaps another check-in.';
     }
     if (err.code === 'PUNCH_OPEN_EXISTS') {
       const o = punches.find((q) => !q.checkOut && q.id !== skipId);
@@ -250,7 +250,7 @@ const AttendanceSidePanel = ({ open, onClose, person, date, today, shift, initia
 
   if (!person) return null;
   const groups = groupHistory(history || []);
-  const sub = `${formatShortDate(date)} · ${shift ? `shift ${fmt(shift.start)} – ${fmt(shift.end)}` : 'no shift this day'}`;
+  const sub = `${formatShortDate(date)} · ${shift ? `shift ${fmtRange(shift.start, shift.end)}` : 'no shift this day'}`;
 
   return (
     <SidePanel
@@ -316,7 +316,7 @@ const AttendanceSidePanel = ({ open, onClose, person, date, today, shift, initia
                 </li>
               ) : delId === q.id ? (
                 <li key={q.id} className="rounded-spa border border-border p-2.5 space-y-2" data-testid="delete-punch">
-                  <p className="text-[12.5px] text-text-secondary">Delete <b className="font-medium text-text-primary">{bn(q.branchId)}</b> · {fmt(q.checkIn)} – {q.checkOut ? fmt(q.checkOut) : 'still in'}?</p>
+                  <p className="text-[12.5px] text-text-secondary">Delete <b className="font-medium text-text-primary">{bn(q.branchId)}</b> · {q.checkOut ? fmtRange(q.checkIn, q.checkOut) : `${fmt(q.checkIn)} – still in`}?</p>
                   {punchReason(true)}
                   {punchErr}
                   <div className="flex items-center gap-2 text-[12px]">
@@ -326,7 +326,7 @@ const AttendanceSidePanel = ({ open, onClose, person, date, today, shift, initia
                 </li>
               ) : (
                 <li key={q.id} className="flex items-center gap-2 text-[12.5px] text-text-secondary" data-punch-row>
-                  <span className="flex-1 min-w-0 truncate"><b className="font-medium text-text-primary">{bn(q.branchId)}</b> · {fmt(q.checkIn)} – {q.checkOut ? fmt(q.checkOut) : 'still in'}</span>
+                  <span className="flex-1 min-w-0 truncate"><b className="font-medium text-text-primary">{bn(q.branchId)}</b> · {q.checkOut ? fmtRange(q.checkIn, q.checkOut) : `${fmt(q.checkIn)} – still in`}</span>
                   {canEdit && <button type="button" disabled={boxOpen} onClick={() => startEdit(q)} className="text-primary hover:underline disabled:opacity-40">Edit</button>}
                   {canEdit && <button type="button" disabled={boxOpen} onClick={() => startDelete(q)} className="text-error hover:underline disabled:opacity-40">Delete</button>}
                 </li>

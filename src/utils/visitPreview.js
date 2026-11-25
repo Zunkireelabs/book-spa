@@ -1,17 +1,10 @@
+import { formatClockNow } from './clockTime';
 // ZNLY-402 piece 5: turn a visit_* dry-run answer ({ rows: [{booking_id, service, start, staff, verdict, reason}] }) into display rows.
 // `lines` = { [booking_id]: { name, price, start, staff } } from the "This booking" block (the dry run does not carry prices).
-const time12 = (t) => {
-  if (!t) return '';
-  const m = String(t).match(/(\d{1,2}):(\d{2})/);
-  if (!m) return String(t);
-  let h = Number(m[1]); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12;
-  return `${h}:${m[2]}${ap}`;
-};
-export { time12 };
 
 const display = (r, lines, started) => {
   const l = lines?.[r.booking_id] || {};
-  const start = time12(r.start || l.start);
+  const start = formatClockNow(r.start || l.start);
   const staff = r.staff || l.staff || '';
   const sub = started ? ['Started', staff].filter(Boolean).join(' · ') : [start, staff].filter(Boolean).join(' · ');
   return { id: r.booking_id, name: r.service || l.name || 'Service', price: l.price ?? null, sub, reason: r.reason || '' };

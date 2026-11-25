@@ -10,7 +10,7 @@ import Icon from '../../../../components/AppIcon';
 import CalendarBookingCard from './CalendarBookingCard';
 import { BookingHoverLayer, useHoverCardBookingId } from './BookingHoverCard';
 import { toKathmanduParts, addDays } from './calendarDates';
-import { formatClockTime, formatHourLabel } from './timeFormat';
+import { formatClockTime, formatHourLabel, formatClockRange } from '../../../../utils/clockTime';
 import SharedBookingLines from './SharedBookingLines';
 import { STATUS_DOT_COLOR, isClosedByBlocks } from '../../../../utils/todayStatusLine';
 import OverflowBadge from './OverflowBadge';
@@ -976,7 +976,7 @@ const CalendarGrid = ({
   };
   const formatBackLabel = (ymd, hm) => {
     const [h, m] = (hm || '00:00').split(':').map(Number);
-    const t = `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`;
+    const t = formatClockTime(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, use24h);
     if (ymd === todayStr) return t;
     return `${new Date(`${ymd}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}, ${t}`;
   };
@@ -1488,7 +1488,7 @@ const CalendarGrid = ({
     pill.style.display = 'block';
     pill.style.top = `${top - 9}px`;
     pill.style.left = `${left + 3}px`;
-    pill.textContent = `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, '0')}${hour < 12 ? 'am' : 'pm'}`;
+    pill.textContent = formatClockTime(`${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`, use24h);
   };
 
   const renderHoverTime = () => (
@@ -2099,7 +2099,7 @@ const CalendarGrid = ({
           {(overflowSheet || []).map((b) => (
             <button key={`${b.id}-${b._comboIndex ?? ''}`} type="button" className="w-full text-left py-3 px-1 min-h-[56px]"
               onClick={() => { setOverflowSheet(null); onBookingClick?.(b); }}>
-              <div className="font-data text-[12px] text-text-secondary">{formatClockTime(b.startTime, use24h)} – {formatClockTime(b.endTime, use24h)}</div>
+              <div className="font-data text-[12px] text-text-secondary">{formatClockRange(b.startTime, b.endTime, use24h)}</div>
               <div className="font-body text-[14px] font-semibold text-text-primary truncate">{hideSensitive ? '•••••' : coupleName(b.customerName || 'Guest', b.companionName)}</div>
               <div className="font-body text-[12px] text-text-secondary truncate">{b.serviceName}</div>
             </button>
