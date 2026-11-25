@@ -80,7 +80,7 @@ const StaffPicker = ({
     const today = extra.bookings != null && fit ? (extra.bookings ? `${extra.bookings} ${slot?.date && slot.date !== nepalNow().today ? `on ${dayTag(slot.date)}` : 'today'}` : null) : null;
     const sub = holdObj ? holdObj.line
       : extra.off ? offReasonFor(extra.off, slot?.date, nepalNow().today)
-        : extra.busy ? `Busy ${pillRange(extra.busy.start, extra.busy.end)} · free after ${clockShort(extra.busy.end)}`
+        : extra.busy ? `Busy ${pillRange(extra.busy.start, extra.busy.end)} · free after ${clockAmPm(extra.busy.end)}`
           : [gender, fit ? today : (p.specialties?.length ? p.specialties.join(', ') : null)].filter(Boolean).join(' · ');
     const pill = holdObj ? { text: holdObj.pill, cls: 'bg-indigo-50 text-indigo-600' }
       : extra.off ? { text: 'Off', cls: 'bg-background text-text-secondary' }

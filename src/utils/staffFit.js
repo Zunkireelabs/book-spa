@@ -1,4 +1,5 @@
 import { readUse24h } from './clockPref';
+import { formatClockRange } from './clockTime';
 // Time-aware staff list for the shared Staff picker (ZNLY-300). Pure: callers pass already-fetched data.
 // Minutes are Nepal-local minutes since midnight for ONE day. "Assigned" never appears here: it only ever means "on this booking".
 const ACTIVE = (b) => !['cancelled', 'no show', 'completed'].includes(String(b.status || '').toLowerCase());
@@ -9,33 +10,43 @@ export const clockShort = (m) => { if (readUse24h()) return hhmm(m); const h = M
 const hhmm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 const ap = (m) => (readUse24h() ? '' : Math.floor(m / 60) % 24 >= 12 ? 'pm' : 'am');
 const trim0 = (s) => s.replace(/:00$/, '');
-/** "1–2:30pm", "11:30am–12:15pm" */
-export function rangeLabel(a, b) {
-  if (readUse24h()) return `${hhmm(a)}–${hhmm(b)}`;
-  const sa = trim0(clockShort(a)); const sb = trim0(clockShort(b));
-  return ap(a) === ap(b) ? `${sa}–${sb}${ap(b)}` : `${sa}${ap(a)}–${sb}${ap(b)}`;
-}
-/** Mockup heading style: "2:00–2:30pm" and "2:00pm" (minutes always shown). */
-export const rangeClock = (a, b) => (ap(a) === ap(b) ? `${clockShort(a)}–${clockShort(b)}${ap(b)}` : `${clockShort(a)}${ap(a)}–${clockShort(b)}${ap(b)}`);
+/** "11:00am–1:00pm", "2:00–2:30pm" (24h: "11:00–13:00"): the ONE range look, shared with every other staff screen. */
+export const rangeLabel = (a, b) => formatClockRange(hhmm(a), hhmm(b), readUse24h());
+export const rangeClock = rangeLabel;
 export const clockAmPm = (m) => `${clockShort(m)}${ap(m)}`;
-/** Pill text: "1–2:30" (no am/pm, as in the mockup). */
-export const pillRange = (a, b) => `${trim0(clockShort(a))}–${trim0(clockShort(b))}`;
+export const pillRange = rangeLabel; // Busy / Free lines use the same range look
 
-/** Raw calendar bookings (snake_case) of `date` -> { [staffId]: [{ start, end }] }, active only, `excludeBookingId` left out. */
-export function staffDayRanges(bookings, { date, excludeBookingId = null, defaultMinutes = 60 } = {}) {
+/** Raw calendar bookings (snake_case) of `date` (no date = all given) -> { [staffId]: [{ start, end, customer, service }] }, active only, `excludeBookingId` / `excludeIds` left out. */
+export function staffDayRanges(bookings, { date, excludeBookingId = null, excludeIds = null, defaultMinutes = 60 } = {}) {
   const out = {};
   for (const b of bookings || []) {
-    if (!ACTIVE(b) || b.date !== date || (excludeBookingId && b.id === excludeBookingId)) continue;
+    if (!ACTIVE(b) || (date && b.date !== date) || (excludeBookingId && b.id === excludeBookingId) || excludeIds?.has?.(b.id)) continue;
     const start = mins(b.start_time);
     if (start == null) continue;
     const end = mins(b.end_time) ?? start + defaultMinutes;
     const ids = b.booking_therapists?.length ? b.booking_therapists.map((bt) => bt.therapist_id) : b.therapist_id ? [b.therapist_id] : [];
-    for (const id of ids) (out[id] ||= []).push({ start, end });
+    const customer = b.customer_name || b.walk_in_label || '';
+    const service = b.service?.name || b.service_name_snapshot || '';
+    for (const id of ids) (out[id] ||= []).push({ start, end, customer, service });
   }
   return out;
 }
 
 const overlaps = (r, s, e) => s < r.end && e > r.start;
+
+/** ZNLY-404: the ONE wording for "this person already has a booking then" when the org allows overlaps (nothing is blocked; it only warns). */
+export const overlapLine = (c) => `⚠ Overlaps ${[c.customer, formatClockRange(hhmm(c.start), hhmm(c.end), readUse24h()), c.service && `(${c.service})`].filter(Boolean).join(' ')}. You can still book it.`;
+
+/** The first booking (earliest start) of `bookingsOfDay` that `person` (id or {id}) has inside [start, end) minutes, or null. Touching ends (end == start) do not clash. */
+export function overlapNote(person, start, end, bookingsOfDay, excludeIds = null) {
+  const id = person?.id ?? person;
+  const hit = (staffDayRanges(bookingsOfDay, { excludeIds: excludeIds ? new Set(excludeIds) : null })[id] || []).filter((r) => overlaps(r, start, end)).sort((a, b) => a.start - b.start)[0];
+  return hit ? { customer: hit.customer, service: hit.service, start: hit.start, end: hit.end } : null;
+}
+
+/** Rows of the booking being made ([{ staffId, start, end, service }] minutes) as day bookings, so a person picked twice in ONE booking also warns. */
+export const ownRowBookings = (rows, date = null, customer = 'this booking') => (rows || []).filter((r) => r.staffId && Number.isFinite(r.start) && Number.isFinite(r.end))
+  .map((r, i) => ({ id: `own-${i}`, date, status: 'Confirmed', therapist_id: r.staffId, start_time: hhmm(r.start), end_time: hhmm(r.end), customer_name: customer, service_name_snapshot: r.service || '' }));
 
 /**
  * Group people for a slot [slotStart, slotEnd).
@@ -108,7 +119,8 @@ export function pickedRowStatus(person, { slot = null, rangesById = {}, offById 
   const hit = (rangesById[person.id] || []).filter((r) => overlaps(r, s, e));
   if (hit.length) {
     const range = pillRange(Math.min(...hit.map((r) => r.start)), Math.max(...hit.map((r) => r.end)));
-    return { name, statusLine: `Busy ${range}`, pill: 'busy', problem: busyOk ? '' : `${name} is busy ${range}` };
+    const first = [...hit].sort((a, b) => a.start - b.start)[0];
+    return { name, statusLine: `Busy ${range}`, pill: 'busy', problem: busyOk ? '' : `${name} is busy ${range}`, note: busyOk ? overlapLine(first) : '' };
   }
   return { name, statusLine: `Free ${rangeLabel(s, e)}`, pill: 'free', problem: '' };
 }
@@ -131,7 +143,7 @@ export function pickedRowStatusMulti(people, opts = {}) {
   const problem = all.find((x) => x.problem)?.problem || '';
   const worst = all.find((x) => x.pill !== 'free' && x.statusLine) || all.find((x) => x.statusLine) || all[0];
   const pill = all.some((x) => x.pill === 'busy') ? 'busy' : all.every((x) => x.pill === 'free') ? 'free' : null;
-  return { names: all.map((x) => x.name), statusLine: worst.statusLine, pill, problem };
+  return { names: all.map((x) => x.name), statusLine: worst.statusLine, pill, problem, note: all.find((x) => x.note)?.note || '' };
 }
 
 /** { [id]: 'Off today' | 'On leave' } from the calendar's attendance map (id -> 'Absent' | 'Leave' | ...) and shift rows for `date`. */

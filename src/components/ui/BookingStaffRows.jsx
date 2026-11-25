@@ -54,6 +54,7 @@ const BookingStaffRows = ({
               statusLine={can ? info.statusLine : ''}
               pill={can ? info.pill : null}
               problem={can ? info.problem : ''}
+              note={can ? info.note : ''}
               assignedIds={r.staffIds}
               assignedNames={r.staff}
               disabled={!can}

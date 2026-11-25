@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { staffPickIncomplete, arrangeByTime, staffDayRanges, rangeLabel, pillRange, offStaffReasons, offDayLabel, offReasonFor, staffHeldByOthers, pickedRowStatus, pickedRowStatusMulti, clockToMin, pickProblems, fillFreeStaff, undoFill } from './staffFit';
+import { staffPickIncomplete, arrangeByTime, staffDayRanges, rangeLabel, pillRange, offStaffReasons, offDayLabel, offReasonFor, staffHeldByOthers, pickedRowStatus, pickedRowStatusMulti, clockToMin, pickProblems, fillFreeStaff, undoFill, overlapNote, overlapLine, ownRowBookings } from './staffFit';
 
 const P = (id, name) => ({ id, name });
 const people = [P('a', 'Asha'), P('b', 'Bishnu'), P('c', 'Chhori'), P('d', 'Dil')];
@@ -14,7 +14,7 @@ describe('staffDayRanges', () => {
       bk('4', 'c', '09:00:00', '10:00:00', { therapist_id: null, booking_therapists: [{ therapist_id: 'c' }, { therapist_id: 'd' }] }),
       { ...bk('5', 'a', '13:00:00', '14:00:00'), date: '2026-11-21' },
     ], { date: '2026-11-20', excludeBookingId: 'self' });
-    expect(r.a).toEqual([{ start: 780, end: 840 }]);
+    expect(r.a).toEqual([{ start: 780, end: 840, customer: '', service: '' }]);
     expect(r.b).toBeUndefined();
     expect(Object.keys(r).sort()).toEqual(['a', 'c', 'd']);
   });
@@ -59,9 +59,9 @@ describe('arrangeByTime', () => {
 
 describe('labels and off reasons', () => {
   it('formats ranges', () => {
-    expect(rangeLabel(13 * 60 + 15, 14 * 60)).toBe('1:15–2pm');
+    expect(rangeLabel(13 * 60 + 15, 14 * 60)).toBe('1:15–2:00pm');
     expect(rangeLabel(11 * 60 + 30, 12 * 60 + 15)).toBe('11:30am–12:15pm');
-    expect(pillRange(13 * 60, 14 * 60 + 30)).toBe('1–2:30');
+    expect(pillRange(13 * 60, 14 * 60 + 30)).toBe('1:00–2:30pm');
   });
   it('offStaffReasons reads attendance and roster day-off', () => {
     const r = offStaffReasons(people, { attendanceMap: { a: 'Leave', b: 'Absent' }, shiftsByTherapist: { c: { d1: { works: false, source: 'weekly' } }, d: { d1: { works: false, source: 'none' } } }, date: 'd1' });
@@ -192,7 +192,7 @@ describe('ZNLY-310 pickedRowStatus', () => {
   const slot = { start: 840, end: 900 }; // 2:00-3:00pm
   const T = '2026-11-22';
   it('free', () => {
-    expect(pickedRowStatus(k, { slot, date: T, today: T })).toEqual({ name: 'Kebisha S.', statusLine: 'Free 2–3pm', pill: 'free', problem: '' });
+    expect(pickedRowStatus(k, { slot, date: T, today: T })).toEqual({ name: 'Kebisha S.', statusLine: 'Free 2:00–3:00pm', pill: 'free', problem: '' });
   });
   it('busy: problem unless busyOk', () => {
     const rangesById = { k: [{ start: 810, end: 855 }] };
@@ -256,5 +256,37 @@ describe('allowOverlap (ZNLY-389)', () => {
   it('a busy pick has no problem text when busyOk', () => {
     const r = pickedRowStatus({ id: 's1', name: 'Sami' }, { slot: { start: 600, end: 660 }, rangesById, busyOk: true });
     expect(r.pill).toBe('busy'); expect(r.problem).toBe('');
+  });
+});
+
+describe('overlapNote (ZNLY-404)', () => {
+  const day = [
+    bk('1', 'a', '11:15:00', '11:45:00', { customer_name: 'Anisha Koirala', service: { name: 'Brows' } }),
+    bk('2', 'a', '13:00:00', '14:00:00', { customer_name: 'Ram', service: { name: 'Lash' } }),
+    bk('3', 'b', '11:15:00', '11:45:00', { customer_name: 'Sita' }),
+  ];
+  const at = (h, m = 0) => h * 60 + m;
+  it.each([
+    ['none: other person', 'c', at(11, 15), at(11, 45), [], null],
+    ['none: free slot', 'a', at(12), at(12, 30), [], null],
+    ['one clash, labelled', 'a', at(11, 30), at(12), [], { customer: 'Anisha Koirala', service: 'Brows', start: at(11, 15), end: at(11, 45) }],
+    ['excluded self', 'a', at(11, 30), at(12), ['1'], null],
+    ['touching: end == start is no clash', 'a', at(11, 45), at(12, 30), [], null],
+    ['touching: start == end is no clash', 'a', at(10, 30), at(11, 15), [], null],
+    ['first of two clashes (earliest)', 'a', at(11, 30), at(13, 30), [], { customer: 'Anisha Koirala', service: 'Brows', start: at(11, 15), end: at(11, 45) }],
+  ])('%s', (_n, who, s, e, ex, want) => { expect(overlapNote(who, s, e, day, ex)).toEqual(want); });
+  it('own-row clash: two rows of the same booking on one person', () => {
+    const own = ownRowBookings([{ staffId: 'a', start: at(15), end: at(16), service: 'Brows' }], null);
+    expect(overlapNote('a', at(15, 30), at(16, 30), [...day, ...own])).toEqual({ customer: 'this booking', service: 'Brows', start: at(15), end: at(16) });
+  });
+  it('one wording, 12h and the clock follows the pref', () => {
+    expect(overlapLine({ customer: 'Anisha Koirala', service: 'Brows', start: at(11, 15), end: at(11, 45) })).toBe('⚠ Overlaps Anisha Koirala 11:15–11:45am (Brows). You can still book it.');
+  });
+  it('pickedRowStatus: note only when overlap is allowed', () => {
+    const rangesById = { a: [{ start: at(11, 15), end: at(11, 45), customer: 'Anisha Koirala', service: 'Brows' }] };
+    const o = { slot: { start: at(11, 30), end: at(12) }, rangesById };
+    expect(pickedRowStatus({ id: 'a', name: 'Asha' }, { ...o, busyOk: true }).note).toMatch(/^⚠ Overlaps Anisha Koirala/);
+    expect(pickedRowStatus({ id: 'a', name: 'Asha' }, { ...o, busyOk: false }).note).toBe('');
+    expect(pickedRowStatus({ id: 'a', name: 'Asha' }, { ...o, busyOk: false }).problem).toMatch(/is busy/);
   });
 });

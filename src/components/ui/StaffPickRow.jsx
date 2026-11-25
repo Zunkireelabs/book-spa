@@ -10,7 +10,7 @@ const initials = (n) => String(n || '?').trim().split(/\s+/).slice(0, 2).map((w)
 // ZNLY-318 extensions (every user gets them): `people` + `max` for a couple (two overlapping avatars, "A, B", amber "1 of 2 · pick one more"),
 // `assignedIds` / `assignedNames` (the saved assignment: ASSIGNED tag when the pick equals it, "Was <name>" hint when it differs),
 // `onOpenPhone` (phone: the caller shows the list itself, e.g. in place inside its own sheet, instead of this row's own bottom sheet).
-const StaffPickRow = ({ id = null, name = '', people = null, max = 1, statusLine: statusLineProp = '', pill: pillProp = null, problem = '', assignedIds = [], assignedNames = [], emptyLabel = 'Pick staff', title = 'Pick staff', renderPicker, onOpenPhone = null, disabled = false }) => {
+const StaffPickRow = ({ id = null, name = '', people = null, max = 1, statusLine: statusLineProp = '', pill: pillProp = null, problem = '', note = '', assignedIds = [], assignedNames = [], emptyLabel = 'Pick staff', title = 'Pick staff', renderPicker, onOpenPhone = null, disabled = false }) => {
   const picks = people || (name ? [{ id, name }] : []);
   const multi = max > 1;
   const partial = multi && Number.isFinite(max) && picks.length > 0 && picks.length < max;
@@ -28,7 +28,12 @@ const StaffPickRow = ({ id = null, name = '', people = null, max = 1, statusLine
   return (
     <PickShell tone={tone} title={title} renderPicker={renderPicker} onOpenPhone={onOpenPhone} disabled={disabled}
       sheetFooter={multi ? (close) => <button type="button" onClick={close} className="w-full min-h-[44px] rounded-spa bg-primary text-white text-sm font-semibold">Done</button> : undefined}
-      belowRow={(open) => (wasHint && !open ? <p className="mt-1.5 px-0.5 text-xs text-text-secondary">{wasHint}</p> : null)}>
+      belowRow={(open) => (open ? null : (
+        <>
+          {wasHint && <p className="mt-1.5 px-0.5 text-xs text-text-secondary">{wasHint}</p>}
+          {note && !problem && <p data-overlap-note className="mt-1.5 px-0.5 text-xs text-amber-800">{note}</p>}
+        </>
+      ))}>
       {empty ? (
         <span className="flex-1 text-sm text-text-secondary">＋ {emptyLabel}</span>
       ) : (

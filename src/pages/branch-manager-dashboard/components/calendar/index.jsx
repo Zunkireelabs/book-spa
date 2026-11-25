@@ -585,6 +585,7 @@ const OperationalCalendar = ({ branchId }) => {
           date={visitMove.date}
           startTime={visitMove.startTime}
           lines={visitMove.lines}
+          dayBookings={calendarData?.bookings || []}
           canOverride={['manager', 'admin'].includes(profile?.role)}
           onClose={() => setVisitMove(null)}
           onDone={() => { setVisitMove(null); handleRebookCancel(); showToast('Booking moved.'); refreshLight(refreshCalendar); }}

@@ -29,7 +29,7 @@ describe('StaffPicker (ZNLY-303 look)', () => {
     expect(screen.getByText('Free 2:00–2:30pm')).toBeTruthy();
     expect(screen.getByText('Busy at 2:00pm')).toBeTruthy();
     expect(screen.getByText('Off today', { selector: 'p' })).toBeTruthy();
-    expect(screen.getByText('Busy 1:30–2:15 · free after 2:15')).toBeTruthy();
+    expect(screen.getByText('Busy 1:30–2:15pm · free after 2:15pm')).toBeTruthy();
     expect(screen.getByText('Busy', { selector: 'span.rounded-full' })).toBeTruthy();
     expect(screen.getByText('Female', { exact: false })).toBeTruthy();
     expect(screen.getByRole('radio', { name: /Dina S/ }).disabled).toBe(true);

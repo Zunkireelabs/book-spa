@@ -31,7 +31,7 @@ import { ExistingCustomerTag, EarlierBalanceNotice } from '../../../../component
 import { nepalNow } from '../../../../utils/customerDirectory';
 import { useDayAvailability } from '../../../../hooks/useDayAvailability';
 import StaffPickRow from '../../../../components/ui/StaffPickRow';
-import { staffPickIncomplete, staffDayRanges, arrangeByTime, staffHeldByOthers, pickProblems, fillFreeStaff, undoFill, rangeLabel, rangeClock, pillRange, clockShort, clockAmPm, pickedRowStatus, pickedRowStatusMulti, clockToMin } from '../../../../utils/staffFit';
+import { staffPickIncomplete, staffDayRanges, arrangeByTime, staffHeldByOthers, pickProblems, fillFreeStaff, undoFill, rangeLabel, rangeClock, pillRange, clockShort, clockAmPm, overlapNote, overlapLine, ownRowBookings, pickedRowStatus, pickedRowStatusMulti, clockToMin } from '../../../../utils/staffFit';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { shouldShowFillFree } from '../../../../utils/serviceCatalog';
 import { fieldForErrorCode } from '../../../../utils/quickCreateErrorField';
@@ -545,7 +545,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     const p = people[idx]; const g = guestSlots[idx];
     if (!p?.therapistId || !g) return { name: '', statusLine: '', pill: null };
     const { busy } = arrangeByTime(pickerPeople.filter((t) => t.id === p.therapistId), { slotStart: g.start, slotEnd: g.end, rangesById: groupRanges, offById: groupOff });
-    return { name: staffNameOf(p.therapistId), statusLine: busy.length ? `Busy ${pillRange(busy[0].busyRange.start, busy[0].busyRange.end)}` : `Free ${rangeLabel(g.start, g.end)}`, pill: busy.length ? 'busy' : 'free' };
+    // ZNLY-404: ON orgs warn (not block) about an existing booking, or another guest of this same booking, on the same person.
+    const note = allowStaffOverlap && busy.length + guestSlots.filter((o) => o.idx !== g.idx).length > 0
+      ? (() => { const n = overlapNote(p.therapistId, g.start, g.end, [...(dayBookings || []), ...ownRowBookings(guestSlots.filter((o) => o.idx !== g.idx), bookingDate)]); return n ? overlapLine(n) : ''; })() : '';
+    return { name: staffNameOf(p.therapistId), statusLine: busy.length ? `Busy ${pillRange(busy[0].busyRange.start, busy[0].busyRange.end)}` : `Free ${rangeLabel(g.start, g.end)}`, pill: busy.length ? 'busy' : 'free', note };
   };
   const setGuestStaff = (idx, id) => { setFillUndo(null); setPerson(idx, { therapistId: id }); };
   const handleGuestCustomerSelect = async (idx, customer) => {
@@ -1258,6 +1261,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     max={maxPick}
                     statusLine={info.statusLine}
                     pill={info.pill}
+                    note={info.note}
                     problem={refusedStaff(picked[0]?.name, picked.length > 0, info.problem)}
                     emptyLabel={`Pick ${staffLabel.toLowerCase()}`}
                     title={`${lbl} for the booking`}

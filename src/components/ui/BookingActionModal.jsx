@@ -2817,6 +2817,7 @@ const BookingActionModal = ({
                               statusLine={isAssignmentBlocked ? '' : info.statusLine}
                               pill={isAssignmentBlocked ? null : info.pill}
                               problem={isAssignmentBlocked ? '' : info.problem}
+                              note={isAssignmentBlocked ? '' : info.note}
                               assignedIds={assignedIds}
                               assignedNames={savedPeople}
                               disabled={isAssignmentBlocked}
