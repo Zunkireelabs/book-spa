@@ -727,7 +727,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       submitInFlightRef.current = false;
       // Bring the field the reason is about into view (the footer already shows the reason itself).
       const field = fieldForErrorCode(err?.code) || errorField(text);
-      if (field) requestAnimationFrame(() => document.querySelector(`[data-qc-field="${field}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+      // A refused service card (red) wins: on a phone its reason would otherwise sit below the fold.
+      if (field || Number.isInteger(err?.row)) requestAnimationFrame(() => (document.querySelector('[data-row-problem="true"]') || document.querySelector(`[data-qc-field="${field}"]`))?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
     }
   };
 

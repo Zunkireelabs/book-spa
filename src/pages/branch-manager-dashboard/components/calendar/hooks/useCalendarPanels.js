@@ -251,7 +251,8 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       therapistId: slotInfo.colType === 'therapist' ? slotInfo.colId : null,
       roomId: slotInfo.colType === 'room' ? slotInfo.colId : null,
     });
-    if (manualBlock) {
+    // Pick mode (reschedule / rebook) places on a block too: the Move dialog then shows the server's verdict for that time.
+    if (manualBlock && !rebookSource) {
       showToast(describeBlockOverlap(manualBlock), 'error');
       return;
     }

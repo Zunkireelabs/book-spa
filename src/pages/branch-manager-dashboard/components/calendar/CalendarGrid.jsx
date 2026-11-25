@@ -213,6 +213,7 @@ const CalendarGrid = ({
   onDeleteManualBlock,
   onResizeManualBlock,
   onEditManualBlock,
+  pickMode = false,
   draftGhost,
   selectedBookingId,
   onDragCreate,
@@ -1106,6 +1107,7 @@ const CalendarGrid = ({
           onDeleteClick={(e) => handleDeleteBlockClick(e, range, range.day)}
           onResizeStart={(e) => handleBlockResizeStart(e, range, range.day)}
           onClick={() => onEditManualBlock?.(range)}
+          passThrough={pickMode}
           use24h={use24h}
         />
       );
