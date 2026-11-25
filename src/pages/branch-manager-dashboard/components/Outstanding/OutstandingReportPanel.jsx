@@ -210,6 +210,7 @@ const OutstandingReportPanel = ({ branchId }) => {
     if (!row.customerPhone) return;
     const { data } = await getCustomerOutstandingBalance({
       customerPhone: row.customerPhone,
+      customerId: row.customerId,
       branchId,
       excludeBookingId: row.bookingId,
     });
