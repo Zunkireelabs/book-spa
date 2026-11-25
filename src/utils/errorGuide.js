@@ -256,6 +256,8 @@ function buildCard(err, ctx, opts) {
   }
   const code = (err?.code && ERROR_CATALOG[err.code] ? err.code : undefined) || codeFromText(err) || codeFromPostgres(err);
   const entry = code && ERROR_CATALOG[code];
+  // A server refusal with its own plain sentence (visit_* functions: "Nothing was changed.", "This day has been closed...") is a fix card, never the generic system card.
+  if (!entry && err?.refusal && safeMsg(err)) return { kind: 'fix', code: err.code || 'REFUSED', lead: safeMsg(err), how: '', why: '', field: null, actions: [] };
   if (!entry || entry.kind === 'system') {
     const built = entry ? entry.build(ctx, err) : {};
     const noRetry = !!entry?.noRetry;

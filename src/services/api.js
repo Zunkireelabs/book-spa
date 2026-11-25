@@ -8339,6 +8339,7 @@ async function visitCall(fn, args) {
           rows: data.rows || [],
           overridable: (e.code || data.code) === 'NEEDS_OVERRIDE',
           plain: true,
+          refusal: true, // a plain-sentence refusal written by the server (not a crash): the guidance card shows its own message
         },
       };
     }

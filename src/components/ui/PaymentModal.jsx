@@ -29,7 +29,7 @@ import { addTenderRow, removeTenderRow, updateTenderRow } from '../../utils/tend
 import { useOrg } from '../../contexts/OrgContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { pendingQrRows, qrSignature, isQrConfirmed } from '../../utils/paymentQr';
-import { computeChange, quickCashOptions, buildReceiptText, buildReceiptHtml, buildWhatsAppUrl } from '../../utils/checkoutReceipt';
+import { computeChange, quickCashOptions, buildReceiptText, buildReceiptHtml, receiptStatus, buildWhatsAppUrl } from '../../utils/checkoutReceipt';
 import { useAuth } from '../../contexts/AuthContext';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, PRODUCTS_ENABLED } from '../../lib/featureFlags';
 import {
@@ -1311,6 +1311,10 @@ const PaymentModal = ({
   };
 
   // Snapshot for the success state / receipt (taken at submit, so the booking refreshing underneath can't change it).
+  // Payable services of THIS booking left unticked ("pay later") still owe their balance; a waiting-for-confirmation one is not payable yet, so it is not counted.
+  const untickedDue = visitList
+    ? round2(visitCandidates.filter((b) => !checkedAddOns.has(b.bookingId)).reduce((sum, b) => sum + bookingDue(b), 0) + (mainOff ? Math.max(round2(finalAmount - alreadyPaid), 0) : 0))
+    : 0;
   const buildReceipt = (cleaned, tipAmount, tipSplits, extra = null) => {
     const staffName = (id) => branchStaffOptions.find((s) => s.id === id)?.name || 'staff';
     const gross = Number(booking.base_amount ?? booking.baseAmount ?? 0) > 0 ? Number(booking.base_amount ?? booking.baseAmount) : finalAmount;
@@ -1369,7 +1373,7 @@ const PaymentModal = ({
     return {
       orgName, branchName, guestName, guestPhone, bookingNumber,
       dateLabel: new Date().toLocaleString('en-GB', { timeZone: NEPAL_TZ, day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
-      lines, tenders: productPart ? productPart.treatmentTenders : tenderRows, total: entered, leftover, extraCount: additionalBookings.length,
+      lines, tenders: productPart ? productPart.treatmentTenders : tenderRows, total: entered, leftover: round2(leftover + untickedDue), extraCount: additionalBookings.length,
       products: productPart,
       hasMember: lines.some((l) => l.member), lineTotal: round2(grandTotal - (extra?.productsTotal ?? productsTotal)),
       tipTotal: tipAmount,
@@ -1558,9 +1562,9 @@ const PaymentModal = ({
         <div className="text-[30px] font-semibold tracking-[-1px] mt-0.5 tabular-nums"><span className="text-[15px] font-medium text-[#8A8A90] mr-1.5 tracking-normal">NPR</span>{fmt(receipt.total)}</div>
         <div className="text-[13px] text-[#515152] mt-0.5">
           {receipt.guestName && <>{receipt.guestName} · </>}
-          {receipt.leftover > 0
-            ? <span className="text-[#B45309]">NPR {fmt(receipt.leftover)} still due</span>
-            : <>{receipt.bookingNumber}{receipt.extraCount > 0 ? ` + ${receipt.extraCount} more` : ''} {receipt.extraCount > 0 ? 'are' : 'is'} fully paid</>}
+          {receiptStatus(receipt).due
+            ? <span className="text-[#B45309]">{receiptStatus(receipt).text}</span>
+            : receiptStatus(receipt).text}
         </div>
         <div className="mt-5 border-t border-[#E7E8E6] text-left text-[13px] pb-1">
           {receipt.products && <div className="pt-3 pb-1 text-[11px] font-medium text-[#8A8A90] tracking-[.04em] uppercase">{treatmentWord}</div>}

@@ -56,6 +56,11 @@ describe('describeError', () => {
     expect(describeError({ code: '23P01', rawMessage: 'conflicting key value violates exclusion constraint "excl_therapist_overlap"' }, ctx).code).toBe('THERAPIST_CONFLICT');
     expect(describeError({ code: '23P01', rawMessage: 'violates exclusion constraint "excl_room_overlap"' }, ctx).code).toBe('ROOM_CONFLICT');
   });
+  it('a visit_* server refusal with no catalog entry shows its own sentence, not the generic system card (ZNLY-402)', () => {
+    const c = describeError({ code: 'NOTHING_TO_CHANGE', message: 'Nothing was changed.', plain: true, refusal: true });
+    expect(c).toMatchObject({ kind: 'fix', code: 'NOTHING_TO_CHANGE', lead: 'Nothing was changed.' });
+    expect(describeError({ code: 'NOTHING_TO_CHANGE', message: 'Nothing was changed.', plain: true }).kind).toBe('system'); // not flagged = still generic
+  });
   it('23505 unique -> DUPLICATE with no technical text; other Postgres codes stay system', () => {
     const c = describeError({ code: '23505', rawMessage: 'duplicate key value violates unique constraint "services_name_key"' });
     expect(c).toMatchObject({ kind: 'fix', code: 'DUPLICATE', lead: 'That already exists.' });

@@ -31,6 +31,12 @@ export function quickCashOptions(cashAmount) {
   return [...new Set(next)].filter((v) => v > c).sort((a, b) => a - b).slice(0, 3);
 }
 
+/** The success line under the amount. `leftover` is everything still to pay on the booking (this checkout's shortfall + services left unticked), never a waiting-for-confirmation one. */
+export function receiptStatus(r) {
+  if (r.leftover > 0) return { due: true, text: `Paid NPR ${fmtNum(r.total)} · NPR ${fmtNum(r.leftover)} still to pay` };
+  return { due: false, text: `${r.bookingNumber}${r.extraCount > 0 ? ` + ${r.extraCount} more` : ''} ${r.extraCount > 0 ? 'are' : 'is'} fully paid` };
+}
+
 /** Plain-text receipt summary — used as the WhatsApp message body. */
 export function buildReceiptText(r) {
   const lines = [];
@@ -45,7 +51,7 @@ export function buildReceiptText(r) {
     r.products.lines.forEach((l) => lines.push(`${l.label} × ${l.qty}: NPR ${fmtNum(l.amount)}`));
     (r.products.tenders || []).forEach((t) => lines.push(`Paid by ${t.label}: NPR ${fmtNum(t.amount)}`));
   }
-  if (r.leftover > 0) lines.push(`Still due: NPR ${fmtNum(r.leftover)}`);
+  if (r.leftover > 0) lines.push(`Still to pay: NPR ${fmtNum(r.leftover)}`);
   if (r.tipTotal > 0) lines.push(`Tip (separate): NPR ${fmtNum(r.tipTotal)}`);
   lines.push('Thank you!');
   return lines.join('\n');
@@ -86,7 +92,7 @@ h2{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#6b6b70;ma
 <div class="muted">${esc(r.guestName || '')}${r.bookingNumber ? ` · ${esc(r.bookingNumber)}` : ''}</div>
 <h2>Services</h2><table>${rows}</table>
 <h2>Payment</h2><table>${tenders}
-${r.leftover > 0 ? row('Still due', fmtNum(r.leftover)) : ''}
+${r.leftover > 0 ? row('Still to pay', fmtNum(r.leftover)) : ''}
 <tr class="tot"><td>Total paid (NPR)</td><td class="n">${fmtNum(r.total)}</td></tr></table>
 ${productsHtml}
 ${r.tipTotal > 0 ? `<div class="muted">Tip NPR ${fmtNum(r.tipTotal)} was given to staff and recorded separately.</div>` : ''}
