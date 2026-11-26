@@ -9,6 +9,9 @@ describe('receiptStatus', () => {
   });
   it('part payment: paid amount and the balance still to pay', () => {
     expect(receiptStatus({ ...r, leftover: 349 })).toEqual({ due: true, text: 'Paid NPR 3,000 · NPR 349 still to pay' });
+    // a service still waiting for confirmation: never "fully paid"
+    expect(receiptStatus({ ...r, waiting: 99 })).toEqual({ due: true, text: 'Paid NPR 3,000 · NPR 99 waiting for confirmation' });
+    expect(receiptStatus({ ...r, leftover: 349, waiting: 99 }).text).toBe('Paid NPR 3,000 · NPR 349 still to pay · NPR 99 waiting for confirmation');
   });
 });
 

@@ -307,9 +307,14 @@ const PaymentModal = ({
   // behaviour every caller had before the Checkout dialog made them individually optional).
   const candidates = addOnCandidates || initialAdditional;
   const [checkedAddOns, setCheckedAddOns] = useState(() => new Set(initialAdditional.map((b) => b.bookingId)));
+  // Visit mode: the host (BookingActionModal) owns the ticks of THIS booking's services, so a service that loads after this dialog
+  // mounted still opens ticked (a mount-time Set would miss it). Earlier-balance rows keep the local Set.
+  const isVisitRow = (b) => visitList && (b.amountDue === undefined || b.amountDue === null);
+  const hostTicked = useMemo(() => new Set(initialAdditional.map((b) => b.bookingId)), [initialAdditional]);
+  const isOn = (b) => (isVisitRow(b) ? hostTicked.has(b.bookingId) : checkedAddOns.has(b.bookingId));
   const additionalBookings = useMemo(
-    () => candidates.filter((b) => checkedAddOns.has(b.bookingId)),
-    [candidates, checkedAddOns]
+    () => candidates.filter((b) => (visitList && (b.amountDue === undefined || b.amountDue === null) ? hostTicked.has(b.bookingId) : checkedAddOns.has(b.bookingId))),
+    [candidates, checkedAddOns, hostTicked, visitList]
   );
   const hasPreviousDue = additionalBookings.length > 0;
   // Visit mode: the other services of THIS booking sit in the first list; only earlier balances stay under "Add to this payment".
@@ -1313,7 +1318,7 @@ const PaymentModal = ({
   // Snapshot for the success state / receipt (taken at submit, so the booking refreshing underneath can't change it).
   // Payable services of THIS booking left unticked ("pay later") still owe their balance; a waiting-for-confirmation one is not payable yet, so it is not counted.
   const untickedDue = visitList
-    ? round2(visitCandidates.filter((b) => !checkedAddOns.has(b.bookingId)).reduce((sum, b) => sum + bookingDue(b), 0) + (mainOff ? Math.max(round2(finalAmount - alreadyPaid), 0) : 0))
+    ? round2(visitCandidates.filter((b) => !isOn(b)).reduce((sum, b) => sum + bookingDue(b), 0) + (mainOff ? Math.max(round2(finalAmount - alreadyPaid), 0) : 0))
     : 0;
   const buildReceipt = (cleaned, tipAmount, tipSplits, extra = null) => {
     const staffName = (id) => branchStaffOptions.find((s) => s.id === id)?.name || 'staff';
@@ -1373,7 +1378,7 @@ const PaymentModal = ({
     return {
       orgName, branchName, guestName, guestPhone, bookingNumber,
       dateLabel: new Date().toLocaleString('en-GB', { timeZone: NEPAL_TZ, day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
-      lines, tenders: productPart ? productPart.treatmentTenders : tenderRows, total: entered, leftover: round2(leftover + untickedDue), extraCount: additionalBookings.length,
+      lines, tenders: productPart ? productPart.treatmentTenders : tenderRows, total: entered, leftover: round2(leftover + untickedDue), extraCount: additionalBookings.length, waiting: visitList ? round2(waitingRows.reduce((n, w) => n + Number(w.price || 0), 0)) : 0,
       products: productPart,
       hasMember: lines.some((l) => l.member), lineTotal: round2(grandTotal - (extra?.productsTotal ?? productsTotal)),
       tipTotal: tipAmount,
@@ -1680,7 +1685,7 @@ const PaymentModal = ({
               if (id === mainBookingId) return <React.Fragment key={id}>{mainBlock}</React.Fragment>;
               const b = byId.get(id);
               if (!b) return null;
-              const on = checkedAddOns.has(b.bookingId);
+              const on = isOn(b);
               return (
                 <React.Fragment key={b.bookingId}>
                   <button type="button" role="checkbox" aria-checked={on} onClick={() => { toggleAddOn(b.bookingId); onVisitToggle?.(b.bookingId); }}

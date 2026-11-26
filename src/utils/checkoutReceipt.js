@@ -33,7 +33,10 @@ export function quickCashOptions(cashAmount) {
 
 /** The success line under the amount. `leftover` is everything still to pay on the booking (this checkout's shortfall + services left unticked), never a waiting-for-confirmation one. */
 export function receiptStatus(r) {
-  if (r.leftover > 0) return { due: true, text: `Paid NPR ${fmtNum(r.total)} · NPR ${fmtNum(r.leftover)} still to pay` };
+  // `waiting` = NPR of services of this booking still waiting for confirmation: never say "fully paid" while one is open.
+  const waiting = r.waiting > 0 ? ` · NPR ${fmtNum(r.waiting)} waiting for confirmation` : '';
+  if (r.leftover > 0) return { due: true, text: `Paid NPR ${fmtNum(r.total)} · NPR ${fmtNum(r.leftover)} still to pay${waiting}` };
+  if (r.waiting > 0) return { due: true, text: `Paid NPR ${fmtNum(r.total)}${waiting}` };
   return { due: false, text: `${r.bookingNumber}${r.extraCount > 0 ? ` + ${r.extraCount} more` : ''} ${r.extraCount > 0 ? 'are' : 'is'} fully paid` };
 }
 
