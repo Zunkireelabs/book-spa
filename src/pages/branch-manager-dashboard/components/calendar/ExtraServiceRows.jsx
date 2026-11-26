@@ -38,8 +38,10 @@ const ExtraRow = ({
   const refused = (!isFirst || editMode) && errorRow === i;
   const shown = text || (refused ? errorText : '');
   // A refusal about THIS card's staff (busy / off shift / not in this branch) is shown by the staff row itself (never "Free" next to it), until the staff or time changes.
-  const staffText = staffRowProblem({ liveText: text, refused, errorStaff, hasStaff: !!(svc && needsStaff && r.therapistId), errorText });
-  const hideChip = !!(staffText || locked || refused);   // a refusal that is not about staff (day closed...) must not sit next to a green "Free"
+  // A refusal of a NEW booking that names no extra row is about Service 1 (the first card): it feeds the same rule, so its chip never says "Free" either.
+  const refusedHere = refused || (isFirst && !editMode && errorRow == null && !!errorText);
+  const staffText = staffRowProblem({ liveText: text, refused: refusedHere, errorStaff, hasStaff: !!(svc && needsStaff && r.therapistId), errorText });
+  const hideChip = !!(staffText || locked || refusedHere);   // a refusal that is not about staff (day closed...) must not sit next to a green "Free"
   const staffShows = !!(svc && needsStaff && r.therapistId && staffText);   // the staff card itself carries the reason, so it never says "Free" next to it
   return (
     <div data-qc-field={isFirst ? 'service' : `service-x${i - 1}`} data-row-problem={shown ? 'true' : undefined} className={`rounded-spa-lg border ${locked ? 'bg-[#F4F4F6] opacity-90' : 'bg-background'} p-3 space-y-2.5 ${!shown ? 'border-border' : overridable ? 'border-amber-300 ring-2 ring-amber-200' : 'border-error ring-2 ring-error/20'}`}>

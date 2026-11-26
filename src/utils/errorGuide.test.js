@@ -21,6 +21,11 @@ describe('describeError', () => {
     expect(c.actions.map((a) => a.label)).toEqual(['Book at 1:30 pm', 'Book at 2:00 pm', 'Pick a room']);
     expect(c.actions[0]).toMatchObject({ intent: 'set-time', value: '13:30' });
   });
+  it('availability refusal: the server sentence always ends with a full stop before the how', () => {
+    const c = describeError({ code: 'OVERLAP', message: 'Rojina K already has a booking 14:00–14:30' }, ctx);
+    expect(c.lead).toBe('Rojina K already has a booking 14:00–14:30.');
+    expect(`${c.lead} ${c.how}`).toBe('Rojina K already has a booking 14:00–14:30. They already have a booking then. Pick another time, or someone else.');
+  });
   it('staff busy: offers the free person', () => {
     const c = describeError({ code: 'THERAPIST_CONFLICT' }, ctx);
     expect(c.field).toBe('staff'); expect(c.how).toBe('Free then: Aksa.');
@@ -43,7 +48,7 @@ describe('describeError', () => {
   });
   it('availability codes reuse the guard message', () => {
     const c = describeError({ code: 'ON_BREAK', message: 'Susan is on a break 1:00 pm–2:00 pm' }, ctx);
-    expect(c.lead).toBe('Susan is on a break 1:00 pm–2:00 pm'); expect(c.field).toBe('staff');
+    expect(c.lead).toBe('Susan is on a break 1:00 pm–2:00 pm.'); expect(c.field).toBe('staff');
   });
   it('a code only named in the text still resolves', () => {
     expect(describeError({ message: 'ROOM_AT_CAPACITY: full' }, ctx).code).toBe('ROOM_AT_CAPACITY');
