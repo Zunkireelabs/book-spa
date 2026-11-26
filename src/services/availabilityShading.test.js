@@ -67,7 +67,7 @@ describe('shiftHeaderInfo', () => {
 describe('slotVerdict / isOutsideShift', () => {
   const d = day({ breaks: [{ name: 'Lunch', start_min: 780, end_min: 840 }] });
   it('reports the reason for shaded time and null for free time', () => {
-    expect(slotVerdict(d, 780, 810, { therapistName: 'Vina' }).message).toBe('Vina is on a break 13:00–14:00');
+    expect(slotVerdict(d, 780, 810, { therapistName: 'Vina' }).message).toBe('Vina is on a break 1:00–2:00pm');
     expect(slotVerdict(d, 600, 660)).toBeNull();
   });
   it('flags a booking now outside the rule', () => {

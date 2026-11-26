@@ -17,7 +17,7 @@ function escapeHtml(str) {
 function formatIssuedAt(isoString) {
   return new Date(isoString).toLocaleString('en-GB', {
     timeZone: NEPAL_TZ,
-    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, // customer-facing: always 12h, never the staff setting
   });
 }
 

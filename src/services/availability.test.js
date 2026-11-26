@@ -3,8 +3,28 @@ import {
   parseAvailabilityError, formatAvailabilityMessage, evaluateAvailability, nextFreeStarts, firstOtherFreeTherapist, isOverridableCode, createEnforcementCache,
 } from './availability';
 
+// The refusal text follows the saved 12h/24h choice (utils/clockPref); tests flip it here.
+let mock24h = true;
+vi.mock('../utils/clockPref', () => ({ readUse24h: () => mock24h }));
+
 const pgError = (code, detail, text = 'x') => ({
   code: 'P0006', message: `${code}: ${text}`, details: JSON.stringify(detail),
+});
+
+describe('refusal ranges follow the 12h/24h choice', () => {
+  const d = { therapist_name: 'Rojina', reason: 'booking', range_start: '14:00', range_end: '14:30' };
+  it.each([
+    [false, 'OVERLAP', d, 'Rojina already has a booking 2:00–2:30pm'],
+    [true, 'OVERLAP', d, 'Rojina already has a booking 14:00–14:30'],
+    [false, 'ON_BREAK', { ...d, range_start: '11:30', range_end: '12:15' }, 'Rojina is on a break 11:30am–12:15pm'],
+    [false, 'BLOCKED', { ...d, range_start: '15:00', range_end: '16:00', label: 'training' }, 'Rojina is blocked 3:00–4:00pm (training)'],
+    [false, 'ON_LEAVE', { reason: 'leave_half', therapist_name: 'Rojina', range_start: '09:00', range_end: '13:00' }, 'Rojina is off 9:00am–1:00pm'],
+    [false, 'OFF_SHIFT', { reason: 'before_shift', therapist_name: 'Rojina', range_start: '00:00', range_end: '11:00' }, 'Rojina is off until 11:00am'],
+    [false, 'OFF_SHIFT', { reason: 'after_shift', therapist_name: 'Rojina', range_start: '18:00', range_end: '24:00' }, "Rojina's shift ends at 6:00pm"],
+  ])('use24h=%s %s', (use24h, code, detail, message) => {
+    mock24h = use24h;
+    try { expect(formatAvailabilityMessage(code, detail)).toBe(message); } finally { mock24h = true; }
+  });
 });
 
 describe('parseAvailabilityError', () => {
