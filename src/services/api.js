@@ -2307,7 +2307,7 @@ export async function getDueReportByBranch({ from, to } = {}) {
       let query = supabase
         .from('bookings')
         .select(
-          'id, booking_number, branch_id, branches(name), customer_name, customer_phone, date, status, final_amount, payment_status, therapist_name_snapshot, client_request_id, created_by, creator:users!created_by(full_name), payments(amount)', opts)
+          'id, booking_number, branch_id, branches(name), customer_id, customer_name, customer_phone, date, status, final_amount, payment_status, therapist_name_snapshot, client_request_id, created_by, creator:users!created_by(full_name), payments(amount)', opts)
         .in('payment_status', ['unpaid', 'partial'])
         .not('status', 'in', '("Cancelled","No Show")');
       if (from) query = query.gte('date', from);
@@ -2332,6 +2332,7 @@ export async function getDueReportByBranch({ from, to } = {}) {
         date: b.date,
         status: b.status,
         paymentStatus: b.payment_status,
+        customerId: b.customer_id || null,
         customerName: b.customer_name,
         customerPhone: b.customer_phone,
         therapistName: b.therapist_name_snapshot || null,
@@ -2377,11 +2378,12 @@ export async function getCustomerOutstandingBalance({ customerPhone, customerId,
         .select(DUE_COLUMNS)
         .in('status', ['In-Progress', 'Completed'])
         .order('id');
-      query = key.customerId ? query.eq('customer_id', key.customerId) : query.eq('customer_phone', key.phone);
+      // Phone key owns only rows WITHOUT a customer_id (utils/earlierBalance.js): a customer-linked row belongs to its customer.
+      query = key.customerId ? query.eq('customer_id', key.customerId) : query.eq('customer_phone', key.phone).is('customer_id', null);
       if (excludeBookingId) query = query.neq('id', excludeBookingId);
       return withBranch(query, branchId);
     });
-    const mine = key.customerId ? rows : rows.filter((b) => samePhone(b.customer_phone, key.phone));
+    const mine = key.customerId ? rows : rows.filter((b) => !b.customer_id && samePhone(b.customer_phone, key.phone));
     return { data: dueSummary(summarizeMoney(mine, { today, excludeBookingId })), error: null };
   } catch (error) {
     console.error('[API] getCustomerOutstandingBalance error:', error.message);

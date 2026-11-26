@@ -180,6 +180,7 @@ const DueReportPanel = () => {
     if (!row.customerPhone) return;
     const { data } = await getCustomerOutstandingBalance({
       customerPhone: row.customerPhone,
+      customerId: row.customerId,
       branchId: row.branchId,
       excludeBookingId: row.bookingId,
     });
