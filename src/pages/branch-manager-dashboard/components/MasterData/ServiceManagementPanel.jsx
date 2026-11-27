@@ -92,13 +92,13 @@ const ServiceManagementPanel = () => {
     }
   }, []);
 
-  // ZNLY-418: "Open to everyone" / "N staff" chip: how many people at the active location are on the service's staff list (none = open to everyone)
+  // ZNLY-418: "All staff" / "N staff" chip: how many people at the active location are on the service's staff list (none = open to everyone)
   const [staffIndex, setStaffIndex] = useState(null);
   const activeBranchId = useActiveBranchId();
   const staffChip = (s) => {
     if (!staffIndex || !activeBranchId || activeBranchId === OVERALL_BRANCH_ID || s.requires_therapist === false) return null;
     const n = (staffIndex.lists[s.id] || []).filter((t) => staffIndex.home[t] === activeBranchId).length;
-    return n === 0 ? 'Open to everyone' : `${n} staff`;
+    return n === 0 ? 'All staff' : `${n} staff`;
   };
   const hasLoadedRef = useRef(false);
   const loadServices = useCallback(async () => {

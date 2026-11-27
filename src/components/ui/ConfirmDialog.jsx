@@ -12,6 +12,8 @@ export const CANCEL_REASON_OPTIONS = [
   { value: 'others', label: 'Others' },
 ];
 
+const DEFAULT_REASON_PLACEHOLDER = 'e.g. Customer changed their mind';
+
 const ConfirmDialog = ({
   title,
   message,
@@ -24,7 +26,7 @@ const ConfirmDialog = ({
   reasonOptional = false, // true: shows a "Reason (optional)" field that never blocks confirm (wins over requireReason)
   error = null, // message shown inside the dialog, above the buttons (the dialog stays open on error)
   reasonLabel = 'Reason', // label of the optional field (reasonOptional only), e.g. 'Note'
-  reasonPlaceholder = 'e.g. Customer changed their mind',
+  reasonPlaceholder = DEFAULT_REASON_PLACEHOLDER,
   cancelLabel = 'Back',
   hideBack = false, // true: a single OK button (information only)
   confirmVariant = 'danger', // 'danger' | 'primary' (a save prompt is not destructive)
@@ -136,7 +138,7 @@ const ConfirmDialog = ({
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 rows={3}
-                placeholder="Explain why..."
+                placeholder={reasonPlaceholder === DEFAULT_REASON_PLACEHOLDER ? 'Explain why...' : reasonPlaceholder}
                 className="w-full px-3 py-2 border border-border rounded-spa font-body font-body-normal text-sm text-text-primary bg-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
                 disabled={isSubmitting}
                 autoFocus

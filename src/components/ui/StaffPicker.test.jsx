@@ -62,20 +62,20 @@ describe('StaffPicker (ZNLY-303 look)', () => {
 
 describe('StaffPicker: people not on the service staff list (ZNLY-418)', () => {
   const base = { people, selectedIds: [], onChange: vi.fn(), slot, bookings: [], max: 1 };
-  it('staff role: a last group "Doesn\'t do this service", rows dim + disabled with the Not listed pill, and the ask-a-manager footer', async () => {
+  it('staff role: a last group "Doesn\'t do this service", rows dim + disabled with the Does not do it pill, and the ask-a-manager footer', async () => {
     render(<StaffPicker {...base} serviceId="s1" />);
     expect(await screen.findByText("Doesn't do this service", { selector: 'p' })).toBeTruthy();
-    expect(screen.getAllByText('Not listed').length).toBe(2);
-    expect(screen.getAllByText("Not on Brows Shaping's staff list").length).toBe(2);
+    expect(screen.getAllByText("Doesn't do it").length).toBe(2);
+    expect(screen.getAllByText('Not set up for this service').length).toBe(2);
     expect(screen.getByRole('radio', { name: /Cara T/ }).disabled).toBe(true);
     expect(screen.getByRole('radio', { name: /Asha K/ }).disabled).toBe(false);
-    expect(screen.getByText("Ask a manager to add them to the service's staff list.")).toBeTruthy();
+    expect(screen.getByText('Need one of them? Ask a manager.')).toBeTruthy();
   });
   it('a service with no list: no such group, nobody locked', async () => {
     render(<StaffPicker {...base} serviceId="s2" />);
     await screen.findByText(/^Free /, { selector: 'p' });
     expect(screen.queryByText("Doesn't do this service")).toBeNull();
-    expect(screen.queryByText('Not listed')).toBeNull();
+    expect(screen.queryByText("Doesn't do it")).toBeNull();
     expect(screen.getByRole('radio', { name: /Cara T/ }).disabled).toBe(false);
   });
 });

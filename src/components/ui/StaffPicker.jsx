@@ -85,12 +85,12 @@ const StaffPicker = ({
     const gender = p.gender && String(p.gender).replace(/^./, (c) => c.toUpperCase());
     const today = extra.bookings != null && fit ? (extra.bookings ? `${extra.bookings} ${slot?.date && slot.date !== nepalNow().today ? `on ${dayTag(slot.date)}` : 'today'}` : null) : null;
     const sub = holdObj ? holdObj.line
-      : extra.notListed ? `Not on ${serviceLabel}'s staff list${canOverride ? " · You'll be asked for a reason" : ''}`
+      : extra.notListed ? `Not set up for this service${canOverride ? ' · You can still pick them with a reason' : ''}`
       : extra.off ? offReasonFor(extra.off, slot?.date, nepalNow().today)
         : extra.busy ? `Busy ${pillRange(extra.busy.start, extra.busy.end)} · free after ${clockAmPm(extra.busy.end)}`
           : [gender, fit ? today : (p.specialties?.length ? p.specialties.join(', ') : null)].filter(Boolean).join(' · ');
     const pill = holdObj ? { text: holdObj.pill, cls: 'bg-indigo-50 text-indigo-600' }
-      : extra.notListed ? { text: 'Not listed', cls: 'bg-rose-50 text-rose-700' }
+      : extra.notListed ? { text: "Doesn't do it", cls: 'bg-rose-50 text-rose-700' }
       : extra.off ? { text: 'Off', cls: 'bg-background text-text-secondary' }
         : extra.busy ? { text: 'Busy', cls: 'bg-amber-100 text-amber-800' } : null;
     return (
@@ -153,7 +153,7 @@ const StaffPicker = ({
         {section(`Busy at ${clockAmPm(fit.s)}`, busy.map((x) => row(x.person, { busy: x.busyRange, bookings: x.bookings })))}
         {section(offDayLabel(slot?.date, nepalNow().today), off.map((x) => row(x.person, { off: x.reason })))}
         {section("Doesn't do this service", notListed.map((x) => row(x.person, { notListed: true, bookings: x.bookings })))}
-        {notListed.length > 0 && !canOverride && <p className="px-4 pt-1.5 pb-1 text-[12.5px] leading-snug text-text-secondary">Ask a manager to add them to the service&apos;s staff list.</p>}
+        {notListed.length > 0 && !canOverride && <p className="px-4 pt-1.5 pb-1 text-[12.5px] leading-snug text-text-secondary">Need one of them? Ask a manager.</p>}
       </>
     );
   }

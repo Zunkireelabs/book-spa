@@ -357,7 +357,7 @@ const ServiceDetailPage = () => {
 
     const targetId = isEdit ? serviceId : result.data?.id;
     if (!targetId) {
-      setFormError('Service saved, but its id was not returned — eligible staff could not be saved. Reopen it to configure eligible staff.');
+      setFormError('Service saved, but its id was not returned, so who does it could not be saved. Reopen it to set this.');
       setSaving(false);
       return;
     }
@@ -379,7 +379,7 @@ const ServiceDetailPage = () => {
     // to under "All locations" - an existing per-location list is left as it is there.
     if (staffScopeBranchId && (isEdit || restrictStaff)) {
       const staffResult = await setServiceTherapists(targetId, restrictStaff ? eligibleTherapistIds : [], staffScopeBranchId);
-      if (staffResult.error) return failStep(staffResult.error, 'eligible staff');
+      if (staffResult.error) return failStep(staffResult.error, 'who does this service');
     }
 
     // Always write the combo bundle (even an empty list when isCombo was turned off) —
@@ -649,7 +649,7 @@ const ServiceDetailPage = () => {
                   </div>
                 </SettingsRow>
 
-                <SettingsRow title="Who can do it" description={`Restrict this service to specific ${staffLabelPlural.toLowerCase()}, or leave open to everyone.`}>
+                <SettingsRow title="Who does this service" description="Tick no one and everyone can do it.">
                   <div className="space-y-3 max-w-xl">
                     <label className="flex items-start gap-2.5 cursor-pointer">
                       <input type="checkbox" checked={formData.requiresTherapist} onChange={(e) => setFormData({ ...formData, requiresTherapist: e.target.checked })} className="accent-primary w-4 h-4 rounded mt-0.5" />
@@ -693,7 +693,7 @@ const ServiceDetailPage = () => {
                       <div className="space-y-2">
                         <div className="flex items-start justify-between gap-3">
                           <p className="font-caption text-xs text-text-secondary">
-                            Checked staff can perform this service. Unchecked staff cannot.
+                            Ticked staff do this service. The others are greyed out when you book it.
                           </p>
                           <button type="button" onClick={() => setEligibleTherapistIds(allTherapists.map((t) => t.id))}
                             className="flex-shrink-0 min-h-[44px] px-2 text-xs font-medium text-primary hover:underline">Select all staff</button>

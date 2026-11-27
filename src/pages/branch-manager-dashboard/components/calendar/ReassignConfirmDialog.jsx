@@ -4,7 +4,7 @@ import { formatClockRange } from '../../../../utils/clockTime';
 import { readUse24h } from '../../../../utils/clockPref';
 import { useOrg } from '../../../../contexts/OrgContext';
 import { overlapNote, overlapLine, clockToMin, eligibleFor } from '../../../../utils/staffFit';
-import { formatAvailabilityMessage } from '../../../../services/availability';
+import ModalShell from '../../../../components/ui/ModalShell';
 import { useServiceEligibility } from '../../../../components/ui/StaffPicker';
 import { useActiveBranchId } from '../../../../contexts/BranchContext';
 import { useAvailabilityGuard } from '../../../../contexts/AvailabilityOverrideContext';
@@ -34,7 +34,7 @@ const useNotListed = (pr, calendarData) => {
   if (pr.isSharedReassign && booking?.booking_therapists?.some((bt) => bt.therapist_id === target)) return null; // consolidating onto someone already on it
   const serviceId = pr.booking?.serviceId || booking?.service_id;
   if (eligibleFor(index, { serviceId, therapistId: target, branchId }).ok) return null;
-  return formatAvailabilityMessage('THERAPIST_NOT_ELIGIBLE', { therapist_name: pr.targetColName, service_name: index.labels?.[serviceId] || pr.booking?.serviceName });
+  return { name: pr.targetColName, service: index.labels?.[serviceId] || pr.booking?.serviceName || 'this service' };
 };
 
 const ReassignConfirmDialog = ({ pendingReassign, calendarData, staffLabel, locationLabel, onCancel, onConfirm }) => {
@@ -45,8 +45,7 @@ const ReassignConfirmDialog = ({ pendingReassign, calendarData, staffLabel, loca
   const needsReason = !!notListed && canOverride;
   const blocked = !!notListed && !canOverride;
   return (
-  <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-center justify-center p-4">
-    <div className="bg-surface rounded-spa-lg spa-shadow-modal p-6 max-w-sm w-full animate-fade-in">
+  <ModalShell onClose={onCancel} className="max-w-sm p-6">
       <div className="flex items-center gap-2 mb-4">
         <Icon name={pendingReassign.timeOnly ? 'Clock' : pendingReassign.isSharedReassign ? 'Users' : (pendingReassign.type === 'therapist' ? 'UserCheck' : 'DoorOpen')} size={20} className={pendingReassign.isSharedReassign ? 'text-primary' : 'text-primary'} />
         <h3 className="font-heading font-heading-semibold text-base text-text-primary">
@@ -82,13 +81,15 @@ const ReassignConfirmDialog = ({ pendingReassign, calendarData, staffLabel, loca
       )}
       {notListed && (
         <p data-not-listed-note className="font-body text-xs text-amber-800 mb-3">
-          {notListed}. {canOverride ? 'You can still move it; the reason is saved on the booking\'s history with your name.' : 'Ask a manager to add them to the service\'s staff list.'}
+          {canOverride
+            ? `${notListed.name} doesn't usually do ${notListed.service}. You can still move it. Just say why. Your name and reason are saved on the booking.`
+            : `${notListed.name} doesn't do ${notListed.service}. Ask a manager if you need to move it here.`}
         </p>
       )}
       {needsReason && (
         <label className="block mb-1">
           <span className="font-body text-xs font-medium text-text-primary">Reason</span>
-          <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Rojina off sick, trained on this" maxLength={300}
+          <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Rojina is off sick today" maxLength={300}
             className="mt-1 w-full h-11 px-3 bg-surface border border-border rounded-spa text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary" />
         </label>
       )}
@@ -110,8 +111,7 @@ const ReassignConfirmDialog = ({ pendingReassign, calendarData, staffLabel, loca
           </button>
         )}
       </div>
-    </div>
-  </div>
+  </ModalShell>
   );
 };
 

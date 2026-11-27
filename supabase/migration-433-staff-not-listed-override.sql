@@ -54,7 +54,7 @@ BEGIN
                AND public._therapist_open_window_branch(p_therapist_id, p_start_datetime) = p_branch_id;
   IF v_visitor THEN
     IF p_service_id IS NOT NULL AND NOT public._visitor_service_ok(p_therapist_id, p_service_id) THEN
-      v_ne_msg := format('%s does not do %s at their home branch, so cannot cover it here.',
+      v_ne_msg := format('%s doesn''t do %s at their home branch, so can''t cover it here.',
         COALESCE(v_therapist_name, 'This therapist'), COALESCE(v_service_name, 'this service'));
     END IF;
   ELSE
@@ -71,7 +71,7 @@ BEGIN
       ) INTO v_on_allowlist;
 
       IF NOT v_on_allowlist THEN
-        v_ne_msg := format('%s is not on the staff list for %s.', COALESCE(v_therapist_name, 'This therapist'), COALESCE(v_service_name, 'this service'));
+        v_ne_msg := format('%s doesn''t usually do %s.', COALESCE(v_therapist_name, 'This therapist'), COALESCE(v_service_name, 'this service'));
       END IF;
     END IF;
   END IF;
@@ -87,7 +87,7 @@ BEGIN
     END IF;
     v_role := public.get_user_role();
     IF v_role IS DISTINCT FROM 'manager'::user_role AND v_role IS DISTINCT FROM 'admin'::user_role THEN
-      RAISE EXCEPTION 'OVERRIDE_NOT_ALLOWED: Only a manager or admin can book someone who is not on the service''s staff list.'
+      RAISE EXCEPTION 'OVERRIDE_NOT_ALLOWED: Only a manager can book someone for a service they don''t do.'
         USING ERRCODE = 'PT403', DETAIL = v_detail::text;
     END IF;
     INSERT INTO public.audit_logs (branch_id, table_name, record_id, action_type, old_data, new_data, changed_by, reason)

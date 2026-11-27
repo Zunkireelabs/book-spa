@@ -6,7 +6,7 @@ import { readUse24h } from '../utils/clockPref';
 // (check_therapist_booking_guards, migration-353); this module only turns its stable error codes into
 // messages and shows the same verdict early, while a form is being filled in.
 
-// ZNLY-418: THERAPIST_NOT_ELIGIBLE (person not on the service's staff list) travels the same road: a manager/admin may book anyway with a reason.
+// ZNLY-418: THERAPIST_NOT_ELIGIBLE (person not set up for the service) travels the same road: a manager/admin may book anyway with a reason.
 export const AVAILABILITY_CODES = ['OFF_SHIFT', 'ON_BREAK', 'ON_LEAVE', 'BLOCKED', 'OTHER_BRANCH', 'OVERLAP', 'THERAPIST_NOT_ELIGIBLE', 'OVERRIDE_NOT_ALLOWED'];
 
 // Never overridable, not even by admins: leave is changed in Attendance, overlaps are physical.
@@ -53,10 +53,10 @@ export function formatAvailabilityMessage(code, detail = {}, { staffLabel = 'sta
       return `${who} is not working on this date`;
     case 'THERAPIST_NOT_ELIGIBLE': {
       const svc = detail.service_name || 'this service';
-      return detail.visitor ? `${who} does not do ${svc} at their home ${wordBranch()}, so cannot cover it here` : `${who} is not on ${svc}'s staff list`;
+      return detail.visitor ? `${who} doesn't do ${svc} at their home ${wordBranch()}, so can't cover it here` : `${who} doesn't usually do ${svc}`;
     }
     case 'OVERRIDE_NOT_ALLOWED':
-      return detail.not_listed ? 'Only a manager or admin can book someone who is not on the service\'s staff list.' : 'Only a manager or admin can book outside a staff member\'s availability.';
+      return detail.not_listed ? 'Only a manager can book someone for a service they don\'t do.' : 'Only a manager or admin can book outside a staff member\'s availability.';
     default:
       return 'This time is not available.';
   }

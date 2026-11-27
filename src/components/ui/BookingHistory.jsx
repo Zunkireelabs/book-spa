@@ -26,7 +26,7 @@ const describe = (log) => {
   switch (log.action_type) {
     case 'AVAILABILITY_OVERRIDE':
       // ZNLY-418: booked someone who is not on the service's staff list (same audit action, distinct code)
-      if (d.code === 'THERAPIST_NOT_ELIGIBLE') return { icon: 'ShieldAlert', title: 'Booked staff not on the service list', detail: [d.therapist_name, d.service_name].filter(Boolean).join(' · '), reason: d.override_reason };
+      if (d.code === 'THERAPIST_NOT_ELIGIBLE') return { icon: 'ShieldAlert', title: 'Booked with someone who doesn\'t usually do this service', detail: [d.therapist_name, d.service_name].filter(Boolean).join(' · '), reason: d.override_reason };
       return { icon: 'ShieldAlert', title: `Booked outside availability (${d.message || d.code})`, reason: d.override_reason };
     case 'ADMIN_CORRECTION':
       return { icon: 'PenLine', title: 'Corrected by admin', reason: log.reason };
