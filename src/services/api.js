@@ -18356,7 +18356,7 @@ export async function updateOutreachAiConfig(payload) {
 // Inserts one outreach_messages row via the outreach_send_manual SECURITY
 // DEFINER RPC (migration-110) — outreach_messages has no client INSERT
 // policy by design (migration-104), so this cannot be a raw .insert().
-export async function sendCustomerMessage({ customerId, bookingId = null, channel, toAddress, subject = null, body }) {
+export async function sendCustomerMessage({ customerId, bookingId = null, channel, toAddress, subject = null, body, dedupePrefix = 'manual' }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -18366,8 +18366,8 @@ export async function sendCustomerMessage({ customerId, bookingId = null, channe
     }
 
     const dedupeKey = typeof crypto !== 'undefined' && crypto.randomUUID
-      ? `manual:${crypto.randomUUID()}`
-      : `manual:${customerId}:${Date.now()}`;
+      ? `${dedupePrefix}:${crypto.randomUUID()}`
+      : `${dedupePrefix}:${customerId}:${Date.now()}`;
 
     const { data: messageId, error } = await supabase.rpc('outreach_send_manual', {
       p_customer_id: customerId,
@@ -18384,6 +18384,25 @@ export async function sendCustomerMessage({ customerId, bookingId = null, channe
     return { data: { id: messageId }, error: null };
   } catch (error) {
     console.error('[API] sendCustomerMessage error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ---- ZNLY-410 Part B: sending a bill by email ---------------------------------
+// Who the bill goes to, whether email can go out, and what happened to the last send of this bill (migration 438, every role).
+export async function fetchBillSendInfo(bookingId, { multi = false, single = false, extraIds = [] } = {}) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data: b, error } = await supabase.from('bookings').select('customer_id, customers(full_name, email)').eq('id', bookingId).maybeSingle();
+    if (error) throw error;
+    if (!b?.customer_id) return { data: null, error: { message: 'No customer on this booking.' } };
+    const { data: unit } = await fetchBillUnit({ bookingId, multi, single, extraIds });
+    const { data: st, error: stErr } = await supabase.rpc('bill_send_state', { p_bill_number: unit?.billNumber || null });
+    if (stErr) throw stErr;
+    return { data: { customerId: b.customer_id, name: b.customers?.full_name || '', email: b.customers?.email || '', emailReady: st?.email_ready === true, last: st?.last ? { status: st.last.status, at: st.last.created_at } : null }, error: null };
+  } catch (error) {
+    console.error('[API] fetchBillSendInfo error:', error.message);
     return { data: null, error };
   }
 }

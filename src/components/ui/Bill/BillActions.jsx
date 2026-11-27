@@ -1,12 +1,18 @@
 // ZNLY-410 step 1: the ONE bill control — View · Print ▾ (A4 page / Receipt printer (80 mm)) — used on the checkout success screen, the booking
-// panel and the profile Bills list, so the words are the same everywhere. Send to ▾ arrives with step 2.
+// panel and the profile Bills list, so the words are the same everywhere. Step 2: Send to ▾ (email only; WhatsApp joins in step 3).
 import React, { useEffect, useRef, useState } from 'react';
 import Icon from '../../AppIcon';
 import SidePanel from '../SidePanel';
 import InvoicePrintModal from '../InvoicePrintModal';
 import { useBillOrg } from './useBillOrg';
 import { useParams } from 'react-router-dom';
-import { fetchBillUnit, fixBillNumber, fetchBillLink, turnOffBillLink } from '../../../services/api';
+import { createPortal } from 'react-dom';
+import ModalShell from '../ModalShell';
+import Button from '../Button';
+import { fetchBillUnit, fixBillNumber, fetchBillLink, turnOffBillLink, shareBill, fetchBillMessage, fetchBillSendInfo, sendCustomerMessage, updateCustomerContact } from '../../../services/api';
+import { fillBillMessage } from '../../../utils/billMessage';
+import { useOrg } from '../../../contexts/OrgContext';
+import { useToast } from '../../../pages/branch-manager-dashboard/components/Area/listKit';
 import { buildBill, billSource } from '../../../utils/buildBill';
 import { Bill, BILL_CSS, printBill } from './Bill';
 import { useMenuNav } from '../useMenuNav';
@@ -72,6 +78,33 @@ const LinkMenu = ({ token, onOff }) => {
   );
 };
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const SEND_WORDS = { queued: 'Sending', approved: 'Sending', sending: 'Sending', sent: 'Sent', delivered: 'Sent', failed: 'Failed' };
+
+// Asks for an address when the customer has none (bottom sheet on a phone), optionally saving it to the profile.
+const EmailDialog = ({ onSend, onClose, busy, error }) => {
+  const [email, setEmail] = useState('');
+  const [save, setSave] = useState(true);
+  const valid = EMAIL_RE.test(email.trim());
+  return (
+    <ModalShell onClose={onClose} className="max-w-sm max-sm:fixed max-sm:bottom-0 max-sm:left-0 max-sm:right-0 max-sm:max-w-none max-sm:rounded-b-none">
+      <div className="p-5 space-y-3">
+        <h2 className="font-heading font-heading-semibold text-base text-text-primary">Send the bill by email</h2>
+        <label className="block text-[13px] text-text-secondary">This customer has no email yet. Type one:
+          <input type="email" autoFocus value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" className="mt-1 w-full h-10 px-3 rounded-spa border border-border text-sm text-text-primary bg-surface" />
+        </label>
+        <label className="flex items-center gap-2 text-[13px] text-text-primary"><input type="checkbox" checked={save} onChange={(e) => setSave(e.target.checked)} />Save to profile</label>
+        {error && <p role="alert" className="text-xs text-error">{error}</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => onSend(email.trim(), save)} disabled={!valid || busy}>{busy ? 'Sending…' : 'Send'}</Button>
+        </div>
+      </div>
+    </ModalShell>
+  );
+};
+
 const BillPanel = ({ bookingId, extraIds, onClose, onPrint, busy, above }) => {
   const { multi, billingOn, orgInfo } = useBillOrg();
   const [state, setState] = useState({ loading: true, bill: null, error: false });
@@ -106,6 +139,57 @@ const BillActions = ({ bookingId, extraIds, up = false, above = false, className
   const [invoiceLayout, setInvoiceLayout] = useState(null); // set = the tax-invoice dialog is open (issue + Original/Copy logging stay exactly as before)
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const { org } = useOrg();
+  const orgSlug = org?.slug;
+  const [sendMenu, setSendMenu] = useState(false);
+  const [info, setInfo] = useState(null);   // { customerId, name, email, emailReady }
+  const [askEmail, setAskEmail] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [dialogError, setDialogError] = useState('');
+  const { notify, toastNode } = useToast();
+  const sendMenuRef = useRef(null);
+  const sendTriggerRef = useRef(null);
+  useMenuNav({ open: sendMenu, onClose: () => setSendMenu(false), menuRef: sendMenuRef, triggerRef: sendTriggerRef });
+
+  const openSend = async () => {
+    const next = !sendMenu;
+    setSendMenu(next);
+    if (!next) return;
+    const { data } = await fetchBillSendInfo(bookingId, { multi, single: billingOn, extraIds });
+    setInfo(data || { error: true });
+  };
+
+  const sendEmail = async (to, saveToProfile) => {
+    setSending(true); setDialogError('');
+    try {
+      if (saveToProfile) {
+        const { error: saveErr } = await updateCustomerContact(info.customerId, { email: to });
+        if (saveErr) throw new Error('save');
+      }
+      const { data: shared, error: shareErr } = await shareBill(bookingId, extraIds || []);
+      if (shareErr || !shared) throw new Error('share');
+      const { data: msg, error: msgErr } = await fetchBillMessage('email');
+      if (msgErr || !msg) throw new Error('message');
+      const vars = { first_name: info.name.trim().split(/\s+/)[0] || '', business: orgInfo.name || '', bill_number: shared.billNumber };
+      const url = `${window.location.origin}/${orgSlug}/bill/${shared.token}`;
+      const html = `${esc(fillBillMessage(msg.body, vars)).replace(/\n/g, '<br>')}<p><a href="${url}">View bill</a></p>`;
+      const { error: sendErr } = await sendCustomerMessage({ customerId: info.customerId, bookingId, channel: 'email', toAddress: to, subject: fillBillMessage(msg.subject, vars), body: html, dedupePrefix: `bill:${shared.billNumber}` });
+      if (sendErr) throw new Error('send');
+      setAskEmail(false);
+      notify(`Bill sent to ${to} by email`);
+      setInfo((i) => ({ ...i, last: { status: 'queued' } }));
+    } catch (e) {
+      const text = e.message === 'save' ? "Couldn't save the email to the profile. Try again." : "Couldn't send this bill. Try again.";
+      setDialogError(text);
+      notify(text, 'error');
+    } finally { setSending(false); }
+  };
+
+  const pickEmail = () => {
+    setSendMenu(false);
+    setDialogError('');
+    if (info?.email) sendEmail(info.email, false); else setAskEmail(true);
+  };
 
   const print = async (layout) => {
     setError('');
@@ -130,7 +214,27 @@ const BillActions = ({ bookingId, extraIds, up = false, above = false, className
   return (
     <span className={`inline-flex flex-wrap items-center gap-2 ${className}`} data-bill-actions>
       <button type="button" onClick={() => setViewing(true)} className="inline-flex items-center gap-1 h-8 px-2.5 rounded-spa border border-border text-xs font-medium text-text-primary hover:bg-background"><Icon name="Eye" size={13} />View</button>
+      <span className="relative inline-block">
+        <button ref={sendTriggerRef} type="button" onClick={openSend} disabled={sending} aria-haspopup="menu" aria-expanded={sendMenu}
+          className="inline-flex items-center gap-1 h-8 px-2.5 rounded-spa border border-border text-xs font-medium text-text-primary hover:bg-background disabled:opacity-50">
+          <Icon name="Send" size={13} />{sending ? 'Sending…' : 'Send to'}<Icon name="ChevronDown" size={11} />
+        </button>
+        {sendMenu && (
+          <div ref={sendMenuRef} role="menu" aria-label="Send to" className={`absolute left-0 z-dropdown min-w-[240px] bg-surface border border-border rounded-spa spa-shadow-modal py-1 ${up ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+            {!info && <p className="px-3 py-2 text-[13px] text-text-secondary">Checking…</p>}
+            {info?.error && <p className="px-3 py-2 text-[13px] text-text-secondary">Couldn&apos;t check this customer. Close and try again.</p>}
+            {info && !info.error && (info.emailReady === false
+              ? <p role="menuitem" aria-disabled="true" className="px-3 py-2 text-[13px] text-text-secondary">Email isn&apos;t set up yet. Ask Zennly support.</p>
+              : <button type="button" role="menuitem" onClick={pickEmail} className="w-full text-left px-3 py-2 text-[13px] text-text-primary hover:bg-background focus:bg-background outline-none">
+                  Email{info.email ? ` · ${info.email}` : ''}
+                  {info.last && SEND_WORDS[info.last.status] && <span className={`block text-[11px] ${info.last.status === 'failed' ? 'text-error' : 'text-text-secondary'}`}>{SEND_WORDS[info.last.status]}</span>}
+                </button>)}
+          </div>
+        )}
+      </span>
       <PrintMenu onPick={print} busy={busy} up={up} />
+      {createPortal(toastNode, document.body)}
+      {askEmail && <EmailDialog onSend={sendEmail} onClose={() => setAskEmail(false)} busy={sending} error={dialogError} />}
       {error && <span role="alert" className="basis-full text-xs text-error">{error}</span>}
       {viewing && <BillPanel bookingId={bookingId} extraIds={extraIds} onClose={() => setViewing(false)} onPrint={print} busy={busy} above={above} />}
       {invoiceLayout && <InvoicePrintModal bookingId={bookingId} initialLayout={invoiceLayout} onClose={() => setInvoiceLayout(null)} />}
