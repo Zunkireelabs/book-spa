@@ -104,7 +104,7 @@ export function buildCustomerDirectory({ customers = [], bookings = [], memberId
         if (info.therapist) therapistCounts.set(info.therapist, (therapistCounts.get(info.therapist) || 0) + 1);
         if (info.service) serviceCounts.set(info.service, (serviceCounts.get(info.service) || 0) + 1);
       }
-      if (UPCOMING.includes(b.status) && (date > today || (date === today && time > nowHM))) {
+      if (UPCOMING.includes(b.status) && date >= today) { // same rule as the Upcoming amount: today or later, still not completed
         if (!next || date < next.date || (date === next.date && time < next.time)) next = info;
       }
       legacyBalance = round2(legacyBalance + legacyDue(b));
@@ -283,7 +283,7 @@ export function buildPanelDetail({ bookings = [], today, nowHM }) {
 
   const now = rendered.filter((b) => b.status === 'In-Progress' && String(b.date).slice(0, 10) === today).map(row)[0] || null;
   const upcoming = sorted
-    .filter((b) => UPCOMING.includes(b.status) && (String(b.date).slice(0, 10) > today || (String(b.date).slice(0, 10) === today && hm(b.start_time) > nowHM)))
+    .filter((b) => UPCOMING.includes(b.status) && String(b.date).slice(0, 10) >= today)
     .map(row).reverse()[0] || null; // sorted newest-first, so the last of the filtered ones is the earliest
   const recent = rendered.slice(0, 3).map(row);
 
