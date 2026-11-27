@@ -170,7 +170,7 @@ describe('strip + needs you now', () => {
     const s = stripStats(active, { nowTime: '12:00' });
     expect(s.working).toMatchObject({ count: 2, sub: 'of 3 service staff', hint: '1 checked in · 1 not yet' });
     expect(s.notin.count).toBe(1);
-    expect(s.notin.hint).toBe('Oldest: 10:00, 2 h 0 m ago');
+    expect(s.notin.hint).toBe('Oldest: 10:00am, 2 h 0 m ago');
     expect(s.off).toMatchObject({ count: 1, hint: 'Back tomorrow: 1' });
     expect(s.support.count).toBe(1);
   });

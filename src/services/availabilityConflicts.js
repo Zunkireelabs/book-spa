@@ -4,6 +4,8 @@
 // Bookings are never moved or cancelled by any of this; the manager only gets to see them before saving.
 import { hhmmToMinutes, minutesToHHMM } from './availability';
 import { wordBranch } from '../utils/industryTerms';
+import { formatClockRange } from '../utils/clockTime';
+import { readUse24h } from '../utils/clockPref';
 
 const hhmm = (t) => (t ? String(t).slice(0, 5) : '');
 
@@ -94,6 +96,6 @@ export function validateHalfDay({ offStart, offEnd, shift }) {
   let e = hhmmToMinutes(shift?.end);
   if (s == null || e == null) return null;   // no shift to check against
   if (shift.end === '23:59:59' || shift.end === '23:59') e = 1440;
-  if (a < s || b > e) return `Must be inside the shift (${hhmm(shift.start)}–${minutesToHHMM(e)}).`;
+  if (a < s || b > e) return `Must be inside the shift (${formatClockRange(hhmm(shift.start), minutesToHHMM(e), readUse24h())}).`;
   return null;
 }
