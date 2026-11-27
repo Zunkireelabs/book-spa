@@ -5,7 +5,8 @@ import Icon from '../../AppIcon';
 import SidePanel from '../SidePanel';
 import InvoicePrintModal from '../InvoicePrintModal';
 import { useBillOrg } from './useBillOrg';
-import { fetchBillUnit, fixBillNumber } from '../../../services/api';
+import { useParams } from 'react-router-dom';
+import { fetchBillUnit, fixBillNumber, fetchBillLink, turnOffBillLink } from '../../../services/api';
 import { buildBill, billSource } from '../../../utils/buildBill';
 import { Bill, BILL_CSS, printBill } from './Bill';
 import { useMenuNav } from '../useMenuNav';
@@ -34,23 +35,63 @@ const PrintMenu = ({ onPick, busy, up, className = '' }) => {
   );
 };
 
+// ⋯ in the bill panel: only when a customer link exists (it is made the first time the bill is sent).
+const LinkMenu = ({ token, onOff }) => {
+  const { orgSlug } = useParams();
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState('');
+  const [sure, setSure] = useState(false);
+  const menuRef = useRef(null);
+  const triggerRef = useRef(null);
+  useMenuNav({ open, onClose: () => setOpen(false), menuRef, triggerRef });
+  const copy = async () => {
+    setOpen(false);
+    const url = `${window.location.origin}/${orgSlug}/bill/${token}`;
+    try { await navigator.clipboard.writeText(url); setNote('Link copied'); setTimeout(() => setNote(''), 2500); } catch { setNote(url); } // no clipboard access: show the link to copy by hand
+  };
+  if (sure) {
+    return (
+      <span className="flex items-center gap-2 text-xs text-text-secondary mr-auto" data-link-off-confirm>
+        Turn off the customer&apos;s link? It stops working.
+        <button type="button" onClick={onOff} className="h-8 px-2.5 rounded-spa bg-error text-white font-medium">Turn off</button>
+        <button type="button" onClick={() => setSure(false)} className="h-8 px-2.5 rounded-spa border border-border font-medium text-text-primary">Back</button>
+      </span>
+    );
+  }
+  return (
+    <span className="relative mr-auto flex items-center gap-2">
+      <button ref={triggerRef} type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} aria-label="More" className="h-8 w-8 inline-flex items-center justify-center rounded-spa border border-border hover:bg-background"><Icon name="MoreHorizontal" size={15} /></button>
+      {note && <span className="text-xs text-text-secondary break-all max-w-[260px]" role="status">{note}</span>}
+      {open && (
+        <div ref={menuRef} role="menu" aria-label="Customer link" className="absolute left-0 bottom-full mb-1 z-dropdown min-w-[180px] bg-surface border border-border rounded-spa spa-shadow-modal py-1">
+          <button type="button" role="menuitem" onClick={copy} className="w-full text-left px-3 py-2 text-[13px] text-text-primary hover:bg-background focus:bg-background outline-none">Copy link</button>
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); setSure(true); }} className="w-full text-left px-3 py-2 text-[13px] text-text-primary hover:bg-background focus:bg-background outline-none">Turn off link</button>
+        </div>
+      )}
+    </span>
+  );
+};
+
 const BillPanel = ({ bookingId, extraIds, onClose, onPrint, busy, above }) => {
   const { multi, billingOn, orgInfo } = useBillOrg();
   const [state, setState] = useState({ loading: true, bill: null, error: false });
+  const [link, setLink] = useState(null);
   useEffect(() => {
     let alive = true;
-    fetchBillUnit({ bookingId, multi, single: billingOn, extraIds }).then(({ data }) => {
+    fetchBillUnit({ bookingId, multi, single: billingOn, extraIds }).then(async ({ data }) => {
       if (!alive) return;
       setState(data ? { loading: false, bill: buildBill(billSource(data, orgInfo)), error: false } : { loading: false, bill: null, error: true });
+      if (data) { const l = await fetchBillLink(data.rows); if (alive) setLink(l.data); }
     });
     return () => { alive = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingId]);
+  const turnOff = async () => { const r = await turnOffBillLink(link.token); if (!r.error) setLink(null); };
   const { bill } = state;
   return (
     <SidePanel isOpen above={above} title={bill ? `${bill.title === 'Tax invoice' ? 'Tax invoice' : 'Bill'} ${bill.number}` : 'Bill'} onClose={onClose}
       width="min(560px, 100vw)"
-      footer={<div className="flex items-center justify-end gap-2 w-full"><PrintMenu onPick={onPrint} busy={busy} up /></div>}>
+      footer={<div className="flex items-center justify-end gap-2 w-full">{link && <LinkMenu token={link.token} onOff={turnOff} />}<PrintMenu onPick={onPrint} busy={busy} up /></div>}>
       <style data-bill-panel>{BILL_CSS}</style>
       {state.loading && <p className="p-6 text-sm text-text-secondary">Preparing the bill…</p>}
       {state.error && <p className="p-6 text-sm text-text-secondary">Couldn&apos;t load this bill. Close and try again.</p>}

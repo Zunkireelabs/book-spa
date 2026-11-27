@@ -21293,3 +21293,60 @@ export async function fixBillNumber(bookingId, single = false) {
     return { data: null, error };
   }
 }
+
+// ZNLY-410 step 2 (part A): the customer's bill link. share_bill fixes the bill number and returns the bill's active link token (made on first use).
+// extraIds = the other bookings paid in the same checkout (orgs without "Several services in one booking"), exactly as for fetchBillUnit.
+export async function shareBill(bookingId, extraIds = []) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data, error } = await supabase.rpc('share_bill', { p_booking_id: bookingId, p_extra_ids: extraIds || [] });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    return { data: { billNumber: row.bill_number, token: row.token }, error: null };
+  } catch (error) {
+    console.error('[API] shareBill error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** The active link of the bill made of these rows (fetchBillUnit's rows), or null. Staff read; the link is made by shareBill. */
+export async function fetchBillLink(rows) {
+  try {
+    const ids = (rows || []).map((r) => r.id).filter(Boolean);
+    const visits = [...new Set((rows || []).map((r) => r.visitId).filter(Boolean))];
+    if (!ids.length) return { data: null, error: null };
+    const cond = [`booking_ids.ov.{${ids.join(',')}}`, ...visits.map((v) => `visit_id.eq.${v}`)].join(',');
+    const { data, error } = await supabase.from('bill_links').select('token, created_at').eq('active', true).or(cond).order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (error) throw error;
+    return { data: data ? { token: data.token } : null, error: null };
+  } catch (error) {
+    console.error('[API] fetchBillLink error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function turnOffBillLink(token) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data, error } = await supabase.rpc('turn_off_bill_link', { p_token: token });
+    if (error) throw error;
+    return { data: data === true, error: null };
+  } catch (error) {
+    console.error('[API] turnOffBillLink error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** The public bill page: anon, one bill by its token. Returns { active:false[, businessName] } or the bill. */
+export async function fetchPublicBill(token) {
+  try {
+    const { data, error } = await supabase.rpc('get_public_bill', { p_token: token });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchPublicBill error:', error.message);
+    return { data: null, error };
+  }
+}

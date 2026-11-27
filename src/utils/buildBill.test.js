@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { billSource } from './buildBill';
 import { buildBill, billExists, groupBillUnits, timeRange } from './buildBill';
 
 const row = (o) => ({ id: o.n, bookingNumber: `BK-20261119-000${o.n}`, date: '2026-11-19', status: 'Completed', staff: 'Kebisha S.', payments: [], refunds: [], tip: 0, discount: 0, ...o });
@@ -69,5 +70,12 @@ describe('buildBill', () => {
     expect(groupBillUnits([{ id: 'a', visitId: 'v' }, { id: 'b', visitId: 'v' }], false).length).toBe(2);
     expect(timeRange('15:00', '16:30')).toBe('3:00 – 4:30pm');
     expect(timeRange('11:30', '12:30')).toBe('11:30am – 12:30pm');
+  });
+});
+
+describe('public bill source', () => {
+  it('uses the already-masked customer and never the raw phone', () => {
+    const src = billSource({ customer: { name: 'Aliza', phone: '+977 98•• ••4128' }, rows: [row({ n: 1, service: 'X', base: 100, final: 100, customerPhone: '+9779820084128' })], products: [], branch: {}, invoice: null }, { name: 'Biz' });
+    expect(src.customer).toEqual({ name: 'Aliza', phone: '+977 98•• ••4128' });
   });
 });

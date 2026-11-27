@@ -108,7 +108,7 @@ export function billSource(unit, orgInfo, copyLabel = '') {
     rows: unit.rows, products: unit.products, billNumber: unit.billNumber,
     branch: { ...unit.branch, phone: formatPhoneGrouped(unit.branch?.phone) },
     org: i ? { name: orgInfo.name, logoUrl: orgInfo.logoUrl, legalName: i.seller_name, pan: i.seller_pan, phone: formatPhoneGrouped(i.seller_phone), footer: i.footer_text } : { name: orgInfo.name, logoUrl: orgInfo.logoUrl, footer: orgInfo.footer },
-    customer: i ? { name: i.buyer_name, phone: formatPhoneGrouped(i.buyer_phone), pan: i.buyer_pan } : { name: first.customerName, phone: formatPhoneGrouped(first.customerPhone) },
+    customer: i ? { name: i.buyer_name, phone: formatPhoneGrouped(i.buyer_phone), pan: i.buyer_pan } : unit.customer ? { name: unit.customer.name, phone: unit.customer.phone } : { name: first.customerName, phone: formatPhoneGrouped(first.customerPhone) }, // unit.customer: the public page (phone already masked)
     invoice: i ? { number: i.invoice_number, taxMode: i.tax_mode, vatRate: i.vat_rate, vatAmount: i.vat_amount, taxableAmount: i.taxable_amount, subtotal: i.subtotal, discountAmount: i.discount_amount, totalAmount: i.total_amount, issuedAt: i.issued_at, copyLabel } : null,
   };
 }
