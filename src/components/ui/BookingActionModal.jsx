@@ -3106,7 +3106,7 @@ const BookingActionModal = ({
                                             <span className="font-caption text-[10px] text-text-secondary">{rb.booking_number}</span>
                                           </div>
                                           <div className="font-caption text-[10px] text-text-secondary flex flex-wrap gap-x-2">
-                                            {rb.start_time && <span>{clock(rb.start_time)}{rb.end_time ? ` – ${clock(rb.end_time)}` : ''}</span>}
+                                            {rb.start_time && <span>{formatClockRange(rb.start_time, rb.end_time, use24h)}</span>}
                                             {rb.therapist?.name && <span>· {rb.therapist.name}</span>}
                                             {rb.room?.name && <span>· {rb.room.name}</span>}
                                           </div>
