@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { staffPickIncomplete, arrangeByTime, staffDayRanges, rangeLabel, pillRange, offStaffReasons, offDayLabel, offReasonFor, staffHeldByOthers, pickedRowStatus, pickedRowStatusMulti, clockToMin, pickProblems, fillFreeStaff, undoFill, overlapNote, overlapLine, ownRowBookings } from './staffFit';
+import { staffPickIncomplete, arrangeByTime, staffDayRanges, rangeLabel, pillRange, offStaffReasons, offDayLabel, offReasonFor, staffHeldByOthers, pickedRowStatus, pickedRowStatusMulti, clockToMin, pickProblems, fillFreeStaff, undoFill, overlapNote, overlapLine, ownRowBookings, singleMoveOverlap } from './staffFit';
 
 const P = (id, name) => ({ id, name });
 const people = [P('a', 'Asha'), P('b', 'Bishnu'), P('c', 'Chhori'), P('d', 'Dil')];
@@ -288,5 +288,21 @@ describe('overlapNote (ZNLY-404)', () => {
     expect(pickedRowStatus({ id: 'a', name: 'Asha' }, { ...o, busyOk: true }).note).toMatch(/^⚠ Overlaps Anisha Koirala/);
     expect(pickedRowStatus({ id: 'a', name: 'Asha' }, { ...o, busyOk: false }).note).toBe('');
     expect(pickedRowStatus({ id: 'a', name: 'Asha' }, { ...o, busyOk: false }).problem).toMatch(/is busy/);
+  });
+});
+
+describe('singleMoveOverlap (1-service reschedule target)', () => {
+  const day = [bk('x', 'a', '14:00:00', '14:30:00'), bk('me', 'a', '09:00:00', '09:30:00'), bk('y', 'a', '14:00:00', '14:30:00', { date: '2026-11-21' })];
+  const base = { allow: true, staffId: 'a', date: '2026-11-20', startTime: '14:10', minutes: 30, bookings: day, ownId: 'me' };
+  it('returns the overlapping booking when the org allows overlaps and the staff member is busy then', () => {
+    expect(singleMoveOverlap(base)).toMatchObject({ start: 14 * 60, end: 14 * 60 + 30 });
+  });
+  it('is null for a free slot, another day, the booking itself, an org that blocks overlaps, or no staff / length', () => {
+    expect(singleMoveOverlap({ ...base, startTime: '15:00' })).toBeNull();
+    expect(singleMoveOverlap({ ...base, date: '2026-11-22' })).toBeNull();
+    expect(singleMoveOverlap({ ...base, startTime: '09:10' })).toBeNull(); // only its own old slot
+    expect(singleMoveOverlap({ ...base, allow: false })).toBeNull();
+    expect(singleMoveOverlap({ ...base, staffId: null })).toBeNull();
+    expect(singleMoveOverlap({ ...base, minutes: 0 })).toBeNull();
   });
 });

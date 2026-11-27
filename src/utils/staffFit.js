@@ -225,3 +225,10 @@ export function undoFill(staffByIdx, picks) {
   for (const [idx, id] of Object.entries(picks || {})) if (next[idx] === id) next[idx] = '';
   return next;
 }
+
+/** ZNLY-404: a 1-service reschedule target that overlaps another booking of the staff member, when the org allows overlaps (else null: today's behaviour). */
+export function singleMoveOverlap({ allow, staffId, date, startTime, minutes, bookings, ownId }) {
+  const s = clockToMin(startTime);
+  if (!allow || !staffId || !minutes || s == null) return null;
+  return overlapNote(staffId, s, s + minutes, (bookings || []).filter((b) => b.date === date), [ownId]);
+}

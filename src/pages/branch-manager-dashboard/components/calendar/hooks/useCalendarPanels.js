@@ -22,6 +22,8 @@ import { buildEditSlot } from '../editBookingSlot';
 import { buildAddServiceSlot } from '../addServiceSlot';
 import { isCheckedOutBlockedSlot, DEFAULT_SLOT_MINUTES } from '../calendarSlots';
 import { teamMemberLower } from '../../../../../utils/industryTerms';
+import { useOrg } from '../../../../../contexts/OrgContext';
+import { singleMoveOverlap, clockToMin } from '../../../../../utils/staffFit';
 
 // Panel routing for the calendar: which panel is open (booking details, quick-create, block / transfer forms), the
 // dirty-guard refs and open/switch/close helpers, the empty-slot / drag-to-create / new-booking entry points, the
@@ -31,6 +33,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   const [searchParams, setSearchParams] = useSearchParams();
   const { guard } = useAvailabilityGuard();
   const { branches } = useBranch();
+  const { allowStaffOverlap } = useOrg();
   const activeBranch = (branches || []).find((b) => b.id === branchId);
 
   // Modal state
@@ -276,22 +279,42 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
         setVisitMove({ visitKey: source.visit.visitKey, date: slotInfo.day, startTime, lines: source.visit.lines });
         return;
       }
+      // The same move for both 1-service paths below: new booking + cancel the original in one transaction.
+      const moveSingle = () => guard((overrideReason) => rescheduleBookingAsNewBooking({
+        bookingId: source.originalBookingId,
+        date: slotInfo.day,
+        startTime,
+        therapistId,
+        roomId,
+        reason: `Rescheduled to ${slotInfo.day} ${startTime}`,
+        overrideReason,
+      }));
       if (source.isReschedule) {
+        // ZNLY-404: overlap allowed + the staff member is busy then -> the same Move dialog as a 2-service booking, as the confirmation only.
+        const b = source.booking || {};
+        const minutes = clockToMin(b.endTime) - clockToMin(b.startTime);
+        if (singleMoveOverlap({ allow: allowStaffOverlap, staffId: therapistId, date: slotInfo.day, startTime, minutes, bookings: calendarData?.bookings, ownId: source.originalBookingId })) {
+          setVisitMove({
+            visitKey: b.visitId || source.originalBookingId, date: slotInfo.day, startTime, staffIds: [therapistId],
+            lines: { [source.originalBookingId]: { name: b.service, price: b.finalAmount, minutes, staff: (calendarData?.therapists || []).find((t) => t.id === therapistId)?.name || b.therapist } },
+            onConfirm: async () => {
+              const result = await moveSingle();
+              if (result.error) { if (isNetworkError(result.error)) refreshLight(refreshCalendar); return result; }
+              setRebookSource(null);
+              showToast('Booking rescheduled successfully.');
+              refreshLight(refreshCalendar);
+              return result;
+            },
+          });
+          return;
+        }
         // Single DB transaction (reschedule_booking RPC): creates the new booking and cancels the original atomically, and
         // carries discount / special requests / companion / referral fields over, so there is no partial-failure state.
         // Pick mode stays up while it runs (spinner on the card, further clicks ignored); on failure it simply stays, so the
         // user can pick another slot.
         reschedulePendingRef.current = true;
         setReschedulePending(true);
-        const result = await guard((overrideReason) => rescheduleBookingAsNewBooking({
-          bookingId: source.originalBookingId,
-          date: slotInfo.day,
-          startTime,
-          therapistId,
-          roomId,
-          reason: `Rescheduled to ${slotInfo.day} ${startTime}`,
-          overrideReason,
-        }));
+        const result = await moveSingle();
         reschedulePendingRef.current = false;
         setReschedulePending(false);
         if (result.error) {
@@ -397,7 +420,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     // Overall is view-only for anything that creates data (booking, block, transfer): nothing to offer, so no menu.
     if (isOverallBranch(branchId)) return;
     setChoiceMenuSlot(slotInfo);
-  }, [rebookSource, branchId, refreshCalendar, calendarData, blocksAvailable, openQuickCreateForSlot, quickCreateSlot, modalOpen, addBlockSlot, editingBlock, transferModalTarget, editingTransferTherapist, guard]);
+  }, [rebookSource, allowStaffOverlap, branchId, refreshCalendar, calendarData, blocksAvailable, openQuickCreateForSlot, quickCreateSlot, modalOpen, addBlockSlot, editingBlock, transferModalTarget, editingTransferTherapist, guard]);
 
   // Block management from the calendar overlay: resize, and delete (via the in-app scope dialog).
   const handleDeleteManualBlock = useCallback(async ({ blockId, day, scope = 'this' }) => {

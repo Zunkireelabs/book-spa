@@ -15,7 +15,9 @@ const money = (n) => `NPR ${Number(n || 0).toLocaleString('en-IN')}`;
 const addMin = (t, m) => { const [h, mm] = String(t).split(':').map(Number); const x = h * 60 + (mm || 0) + (m || 0); return `${String(Math.floor(x / 60) % 24).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`; };
 const dayLabel = (d) => { try { return new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', ''); } catch { return d; } };
 
-const MoveBookingDialog = ({ visitKey, date, startTime, lines, canOverride, onClose, onDone, dayBookings = [] }) => {
+// `onConfirm` (optional, async, returns { error }): a 1-service move confirms through its own existing path instead of visit_reschedule.
+// `staffIds` (optional): who the move lands on when that isn't the booking's own staff (the column that was clicked).
+const MoveBookingDialog = ({ visitKey, date, startTime, lines, canOverride, onClose, onDone, onConfirm, staffIds, dayBookings = [] }) => {
   const clock = useClock();
   const { allowStaffOverlap } = useOrg();
   const [preview, setPreview] = useState(null);
@@ -24,6 +26,8 @@ const MoveBookingDialog = ({ visitKey, date, startTime, lines, canOverride, onCl
   const [reason, setReason] = useState('');
   useEffect(() => {
     let off = false;
+    // 1-service move (onConfirm): no dry run. It would judge the booking's OWN staff, not the one the move lands on; the real checks run at save (guard + reschedule_booking) and come back here as a sentence.
+    if (onConfirm) { setPreview({ rows: Object.keys(lines || {}).map((id) => ({ booking_id: id, verdict: 'change', start: startTime })) }); return undefined; }
     visitReschedule({ visitKey, date, startTime, dryRun: true }).then(({ data, error: e }) => {
       if (off) return;
       if (e) {
@@ -50,7 +54,7 @@ const MoveBookingDialog = ({ visitKey, date, startTime, lines, canOverride, onCl
   const overlapOf = (r, l, start) => {
     if (!allowStaffOverlap || r.verdict === 'block' || !l.minutes) return '';
     const b = dayBookings.find((x) => x.id === r.booking_id);
-    const ids = b?.booking_therapists?.length ? b.booking_therapists.map((t) => t.therapist_id) : b?.therapist_id ? [b.therapist_id] : [];
+    const ids = staffIds || (b?.booking_therapists?.length ? b.booking_therapists.map((t) => t.therapist_id) : b?.therapist_id ? [b.therapist_id] : []);
     const s = clockToMin(start);
     for (const id of ids) { const n = s == null ? null : overlapNote(id, s, s + l.minutes, dayBookings.filter((x) => x.date === date), ownIds); if (n) return overlapLine(n); }
     return '';
@@ -58,7 +62,7 @@ const MoveBookingDialog = ({ visitKey, date, startTime, lines, canOverride, onCl
 
   const go = async () => {
     setBusy(true); setError(null);
-    const { error: e } = await visitReschedule({ visitKey, date, startTime, overrideReason: needReason ? reason.trim() : null });
+    const { error: e } = onConfirm ? await onConfirm() : await visitReschedule({ visitKey, date, startTime, overrideReason: needReason ? reason.trim() : null });
     setBusy(false);
     if (e) { setError(friendlyError(e, 'Nothing was moved. Try again.')); return; }
     onDone();
