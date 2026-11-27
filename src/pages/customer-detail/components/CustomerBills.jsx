@@ -41,7 +41,7 @@ const CustomerBills = ({ customerId, canViewCustomerDetails }) => {
                 <span className="block text-xs">Bill {b.bookingNumber}{b.serviceCount > 1 ? ` · ${b.serviceCount} services` : ''}{staff ? ` · ${staff}` : ''}{u.invoiceNumber ? ` · Tax invoice ${u.invoiceNumber}` : ''}</span>
               </div>
               <div className="text-right tabular-nums"><span className="font-medium text-text-primary">{npr(b.total)}</span>
-                <span className={`block text-[11px] font-semibold rounded-full px-2 py-0.5 mt-0.5 ${CHIP[b.status.kind]}`}>{b.status.kind === 'due' ? `${npr(b.status.amount)} still to pay` : b.status.kind === 'refunded' ? `Refunded ${npr(b.status.amount)}` : 'Paid'}</span>
+                <span className={`ml-auto mt-0.5 flex w-fit text-[11px] font-semibold rounded-full px-2 py-0.5 ${CHIP[b.status.kind]}`}>{b.status.kind === 'due' ? `${npr(b.status.amount)} still to pay` : b.status.kind === 'refunded' ? `Refunded ${npr(b.status.amount)}` : 'Paid'}</span>
               </div>
               <div className="col-span-2 sm:col-span-1"><BillActions bookingId={u.rows[0].id} /></div>
             </div>
