@@ -5,7 +5,7 @@ import { useAvailabilityGuard } from '../../../../contexts/AvailabilityOverrideC
 import { fetchAttendance, fetchServices, getCalendarBookings, updateBookingStatus } from '../../../../services/api';
 
 /** The Calendar's New-booking panel on a given day, prefilled from `slot` ({ day, hour, minute, colType, colId }). */
-export const CreateBookingHost = ({ slot, branchId, onClose, onCreated }) => {
+export const CreateBookingHost = ({ slot, branchId, onClose, onBack, onCreated }) => {
   const { guard } = useAvailabilityGuard();
   const [data, setData] = useState(null);
   const [services, setServices] = useState(null);
@@ -39,6 +39,7 @@ export const CreateBookingHost = ({ slot, branchId, onClose, onCreated }) => {
       branchId={branchId}
       branchHours={data?.branchHours}
       onClose={onClose}
+      onBack={onBack}
       onSubmit={async (formData) => {
         const r = await submitQuickCreate({ formData, branchId, guard, joinVisitOfBookingId: slot?.joinVisitOfBookingId || null });
         if (r.error) return { message: r.error, code: r.code, raw: r.raw, partial: r.partial, row: r.row };

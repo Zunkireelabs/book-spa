@@ -77,7 +77,7 @@ export async function submitQuickCreate({ formData, branchId, guard, joinVisitOf
   // ZNLY-402: "+ Service" joins the source booking's visit (ON orgs; the source is stamped first when it has none). OFF org / no source: visitId stays null.
   let visitId = null;
   if (joinVisitOfBookingId) {
-    const joined = await joinVisitOfBooking({ sourceBookingId: joinVisitOfBookingId, branchId });
+    const joined = await joinVisitOfBooking({ sourceBookingId: joinVisitOfBookingId, branchId, date });
     if (joined.error) return { error: friendlyError(joined.error, 'Could not add this service to the booking.'), code: joined.error.code, raw: joined.error };
     visitId = joined.data || null;
   }
@@ -89,7 +89,7 @@ export async function submitQuickCreate({ formData, branchId, guard, joinVisitOf
     // the first attempt reports the overridable problem without creating, the guard asks for the reason, and the second attempt applies it only to the rows that need it.
     const needing = formData.multiServices.findIndex((s) => s.overrideNeeded);
     const multi = await guard((overrideReason) => (needing >= 0 && !overrideReason
-      ? Promise.resolve({ data: null, error: { overridable: true, code: 'OVERRIDE_NEEDED', message: `${needing === 0 ? 'Service 1' : `Service ${needing + 1}`}: ${formData.multiServices[needing].overrideNote || 'outside the usual availability'}` } })
+      ? Promise.resolve({ data: null, error: { overridable: true, code: 'OVERRIDE_NEEDED', message: `Service ${needing + 1 + (formData.serviceNumberOffset || 0)}: ${formData.multiServices[needing].overrideNote || 'outside the usual availability'}` } })
       : createBookingGroup({
       branchId,
       date,
@@ -112,7 +112,7 @@ export async function submitQuickCreate({ formData, branchId, guard, joinVisitOf
     })));
     if (multi.error) return { error: friendlyError(multi.error, 'Failed to create booking.'), code: multi.error.code, raw: multi.error, row: multi.error.failedRow, partial: multi.error.partial };
     const first = multi.data?.bookings?.[0];
-    return { toast: { msg: `Booking created: ${multi.data.bookings.length} services` }, bookingId: first?.id, bookingNumber: first?.booking_number };
+    return { toast: { msg: `Booking created: ${multi.data.bookings.length} services` }, bookingId: first?.id, bookingNumber: first?.booking_number, visitId };
   }
 
   const result = await guard((overrideReason) => createBooking({
@@ -160,5 +160,5 @@ export async function submitQuickCreate({ formData, branchId, guard, joinVisitOf
   if (result.data?._therapistAssignmentWarning) {
     return { toast: { msg: `Booking created, but: ${result.data._therapistAssignmentWarning}`, type: 'error' }, bookingId: result.data?.id, bookingNumber: result.data?.booking_number };
   }
-  return { toast: { msg: 'Booking created successfully' }, bookingId: result.data?.id, bookingNumber: result.data?.booking_number };
+  return { toast: { msg: 'Booking created successfully' }, bookingId: result.data?.id, bookingNumber: result.data?.booking_number, visitId };
 }

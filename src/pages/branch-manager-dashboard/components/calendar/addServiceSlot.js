@@ -16,8 +16,8 @@ export function lockedClientOf(booking) {
 
 // The same people as this booking, if they are free at `atMin` (nobody else of theirs is in a booking covering that minute).
 // One service = one person, so only the first person is preset (`max` > 1 only for a couple service).
-export function sameStaffIfFree(booking, rawBookings, atMin, max = 1) {
-  const ids = (booking.therapists || []).map((t) => t.id).filter(Boolean).slice(0, max);
+export function sameStaffIfFree(booking, rawBookings, atMin, max = 1, staffIds = null) {
+  const ids = (staffIds || (booking.therapists || []).map((t) => t.id)).filter(Boolean).slice(0, max);
   if (!ids.length || atMin == null) return [];
   const busy = new Set();
   for (const b of rawBookings || []) {
@@ -30,22 +30,52 @@ export function sameStaffIfFree(booking, rawBookings, atMin, max = 1) {
   return ids.every((id) => !busy.has(id)) ? ids : [];
 }
 
-export function buildAddServiceSlot({ booking, mode = 'add-service', rawBookings = [] }) {
+const staffOfRaw = (b) => (b.booking_therapists?.length ? b.booking_therapists.map((bt) => bt.therapist_id) : [b.therapist_id]).filter(Boolean);
+
+// ZNLY-436: the new service starts when the client is free: the end of the clicked service, pushed past every service of the SAME client that day
+// that covers that minute (a chain 12:30 -> 1:00 -> 1:15). Own = same client record, same visit, or the clicked booking itself. Walk-ins have no record: visit/self only.
+// Returns { endMin, lastRaw } (lastRaw = the last service jumped over, null if none).
+export function nextFreeStart(booking, rawBookings) {
+  let t = toMin(booking.endTime) ?? toMin(booking.startTime) ?? toMin(booking.time);
+  let lastRaw = null;
+  if (t == null) return { endMin: t, lastRaw };
+  const own = (rawBookings || []).filter((b) => b.date === booking.date && !IDLE.has(b.status) && b.id !== booking.bookingId
+    && ((booking.customerId && b.customer_id === booking.customerId) || (booking.visitId && b.visit_id === booking.visitId)));
+  for (;;) {
+    const hit = own.find((b) => { const s = toMin(b.start_time); const e = toMin(b.end_time); return s != null && e != null && s <= t && t < e; });
+    if (!hit) break;
+    t = toMin(hit.end_time); lastRaw = hit;
+  }
+  return { endMin: t, lastRaw };
+}
+
+// The visit's own numbers for the "N services booked" card, from the block rows ("This booking": utils/bookingBlock). Dead (cancelled) rows are ignored.
+export function visitSummaryOf(blockRows) {
+  const live = (blockRows || []).filter((r) => !r.dead && r.start);
+  if (!live.length) return null;
+  const starts = live.map((r) => r.start).sort();
+  const ends = live.map((r) => r.end).filter(Boolean).sort();
+  return { count: live.length, start: starts[0], end: ends.length ? ends[ends.length - 1] : '', total: Math.round(live.reduce((n, r) => n + (Number(r.final) || 0), 0) * 100) / 100 };
+}
+
+export function buildAddServiceSlot({ booking, mode = 'add-service', rawBookings = [], blockRows = null }) {
   const lockedClient = lockedClientOf(booking);
-  const endMin = toMin(booking.endTime) ?? toMin(booking.startTime) ?? toMin(booking.time);
+  const { endMin, lastRaw } = nextFreeStart(booking, rawBookings);
   const slot = {
     day: booking.date,
     title: mode === 'rebook' ? 'Rebook' : 'Add a service',
     lockedClient,
     openServiceFirst: mode === 'add-service',
     sourceBookingId: booking.bookingId,
+    returnToBooking: booking,   // the panel's Back returns to this booking
+    ...(mode === 'add-service' ? { visit: visitSummaryOf(blockRows) } : {}),
     // ZNLY-402: only "+ Service" joins the source booking's visit (orgs with the setting ON). Rebook is a new, separate booking.
     ...(mode === 'add-service' ? { joinVisitOfBookingId: booking.bookingId } : {}),
   };
   if (mode === 'add-service' && endMin != null) {
     slot.hour = Math.floor(endMin / 60);
     slot.minute = endMin % 60;
-    slot.defaultTherapistIds = sameStaffIfFree(booking, rawBookings, endMin);
+    slot.defaultTherapistIds = sameStaffIfFree(booking, rawBookings, endMin, 1, lastRaw ? staffOfRaw(lastRaw) : null);
   }
   if (mode === 'rebook') {
     slot.defaultServiceId = booking.serviceId || '';

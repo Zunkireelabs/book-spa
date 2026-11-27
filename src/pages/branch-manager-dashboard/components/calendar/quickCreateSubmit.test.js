@@ -18,7 +18,7 @@ describe('"+ Service" visit link (ZNLY-402)', () => {
   it('joins the source visit: createBooking gets the visitId', async () => {
     joinVisitOfBooking.mockResolvedValue({ data: 'v1', error: null });
     await submitQuickCreate({ formData: form, branchId: 'br', guard, joinVisitOfBookingId: 'src' });
-    expect(joinVisitOfBooking).toHaveBeenCalledWith({ sourceBookingId: 'src', branchId: 'br' });
+    expect(joinVisitOfBooking).toHaveBeenCalledWith({ sourceBookingId: 'src', branchId: 'br', date: '2026-11-24' });
     expect(createBooking.mock.calls[0][0].visitId).toBe('v1');
   });
   it('OFF org (no visit returned): no visitId is sent', async () => {
@@ -60,6 +60,12 @@ describe('several services: override parity (ZNLY-402 3b)', () => {
     const rows = createBookingGroup.mock.calls[0][0].services;
     expect(rows[0].overrideReason).toBeUndefined();
     expect(rows[1].overrideReason).toBe('regular client');
+  });
+  it('ZNLY-436 numbering: with 2 services already booked the override reason names Service 4 (3 + 1)', async () => {
+    const seen = [];
+    const g = async (run) => { const r = await run(undefined); seen.push(r?.error?.message); return { ...r, error: { ...r.error, cancelled: true } }; };
+    await submitQuickCreate({ formData: { ...multi({ overrideNeeded: true, overrideNote: 'x' }), serviceNumberOffset: 2 }, branchId: 'br', guard: g });
+    expect(seen[0]).toBe('Service 4: x');
   });
   it('declining the reason creates nothing', async () => {
     const declining = async (run) => { const first = await run(undefined); return { ...first, error: { ...first.error, cancelled: true } }; };

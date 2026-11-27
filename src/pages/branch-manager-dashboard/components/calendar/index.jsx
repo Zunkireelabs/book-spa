@@ -238,7 +238,7 @@ const OperationalCalendar = ({ branchId }) => {
     servicesCache, servicesLoading, rebookSource, rebookCardRef, reschedulePending, visitMove, setVisitMove, handleRebookCancel,
     waitlistCollapsed, setWaitlistCollapsed, waitlistRefreshToken, handleBookInFromWaitlist,
     openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick,
-    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleAddServiceStart, handleEditFormStart, handleRebookStart, handleRescheduleStart,
+    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateBack, handleQuickCreateSubmit, handleAddServiceStart, handleEditFormStart, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,
   } = useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, showGuide, gridRef, canViewCustomerDetails });
   const waitlist = useWaitlistEntries(branchId, waitlistRefreshToken);
@@ -563,6 +563,7 @@ const OperationalCalendar = ({ branchId }) => {
               rooms={calendarData?.rooms || []}
               bookings={calendarData?.bookings || []}
               onClose={handleQuickCreateClose}
+              onBack={handleQuickCreateBack}
               onSubmit={handleQuickCreateSubmit}
               branchId={branchId}
               branchHours={calendarData?.branchHours}

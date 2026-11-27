@@ -346,6 +346,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       if (!sourceBooking.isWalkIn && !sourceBooking.customerId && (!source.customerPhone || !source.customerPhone.trim())) {
         openQuickCreateForSlot({
           ...slotInfo,
+          returnToBooking: sourceBooking,   // ZNLY-436: Back returns to the booking being rebooked
           defaultCustomerName: source.customerName,
           defaultServiceId: source.serviceId,
         });
@@ -449,6 +450,13 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     setDraftGhost(null);
   }, []);
 
+  // ZNLY-436 Back: the form (its own dirty guard already ran) closes and the booking panel it was opened from comes back. X / Esc still close everything.
+  const handleQuickCreateBack = useCallback(() => {
+    const back = quickCreateSlotRef.current?.returnToBooking;
+    handleQuickCreateClose();
+    if (back) { setSelectedBooking(back); setModalOpen(true); }
+  }, [handleQuickCreateClose]);
+
   // Auto-open the Quick Booking panel when the mobile FAB navigates here with
   // ?newBooking=1. Defaults to today + unassigned, no time. Param is stripped
   // afterwards so refresh/back-nav doesn't re-trigger the panel.
@@ -477,7 +485,8 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   }, [searchParams, branchId, currentDate, handleEmptySlotClick, openQuickCreateForSlot, setSearchParams]);
 
   const handleQuickCreateSubmit = useCallback(async (formData) => {
-    const r = await submitQuickCreate({ formData, branchId, guard, joinVisitOfBookingId: quickCreateSlotRef.current?.joinVisitOfBookingId || null });
+    const slotNow = quickCreateSlotRef.current;
+    const r = await submitQuickCreate({ formData, branchId, guard, joinVisitOfBookingId: slotNow?.joinVisitOfBookingId || null });
     if (r.error) {
       // Part of a group, or a booking whose confirmation could not load, exists already: show the calendar as it really is.
       if (r.partial || ['BOOKING_CONFIRMATION_UNAVAILABLE', 'BOOKING_NOT_VISIBLE', 'BOOKING_GROUP_PARTIAL'].includes(r.code)) refreshLight(refreshCalendar);
@@ -492,20 +501,23 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       setWaitlistRefreshToken((v) => v + 1);
     }
     setQuickCreateSlot(null);
-    refreshLight(refreshCalendar);
+    // ZNLY-436: after "+ Service" the booking panel comes back on the source booking (it now shows one more service).
+    // The source may have been stamped with its visit_id by this very save: the panel needs it to list every service of the visit.
+    const back = slotNow?.joinVisitOfBookingId && r.visitId ? { ...slotNow.returnToBooking, visitId: r.visitId || slotNow.returnToBooking.visitId } : null;
+    if (back) { await refreshLight(refreshCalendar); setSelectedBooking(back); setModalOpen(true); } else refreshLight(refreshCalendar);
     return null;
   }, [branchId, refreshCalendar, guard, bookingWaitlistEntryId, showToast]);
 
   // ── Rebook "pick and place" handlers ───────────────────────
 
   // "+ Service" on a booking: the New booking panel, pre-filled and locked to the booking's client (ZNLY-365).
-  const handleAddServiceStart = useCallback((booking, mode = 'add-service') => {
+  const handleAddServiceStart = useCallback((booking, mode = 'add-service', blockRows = null) => {
     if (isOverallBranch(branchId)) return;
     runThroughPanelGuard(() => {
       setModalOpen(false);
       setSelectedBooking(null);
       setPreviewBooking(null);
-      openQuickCreateForSlot(buildAddServiceSlot({ booking, mode, rawBookings: calendarData?.bookings }));
+      openQuickCreateForSlot(buildAddServiceSlot({ booking, mode, rawBookings: calendarData?.bookings, blockRows }));
     });
   }, [branchId, calendarData, openQuickCreateForSlot]);
 
@@ -639,7 +651,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     servicesCache, servicesLoading, rebookSource, rebookCardRef, reschedulePending, visitMove, setVisitMove, handleRebookCancel,
     bookingWaitlistEntryId, waitlistCollapsed, setWaitlistCollapsed, waitlistRefreshToken, handleBookInFromWaitlist,
     openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick,
-    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleAddServiceStart, handleEditFormStart, handleRebookStart, handleRescheduleStart,
+    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateBack, handleQuickCreateSubmit, handleAddServiceStart, handleEditFormStart, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,
   };
 }

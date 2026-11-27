@@ -36,6 +36,7 @@ export function buildEditSlot({ booking, blockRows = null, referredBy = '' }) {
   const hm = /^(\d{1,2}):(\d{2})/.exec(first?.start || '');
   return {
     day: booking.date,
+    returnToBooking: booking,   // ZNLY-436: Back returns to this booking
     title: `Edit booking · ${booking.customerName || ''}`.trim(),
     hour: hm ? Number(hm[1]) : 9,
     minute: hm ? Number(hm[2]) : 0,

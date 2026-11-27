@@ -1785,7 +1785,7 @@ const BookingActionModal = ({
   // Visible secondary actions (left), in collapse-priority order; disabled ones are not shown here (only in the overflow).
   const secondaryVisible = [
     !isViewer && onAddServiceStart && !isEditing && { key: 'rebook', label: rebookLabel, icon: 'CalendarClock', run: () => onRebookStart?.(booking) },
-    !isViewer && onAddServiceStart && !isEditing && { key: 'add', label: '+ Service', icon: 'PlusCircle', run: () => onAddServiceStart(booking, 'add-service') },
+    !isViewer && onAddServiceStart && !isEditing && { key: 'add', label: '+ Service', icon: 'PlusCircle', run: () => onAddServiceStart(booking, 'add-service', block.rows) },
     !isViewer && !restricted && !isTerminal && !isLocked && extendOptions.length > 0 && { key: 'extend', label: 'Extend', icon: 'Timer', run: () => { setActiveTab('details'); setShowExtendPanel(true); } },
   ].filter(Boolean);
   // Fit: footer width minus the ⋯ button, the primary action and gaps; each button's width is estimated from its label.
@@ -4030,6 +4030,7 @@ const BookingActionModal = ({
         slot={editSlot}
         branchId={booking.branchId || branchId}
         onClose={() => setEditSlot(null)}
+        onBack={() => setEditSlot(null)}
         onCreated={async () => { setEditSlot(null); setBlockReload((n) => n + 1); await onRefreshBooking?.(booking.bookingId); }}
       />
     );
@@ -4147,7 +4148,7 @@ const BookingActionModal = ({
             {!isEditing && !showExtendPanel && !isViewer && onAddServiceStart ? (
               <div className="flex items-stretch gap-2">
                 <button
-                  onClick={() => onAddServiceStart(booking, 'add-service')}
+                  onClick={() => onAddServiceStart(booking, 'add-service', block.rows)}
                   className="flex items-center justify-center text-center px-3 py-1.5 text-xs font-body font-body-medium text-primary border border-primary/30 rounded-spa hover:bg-primary/5 spa-transition-fast min-h-[36px]"
                 >
                   Add another service

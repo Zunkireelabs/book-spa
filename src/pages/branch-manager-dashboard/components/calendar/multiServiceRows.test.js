@@ -61,3 +61,14 @@ describe('staffRowProblem with a staff name (group guests / combo steps)', () =>
     expect(staffRowProblem({ ...base, staffName: 'Jayanti R.' })).toBe('');
   });
 });
+
+describe('ZNLY-436 numbering offset', () => {
+  it('rowsIncompleteReason continues after the services already booked', () => {
+    expect(rowsIncompleteReason([{ serviceId: 'a' }, { serviceId: '' }])).toBe('Pick a service for service 3');
+    expect(rowsIncompleteReason([{ serviceId: 'a' }, { serviceId: '' }], 2)).toBe('Pick a service for service 5');
+  });
+  it('ownOverlaps names the earlier service with the offset', () => {
+    const slots = [{ ids: ['s'], startMin: 600, endMin: 660 }, { ids: ['s'], startMin: 630, endMin: 690 }];
+    expect(ownOverlaps(slots, () => 'Rupa', 2)[1]).toBe('Rupa is already in service 3 at this time. Pick another time or someone else.');
+  });
+});
