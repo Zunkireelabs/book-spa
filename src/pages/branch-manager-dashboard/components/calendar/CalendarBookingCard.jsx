@@ -13,6 +13,7 @@ import { cardTier, iconsForBooking, splitForShortCard, statusTag, shouldMoveName
 import Tooltip from '../../../../components/ui/Tooltip';
 import CardIcon, { LockMark } from './CardIcon';
 import { useCardIconPrefs } from './cardIconPrefs';
+import { snapLength, lengthLabel } from '../../../../utils/calendarStep';
 import { phoneCardPlan, startNoMeridiem, coupleName, shortName, oneLineShowsIcon } from './phoneCalendarLayout';
 
 // Row of 13px icons; `wrap` lets them flow onto a second row before they clip. `more` = "+N" for icons a short card has no room for.
@@ -60,12 +61,34 @@ export function canDragBooking(booking) {
   return true;
 }
 
-const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate, onClientActivate, onClientDeactivate, sameClient = false, hideSensitive = false, use24h = false, outsideHours = null, phone = false, narrow = false, chipWidth = 0 }) => {
+const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate, onClientActivate, onClientDeactivate, sameClient = false, hideSensitive = false, use24h = false, outsideHours = null, phone = false, narrow = false, chipWidth = 0, extendEnabled = false, onExtend, pxPerMin = 2 }) => {
   const colors = getBookingStatusColors(isNoShow(booking) ? 'No Show' : booking.status);
   const isDraggable = canDragBooking(booking);
 
   // Hover card: one shared popover (see BookingHoverCard.jsx). Not shown for the booking already open in the side panel.
   const { ref: cardRef, handlers: hoverHandlers, open: hoverOpen, hideNow } = useBookingHover(booking, { draggable: isDraggable, suppress: isPanelSelected || hideSensitive });
+  // ZNLY-407: make the appointment longer by dragging its bottom edge (length only; the price never changes). Whole 5-minute steps, never shorter than the service.
+  const [extLen, setExtLen] = useState(null); // live length in minutes while dragging
+  const toMinutes = (t) => { if (!t) return null; const [h, m] = String(t).split(':').map(Number); return h * 60 + (m || 0); };
+  const lenNow = toMinutes(booking.endTime) != null && toMinutes(booking.startTime) != null ? toMinutes(booking.endTime) - toMinutes(booking.startTime) : null;
+  const baseLen = booking.serviceMinutes ?? booking.serviceDuration; // the calendar's rows carry serviceDuration, the panel's carry serviceMinutes
+  const canExtendThis = extendEnabled && !phone && !!onExtend && baseLen > 0 && lenNow > 0 && ['pending', 'confirmed', 'in-progress'].includes(String(booking.status || '').toLowerCase())
+    && !booking.isLocked && !booking.isCombo && !booking.isRoomShared;
+  const startExtend = (e) => {
+    if (e.button != null && e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+    const y0 = e.clientY; const el = e.currentTarget;
+    try { el.setPointerCapture(e.pointerId); } catch { /* older browsers: window listeners below still work */ }
+    let last = lenNow;
+    const move = (ev) => { last = snapLength(lenNow + (ev.clientY - y0) / pxPerMin, baseLen); setExtLen(last); };
+    const end = async (ev) => {
+      el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', end); el.removeEventListener('pointercancel', end);
+      try { el.releasePointerCapture(ev.pointerId); } catch { /* already released */ }
+      if (ev.type !== 'pointercancel' && last !== lenNow && Math.abs(ev.clientY - y0) >= 3) await onExtend(booking, last - baseLen);
+      setExtLen(null);
+    };
+    el.addEventListener('pointermove', move); el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+  };
   const [isResizing, setIsResizing] = useState(false);
   const [resizeDir, setResizeDir] = useState(null); // 'top' or 'bottom'
   const [resizeDelta, setResizeDelta] = useState(0);
@@ -219,7 +242,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         cardRef.current = node;
         setNodeRef(node);
       }}
-      className={`absolute left-1 right-1 rounded-spa overflow-visible outline-none focus-visible:ring-2 focus-visible:ring-primary/60 transition-colors duration-150 ease-out hover:z-dropdown hover:brightness-[0.97] ${
+      className={`group/card absolute left-1 right-1 rounded-spa overflow-visible outline-none focus-visible:ring-2 focus-visible:ring-primary/60 transition-colors duration-150 ease-out hover:z-dropdown hover:brightness-[0.97] ${
         isDraggable && !isResizing ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
       } ${isSelected ? 'ring-2 ring-primary ring-offset-1' : ''} ${isPanelSelected ? 'ring-2 ring-primary z-[3] shadow-spa-elevated' : ''} ${booking.isWalkIn && !isPanelSelected ? 'shadow-[inset_4px_0_0_0_theme(colors.warning/40%)]' : ''}`}
       data-booking-card="true"
@@ -231,6 +254,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       style={{
         ...style,
         ...(isResizing ? {} : dragStyle),
+        ...(extLen != null ? { height: Math.max((style?.height || 60) + (extLen - lenNow) * pxPerMin, 24), zIndex: 9999 } : {}),
         ...(isResizing && resizeDir === 'bottom' ? { height: Math.max((style?.height || 60) + resizeDelta, 20), zIndex: 9999 } : {}),
         ...(isResizing && resizeDir === 'top' ? { top: (style?.top || 0) + resizeDelta, height: Math.max((style?.height || 60) - resizeDelta, 20), zIndex: 9999 } : {}),
         // Secondary copies of a shared booking stay readable: a lighter fill and a softer bar, not ghosted.
@@ -365,6 +389,20 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
           </>
         )}
       </div>
+
+      {canExtendThis && (
+        <>
+          <div data-extend-grip role="separator" aria-label="Drag to make this longer" onPointerDown={startExtend} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}
+            className="absolute left-0 right-0 -bottom-[3px] h-[9px] z-10 cursor-ns-resize touch-none flex items-end justify-center group/grip">
+            <span className={`mb-[3px] h-[3px] w-6 rounded-full bg-text-secondary/60 transition-opacity ${extLen != null ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-100'}`} />
+          </div>
+          {extLen != null && (
+            <div data-extend-label className="absolute left-1 top-full mt-1 z-[10000] whitespace-nowrap px-1.5 py-0.5 rounded-spa bg-surface border border-border font-data text-[11px] text-text-primary shadow-spa-resting pointer-events-none">
+              {lengthLabel(formatClockTime(`${String(Math.floor((toMinutes(booking.startTime) + extLen) / 60) % 24).padStart(2, '0')}:${String((toMinutes(booking.startTime) + extLen) % 60).padStart(2, '0')}`, use24h), extLen, baseLen)}
+            </div>
+          )}
+        </>
+      )}
 
       {/* Resize handles for shared booking cards */}
       {canResize && (

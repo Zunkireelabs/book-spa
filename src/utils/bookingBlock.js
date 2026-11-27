@@ -35,7 +35,8 @@ export function toBlockRow(r) {
     start: r.start_time ? String(r.start_time).slice(0, 5) : null,
     end: r.end_time ? String(r.end_time).slice(0, 5) : null,
     name: r.service?.name || r.service_name_snapshot || 'Service',
-    minutes: num(r.service?.duration_minutes) || minutesBetween(r.start_time, r.end_time),
+    baseMinutes: num(r.service?.duration_minutes) || null, // the service's own length (ZNLY-407)
+    minutes: minutesBetween(r.start_time, r.end_time) || num(r.service?.duration_minutes), // ZNLY-407: the booking's real length (a made-longer booking is longer than its service)
     staff,
     staffPeople: people,
     staffIds: people.map((t) => t.id),

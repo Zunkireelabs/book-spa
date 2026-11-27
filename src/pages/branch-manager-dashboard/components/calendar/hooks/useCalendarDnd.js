@@ -13,6 +13,7 @@ import { formatTimeFromSlot, calculateEndTime } from '../calendarDates';
 import { isCheckedOutBlockedSlot } from '../calendarSlots';
 import { useAvailabilityGuard } from '../../../../../contexts/AvailabilityOverrideContext';
 import { teamMemberLower } from '../../../../../utils/industryTerms';
+import { CAL_STEP_MIN } from '../../../../../utils/calendarStep';
 
 // Drag-and-drop for the calendar grid: sensors, pointer tracking, drag start/move/over/end, block drag, the
 // cross-column confirm state and its execution.
@@ -82,7 +83,7 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
     const minutesFromTop = (relativeY / effectiveHourHeight) * 60;
     const hour = Math.floor(minutesFromTop / 60) + openHour;
     const rawMinute = minutesFromTop % 60;
-    const minute = Math.floor(rawMinute / 10) * 10; // Snap to 10-minute intervals (matches click + hover label)
+    const minute = Math.floor(rawMinute / CAL_STEP_MIN) * CAL_STEP_MIN; // Snap to 5-minute intervals (matches click + hover label)
 
     // Clamp to valid hours
     if (hour < openHour || minute < 0) {

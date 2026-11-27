@@ -189,6 +189,7 @@ export function transformBooking(dbBooking) {
     duration: dbBooking.service
       ? `${dbBooking.service.duration_minutes} min`
       : '',
+    serviceMinutes: dbBooking.service?.duration_minutes ?? null, // ZNLY-407: the service's own length; the booking is longer than this when it was made longer
     time: dbBooking.start_time ? dbBooking.start_time.slice(0, 5) : '',
     date: dbBooking.date,
     status: dbBooking.status ? dbBooking.status.toLowerCase() : 'pending',
