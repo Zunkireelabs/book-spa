@@ -33,3 +33,7 @@ describe('formatClockRange', () => {
     expect(formatClockRange('11:30', '12:15', false)).toBe('11:30am–12:15pm');
   });
 });
+
+describe('formatClockRange: a midnight end is never compacted', () => {
+  it('9:00am–12:00am (not 9:00–12:00am)', () => expect(formatClockRange('09:00', '24:00', false)).toBe('9:00am–12:00am'));
+});

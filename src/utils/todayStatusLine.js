@@ -12,7 +12,7 @@
 import { timeToMinutes, hoursFromShiftRow } from './staffDay';
 import { wordBranch, wordBranchCap } from './industryTerms';
 import { readUse24h } from './clockPref';
-import { formatClockRange } from './clockTime';
+import { formatClockRange, formatClockNow } from './clockTime';
 
 const LEAVE_STATUSES = new Set(['Leave', 'Annual Leave', 'Sick Leave']);
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -20,11 +20,8 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const STATUS_DOT_COLOR = { grey: '#B8B8BD', amber: '#F59E0B', green: '#2D5A27', purple: '#7A4B86' };
 
 const hhmm = (min) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
-const range = (a, b) => `${a}–${b}`;
-const h12 = (min) => { if (readUse24h()) return hhmm(min); const h = Math.floor(min / 60) % 24; return `${h % 12 === 0 ? 12 : h % 12}:${String(min % 60).padStart(2, '0')}`; };
-const ampm = (min) => (readUse24h() ? '' : Math.floor(min / 60) % 24 >= 12 ? 'pm' : 'am');
-/** "6:55 – 9:55 pm" (am/pm shown once when both ends agree). */
-const t12 = (min) => (readUse24h() ? hhmm(min) : `${h12(min)} ${ampm(min)}`);
+const range = (a, b) => formatClockRange(a, b, readUse24h());
+/** "6:55–9:55pm" (am/pm shown once when both ends agree; 24h never compacted). */
 const range12 = (a, b) => formatClockRange(hhmm(a % 1440), hhmm(b % 1440), readUse24h());
 const weekdayOf = (dateStr) => {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -82,7 +79,7 @@ export function todayStatusLine({ hours, attendance = null, nowMin = 0, branchCl
   const away = off.find((o) => o.code === 'OTHER_BRANCH' && o.start_min <= nowMin && nowMin < o.end_min);
   if (away) {
     const where = away.label || `another ${wordBranch()}`;
-    return line('other-branch', 9, [`At ${where} until ${hhmm(Math.min(away.end_min, 1439))}`], `At ${where}`, 'grey', 'off');
+    return line('other-branch', 9, [`At ${where} until ${formatClockNow(hhmm(Math.min(away.end_min, 1439)))}`], `At ${where}`, 'grey', 'off');
   }
   const half = off.find((o) => o.code === 'ON_LEAVE' && o.reason === 'leave_half');
   if (half) {
@@ -104,24 +101,24 @@ export function todayStatusLine({ hours, attendance = null, nowMin = 0, branchCl
     const cur = spans.find(([a, z]) => a <= nowMin && nowMin < z);
     const next = spans.find(([a]) => a > nowMin);
     const text = spans.map(([a, z]) => range12(a, z)).join(', ');
-    if (cur) return line('visiting', checkedIn ? 3 : 1, [checkedIn ? `Checked in ${checkedIn}` : null, `Here ${range12(cur[0], cur[1])}`], `Here ${range12(cur[0], cur[1])}`, 'green', 'shift');
-    if (next) return line('visiting-upcoming', 1, [`Here ${range12(next[0], next[1])}`], `Here ${t12(next[0])}`, 'grey', 'shift');
+    if (cur) return line('visiting', checkedIn ? 3 : 1, [checkedIn ? `Checked in ${formatClockNow(checkedIn)}` : null, `Here ${range12(cur[0], cur[1])}`], `Here ${range12(cur[0], cur[1])}`, 'green', 'shift');
+    if (next) return line('visiting-upcoming', 1, [`Here ${range12(next[0], next[1])}`], `Here ${formatClockNow(hhmm(next[0]))}`, 'grey', 'shift');
     return line('finished', 5, [text ? `Visit ended (${text})` : 'Visit ended'], 'Finished', 'grey', 'off');
   }
 
   if (noHours) {
     const branch = startS && endS ? `bookable in ${wordBranch()} hours ${range(startS, endS)}` : `bookable in ${wordBranch()} hours`;
     if (start != null && end != null && (nowMin < start || nowMin >= end)) return line('no-hours-closed', 12, ['No hours set', `${wordBranch()} closed now`], 'No set hours', 'grey', 'none');
-    return line('no-hours', checkedIn ? 11 : 10, [checkedIn ? `Checked in ${checkedIn}` : null, 'No hours set', branch], 'No set hours', 'green', 'none');
+    return line('no-hours', checkedIn ? 11 : 10, [checkedIn ? `Checked in ${formatClockNow(checkedIn)}` : null, 'No hours set', branch], 'No set hours', 'green', 'none');
   }
 
   const shift = `Shift ${range(startS, endS)}`;
   const shortShift = range(startS, endS);
   const breakNow = (h.breaks || []).find((b) => timeToMinutes(b.startTime) <= nowMin && nowMin < timeToMinutes(b.endTime));
-  if (breakNow && !checkedOut) return line('on-break', 4, [`On break until ${breakNow.endTime}`, shift], `Break till ${breakNow.endTime}`, 'amber', 'shift');
-  if (checkedOut) return line('finished', 5, [`Checked out ${checkedOut}`], 'Finished', 'grey', 'off');
-  if (nowMin >= end) return line('finished', 5, [`Shift ended ${endS}`], 'Finished', 'grey', 'off');
-  if (checkedIn) return line('checked-in', 3, [`Checked in ${checkedIn}`, shift], shortShift, 'green', 'shift');
-  if (nowMin >= start) return line('not-checked-in', 2, ['Not checked in', `Shift started ${startS}`], 'Not checked in', 'amber', 'alert');
-  return line('upcoming', 1, [`Starts ${startS}`, shift], shortShift, 'grey', 'shift');
+  if (breakNow && !checkedOut) return line('on-break', 4, [`On break until ${formatClockNow(breakNow.endTime)}`, shift], `Break till ${formatClockNow(breakNow.endTime)}`, 'amber', 'shift');
+  if (checkedOut) return line('finished', 5, [`Checked out ${formatClockNow(checkedOut)}`], 'Finished', 'grey', 'off');
+  if (nowMin >= end) return line('finished', 5, [`Shift ended ${formatClockNow(endS)}`], 'Finished', 'grey', 'off');
+  if (checkedIn) return line('checked-in', 3, [`Checked in ${formatClockNow(checkedIn)}`, shift], shortShift, 'green', 'shift');
+  if (nowMin >= start) return line('not-checked-in', 2, ['Not checked in', `Shift started ${formatClockNow(startS)}`], 'Not checked in', 'amber', 'alert');
+  return line('upcoming', 1, [`Starts ${formatClockNow(startS)}`, shift], shortShift, 'grey', 'shift');
 }

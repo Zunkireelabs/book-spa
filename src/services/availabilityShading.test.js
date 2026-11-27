@@ -52,14 +52,14 @@ describe('buildShadeSegments', () => {
 
 describe('shiftHeaderInfo', () => {
   it('covers each header line', () => {
-    expect(shiftHeaderInfo(day())).toMatchObject({ text: '09:00–18:00', tone: 'shift', dot: 'grey' });
-    expect(shiftHeaderInfo(day({ end_time: '23:59:59' })).text).toBe('09:00–24:00');
+    expect(shiftHeaderInfo(day())).toMatchObject({ text: '9:00am–6:00pm', tone: 'shift', dot: 'grey' });
+    expect(shiftHeaderInfo(day({ end_time: '23:59:59' })).text).toBe('9:00am–12:00am');
     expect(shiftHeaderInfo(day({ works: false }))).toMatchObject({ text: 'Day off', tone: 'off' });
     expect(shiftHeaderInfo(day({ works: false, off: [{ code: 'ON_LEAVE', reason: 'leave_full' }] }))).toMatchObject({ text: 'On leave', tone: 'leave', dot: 'purple' });
     expect(shiftHeaderInfo(day({ source: 'none' }))).toMatchObject({ text: 'No set hours', dot: 'green' });
     // today's column reads the live state
     expect(shiftHeaderInfo(day(), { isToday: true, nowMin: 600 })).toMatchObject({ text: 'Not checked in', dot: 'amber' });
-    expect(shiftHeaderInfo(day(), { isToday: true, nowMin: 600, attendance: { status: 'Present', checkInTime: '09:07' } })).toMatchObject({ text: '09:00–18:00', dot: 'green' });
+    expect(shiftHeaderInfo(day(), { isToday: true, nowMin: 600, attendance: { status: 'Present', checkInTime: '09:07' } })).toMatchObject({ text: '9:00am–6:00pm', dot: 'green' });
     expect(shiftHeaderInfo(null)).toBeNull();
   });
 });

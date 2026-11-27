@@ -19,7 +19,8 @@ export function formatClockRange(start, end, use24h) {
   const a = formatClockTime(start, use24h);
   if (!end) return a;
   const b = formatClockTime(end, use24h);
-  return !use24h && a.slice(-2) === b.slice(-2) ? `${a.slice(0, -2)}–${b}` : `${a}–${b}`;
+  const toMidnight = Number(end.split(':')[0]) % 24 === 0; // "9:00am–12:00am" must not compact to "9:00–12:00am" (reads as noon)
+  return !use24h && !toMidnight && a.slice(-2) === b.slice(-2) ? `${a.slice(0, -2)}–${b}` : `${a}–${b}`;
 }
 
 // Label for a whole-hour gridline / column header (e.g. "9am" / "09:00").
