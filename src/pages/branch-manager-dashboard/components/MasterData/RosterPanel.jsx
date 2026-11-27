@@ -367,7 +367,7 @@ const RosterPanel = ({ branchId }) => {
                             {kind === 'off' ? (
                               <span className="font-body text-[11px] text-text-tertiary">{usual.noHours && !override ? 'No set hours' : 'Off'}</span>
                             ) : (
-                              <span className="px-2 font-data text-[10.5px] leading-tight text-text-secondary"><span className="inline-block">{clock(String(eff.startTime).slice(0, 5))}–</span> <span className="inline-block">{clock(String(eff.endTime).slice(0, 5))}</span></span>
+                              <span className="px-2 font-data text-[10.5px] leading-tight text-text-secondary">{clock(String(eff.startTime).slice(0, 5))}–<wbr />{clock(String(eff.endTime).slice(0, 5))}</span>
                             )}
                             {kind === 'usual' && brk.length > 0 && (
                               <span
