@@ -54,6 +54,42 @@ const customerPhoneOptionalCache = createEnforcementCache(async (branchId) => {
   return data?.organizations?.require_customer_phone === false;
 });
 const customerPhoneOptional = (branchId) => customerPhoneOptionalCache.get(branchId);
+// ZNLY-402 / ZNLY-423: true = this org has "Several services in one booking" ON (organizations.multi_service_bookings, migration 428). Every creation path
+// writes bookings.visit_id ONLY when this is true; unknown / unreadable / OFF reads as false (nothing is written, exactly as before). Cleared when the admin flips the switch.
+const multiServiceCache = createEnforcementCache(async (branchId) => {
+  const { data, error } = await supabase.from('branches').select('organizations(multi_service_bookings)').eq('id', branchId).maybeSingle();
+  if (error) throw error;
+  return data?.organizations?.multi_service_bookings === true;
+});
+const newVisitId = () => ((typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : null);
+
+/**
+ * ZNLY-402: "+ Service" joins the visit of the booking it was opened from. Resolves { data: visitId | null, error }.
+ * OFF org -> { data: null } (nothing is written). ON org -> the source booking's visit_id; when the source has none, a new id is stamped on the
+ * source FIRST (a normal update, so it is audited like any user action) and returned. If the new service then fails to create, the source keeping
+ * a visit_id of its own is harmless: a visit of one booking looks exactly like a booking with no visit.
+ */
+export async function joinVisitOfBooking({ sourceBookingId, branchId }) {
+  try {
+    if (!sourceBookingId || !(await multiServiceCache.get(branchId))) return { data: null, error: null };
+    const { data: src, error: readErr } = await supabase.from('bookings').select('id, visit_id').eq('id', sourceBookingId).maybeSingle();
+    if (readErr) throw readErr;
+    if (!src) return { data: null, error: { code: 'SOURCE_NOT_FOUND', message: 'Could not find the booking to add this service to.' } };
+    if (src.visit_id) return { data: src.visit_id, error: null };
+    const visitId = newVisitId();
+    if (!visitId) return { data: null, error: null };
+    const { data: stamped, error: stampErr } = await supabase.from('bookings').update({ visit_id: visitId }).eq('id', sourceBookingId).is('visit_id', null).select('visit_id');
+    if (stampErr) throw stampErr;
+    if (stamped && stamped.length) return { data: visitId, error: null };
+    // Someone stamped it between our read and write: use theirs.
+    const { data: again, error: againErr } = await supabase.from('bookings').select('visit_id').eq('id', sourceBookingId).maybeSingle();
+    if (againErr) throw againErr;
+    return { data: again?.visit_id || null, error: null };
+  } catch (error) {
+    console.error('[API] joinVisitOfBooking error:', error.message);
+    return { data: null, error: plainError(error, 'Could not add this service to the booking. Please try again.') };
+  }
+}
 const overrideReasonOf = (reason) => (typeof reason === 'string' && reason.trim() ? reason.trim() : null);
 // The reason authorises exactly one write; clear it afterwards so it can never be mistaken for a fresh override later.
 async function clearAvailabilityOverride(bookingId) {
@@ -861,6 +897,19 @@ export async function setAllowStaffOverlap({ enabled }) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] setAllowStaffOverlap error:', error.message);
+    return { data: null, error: plainError(error) };
+  }
+}
+
+// ZNLY-402 / ZNLY-423: per-org "Several services in one booking" (migration 428). Admin only, SECURITY DEFINER RPC like the two above.
+export async function setMultiServiceBookings({ enabled }) {
+  try {
+    const { data, error } = await supabase.rpc('set_multi_service_bookings', { p_value: !!enabled });
+    if (error) throw error;
+    multiServiceCache.clear();
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setMultiServiceBookings error:', error.message);
     return { data: null, error: plainError(error) };
   }
 }
@@ -3569,6 +3618,83 @@ export async function fetchGroupBookings({ bookingGroupId, customerName, date, e
     return { data: data || [], error: null };
   } catch (error) {
     console.error('[API] fetchGroupBookings error:', error.message);
+    return { data: [], error };
+  }
+}
+
+// ZNLY-402 piece 4 (org setting multi_service_bookings ON): EVERY row of one booking (bookings.visit_id), cancelled rows included, any payment state.
+// Read-only, for the "This booking" block in the booking panel. No visit_id = its own booking: nothing to fetch (the block stays hidden).
+// customerId is the same safety check as above: a visit never spans two customers.
+export async function fetchBookingServices({ visitId, customerId }) {
+  try {
+    if (!visitId) return { data: [], error: null };
+    let query = supabase
+      .from('bookings')
+      .select('id, booking_number, customer_id, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service_id, room_id, therapist_id, service_name_snapshot, service:services(name, duration_minutes, is_couple), room:rooms(name), therapist:therapists(name), booking_therapists(therapist_id, therapist:therapists(name)), payments(amount), payment_refunds(amount)')
+      .eq('visit_id', visitId);
+    if (customerId) query = query.eq('customer_id', customerId);
+    const { data, error } = await query.order('start_time');
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchBookingServices error:', error.message);
+    return { data: [], error };
+  }
+}
+
+// ZNLY-402 (org setting multi_service_bookings ON; OFF orgs use fetchRelatedUnpaidBookings above): "related" = the OTHER bookings of the SAME VISIT (bookings.visit_id, migration-427; one person, one Save), unpaid only: this is
+// "what to bundle into a payment". A booking with no visit_id is its own visit, so it has no related bookings: there is no fallback to
+// booking_group_id (a party of several people) or to customer_name + date (the old guess that merged two separate visits). customerId
+// (when known) stays as a safety check: a visit never spans two customers, so a stray row of another customer is never bundled into a
+// membership/wallet payment scoped to one customer (see the BK-20261011-0033/-0034 incident). Same unpaid / non-cancelled filters as before.
+export async function fetchVisitRelatedUnpaidBookings({ excludeBookingId, visitId, customerId }) {
+  try {
+    if (!visitId) return { data: [], error: null };
+    let query = supabase
+      .from('bookings')
+      .select('id, booking_number, customer_id, customer_name, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service:services(name, duration_minutes), room:rooms(name), therapist:therapists(name), payments(amount), payment_refunds(amount)')
+      .not('status', 'in', '("Cancelled","No Show")')
+      .neq('id', excludeBookingId)
+      .eq('visit_id', visitId);
+
+    if (customerId) {
+      query = query.eq('customer_id', customerId);
+    }
+
+    const { data, error } = await query.order('start_time');
+
+    if (error) throw error;
+    // "Unpaid" = nothing held on it (payments − refunds = 0), decided from the payments like every other money figure — the same rule the
+    // calendar's Prev. due uses to drop these siblings, so the two can never disagree.
+    return { data: (data || []).filter((b) => paidPaisa(b) === 0), error: null };
+  } catch (error) {
+    console.error('[API] fetchVisitRelatedUnpaidBookings error:', error.message);
+    return { data: [], error };
+  }
+}
+
+// Every other booking of the same visit, regardless of payment_status — unlike fetchVisitRelatedUnpaidBookings above, this is purely for
+// DISPLAY (so a sibling that's already been paid never silently disappears from another sibling's modal — see the
+// BK-20260915-0025/-0026/-0027 incident, where paying 0025 made it drop out of every other sibling's "related" view). Never used to decide
+// what to bundle into a payment — only fetchVisitRelatedUnpaidBookings governs that. Same visit rule as above (ZNLY-402): no visit_id = no siblings.
+export async function fetchVisitSiblings({ visitId, excludeBookingId, customerId }) {
+  try {
+    if (!visitId) return { data: [], error: null };
+
+    let query = supabase
+      .from('bookings')
+      .select('id, booking_number, payment_status, status, final_amount, service:services(name)')
+      .not('status', 'in', '("Cancelled","No Show")')
+      .neq('id', excludeBookingId)
+      .eq('visit_id', visitId);
+    if (customerId) query = query.eq('customer_id', customerId);
+
+    const { data, error } = await query.order('booking_number');
+
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchVisitSiblings error:', error.message);
     return { data: [], error };
   }
 }
@@ -6848,6 +6974,8 @@ export async function getCalendarBookings(branchId, startDate, endDate, opts = {
         'status', 'payment_status',
         'date', 'start_time', 'end_time', 'start_datetime', 'end_datetime', 'created_at', 'created_by',
         'therapist_id', 'room_id',
+        // ZNLY-402: visit link (migration 427; bookings_safe carries it since migration 428). Only read when the org setting multi_service_bookings is ON.
+        'visit_id',
         vis.canViewPrices && 'base_amount, discount_amount, final_amount',
         'special_requests', 'referred_by',
         'service:services(name, duration_minutes, requires_therapist)',
@@ -7203,6 +7331,7 @@ export async function createBooking({
   companionName,
   companionPhone,
   bookingGroupId,
+  visitId,   // ZNLY-402: bookings.visit_id; callers pass it only for orgs with the setting ON (createBookingGroup, "+ Service")
   referringCustomerId,
   referringRewardType,
   referringRewardAmount,
@@ -7696,6 +7825,7 @@ export async function createBooking({
       special_requests: specialRequests || null,
       created_by: authUser?.id || null,
       booking_group_id: bookingGroupId || null,
+      ...(visitId ? { visit_id: visitId } : {}),
       referral_source: referralSource || null,
       referral_source_detail: referralSourceDetail || null,
       client_request_id: clientRequestId,
@@ -7886,7 +8016,11 @@ export async function createBooking({
 // mid-way failure cancels whatever was already created so the customer is never left
 // silently half-booked. The residual window is small but real, and cancelled rows do
 // remain visible to staff — that trade is deliberate.
-export async function createBookingGroup({ services, date, startTime, therapistId, ...common }) {
+// Staff multi-service booking ("Several services in one booking", ZNLY-402): every service may carry its own `startTime` and `therapistIds`
+// (default: back-to-back from `startTime` with `therapistId`, as for the online flow). `staffRollback: true` (the desk, a signed-in user): the rows made so far
+// are cancelled when a later one fails, because public_cancel_booking_group only releases anonymous online rows (created_by IS NULL). `visitId` may be passed
+// (e.g. "+ Service" joining an existing visit); otherwise an ON org gets a new one. A failure carries `failedRow` (index of the service that failed).
+export async function createBookingGroup({ services, date, startTime, therapistId, staffRollback = false, ...common }) {
   if (!services || services.length === 0) {
     return { data: null, error: { code: 'NO_SERVICES', message: 'Select at least one service.' } };
   }
@@ -7906,25 +8040,32 @@ export async function createBookingGroup({ services, date, startTime, therapistI
   const bookingGroupId = (typeof crypto !== 'undefined' && crypto.randomUUID)
     ? crypto.randomUUID()
     : `grp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  // ZNLY-402: one person, several services, one Save = one visit (ON orgs only; the booking_group_id above stays as before).
+  const visitId = common.visitId || ((await multiServiceCache.get(common.branchId)) ? newVisitId() : null);
 
-  // Lay the services out back-to-back so each row gets its own real slot.
+  // Lay the services out back-to-back so each row gets its own real slot (unless the caller gave a row its own start time).
   let cursor = startTime;
   const planned = services.map((service) => {
-    const slot = { service, startTime: cursor };
-    cursor = addMinutesToTime(cursor, service.duration_minutes);
+    const slot = { service, startTime: service.startTime || cursor };
+    cursor = addMinutesToTime(slot.startTime, service.duration_minutes);
     return slot;
   });
 
   const created = [];
-  for (const { service, startTime: slotStart } of planned) {
+  for (const [rowIndex, { service, startTime: slotStart }] of planned.entries()) {
     // eslint-disable-next-line no-await-in-loop
     const { data, error } = await createBooking({
       ...common,
       serviceId: service.id,
       date,
       startTime: slotStart,
-      therapistId,
-      bookingGroupId,
+      therapistId: service.therapistIds ? undefined : therapistId,
+      therapistIds: service.therapistIds || undefined,
+      overrideReason: service.overrideReason,   // only the rows that needed it (staff multi-service); the online flow passes none
+      // ZNLY-402 (A5): the desk's one-person visit on an ON org carries ONLY visit_id. booking_group_id means a party of several people.
+      // The online flow keeps it: its rollback RPC (public_cancel_booking_group) finds the rows by it.
+      bookingGroupId: staffRollback && visitId ? null : bookingGroupId,
+      visitId,
     });
 
     if (error) {
@@ -7935,8 +8076,10 @@ export async function createBookingGroup({ services, date, startTime, therapistI
       if (created.length > 0) {
         try {
           // eslint-disable-next-line no-await-in-loop
-          const { error: rollbackError } = await supabase
-            .rpc('public_cancel_booking_group', { p_booking_group_id: bookingGroupId });
+          const { error: rollbackError } = staffRollback
+            // The desk: a signed-in user made these rows (created_by is set), which the anonymous RPC deliberately ignores, so cancel them directly.
+            ? await supabase.from('bookings').update({ status: 'Cancelled', cancellation_reason: 'Not created: the booking could not be completed.' }).in('id', created.map((b) => b.id))
+            : await supabase.rpc('public_cancel_booking_group', { p_booking_group_id: bookingGroupId });
           if (rollbackError) throw rollbackError;
         } catch (cancelError) {
           // Surfaced loudly: the customer now holds bookings they weren't told about.
@@ -7945,6 +8088,8 @@ export async function createBookingGroup({ services, date, startTime, therapistI
             data: null,
             error: {
               code: 'BOOKING_GROUP_PARTIAL',
+              failedRow: rowIndex,
+              partial: true,
               message: `${service.name} could not be booked, and we could not automatically release the services booked before it. Please contact the ${wordBranch()} to confirm what is reserved.`,
             },
           };
@@ -7954,7 +8099,8 @@ export async function createBookingGroup({ services, date, startTime, therapistI
         data: null,
         error: {
           ...error,
-          message: `${service.name}: ${error.message || 'could not be booked.'}${created.length > 0 ? ' Your other services were released — please pick another time.' : ''}`,
+          failedRow: rowIndex,
+          message: `${service.name}: ${error.message || 'could not be booked.'}${created.length > 0 && !staffRollback ? ' Your other services were released — please pick another time.' : ''}`,
         },
       };
     }
@@ -8170,6 +8316,120 @@ export async function rescheduleBookingAsNewBooking({ bookingId, date, startTime
     console.error('[API] rescheduleBooking error:', error.message);
     return { data: null, error: plainError(error) };
   }
+}
+
+// ── ZNLY-402 piece 5: booking-level, all-or-nothing calls (migration 430). One exported function per server function. ─────────────────────────────
+// Every call returns { data, error }. A refusal is error { code, message, rows, overridable } with a plain-language message (never SQL text);
+// `data` still carries the per-row verdicts ({ ok, dry_run, rows:[{booking_id, booking_number, service, start, staff, verdict, reason}], totals }).
+// dryRun: true changes nothing and returns exactly what WOULD happen. code NEEDS_OVERRIDE = a manager/admin may repeat the call with overrideReason.
+// visit_update / visit_set_staff answer COMBO_USE_SINGLE_EDIT / MULTI_STAFF_USE_SINGLE_EDIT for a booking they cannot cover yet; the wrappers then run
+// TODAY'S single-booking paths (updateBookingDetails / assignTherapist / updateBookingStatus) so editing is never worse than before.
+const VISIT_SINGLE_EDIT_CODES = ['COMBO_USE_SINGLE_EDIT', 'MULTI_STAFF_USE_SINGLE_EDIT'];
+async function visitCall(fn, args) {
+  try {
+    const { data, error } = await supabase.rpc(fn, args);
+    if (error) return { data: null, error: plainError(error) };
+    if (data && data.ok === false) {
+      const e = data.error || {};
+      return {
+        data,
+        error: {
+          code: e.code || data.code || 'REFUSED',
+          message: e.message || data.message || 'This could not be saved. Nothing was changed.',
+          rows: data.rows || [],
+          overridable: (e.code || data.code) === 'NEEDS_OVERRIDE',
+          plain: true,
+          refusal: true, // a plain-sentence refusal written by the server (not a crash): the guidance card shows its own message
+        },
+      };
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error(`[API] ${fn} error:`, error.message);
+    return { data: null, error: plainError(error) };
+  }
+}
+
+export function visitCreate({ branchId, customer, services, overrideReason = null, dryRun = false }) {
+  const c = { ...(customer || {}) };
+  if (c.phone) c.phone = toE164(c.phone);
+  const svcs = (services || []).map((s) => ({ ...s, override_reason: overrideReasonOf(s.override_reason) || undefined }));
+  return visitCall('visit_create', { p_branch_id: resolveBranchId(branchId), p_customer: c, p_services: svcs, p_override_reason: overrideReasonOf(overrideReason), p_dry_run: !!dryRun });
+}
+
+export async function visitUpdate({ visitKey, changes, overrideReason = null, dryRun = false }) {
+  const res = await visitCall('visit_update', { p_visit_key: visitKey, p_changes: changes, p_override_reason: overrideReasonOf(overrideReason), p_dry_run: !!dryRun });
+  if (res.error && VISIT_SINGLE_EDIT_CODES.includes(res.error.code)) {
+    if (dryRun) return { data: { ok: true, dry_run: true, routed: 'single', rows: [], totals: {} }, error: null };
+    return visitUpdateViaSingleEdits({ changes, overrideReason });
+  }
+  return res;
+}
+
+// Today's per-booking path for a combo / multi-staff booking: the same calls the old Edit form made, one booking at a time.
+async function visitUpdateViaSingleEdits({ changes, overrideReason }) {
+  for (const line of changes?.services || []) {
+    if (!line.booking_id) return { data: null, error: { code: 'ADD_NOT_ALLOWED', message: 'A service cannot be added to this kind of booking here.', plain: true } };
+    if (line.remove) {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await updateBookingStatus({ bookingId: line.booking_id, newStatus: 'Cancelled', reason: line.remove_reason || line.reason });
+      if (r.error) return r;
+      continue;
+    }
+    // eslint-disable-next-line no-await-in-loop
+    const d = await updateBookingDetails({
+      bookingId: line.booking_id, serviceId: line.service_id || undefined, date: line.date || changes.date || undefined, startTime: line.start_time || undefined,
+      specialRequests: changes.special_requests, referredBy: changes.referred_by, overrideReason,
+    });
+    if (d.error) return d;
+    if (line.therapist_ids !== undefined || line.room_id !== undefined) {
+      // eslint-disable-next-line no-await-in-loop
+      const a = await assignTherapist({
+        bookingId: line.booking_id, therapistIds: line.therapist_ids || [],
+        roomId: line.room_id === undefined ? undefined : (line.room_id === 'none' ? null : line.room_id), overrideReason,
+      });
+      if (a.error) return a;
+    }
+  }
+  return { data: { ok: true, dry_run: false, routed: 'single', rows: [], totals: {} }, error: null };
+}
+
+export const visitSetStatus = ({ visitKey, status, reason = null, dryRun = false }) =>
+  visitCall('visit_set_status', { p_visit_key: visitKey, p_status: status, p_reason: reason, p_dry_run: !!dryRun });
+
+export const visitRemoveService = ({ bookingId, reason = null, dryRun = false }) =>
+  visitCall('visit_remove_service', { p_booking_id: bookingId, p_reason: reason, p_dry_run: !!dryRun });
+
+export const visitReschedule = ({ visitKey, date, startTime, overrideReason = null, reason = 'Rescheduled', dryRun = false }) =>
+  visitCall('visit_reschedule', { p_visit_key: visitKey, p_date: date, p_start_time: startTime, p_override_reason: overrideReasonOf(overrideReason), p_reason: reason, p_dry_run: !!dryRun });
+
+// lines: [{ booking_id, type: '%' | 'NPR', value }]; value 0 / blank clears that row. requestedTo = the approver when a line is over the role's limit.
+export const visitApplyDiscount = ({ visitKey, lines, reason, requestedTo = null, dryRun = false }) =>
+  visitCall('visit_apply_discount', { p_visit_key: visitKey, p_lines: lines, p_reason: reason ?? null, p_requested_to: requestedTo, p_dry_run: !!dryRun });
+
+// lines: [{ booking_id, therapist_id, room_id }]; notes (when not undefined) replaces the special requests of the whole booking.
+export async function visitSetStaff({ visitKey, lines, notes, overrideReason = null, dryRun = false }) {
+  const res = await visitCall('visit_set_staff', { p_visit_key: visitKey, p_lines: lines, p_notes: notes === undefined ? null : notes, p_override_reason: overrideReasonOf(overrideReason), p_dry_run: !!dryRun });
+  if (res.error && VISIT_SINGLE_EDIT_CODES.includes(res.error.code)) {
+    if (dryRun) return { data: { ok: true, dry_run: true, routed: 'single', rows: [], totals: {} }, error: null };
+    for (const line of lines || []) {
+      // eslint-disable-next-line no-await-in-loop
+      const a = await assignTherapist({
+        bookingId: line.booking_id, therapistIds: line.therapist_id ? [line.therapist_id] : [],
+        roomId: line.room_id === undefined ? undefined : (line.room_id === 'none' ? null : line.room_id), overrideReason,
+      });
+      if (a.error) return a;
+    }
+    if (notes !== undefined) {
+      for (const line of lines || []) {
+        // eslint-disable-next-line no-await-in-loop
+        const d = await updateBookingDetails({ bookingId: line.booking_id, specialRequests: notes });
+        if (d.error) return d;
+      }
+    }
+    return { data: { ok: true, dry_run: false, routed: 'single', rows: [], totals: {} }, error: null };
+  }
+  return res;
 }
 
 // Public/customer-facing referral lookup — exact phone match, scoped to the org by

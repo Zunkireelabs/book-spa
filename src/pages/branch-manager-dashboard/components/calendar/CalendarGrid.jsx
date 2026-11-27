@@ -1,4 +1,6 @@
 import { buildClientIndex, customerIdOf, isSameClient, clientDayInfo } from './sameClient';
+import { buildVisitIndex, bookingOf, highlightLevel, visitDayInfo } from './sameVisit';
+import { useOrg } from '../../../../contexts/OrgContext';
 import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
@@ -211,6 +213,7 @@ const CalendarGrid = ({
   onDeleteManualBlock,
   onResizeManualBlock,
   onEditManualBlock,
+  pickMode = false,
   draftGhost,
   selectedBookingId,
   onDragCreate,
@@ -253,8 +256,12 @@ const CalendarGrid = ({
   useEffect(() => () => clearTimeout(clientClearTimer.current), []);
   const popoverBookingId = useHoverCardBookingId();
   const activeSharedId = hoverSharedId || popoverBookingId || selectedBookingId || null;
-  const clientIndex = useMemo(() => buildClientIndex(bookings), [bookings]); // one map customerId -> bookings for the whole render, no per-card scans
-  const activeCustomerId = useMemo(() => customerIdOf(bookings, hoverClientId || popoverBookingId || selectedBookingId || null), [bookings, hoverClientId, popoverBookingId, selectedBookingId]);
+  // ZNLY-402: the visit rules (sameVisit.js) only for orgs with "Several services in one booking" ON; every other org keeps the same-client rules (sameClient.js) exactly as before.
+  const { multiServiceBookings } = useOrg();
+  const clientIndex = useMemo(() => (multiServiceBookings ? buildVisitIndex(bookings) : buildClientIndex(bookings)), [bookings, multiServiceBookings]); // one map for the whole render, no per-card scans
+  const activeKey = hoverClientId || popoverBookingId || selectedBookingId || null;
+  const activeBooking = useMemo(() => (multiServiceBookings ? bookingOf(bookings, activeKey) : null), [bookings, activeKey, multiServiceBookings]);
+  const activeCustomerId = useMemo(() => (multiServiceBookings ? null : customerIdOf(bookings, activeKey)), [bookings, activeKey, multiServiceBookings]);
   // Hide the connector of the booking being dragged (its copies are mid-move); it redraws from fresh data on drop.
   const draggingSharedId = activeDragId ? String(activeDragId).split('__')[0] : null;
 
@@ -648,6 +655,7 @@ const CalendarGrid = ({
         companionName: b.companion_name || null, // couple: the second guest's name
         isWalkIn: !!b.is_walk_in, // ZNLY-327: customerName already reads "Walk-in · <label>"
         customerId: b.customer_id || null, // ZNLY-281: same-client highlight matches on this id only
+        visitId: b.visit_id || null, // ZNLY-402: same-visit link (NULL = its own visit); utils/visit.js
         serviceName: b.service?.name || 'Service',
         serviceDuration: b.service?.duration_minutes || null,
         status: b.status,
@@ -1099,6 +1107,7 @@ const CalendarGrid = ({
           onDeleteClick={(e) => handleDeleteBlockClick(e, range, range.day)}
           onResizeStart={(e) => handleBlockResizeStart(e, range, range.day)}
           onClick={() => onEditManualBlock?.(range)}
+          passThrough={pickMode}
           use24h={use24h}
         />
       );
@@ -1758,10 +1767,10 @@ const CalendarGrid = ({
                 onSharedDeactivate={deactivateShared}
                 onClientActivate={activateClient}
                 onClientDeactivate={deactivateClient}
-                sameClient={isSameClient(clientIndex, activeCustomerId, booking)}
+                sameClient={multiServiceBookings ? highlightLevel(clientIndex, activeBooking, booking) : isSameClient(clientIndex, activeCustomerId, booking)}
                 key={cardKey}
                 booking={(() => {
-                  const info = clientDayInfo(clientIndex, booking);
+                  const info = multiServiceBookings ? visitDayInfo(clientIndex, booking) : clientDayInfo(clientIndex, booking);
                   const o = outsideOf(col, day, booking);
                   return o || info ? { ...booking, ...(o ? { availabilityNote: o.note } : {}), ...(info ? { _clientDay: info } : {}) } : booking;
                 })()}

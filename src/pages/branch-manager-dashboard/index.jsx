@@ -1,3 +1,4 @@
+import { announceBooking } from '../../utils/visitAnnounce';
 import { nepalToday } from '../../utils/nepalTime';
 import { nepalNow } from '../../utils/customerDirectory';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -200,6 +201,8 @@ const BranchManagerDashboard = () => {
         // Show notification for new bookings not for today
         if (payload.eventType === 'INSERT' && payload.new) {
           const newBooking = payload.new;
+          // ZNLY-402: once per multi-service booking, and never for one that was rolled back (rows without a visit_id announce at once, as before).
+          announceBooking(newBooking, async (id) => (await supabase.from('bookings').select('status').eq('id', id).maybeSingle()).data?.status, () => {
           const today = nepalToday();
           const isToday = newBooking.date === today;
 
@@ -239,6 +242,7 @@ const BranchManagerDashboard = () => {
             // Auto-dismiss after 8 seconds
             setTimeout(() => setNewBookingNotification(null), 8000);
           }
+          });
         }
       }, 150);
     };

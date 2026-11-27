@@ -44,9 +44,9 @@ describe('QuickCreatePanel smoke', () => {
   it('renders closed without crashing', () => {
     expect(() => render(<QuickCreatePanel {...props} slotInfo={null} />)).not.toThrow();
   });
-  it('renders open, with Create disabled and the "Pick a service" hint', () => {
+  it('renders open, with Create disabled and the first hint naming the customer (customer comes first)', () => {
     render(<QuickCreatePanel {...props} slotInfo={{ day: '2026-11-20', hour: 17, minute: 20, colType: 'therapist', colId: 't1', dragMinutes: 0 }} />);
-    expect(screen.getByText('Pick a service')).toBeTruthy();
+    expect(screen.getAllByText(/Pick a customer/).length).toBeGreaterThan(1); // the row and the footer reason
     expect(screen.getByRole('button', { name: /create booking/i }).disabled).toBe(true);
   });
   it('opens slot-less from a prefill (?view=new-booking): name, phone, email and gender are filled, service preselected', () => {
@@ -61,6 +61,19 @@ describe('QuickCreatePanel smoke', () => {
     expect(screen.getByText('Existing customer')).toBeTruthy();
     expect(screen.getByText(/Massage/)).toBeTruthy();
     expect(screen.getByDisplayValue('5:30pm')).toBeTruthy();
+  });
+
+  it('ZNLY-402 U10: every business gets the grey service card from the first service: no "Service 1" title, Remove or Starts while single (OFF org: no Add button)', () => {
+    const slot = newBookingSlot({
+      today: '2026-11-20', nowHM: '17:20', branchHours: { openTime: '09:00:00', closeTime: '21:00:00' },
+      prefill: { fullName: 'Hema Devi', phone: '+9779841000000', serviceId: 's1' },
+    });
+    render(<QuickCreatePanel {...props} slotInfo={slot} />);
+    expect(document.querySelector('[data-extra-services]')).toBeTruthy();
+    expect(screen.queryByText('Service 1')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Remove service/ })).toBeNull();
+    expect(screen.queryByText('Starts')).toBeNull();
+    expect(screen.queryByText('Add another service')).toBeNull();
   });
 
   describe('group mode (ZNLY-303)', () => {

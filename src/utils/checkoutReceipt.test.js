@@ -1,5 +1,19 @@
 import { describe, it, expect } from 'vitest';
-import { computeChange, quickCashOptions, buildReceiptText, buildWhatsAppUrl, buildReceiptHtml } from './checkoutReceipt';
+import { computeChange, quickCashOptions, buildReceiptText, buildWhatsAppUrl, buildReceiptHtml, receiptStatus } from './checkoutReceipt';
+
+describe('receiptStatus', () => {
+  const r = { total: 3000, leftover: 0, bookingNumber: 'BK-1', extraCount: 0 };
+  it('says fully paid only when nothing is left', () => {
+    expect(receiptStatus(r)).toEqual({ due: false, text: 'BK-1 is fully paid' });
+    expect(receiptStatus({ ...r, extraCount: 1 }).text).toBe('BK-1 + 1 more are fully paid');
+  });
+  it('part payment: paid amount and the balance still to pay', () => {
+    expect(receiptStatus({ ...r, leftover: 349 })).toEqual({ due: true, text: 'Paid NPR 3,000 · NPR 349 still to pay' });
+    // a service still waiting for confirmation: never "fully paid"
+    expect(receiptStatus({ ...r, waiting: 99 })).toEqual({ due: true, text: 'Paid NPR 3,000 · NPR 99 waiting for confirmation' });
+    expect(receiptStatus({ ...r, leftover: 349, waiting: 99 }).text).toBe('Paid NPR 3,000 · NPR 349 still to pay · NPR 99 waiting for confirmation');
+  });
+});
 
 describe('computeChange', () => {
   it('returns the difference when received exceeds the cash amount', () => {
@@ -44,10 +58,10 @@ describe('buildReceiptText', () => {
     expect(t).toContain('Payment received: NPR 3,000');
     expect(t).toContain('Paid by Cash: NPR 1,000');
     expect(t).toContain('Tip (separate): NPR 200');
-    expect(t).not.toContain('Still due');
+    expect(t).not.toContain('Still to pay');
   });
   it('shows the balance still due', () => {
-    expect(buildReceiptText({ ...receipt, leftover: 800 })).toContain('Still due: NPR 800');
+    expect(buildReceiptText({ ...receipt, leftover: 800 })).toContain('Still to pay: NPR 800');
   });
 });
 

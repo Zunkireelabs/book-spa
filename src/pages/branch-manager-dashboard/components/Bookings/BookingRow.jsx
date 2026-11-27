@@ -5,8 +5,9 @@ import { getBookingStatusColors } from '../../../../utils/bookingStatusColors';
 import { isNoShow, toDbStatus, to12h } from '../../../../services/bookingTransformers';
 import { formatPhoneGrouped } from '../../../../utils/phone';
 import { initials } from '../../../../utils/customerDirectory';
-import { formatLate, groupInfo } from '../../../../utils/bookingsList';
+import { formatLate, groupInfo, visitCount } from '../../../../utils/bookingsList';
 import { teamMemberWord } from '../../../../utils/industryTerms';
+import { useOrg } from '../../../../contexts/OrgContext';
 
 export const COLUMN_DEFS = [
   { id: 'service', label: 'Service' },
@@ -45,6 +46,8 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
   const edge = unread ? '#2D5A27' : color;
   const people = b.therapists || [];
   const grp = groupInfo(b, all);
+  const { multiServiceBookings } = useOrg();
+  const vis = multiServiceBookings ? visitCount(b, all) : 1;   // ZNLY-402: "N services" only for orgs with the visit model ON
   const mins = minutesOf(b);
   const isOnline = b.createdBy == null;
   const bg = selected ? 'bg-[#F2F6F0]' : unread ? 'bg-[#F7FAF6] hover:bg-[#F2F6F0]' : 'hover:bg-[#FAFAF9]';
@@ -78,7 +81,7 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
       {bp.md && columns.service && (
         <td className={`${cell} pr-3 ${dim ? 'opacity-[.55]' : ''}`}>
           <div className="text-[13px] truncate">{b.service}</div>
-          <div className="text-[12.5px] text-[#8A8A90] truncate">{[b.roomName, grp > 1 && `Group of ${grp}`].filter(Boolean).join(' · ') || ' '}</div>
+          <div className="text-[12.5px] text-[#8A8A90] truncate">{[b.roomName, (vis > 1 ? `${vis} services` : grp > 1 && `Group of ${grp}`)].filter(Boolean).join(' · ') || ' '}</div>
         </td>
       )}
       {bp.lg && columns.therapist && (

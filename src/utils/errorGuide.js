@@ -43,7 +43,9 @@ const freeNames = (c) => (c.freeStaff || []).map((s) => s.name.split(' ')[0]).jo
 const fix = (build, field) => ({ kind: 'fix', field, build });
 // `noRetry`: the same save can never work (the record is gone), so no Try again.
 const system = ({ how, noRetry } = {}) => ({ kind: 'system', noRetry: !!noRetry, build: () => ({ lead: SYSTEM_LEAD, how }) });
-const availability = (how) => fix((c, e) => ({ lead: safeMsg(e) || `${who(c)} is not available ${when(c)}.`, how, actions: [...timeActions(c), ...altStaff(c), pickStaff] }), 'staff');
+// The server's sentence can come without a final stop; the card joins lead + how, so end the lead once, here.
+const endStop = (t) => (t && !/[.!?]$/.test(t) ? `${t}.` : t);
+const availability = (how) => fix((c, e) => ({ lead: endStop(safeMsg(e)) || `${who(c)} is not available ${when(c)}.`, how, actions: [...timeActions(c), ...altStaff(c), pickStaff] }), 'staff');
 
 export const ERROR_CATALOG = {
   // ---- when ----
@@ -256,6 +258,8 @@ function buildCard(err, ctx, opts) {
   }
   const code = (err?.code && ERROR_CATALOG[err.code] ? err.code : undefined) || codeFromText(err) || codeFromPostgres(err);
   const entry = code && ERROR_CATALOG[code];
+  // A server refusal with its own plain sentence (visit_* functions: "Nothing was changed.", "This day has been closed...") is a fix card, never the generic system card.
+  if (!entry && err?.refusal && safeMsg(err)) return { kind: 'fix', code: err.code || 'REFUSED', lead: safeMsg(err), how: '', why: '', field: null, actions: [] };
   if (!entry || entry.kind === 'system') {
     const built = entry ? entry.build(ctx, err) : {};
     const noRetry = !!entry?.noRetry;
