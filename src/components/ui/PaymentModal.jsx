@@ -29,7 +29,7 @@ import { addTenderRow, removeTenderRow, updateTenderRow } from '../../utils/tend
 import { useOrg } from '../../contexts/OrgContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { pendingQrRows, qrSignature, isQrConfirmed } from '../../utils/paymentQr';
-import BillActions from './Bill/BillActions';
+import BillActions, { BillInDialog } from './Bill/BillActions';
 import { computeChange, quickCashOptions, buildReceiptText, receiptStatus, buildWhatsAppUrl } from '../../utils/checkoutReceipt';
 import { useAuth } from '../../contexts/AuthContext';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, PRODUCTS_ENABLED } from '../../lib/featureFlags';
@@ -973,6 +973,7 @@ const PaymentModal = ({
   };
 
   // ───────────────────────── Checkout UI state (no money logic below this line) ─────────────────────────
+  const [viewingBill, setViewingBill] = useState(false); // the success screen shows the bill inside this dialog (Back returns)
   const [receipt, setReceipt] = useState(null); // snapshot shown by the success state
   const [touched, setTouched] = useState(false);
   useEffect(() => { if (cp.count > 0) setTouched(true); }, [cp.count]);
@@ -1394,7 +1395,7 @@ const PaymentModal = ({
   // Registered on window (capture) so it keeps working when focus has left the dialog (e.g. after a
   // stray click on the backdrop) and so a page behind us never sees the same Esc/Enter.
   const onKeyDown = (e) => {
-    if (document.querySelector('[data-bill-panel]')) return; // the bill panel opened from the success screen owns Esc / Enter
+    if (viewingBill) { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setViewingBill(false); } return; } // the bill shown in this dialog: Esc = Back
     if (presentIdx != null) {
       // The guest-facing QR overlay owns the keyboard: Esc closes only it; Enter activates its focused button natively.
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setPresentIdx(null); }
@@ -1556,7 +1557,14 @@ const PaymentModal = ({
 
   const dialog = receipt ? (
     <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Payment collected"
-      className="checkout-dialog bg-white rounded-[14px] w-[440px] max-w-[calc(100vw-24px)] min-[960px]:max-w-[calc(100vw-32px)] h-[min(640px,calc(100dvh-24px))] min-[960px]:h-[min(640px,calc(100dvh-64px))] max-md:w-full max-md:max-w-none max-md:h-[100dvh] max-md:rounded-none flex flex-col outline-none shadow-[0_0_0_1px_rgba(14,13,12,.06),0_2px_4px_rgba(14,13,12,.04),0_24px_64px_-12px_rgba(14,13,12,.28)] animate-fade-in">
+      className="checkout-dialog bg-white rounded-[14px] w-[560px] max-w-[calc(100vw-24px)] min-[960px]:max-w-[calc(100vw-32px)] h-[min(640px,calc(100dvh-24px))] min-[960px]:h-[min(640px,calc(100dvh-64px))] max-md:w-full max-md:max-w-none max-md:h-[100dvh] max-md:rounded-none flex flex-col outline-none shadow-[0_0_0_1px_rgba(14,13,12,.06),0_2px_4px_rgba(14,13,12,.04),0_24px_64px_-12px_rgba(14,13,12,.28)] animate-fade-in">
+      {viewingBill ? (<>
+        <div className="h-14 px-3 border-b border-[#E7E8E6] flex items-center gap-2 flex-none">
+          <button type="button" onClick={() => setViewingBill(false)} className="h-9 max-md:h-11 pl-2 pr-3 rounded-[7px] text-[13px] font-medium inline-flex items-center gap-1 hover:bg-[#F7F7F5]" data-bill-back><Icon name="ChevronLeft" size={16} />Back</button>
+          <span className="text-[13px] font-medium">Bill</span>
+        </div>
+        <div className="overflow-y-auto flex-1 min-h-0"><BillInDialog bookingId={multiServiceBookings ? mainBookingId : (receipt.billIds?.[0] || mainBookingId)} extraIds={multiServiceBookings ? [] : (receipt.billIds || []).slice(1)} /></div>
+      </>) : (
       <div className="px-7 py-7 text-center overflow-y-auto flex-1 min-h-0"><div className="min-h-full flex flex-col justify-center">
         <div className="w-10 h-10 rounded-full bg-[#EEF3EC] text-primary grid place-items-center mx-auto"><Icon name="Check" size={20} strokeWidth={2.2} /></div>
         <div className="mt-3.5 text-[12.5px] text-[#8A8A90]">{receipt.memberOnly ? 'Member discount saved · nothing left to pay' : 'Payment collected'}</div>
@@ -1612,10 +1620,10 @@ const PaymentModal = ({
             <div key={i} className="flex justify-between items-center h-9 border-b border-[#F1F1EF] last:border-b-0 text-[#8A8A90]"><span>{w.label}</span><span className="tabular-nums">{fmt(w.amount)}</span></div>
           ))}
         </div>
-      </div></div>
-      <div className="h-16 px-5 border-t border-[#E7E8E6] flex items-center gap-2 flex-none">
-        {receipt && showBill && <BillActions bookingId={multiServiceBookings ? mainBookingId : (receipt.billIds?.[0] || mainBookingId)} extraIds={multiServiceBookings ? [] : (receipt.billIds || []).slice(1)} up above />}
-        {whatsappUrl && (
+      </div></div>)}
+      <div className="min-h-16 py-2 px-5 border-t border-[#E7E8E6] flex items-center gap-2 flex-none max-md:flex-wrap">
+        {receipt && showBill && <BillActions bookingId={multiServiceBookings ? mainBookingId : (receipt.billIds?.[0] || mainBookingId)} extraIds={multiServiceBookings ? [] : (receipt.billIds || []).slice(1)} up hideView={viewingBill} onView={() => setViewingBill(true)} className="md:flex-nowrap" />}
+        {whatsappUrl && !viewingBill && (
           <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="h-9 max-md:h-11 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white text-[13px] font-medium inline-flex items-center gap-2 hover:bg-[#F7F7F5]"><Icon name="MessageCircle" size={15} strokeWidth={1.6} />WhatsApp</a>
         )}
         <button type="button" autoFocus onClick={() => onClose?.({ paid: true })} className="ml-auto h-9 max-md:h-11 max-md:px-6 pl-4 pr-3 rounded-[7px] bg-primary text-white text-[13px] font-medium inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(45,90,39,.25)]">Done<kbd className="max-md:hidden text-[10.5px] px-1.5 rounded border border-white/25 bg-white/10 font-sans">↵</kbd></button>

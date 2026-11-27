@@ -105,7 +105,8 @@ const EmailDialog = ({ onSend, onClose, busy, error }) => {
   );
 };
 
-const BillPanel = ({ bookingId, extraIds, onClose, onPrint, busy, above }) => {
+// Loads and builds the bill (shared by the side panel and the in-dialog view).
+function useBillDoc(bookingId, extraIds, withLink) {
   const { multi, billingOn, orgInfo } = useBillOrg();
   const [state, setState] = useState({ loading: true, bill: null, error: false });
   const [link, setLink] = useState(null);
@@ -114,26 +115,41 @@ const BillPanel = ({ bookingId, extraIds, onClose, onPrint, busy, above }) => {
     fetchBillUnit({ bookingId, multi, single: billingOn, extraIds }).then(async ({ data }) => {
       if (!alive) return;
       setState(data ? { loading: false, bill: buildBill(billSource(data, orgInfo)), error: false } : { loading: false, bill: null, error: true });
-      if (data) { const l = await fetchBillLink(data.rows); if (alive) setLink(l.data); }
+      if (data && withLink) { const l = await fetchBillLink(data.rows); if (alive) setLink(l.data); }
     });
     return () => { alive = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingId]);
+  return { state, link, setLink };
+}
+
+const BillDocBody = ({ state }) => (
+  <>
+    <style data-bill-panel>{BILL_CSS}</style>
+    {state.loading && <p className="p-6 text-sm text-text-secondary">Preparing the bill…</p>}
+    {state.error && <p className="p-6 text-sm text-text-secondary">Couldn&apos;t load this bill. Go back and try again.</p>}
+    {state.bill && <div className="border border-border rounded-spa m-4 overflow-hidden text-left"><Bill bill={state.bill} layout="a4" /></div>}
+  </>
+);
+
+/** The bill drawn inside a centred dialog (the checkout success screen swaps its body to this). */
+export const BillInDialog = ({ bookingId, extraIds }) => <BillDocBody state={useBillDoc(bookingId, extraIds, false).state} />;
+
+const BillPanel = ({ bookingId, extraIds, onClose, onPrint, busy }) => {
+  const { state, link, setLink } = useBillDoc(bookingId, extraIds, true);
   const turnOff = async () => { const r = await turnOffBillLink(link.token); if (!r.error) setLink(null); };
   const { bill } = state;
   return (
-    <SidePanel isOpen above={above} title={bill ? `${bill.title === 'Tax invoice' ? 'Tax invoice' : 'Bill'} ${bill.number}` : 'Bill'} onClose={onClose}
+    <SidePanel isOpen title={bill ? `${bill.title === 'Tax invoice' ? 'Tax invoice' : 'Bill'} ${bill.number}` : 'Bill'} onClose={onClose}
       width="min(560px, 100vw)"
       footer={<div className="flex items-center justify-end gap-2 w-full">{link && <LinkMenu token={link.token} onOff={turnOff} />}<PrintMenu onPick={onPrint} busy={busy} up /></div>}>
-      <style data-bill-panel>{BILL_CSS}</style>
-      {state.loading && <p className="p-6 text-sm text-text-secondary">Preparing the bill…</p>}
-      {state.error && <p className="p-6 text-sm text-text-secondary">Couldn&apos;t load this bill. Close and try again.</p>}
-      {bill && <div className="border border-border rounded-spa m-4 overflow-hidden"><Bill bill={bill} layout="a4" /></div>}
+      <BillDocBody state={state} />
     </SidePanel>
   );
 };
 
-const BillActions = ({ bookingId, extraIds, up = false, above = false, className = '' }) => {
+// onView: the host shows the bill itself (a centred dialog) instead of the side panel; hideView: the bill is already on screen.
+const BillActions = ({ bookingId, extraIds, up = false, onView, hideView = false, className = '' }) => {
   const { multi, billingOn, orgInfo } = useBillOrg();
   const [viewing, setViewing] = useState(false);
   const [invoiceLayout, setInvoiceLayout] = useState(null); // set = the tax-invoice dialog is open (issue + Original/Copy logging stay exactly as before)
@@ -213,7 +229,7 @@ const BillActions = ({ bookingId, extraIds, up = false, above = false, className
 
   return (
     <span className={`inline-flex flex-wrap items-center gap-2 ${className}`} data-bill-actions>
-      <button type="button" onClick={() => setViewing(true)} className="inline-flex items-center gap-1 h-8 px-2.5 rounded-spa border border-border text-xs font-medium text-text-primary hover:bg-background"><Icon name="Eye" size={13} />View</button>
+      {!hideView && <button type="button" onClick={() => (onView ? onView() : setViewing(true))} className="inline-flex items-center gap-1 h-8 px-2.5 rounded-spa border border-border text-xs font-medium text-text-primary hover:bg-background"><Icon name="Eye" size={13} />View</button>}
       <span className="relative inline-block">
         <button ref={sendTriggerRef} type="button" onClick={openSend} disabled={sending} aria-haspopup="menu" aria-expanded={sendMenu}
           className="inline-flex items-center gap-1 h-8 px-2.5 rounded-spa border border-border text-xs font-medium text-text-primary hover:bg-background disabled:opacity-50">
@@ -236,7 +252,7 @@ const BillActions = ({ bookingId, extraIds, up = false, above = false, className
       {createPortal(toastNode, document.body)}
       {askEmail && <EmailDialog onSend={sendEmail} onClose={() => setAskEmail(false)} busy={sending} error={dialogError} />}
       {error && <span role="alert" className="basis-full text-xs text-error">{error}</span>}
-      {viewing && <BillPanel bookingId={bookingId} extraIds={extraIds} onClose={() => setViewing(false)} onPrint={print} busy={busy} above={above} />}
+      {viewing && <BillPanel bookingId={bookingId} extraIds={extraIds} onClose={() => setViewing(false)} onPrint={print} busy={busy} />}
       {invoiceLayout && <InvoicePrintModal bookingId={bookingId} initialLayout={invoiceLayout} onClose={() => setInvoiceLayout(null)} />}
     </span>
   );
