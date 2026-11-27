@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../../../../contexts/AuthContext';
 import { viewerAccess } from '../../../../services/dataMasking';
 import Icon from '../../../../components/AppIcon';
+import { buildEditChanges } from './editBookingSlot';
 import DateTimeRow from '../../../../components/ui/DateTimeRow';
 import { format12h } from '../../../../utils/timeInput';
 import SidePanel, { PANEL_WIDTH_BOOKING } from '../../../../components/ui/SidePanel';
@@ -36,6 +37,8 @@ import { friendlyError } from '../../../../utils/friendlyError';
 import { shouldShowFillFree } from '../../../../utils/serviceCatalog';
 import { fieldForErrorCode } from '../../../../utils/quickCreateErrorField';
 import { useOrg } from '../../../../contexts/OrgContext';
+import ExtraServiceRows from './ExtraServiceRows';
+import { rowTimes, rowsIncompleteReason, toGroupServices, ownOverlaps, staffRowProblem } from './multiServiceRows';
 
 
 // ZNLY-365: the client row when the panel was opened from a booking ("+ Service" / Rebook). Not editable: same client as that booking.
@@ -48,24 +51,33 @@ const LockedClientCard = ({ client, name }) => {
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-semibold text-text-primary">{label}</span>
         <span className="block truncate text-xs text-text-secondary">
-          {client.bookingNumber ? `Same client as ${client.bookingNumber}` : 'Same client'}
+          {client.phone ? client.phone : client.bookingNumber ? `Same client as ${client.bookingNumber}` : 'Same client'}
           {client.kind === 'walkin' && <span className="ml-1.5 rounded-full bg-[#FDF1DC] px-2 py-px text-[11px] font-medium text-secondary">Walk-in</span>}
         </span>
       </span>
-      <span className="flex flex-shrink-0 items-center gap-1 text-[11px] text-[#8A8A90]"><Icon name="Lock" size={12} />same client</span>
+      {!client.phone && <span className="flex flex-shrink-0 items-center gap-1 text-[11px] text-[#8A8A90]"><Icon name="Lock" size={12} />same client</span>}
     </div>
   );
 };
 
 // ── Quick Create Panel ────────────────────────────────────────
 
-const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours, retarget, onDraftChange, columnMode = 'therapist', allTherapists = [], guardRef, offStaff = {}, offDate = null, onRefreshCalendar }) => {
+const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings: bookingsProp = [], onClose, onSubmit, branchId, branchHours, retarget, onDraftChange, columnMode = 'therapist', allTherapists = [], guardRef, offStaff = {}, offDate = null, onRefreshCalendar }) => {
+  const edit = slotInfo?.edit || null;   // ZNLY-402 piece 5: Edit booking = this same form, prefilled with the whole booking
+  // The booking's own rows are not "busy" against themselves.
+  const bookings = useMemo(() => (edit ? bookingsProp.filter((b) => !edit.ownIds.includes(b.id)) : bookingsProp), [bookingsProp, edit]);
+  const [firstEdit, setFirstEdit] = useState(null);   // Edit: the first service's { bookingId, locked, name }
+  const [removedIds, setRemovedIds] = useState([]);    // Edit: services dropped from the form, cancelled by Save changes
+  const editBaselineRef = useRef('');
   const { profile: viewerProfile } = useAuth();
-  const { allowStaffOverlap, requireCustomerPhone } = useOrg();   // ZNLY-389 / ZNLY-390: per-org booking rules
+  const { allowStaffOverlap, requireCustomerPhone, multiServiceBookings } = useOrg();   // ZNLY-389 / ZNLY-390: per-org booking rules
   // ZNLY-278: an own-only login books only itself; the data layer hands it a single team member, so that one is the default.
   const defaultTherapistId = viewerAccess(viewerProfile).ownOnly && therapists?.length === 1 ? therapists[0].id : null;
   const canViewPrices = viewerAccess(viewerProfile).canViewPrices; // ZNLY-235: no prices for this login
   const [serviceId, setServiceId] = useState('');
+  // ZNLY-402 piece 3b: extra services of the same booking (only when the org setting is ON; [] otherwise and the panel is exactly as before).
+  const [extraRows, setExtraRows] = useState([]);
+  const [errorRow, setErrorRow] = useState(null);   // which service (1 = the second) the refused save was about
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerCountryCode, setCustomerCountryCode] = useState('+977');
@@ -278,6 +290,14 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       checkPreviousDue(`${slotInfo.defaultCustomerCountryCode || '+977'}${slotInfo.defaultCustomerPhone}`);
     }
     setConfirm(null);
+    setExtraRows([]); setFirstEdit(null); setRemovedIds([]); setErrorRow(null);
+    if (slotInfo?.edit) {
+      const e = slotInfo.edit; const [f, ...rest] = e.rows;
+      const xr = rest.map((r) => ({ key: `e${r.bookingId}`, bookingId: r.bookingId, serviceId: r.serviceId, therapistId: r.therapistId, roomId: r.roomId, start: r.start, locked: r.locked, name: r.name }));
+      setServiceId(f.serviceId); setSelectedTherapistIds(f.therapistId ? [f.therapistId] : []); setRoomId(f.roomId || ''); setBookingTime(f.start);
+      setSpecialRequests(e.specialRequests || ''); setExtraRows(xr); setFirstEdit({ bookingId: f.bookingId, locked: f.locked, name: f.name });
+      editBaselineRef.current = JSON.stringify([slotInfo.day, f.start, f.serviceId, f.therapistId ? [f.therapistId] : [], f.roomId || '', e.specialRequests || '', xr, []]);
+    }
     initialDraftRef.current = {
       date: slotInfo?.day || '',
       time: slotTime,
@@ -314,6 +334,32 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // Self-service amenity (sauna/steam/locker): no therapist picker; staff just allocate a room if one applies.
   const serviceRequiresTherapist = selectedService ? selectedService.requires_therapist !== false : true;
   const isCoupleBooking = bookingMode === 'individual' && selectedTherapistIds.length > 1 && !!selectedService?.is_couple;
+  // ZNLY-402 3b: "+ Add another service" needs the setting ON, Individual mode and a plain first service (a combo or couple service keeps its own flow).
+  const canMulti = !!multiServiceBookings && bookingMode === 'individual' && !!selectedService && !selectedService.is_combo && !selectedService.is_couple;
+  // ZNLY-402 U10: every business gets the same grey service card from the FIRST service (Individual mode). A combo / couple service keeps its own
+  // layout (its staff and schedule rules differ). Only an ON org gets "Add another service" (canMulti).
+  const useCard = bookingMode === 'individual' && !selectedService?.is_combo && !selectedService?.is_couple;
+  const activeRows = canMulti ? extraRows : [];
+  const extraServices = useMemo(() => pickerServices.filter((x) => !x.is_combo && !x.is_couple), [pickerServices]);
+  const extraTimes = useMemo(() => rowTimes(activeRows, services, bookingTime, selectedService?.duration_minutes), [activeRows, services, bookingTime, selectedService]);
+  const extraIncomplete = rowsIncompleteReason(activeRows);
+  // Live checks per extra row, reported by the rows themselves (shift / break / leave / clash: the same rule as a single booking). Nothing is created until every row passes.
+  const [rowProblems, setRowProblems] = useState({});
+  const onRowProblem = useCallback((key, text, overridable = false) => setRowProblems((p) => ((p[key]?.text || '') === (text || '') && !!p[key]?.overridable === !!overridable ? p : { ...p, [key]: { text: text || '', overridable: !!overridable } })), []);
+  const ownProblems = useMemo(() => {
+    if (!activeRows.length || allowStaffOverlap) return {};
+    const nm = (id) => (therapists || []).find((x) => x.id === id)?.name || 'This person';
+    const f0 = clockToMin(bookingTime);
+    const slots = [{ ids: selectedTherapistIds, startMin: f0 ?? 0, endMin: (f0 ?? 0) + (selectedService?.duration_minutes || 60) }, ...activeRows.map((r, i) => ({ ids: r.therapistId ? [r.therapistId] : [], startMin: extraTimes[i].startMin, endMin: extraTimes[i].endMin }))];
+    return ownOverlaps(slots, nm);
+  }, [activeRows, allowStaffOverlap, therapists, bookingTime, selectedTherapistIds, selectedService, extraTimes]);
+  const firstRowProblem = (() => {
+    for (let i = 0; i < activeRows.length; i += 1) { const p = rowProblems[activeRows[i].key]; if (p?.text && !p.overridable) return `Service ${i + 2}: ${p.text}`; }
+    return '';
+  })();
+  // Rows whose only problem is an overridable availability verdict: a manager / admin may book anyway with a reason (asked once, before anything is created).
+  const rowOverrides = activeRows.map((r) => !!rowProblems[r.key]?.overridable);
+  const anyRowOverride = rowOverrides.some(Boolean);
   // Group booking creates one independent booking per person, so a couple service would bill the combined price to each.
   const groupServices = (services || []).filter((s) => !s.is_couple);
   // Warn (and disable Create) when the booking interval overlaps a manual block. Client-side only.
@@ -339,7 +385,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   // Everything a rejection could depend on. A saved rejection stays (and Create stays off) only while this is unchanged.
   const formKey = JSON.stringify([bookingMode, bookingDate, bookingTime, serviceId, selectedTherapistIds, roomId, customerName, customerPhone, knownCustomerId, customerKind, walkInLabel,
-    people, groupServiceId, groupRoomId, serviceMode, groupType, therapistRoomOverrides, comboTherapistOverrides, comboRoomOverrides]);
+    people, groupServiceId, groupRoomId, serviceMode, groupType, therapistRoomOverrides, comboTherapistOverrides, comboRoomOverrides, extraRows]);
 
   const svcDur = (sid) => (services || []).find((t) => t.id === sid)?.duration_minutes || 60;
 
@@ -410,7 +456,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // dayChecking: the fetch is in flight (show "Checking who's free…"); dayKnown false and not checking = failed / own-only: plain list, no Fill.
   const dayKnown = reuseCalDay || ownDayData.ready;
   const dayChecking = !!bookingDate && !dayKnown && !ownDayData.failed && !viewerAccess(viewerProfile).ownOnly;
-  const dayBookings = reuseCalDay ? bookings : (ownDayData.ready ? ownDayData.bookings : null);
+  const dayBookings = reuseCalDay ? bookings : (ownDayData.ready ? (edit ? ownDayData.bookings.filter((b) => !edit.ownIds.includes(b.id)) : ownDayData.bookings) : null);
   const dayOff = reuseCalDay ? offStaff : (ownDayData.ready ? ownDayData.offById : {});
   const groupRanges = useMemo(() => (bookingMode === 'group' && bookingDate && dayBookings ? staffDayRanges(dayBookings, { date: bookingDate }) : {}), [bookingMode, bookingDate, dayBookings]);
   const groupOff = dayOff;
@@ -614,6 +660,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     e.preventDefault();
     if (bookingMode === 'group' ? !groupValid : (!serviceId || customerMissing(customerFields))) return;
     if (blockOverlapMsg) return;
+    if (bookingMode === 'individual' && (extraIncomplete || firstRowProblem)) return;
     // Synchronous re-entry guard: the `submitting` state disables the button
     // only after a re-render, so a fast double-click can fire two submits and
     // create duplicate bookings. The ref blocks the second call immediately.
@@ -621,7 +668,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     submitInFlightRef.current = true;
     setSubmitting(true);
     setError(null);
-    const payload = bookingMode === 'group'
+    const editRows = edit ? [
+      { bookingId: firstEdit?.bookingId || null, serviceId, therapistId: selectedTherapistIds[0] || '', roomId, start: bookingTime },
+      ...extraRows.map((r, i) => ({ bookingId: r.bookingId || null, serviceId: r.serviceId, therapistId: r.therapistId, roomId: r.roomId || '', start: extraTimes[i]?.start || r.start })),
+    ] : [];
+    const payload = edit
+      ? { bookingDate, bookingTime, edit: { visitKey: edit.visitKey, order: editRows.map((r) => r.bookingId), changes: buildEditChanges({ date: bookingDate, specialRequests: specialRequests.trim(), rows: editRows, removed: removedIds }) } }
+      : bookingMode === 'group'
       ? {
           mode: 'group',
           specialRequests: specialRequests.trim() || null,
@@ -650,6 +703,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 roomId: c.defaultSameRoom !== false ? (roomId && roomId !== 'none' ? roomId : null) : (comboRoomOverrides[c.serviceId] || null),
               }))
             : undefined,
+          // ZNLY-402 3b: several services for one person: the first service plus each extra row, each with its own start and staff.
+          multiServices: activeRows.length > 0
+            ? toGroupServices({ first: selectedService, firstStart: bookingTime, firstTherapistIds: selectedTherapistIds, rows: activeRows, services, overrides: [!!precheck.warn, ...rowOverrides], overrideNotes: [precheck.verdict?.message, ...activeRows.map((r) => rowProblems[r.key]?.text)] })
+            : undefined,
           bookingDate,
           bookingTime,
           referringCustomerId: (!isExistingCustomer && referringCustomerId) || undefined,
@@ -660,16 +717,18 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         };
     const err = await onSubmit(payload);
     if (err) {
-      const text = friendlyError(err, 'Couldn\'t create the booking. Please try again.');
+      const text = friendlyError(err, edit ? 'Nothing was saved. Please try again.' : 'Couldn\'t create the booking. Please try again.');
       setError(text);
       setErrorCode(err?.code || null);
       setErrorCard(describeError(err?.raw || { code: err?.code, message: err?.message }, { ...guideCtx, partial: err?.partial }));
       setErrorKey(formKey);
+      setErrorRow(Number.isInteger(err?.row) && err.row >= (edit ? 0 : 1) ? err.row : null);
       setSubmitting(false);
       submitInFlightRef.current = false;
       // Bring the field the reason is about into view (the footer already shows the reason itself).
       const field = fieldForErrorCode(err?.code) || errorField(text);
-      if (field) requestAnimationFrame(() => document.querySelector(`[data-qc-field="${field}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+      // A refused service card (red) wins: on a phone its reason would otherwise sit below the fold.
+      if (field || Number.isInteger(err?.row)) requestAnimationFrame(() => (document.querySelector('[data-row-problem="true"]') || document.querySelector(`[data-qc-field="${field}"]`))?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
     }
   };
 
@@ -689,12 +748,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // "Dirty" = the user edited something that is NOT the slot itself. Date, time and column come from the slot (and are
   // moved silently by retargeting); service, customer, contact, notes, group members, referral, and a therapist/room
   // choice that differs from what the slot set all count as an edit.
-  const isDirty = isOpen && (
-    !!((serviceId && serviceId !== initialDraftRef.current.service) || (!slotInfo?.lockedClient && (customerName.trim() || customerPhone.trim() || customerEmail.trim() || customerGender)) || specialRequests.trim()
+  const editSnap = JSON.stringify([bookingDate, bookingTime, serviceId, selectedTherapistIds, roomId, specialRequests, extraRows, removedIds]);
+  const isDirty = isOpen && (edit ? editSnap !== editBaselineRef.current : (
+    !!((serviceId && serviceId !== initialDraftRef.current.service) || activeRows.length > 0 || (!slotInfo?.lockedClient && (customerName.trim() || customerPhone.trim() || customerEmail.trim() || customerGender)) || specialRequests.trim()
       || (customerKind === 'walkin' && !slotInfo?.walkIn && !slotInfo?.lockedClient) || (!slotInfo?.lockedClient && walkInLabel.trim()) || groupServiceId || peopleEdited || referringCustomerName)
     || selectedTherapistIds.join(',') !== (initialDraftRef.current.therapist ? initialDraftRef.current.therapist : '')
     || (roomId || '') !== initialDraftRef.current.room
-  );
+  ));
   // Lets the calendar run another panel action (open a booking, …) through this panel's dirty guard.
   useEffect(() => {
     if (!guardRef) return undefined;
@@ -715,7 +775,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     therapistId: bookingMode === 'individual' ? selectedTherapistIds[0] : null, enabled: !!slotInfo,
   });
   useEffect(() => {
-    if (!isOpen) { onDraftChange?.(null); return; }
+    if (!isOpen || edit) { onDraftChange?.(null); return; }   // Edit: the booking's own cards are already on the grid, no ghost
     onDraftChange?.({
       date: bookingDate,
       startTime: bookingTime,
@@ -747,7 +807,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     };
   };
   useEffect(() => {
-    if (!retarget || retarget.nonce === lastRetargetRef.current || !isOpen) return;
+    if (!retarget || retarget.nonce === lastRetargetRef.current || !isOpen || edit) return;
     lastRetargetRef.current = retarget.nonce;
     const s = retarget.slot;
     const curCol = s.colType === 'room' ? (roomId || '') : s.colType === 'therapist' ? (selectedTherapistIds[0] || '') : '';
@@ -760,19 +820,20 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // Couple rule (same helper as the booking panel): 0 picks saves unassigned, 2 is fine, 1 is not.
   // Reasons follow form order (ZNLY-322): the service row sits above the contact card, so a missing service is named first.
   const groupServiceMissing = serviceMode === 'same' ? !groupServiceId : people.some((q) => !q.serviceId);
-  const groupInvalidReason = groupServiceMissing
-    ? (serviceMode === 'same' ? 'Pick a service' : `Pick a service for ${people.findIndex((q) => !q.serviceId) === 0 ? 'the booking contact' : `Person ${people.findIndex((q) => !q.serviceId) + 1}`}`)
-    : !people[0]?.kind ? PICK_REASON : (people[0].kind === 'new' && people[0].name?.trim() && contactPhoneProblem) ? contactPhoneProblem : guestPhoneProblem ? guestPhoneProblem : 'Add the booking contact';
+  const groupInvalidReason = !people[0]?.kind ? PICK_REASON : (people[0].kind === 'new' && people[0].name?.trim() && contactPhoneProblem) ? contactPhoneProblem
+    : groupServiceMissing
+      ? (serviceMode === 'same' ? 'Pick a service' : `Pick a service for ${people.findIndex((q) => !q.serviceId) === 0 ? 'the booking contact' : `Person ${people.findIndex((q) => !q.serviceId) + 1}`}`)
+      : guestPhoneProblem ? guestPhoneProblem : 'Add the booking contact';
   // ZNLY-322: tapping the "Pick a service" footer reason scrolls to the first empty service row and rings it for 3 s.
   const [flashSvc, setFlashSvc] = useState(null);
-  const firstEmptySvcField = bookingMode === 'individual' ? (serviceId ? null : 'service')
+  const firstEmptySvcField = bookingMode === 'individual' ? (serviceId ? (extraIncomplete ? `service-x${activeRows.findIndex((r) => !r.serviceId)}` : null) : 'service')
     : serviceMode === 'same' ? (groupServiceId ? null : 'service')
       : (() => { const k = people.findIndex((q) => !q.serviceId); return k < 0 ? null : `service-${k}`; })();
   useEffect(() => { if (!flashSvc) return undefined; const t = setTimeout(() => setFlashSvc(null), 3000); return () => clearTimeout(t); }, [flashSvc]);
   // ZNLY-327: the customer reason works the same way, after the service (form order).
   const customerUnpicked = bookingMode === 'individual' ? !customerKind : !people[0]?.kind;
   const phoneBad = bookingMode === 'individual' ? customerKind === 'new' && !!customerName.trim() && !!phoneProblem(customerCountryCode, customerPhone) : people[0]?.kind === 'new' && !!contactPhoneProblem;
-  const firstEmptyField = firstEmptySvcField || (customerUnpicked ? 'customer' : phoneBad ? 'phone' : null);
+  const firstEmptyField = (customerUnpicked ? 'customer' : phoneBad ? 'phone' : null) || firstEmptySvcField;   // customer first, then services (the form's order)
   const tapPickService = () => {
     if (!firstEmptyField) return;
     setFlashSvc(firstEmptyField);
@@ -840,13 +901,20 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     if (!roomId && roomSts.every((x) => x.state === 'full')) return { ...describeError({ code: 'ROOMS_FULL' }, guideCtx), blocking: true };
     return null;
   })();
-  const card = activeCard || liveCard;
+  // ZNLY-402 3b: a refusal about an extra service: its fix buttons would act on the FIRST service's staff / time, so they are not offered; the row carries the reason.
+  const rowRefused = errorRow != null && errorKey === formKey && !!activeError;
+  // Edit: a refusal that names a service shows ONLY on that service's card (no generic card on top); any other card drops the "move the date" fixes (they would book a different day).
+  const card = edit && rowRefused ? null
+    : rowRefused && activeCard ? { ...activeCard, actions: [] }
+      : (() => { const c = activeCard || liveCard; return edit && c ? { ...c, actions: (c.actions || []).filter((a) => !/^set-date/.test(a.intent || '')) } : c; })();
   // Bring the card into view the moment it appears (it sits under date/time and can start partly off-screen).
   const cardRef = useRef(null);
   const cardKey = card ? `${card.code}${card.ref || ''}` : '';
   useEffect(() => { if (cardKey) cardRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }); }, [cardKey]);
   const errField = activeCard ? (activeCard.field || fieldForErrorCode(errorCode) || errorField(activeError)) : activeError ? (fieldForErrorCode(errorCode) || errorField(activeError)) : (liveCard?.field || null);
-  const fieldRing = (name) => (errField === name ? 'rounded-spa ring-2 ring-error' : '');
+  // A refusal about staff: the staff row it is about shows it (and no Free chip) until the form changes.
+  const refusedStaff = (staffName, hasStaff = true, liveText = '') => staffRowProblem({ liveText, refused: !!activeError, errorStaff: errField === 'staff', hasStaff, errorText: activeError || '', staffName });
+  const fieldRing = (name) => (errField === name && !rowRefused ? 'rounded-spa ring-2 ring-error' : '');
   // Fix buttons only fill or open something. Nothing here saves.
   const scrollToField = (f) => requestAnimationFrame(() => document.querySelector(`[data-qc-field="${f}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
   const onGuideAction = (a) => {
@@ -872,8 +940,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     ? (/^Overlaps '(Transferred|Visiting)/.test(blockOverlapMsg) ? `${staffLabel} unavailable` : 'Overlaps a block')
     : bookingMode === 'group'
       ? (!groupValid ? groupInvalidReason : groupProblemFooter || (groupStaffIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : ''))
-      : !serviceId ? 'Pick a service' : (isCoupleBooking && companionPhone.problem) ? `Companion's phone: ${companionPhone.problem}` : couplePickIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : customerMissing(customerFields);
-  const createDisabled = submitting || (!!activeError && !(activeCard?.kind === 'system' && activeCard.canRetry)) || !!liveCard?.blocking || !!blockOverlapMsg || precheck.blocked || couplePickIncomplete || (isCoupleBooking && !!companionPhone.problem) || (bookingMode === 'group' && (!!groupProblemFooter || groupStaffIncomplete)) || (bookingMode === 'group' ? !groupValid : (!serviceId || !!customerMissing(customerFields)));
+      : customerMissing(customerFields) ? customerMissing(customerFields) : !serviceId ? 'Pick a service' : extraIncomplete ? extraIncomplete : firstRowProblem ? firstRowProblem : (isCoupleBooking && companionPhone.problem) ? `Companion's phone: ${companionPhone.problem}` : couplePickIncomplete ? `1 of 2 ${staffLabelPlural.toLowerCase()} picked. Pick one more, or clear to leave it unassigned.` : '';
+  const createDisabled = submitting || (!!activeError && !(activeCard?.kind === 'system' && activeCard.canRetry)) || !!liveCard?.blocking || !!blockOverlapMsg || precheck.blocked || couplePickIncomplete || (isCoupleBooking && !!companionPhone.problem) || (bookingMode === 'group' && (!!groupProblemFooter || groupStaffIncomplete)) || (bookingMode === 'individual' && (!!extraIncomplete || !!firstRowProblem)) || (bookingMode === 'group' ? !groupValid : (!serviceId || !!customerMissing(customerFields)));
   const confirmSlotLabel = confirm?.type === 'move'
     ? [therapists.find((d) => d.id === confirm.slot.colId)?.name || rooms.find((c) => c.id === confirm.slot.colId)?.name || confirm.slot.colName,
        confirm.slot.day,
@@ -926,7 +994,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         className="h-9 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 spa-transition-fast disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
       >
         {submitting && <div className="animate-spin w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full" />}
-        {submitting ? 'Creating...' : bookingMode === 'group' ? `Create ${peopleCount} bookings` : precheck.warn ? 'Book anyway…' : 'Create booking'}
+        {submitting ? (edit ? 'Saving...' : 'Creating...') : edit ? 'Save changes' : bookingMode === 'group' ? `Create ${peopleCount} bookings` : (precheck.warn || anyRowOverride) ? 'Book anyway…' : 'Create booking'}
       </button>
     </div>
   );
@@ -941,7 +1009,71 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       branchHours={branchHours}
       timeRingClass={fieldRing('time')}
       timeFieldAttr="time"
+      timeDisabled={!!firstEdit?.locked}
     />
+  );
+
+  // Name / Phone / Email / Gender of one person. Guests use it in their card; the lead's (a NEW customer) lives in the Customer block, not a second "contact" card.
+  const personFields = (p, idx) => (
+  <>
+                  <div>
+                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                      Name {idx === 0 && <span className="text-error">*</span>}
+                      {p.customerId && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
+                    </label>
+                    <CustomerAutocomplete
+                      value={p.name}
+                      onChange={(v) => setPerson(idx, { name: v, customerId: null, previousDue: null })}
+                      onSelect={(c) => handleGuestCustomerSelect(idx, c)}
+                      branchId={branchId}
+                      searchBy="any"
+                      placeholder={idx === 0 ? 'Search or type a name' : `Name (blank = ${contactFirst}'s)`}
+                    />
+                  </div>
+
+                  <div {...(idx === 0 ? { 'data-qc-field': 'phone' } : {})} className={idx === 0 && flashSvc === 'phone' ? 'rounded-spa ring-2 ring-error' : ''}>
+                    <PhoneField
+                      label="Phone" required={idx === 0 && requireCustomerPhone} id={`qc-person-${idx}-phone`} walkInHint
+                      dial={p.countryCode || '+977'} national={p.phone || ''}
+                      placeholder={idx === 0 ? '98XXXXXXXX' : `Blank = ${contactFirst}'s`}
+                      showProblem={idx === 0 ? p.kind === 'new' : !p.customerId}
+                      onChange={({ dial, national }) => (dial !== (p.countryCode || '+977') ? setPerson(idx, { countryCode: dial }) : setPerson(idx, { phone: national, customerId: null, previousDue: null }))}
+                    />
+                  </div>
+
+                  {canViewPrices && <EarlierBalanceNotice name={p.name} due={p.previousDue} />}
+
+                  <div>
+                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Email</label>
+                    <input
+                      type="email"
+                      value={p.email}
+                      onChange={(e) => setPerson(idx, { email: e.target.value })}
+                      placeholder={idx === 0 ? 'customer@email.com' : `Blank = ${contactFirst}'s`}
+                      className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Gender</label>
+                    <div className="flex gap-2">
+                      {['Male', 'Female'].map((g) => (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={() => setPerson(idx, { gender: p.gender === g.toLowerCase() ? '' : g.toLowerCase() })}
+                          className={`px-4 py-2 text-sm border rounded-spa transition-colors ${
+                            p.gender === g.toLowerCase()
+                              ? 'border-primary bg-primary/10 text-primary font-medium'
+                              : 'border-border bg-surface text-text-secondary hover:bg-background'
+                          }`}
+                        >
+                          {g}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+  </>
   );
 
   return (
@@ -968,193 +1100,6 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
             {bookingMode === 'individual' && (
             <>
-            {/* Service */}
-            <div>
-              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                Service <span className="text-error">*</span>
-              </label>
-              <div data-qc-field="service"><ServicePickRow required invalid={flashSvc === 'service' && !serviceId} services={pickerServices} value={serviceId} onChange={setServiceId} branchId={branchId} canViewPrices={canViewPrices} loading={servicesLoading} openSignal={openServiceSignal} onSignalConsumed={() => setOpenServiceSignal(0)} title="Service for the booking" sub={svcSubLine} ariaLabel="Service" /></div>
-              {visitorTherapist && visitorServiceNames && (
-                <p className="mt-1.5 text-xs text-text-secondary" data-visitor-services-help>
-                  Showing the {pickerServices.length} service{pickerServices.length === 1 ? '' : 's'} {visitorTherapist.name} does at the home {(locationLabel || 'branch').toLowerCase()} that this one also offers.
-                </p>
-              )}
-            </div>
-
-            {/* Room */}
-            {rooms && rooms.length > 0 && (
-              <div data-qc-field="room" className={fieldRing('room')}>
-                <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                  Room
-                </label>
-                <RoomPickRow rooms={rooms} bookings={bookings} date={bookingDate} startTime={bookingTime}
-                  durationMin={selectedService?.duration_minutes || dragMinutes || 60} value={roomId} onChange={setRoomId} openSignal={roomSignal} onSignalConsumed={() => setRoomSignal(0)} serviceName={selectedService?.name} title={`Room for ${customerKind === 'walkin' ? `Walk-in${walkInLabel.trim() ? ` · ${walkInLabel.trim()}` : ''}` : (customerName.trim() || 'the booking')}`} />
-              </div>
-            )}
-
-            {/* Therapist(s): hidden for a combo whose every component needs its own staff, and for self-service amenities */}
-            {!comboAllDifferentStaff && serviceRequiresTherapist && (
-            <div data-qc-field="staff" className={fieldRing('staff')}>
-            {(() => {
-              const s0 = clockToMin(bookingTime); const e0 = clockToMin(pickerSlotEnd);
-              const maxPick = selectedService?.is_couple ? 2 : (selectedTherapistIds.length > 1 ? Infinity : 1);
-              const picked = selectedTherapistIds.map((tid) => pickerPeople.find((t) => t.id === tid) || { id: tid, name: staffNameOf(tid) });
-              const info = pickedRowStatusMulti(picked, {
-                slot: dayBookings && s0 != null ? { start: s0, end: e0 > s0 ? e0 : s0 + 60 } : null,
-                rangesById: dayBookings && bookingDate ? staffDayRanges(dayBookings, { date: bookingDate }) : {},
-                offById: dayOff, date: bookingDate, today: nepalNow().today, busyOk: allowStaffOverlap,
-              });
-              const lbl = selectedTherapistIds.length > 1 ? staffLabelPlural : staffLabel;
-              return (
-                <div>
-                  <p className="flex items-baseline justify-between mb-1.5 font-body font-body-medium text-[13px] text-text-primary">{lbl} <span className="text-xs font-normal text-text-secondary">optional</span></p>
-                  <StaffPickRow
-                    people={picked}
-                    max={maxPick}
-                    statusLine={info.statusLine}
-                    pill={info.pill}
-                    problem={info.problem}
-                    emptyLabel={`Pick ${staffLabel.toLowerCase()}`}
-                    title={`${lbl} for the booking`}
-                    renderPicker={(close) => (
-                      <StaffPicker
-                        people={pickerPeople}
-                        selectedIds={selectedTherapistIds}
-                        onChange={(ids) => { setSelectedTherapistIds(ids); if (maxPick === 1) close(); }}
-                        max={maxPick}
-                        header={{ title: `${lbl} for the booking${maxPick === 2 ? ' · pick 2' : ''}`, sub: [selectedService?.name, s0 != null && e0 != null ? rangeLabel(s0, e0) : ''].filter(Boolean).join(' · ') }}
-                        onNone={() => { setSelectedTherapistIds([]); close(); }}
-                        noneLabel={`No ${staffLabel.toLowerCase()} · assign later`}
-                        staffLabel={staffLabel}
-                        staffLabelPlural={staffLabelPlural}
-                        slot={bookingDate && bookingTime ? { date: bookingDate, start: bookingTime, end: pickerSlotEnd } : null}
-                        serviceId={selectedService?.id || null}
-                        bookings={dayBookings}
-                        offById={dayOff}
-                      />
-                    )}
-                  />
-                </div>
-              );
-            })()}
-            </div>
-            )}
-
-            {/* Couple — separate rooms & companion; only for a couple service with 2+ therapists */}
-            {isCoupleBooking && (
-              <div className="space-y-2 p-3 border border-border rounded-spa-lg bg-background">
-                <p className="font-body font-body-medium text-[13px] text-text-primary">Couple · separate rooms &amp; companion (optional)</p>
-                <p className="text-xs text-text-secondary">Leave a companion's room unset to keep them in the room selected above.</p>
-                <div className="space-y-1.5">
-                  {selectedTherapistIds.slice(1).map((tid) => {
-                    const t = (therapists || []).find((th) => th.id === tid);
-                    return (
-                      <div key={tid} className="flex items-center gap-2">
-                        <span className="font-body font-body-medium text-[13px] text-text-primary w-24 truncate flex-shrink-0">{t?.name || 'Companion'}</span>
-                        <div className="flex-1 min-w-0"><RoomPickRow rooms={rooms} bookings={bookings} date={bookingDate} startTime={bookingTime}
-                          durationMin={selectedService?.duration_minutes || dragMinutes || 60} value={therapistRoomOverrides[tid] || ''}
-                          onChange={(val) => setTherapistRoomOverrides((prev) => ({ ...prev, [tid]: val }))}
-                          anyLabel="Same room as above" anyHint="Keeps them in the room above" title={`Room for ${t?.name || 'companion'}`} /></div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <input type="text" value={companionName} onChange={(e) => setCompanionName(e.target.value)} placeholder="Companion's name (optional)"
-                    className="w-full h-10 px-3 text-[13px] border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
-                  <PhoneField {...companionPhone.field} id="qc-companion-phone" placeholder="Companion's phone (optional)" />
-                </div>
-              </div>
-            )}
-
-            {/* Combo schedule & staff: when each component runs (same offset algorithm as createComboBookingItems) and who does it */}
-            {isComboService && (
-              <div className="rounded-spa-lg border border-border bg-surface shadow-spa-resting">
-                <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 bg-primary/5 border-b border-border rounded-t-spa-lg">
-                  <div className="flex items-center gap-2">
-                    <Icon name="Layers" size={14} className="text-primary" />
-                    <span className="font-body font-body-medium text-[13px] text-text-primary">Combo schedule &amp; staff</span>
-                  </div>
-                  {comboComponents.length > 0 && (
-                    <span className="text-[11px] text-text-secondary bg-surface border border-border rounded-full px-2 py-0.5">{comboComponents.length} services</span>
-                  )}
-                </div>
-                <div className="px-3.5 py-3">
-                  {comboComponentsLoading ? (
-                    <p className="text-xs text-text-secondary py-1">Loading combo services...</p>
-                  ) : comboComponents.length === 0 ? (
-                    <p className="text-xs text-text-secondary py-1">No components configured for this combo.</p>
-                  ) : (
-                    <div className="relative space-y-3.5">
-                      {comboSchedule.map((c, index) => {
-                        const toClock = (min) => format12h(minToHHMM(c.base + min));
-                        const heldFor = comboHeld[index] || {};
-                        return (
-                          <div key={c.componentId} className="flex items-start gap-3">
-                            <div className="flex flex-col items-center flex-shrink-0">
-                              <div className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center font-data text-[11px]">{index + 1}</div>
-                              {index < comboSchedule.length - 1 && <div className="w-px flex-1 min-h-[22px] bg-border mt-1" />}
-                            </div>
-                            <div className="flex-1 min-w-0 pb-0.5">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <p className="font-body font-body-medium text-[13px] text-text-primary leading-tight">{c.service?.name || 'Service'}</p>
-                                  <p className="font-data text-xs text-text-secondary mt-0.5">{toClock(c.start)} – {toClock(c.end)} <span className="text-text-tertiary">· {c.duration}min</span></p>
-                                </div>
-                                {c.defaultSameStaff && (
-                                  <span className="flex-shrink-0 inline-flex items-center gap-1 text-[11px] text-text-secondary bg-background border border-border rounded-full px-2 py-0.5">
-                                    <Icon name="Link" size={10} />
-                                    Same staff
-                                  </span>
-                                )}
-                              </div>
-                              {!c.defaultSameStaff && (
-                                <div className="mt-2">
-                                  <StaffPickRow
-                                    id={comboTherapistOverrides[c.serviceId] || null}
-                                    {...comboPick(index)}
-                                    problem={comboProblemText(index)}
-                                    emptyLabel={`Pick ${staffLabel.toLowerCase()}`}
-                                    title={`${staffLabel} for step ${index + 1}`}
-                                    renderPicker={(close) => (
-                                      <StaffPicker
-                                        people={pickerPeople}
-                                        selectedIds={comboTherapistOverrides[c.serviceId] ? [comboTherapistOverrides[c.serviceId]] : []}
-                                        onChange={(ids) => { setComboTherapistOverrides((prev) => ({ ...prev, [c.serviceId]: ids[0] || '' })); close(); }}
-                                        max={1}
-                                        header={{ title: `${staffLabel} for step ${index + 1} · ${c.service?.name || 'Service'}`, sub: `${c.service?.name || 'Service'} · ${toClock(c.start)}–${toClock(c.end)}` }}
-                                        onNone={() => { setComboTherapistOverrides((prev) => ({ ...prev, [c.serviceId]: '' })); close(); }}
-                                        noneLabel={`No ${staffLabel.toLowerCase()} · assign later`}
-                                        staffLabel={staffLabel}
-                                        staffLabelPlural={staffLabelPlural}
-                                        slot={bookingDate ? { date: bookingDate, start: minToHHMM(c.base + c.start), end: minToHHMM(c.base + c.end) } : null}
-                                        serviceId={c.serviceId || null}
-                                        bookings={dayBookings}
-                                        offById={comboOff}
-                                        lockedById={Object.fromEntries(Object.entries(heldFor).map(([sid, oi]) => [sid, { pill: `With step ${oi + 1}`, line: `With step ${oi + 1} at this time` }]))}
-                                      />
-                                    )}
-                                  />
-                                </div>
-                              )}
-                              {c.defaultSameRoom === false && (
-                                <div className="mt-2">
-                                  <RoomPickRow rooms={rooms} bookings={bookings} date={bookingDate} startTime=""
-                                    value={comboRoomOverrides[c.serviceId] || ''}
-                                    onChange={(val) => setComboRoomOverrides(prev => ({ ...prev, [c.serviceId]: val }))}
-                                    anyLabel="Select room" anyHint="Pick the room for this part" title="Room for this part" />
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
             {/* Customer: one closed row (ZNLY-327), like Service and Staff */}
             <div data-qc-field="customer" className={fieldRing('customer')}>
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
@@ -1262,11 +1207,252 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               </div>
             </div>
             )}
+
+            {/* Service (with 2+ services, Service 1 is drawn as the same card as the others, below) */}
+            {!useCard && (
+            <div>
+              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                Service <span className="text-error">*</span>
+              </label>
+              <div data-qc-field="service"><ServicePickRow required invalid={flashSvc === 'service' && !serviceId} services={pickerServices} value={serviceId} onChange={setServiceId} branchId={branchId} canViewPrices={canViewPrices} loading={servicesLoading} openSignal={openServiceSignal} onSignalConsumed={() => setOpenServiceSignal(0)} title="Service for the booking" sub={svcSubLine} ariaLabel="Service" /></div>
+              {visitorTherapist && visitorServiceNames && (
+                <p className="mt-1.5 text-xs text-text-secondary" data-visitor-services-help>
+                  Showing the {pickerServices.length} service{pickerServices.length === 1 ? '' : 's'} {visitorTherapist.name} does at the home {(locationLabel || 'branch').toLowerCase()} that this one also offers.
+                </p>
+              )}
+            </div>
+            )}
+
+            {/* Room */}
+            {rooms && rooms.length > 0 && (
+              <div data-qc-field="room" className={fieldRing('room')}>
+                <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                  Room
+                </label>
+                <RoomPickRow rooms={rooms} bookings={bookings} date={bookingDate} startTime={bookingTime}
+                  durationMin={selectedService?.duration_minutes || dragMinutes || 60} value={roomId} onChange={setRoomId} openSignal={roomSignal} onSignalConsumed={() => setRoomSignal(0)} serviceName={selectedService?.name} title={`Room for ${customerKind === 'walkin' ? `Walk-in${walkInLabel.trim() ? ` · ${walkInLabel.trim()}` : ''}` : (customerName.trim() || 'the booking')}`} />
+              </div>
+            )}
+
+            {/* Therapist(s): hidden for a combo whose every component needs its own staff, and for self-service amenities */}
+            {!comboAllDifferentStaff && serviceRequiresTherapist && !useCard && (
+            <div data-qc-field="staff" className={fieldRing('staff')}>
+            {(() => {
+              const s0 = clockToMin(bookingTime); const e0 = clockToMin(pickerSlotEnd);
+              const maxPick = selectedService?.is_couple ? 2 : (selectedTherapistIds.length > 1 ? Infinity : 1);
+              const picked = selectedTherapistIds.map((tid) => pickerPeople.find((t) => t.id === tid) || { id: tid, name: staffNameOf(tid) });
+              const info = pickedRowStatusMulti(picked, {
+                slot: dayBookings && s0 != null ? { start: s0, end: e0 > s0 ? e0 : s0 + 60 } : null,
+                rangesById: dayBookings && bookingDate ? staffDayRanges(dayBookings, { date: bookingDate }) : {},
+                offById: dayOff, date: bookingDate, today: nepalNow().today, busyOk: allowStaffOverlap,
+              });
+              const lbl = selectedTherapistIds.length > 1 ? staffLabelPlural : staffLabel;
+              return (
+                <div>
+                  <p className="flex items-baseline justify-between mb-1.5 font-body font-body-medium text-[13px] text-text-primary">{lbl} <span className="text-xs font-normal text-text-secondary">optional</span></p>
+                  <StaffPickRow
+                    people={picked}
+                    max={maxPick}
+                    statusLine={info.statusLine}
+                    pill={info.pill}
+                    problem={refusedStaff(picked[0]?.name, picked.length > 0, info.problem)}
+                    emptyLabel={`Pick ${staffLabel.toLowerCase()}`}
+                    title={`${lbl} for the booking`}
+                    renderPicker={(close) => (
+                      <StaffPicker
+                        people={pickerPeople}
+                        selectedIds={selectedTherapistIds}
+                        onChange={(ids) => { setSelectedTherapistIds(ids); if (maxPick === 1) close(); }}
+                        max={maxPick}
+                        header={{ title: `${lbl} for the booking${maxPick === 2 ? ' · pick 2' : ''}`, sub: [selectedService?.name, s0 != null && e0 != null ? rangeLabel(s0, e0) : ''].filter(Boolean).join(' · ') }}
+                        onNone={() => { setSelectedTherapistIds([]); close(); }}
+                        noneLabel={`No ${staffLabel.toLowerCase()} · assign later`}
+                        staffLabel={staffLabel}
+                        staffLabelPlural={staffLabelPlural}
+                        slot={bookingDate && bookingTime ? { date: bookingDate, start: bookingTime, end: pickerSlotEnd } : null}
+                        serviceId={selectedService?.id || null}
+                        bookings={dayBookings}
+                        offById={dayOff}
+                      />
+                    )}
+                  />
+                </div>
+              );
+            })()}
+            </div>
+            )}
+
+            {/* ZNLY-402 3b: more services for the same person in one booking (org setting ON; nothing is drawn otherwise) */}
+            {useCard && (
+              <ExtraServiceRows
+                rows={activeRows} setRows={setExtraRows} times={extraTimes} services={extraServices} first={selectedService} canAdd={canMulti}
+                firstCard={{
+                  locked: firstEdit?.locked || '',
+                  serviceId, therapistId: selectedTherapistIds[0] || '', start: bookingTime, flash: flashSvc === 'service' && !serviceId,
+                  firstServices: pickerServices, loading: servicesLoading, openSignal: openServiceSignal, onSignalConsumed: () => setOpenServiceSignal(0),
+                  onService: setServiceId, onStaff: (v) => setSelectedTherapistIds(v ? [v] : []), onStart: setBookingTime,
+                  // Removing Service 1 promotes Service 2 into the panel's own service (its start only if it was set by hand).
+                  onRemove: (next) => { if (!next) return; if (firstEdit?.bookingId) setRemovedIds((ids) => [...ids, firstEdit.bookingId]); setFirstEdit(next.bookingId ? { bookingId: next.bookingId, locked: next.locked || '', name: next.name } : null); setServiceId(next.serviceId); setSelectedTherapistIds(next.therapistId ? [next.therapistId] : []); if (next.start) setBookingTime(next.start); setExtraRows((rs) => rs.slice(1)); },
+                }}
+                staffRing={fieldRing('staff')}
+                onRemoved={(id) => setRemovedIds((ids) => [...ids, id])}
+                branchId={branchId} canViewPrices={canViewPrices} pickerPeople={pickerPeople} dayBookings={dayBookings} dayOff={dayOff}
+                branchHours={branchHours} bookingDate={bookingDate} allowStaffOverlap={allowStaffOverlap} staffLabel={staffLabel} staffLabelPlural={staffLabelPlural}
+                problems={rowProblems} ownProblems={ownProblems} onProblem={onRowProblem} errorRow={errorKey === formKey ? errorRow : null} errorText={activeError || ''} errorStaff={errField === 'staff'} editMode={!!edit} flashRow={flashSvc && /^service-x\d+$/.test(flashSvc) ? Number(flashSvc.slice(9)) : null}
+              />
+            )}
+            {useCard && visitorTherapist && visitorServiceNames && (
+              <p className="-mt-1 text-xs text-text-secondary" data-visitor-services-help>
+                Showing the {pickerServices.length} service{pickerServices.length === 1 ? '' : 's'} {visitorTherapist.name} does at the home {(locationLabel || 'branch').toLowerCase()} that this one also offers.
+              </p>
+            )}
+
+            {/* Couple — separate rooms & companion; only for a couple service with 2+ therapists */}
+            {isCoupleBooking && (
+              <div className="space-y-2 p-3 border border-border rounded-spa-lg bg-background">
+                <p className="font-body font-body-medium text-[13px] text-text-primary">Couple · separate rooms &amp; companion (optional)</p>
+                <p className="text-xs text-text-secondary">Leave a companion's room unset to keep them in the room selected above.</p>
+                <div className="space-y-1.5">
+                  {selectedTherapistIds.slice(1).map((tid) => {
+                    const t = (therapists || []).find((th) => th.id === tid);
+                    return (
+                      <div key={tid} className="flex items-center gap-2">
+                        <span className="font-body font-body-medium text-[13px] text-text-primary w-24 truncate flex-shrink-0">{t?.name || 'Companion'}</span>
+                        <div className="flex-1 min-w-0"><RoomPickRow rooms={rooms} bookings={bookings} date={bookingDate} startTime={bookingTime}
+                          durationMin={selectedService?.duration_minutes || dragMinutes || 60} value={therapistRoomOverrides[tid] || ''}
+                          onChange={(val) => setTherapistRoomOverrides((prev) => ({ ...prev, [tid]: val }))}
+                          anyLabel="Same room as above" anyHint="Keeps them in the room above" title={`Room for ${t?.name || 'companion'}`} /></div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input type="text" value={companionName} onChange={(e) => setCompanionName(e.target.value)} placeholder="Companion's name (optional)"
+                    className="w-full h-10 px-3 text-[13px] border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                  <PhoneField {...companionPhone.field} id="qc-companion-phone" placeholder="Companion's phone (optional)" />
+                </div>
+              </div>
+            )}
+
+            {/* Combo schedule & staff: when each component runs (same offset algorithm as createComboBookingItems) and who does it */}
+            {isComboService && (
+              <div className="rounded-spa-lg border border-border bg-surface shadow-spa-resting">
+                <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 bg-primary/5 border-b border-border rounded-t-spa-lg">
+                  <div className="flex items-center gap-2">
+                    <Icon name="Layers" size={14} className="text-primary" />
+                    <span className="font-body font-body-medium text-[13px] text-text-primary">Combo schedule &amp; staff</span>
+                  </div>
+                  {comboComponents.length > 0 && (
+                    <span className="text-[11px] text-text-secondary bg-surface border border-border rounded-full px-2 py-0.5">{comboComponents.length} services</span>
+                  )}
+                </div>
+                <div className="px-3.5 py-3">
+                  {comboComponentsLoading ? (
+                    <p className="text-xs text-text-secondary py-1">Loading combo services...</p>
+                  ) : comboComponents.length === 0 ? (
+                    <p className="text-xs text-text-secondary py-1">No components configured for this combo.</p>
+                  ) : (
+                    <div className="relative space-y-3.5">
+                      {comboSchedule.map((c, index) => {
+                        const toClock = (min) => format12h(minToHHMM(c.base + min));
+                        const heldFor = comboHeld[index] || {};
+                        return (
+                          <div key={c.componentId} className="flex items-start gap-3">
+                            <div className="flex flex-col items-center flex-shrink-0">
+                              <div className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center font-data text-[11px]">{index + 1}</div>
+                              {index < comboSchedule.length - 1 && <div className="w-px flex-1 min-h-[22px] bg-border mt-1" />}
+                            </div>
+                            <div className="flex-1 min-w-0 pb-0.5">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="font-body font-body-medium text-[13px] text-text-primary leading-tight">{c.service?.name || 'Service'}</p>
+                                  <p className="font-data text-xs text-text-secondary mt-0.5">{toClock(c.start)} – {toClock(c.end)} <span className="text-text-tertiary">· {c.duration}min</span></p>
+                                </div>
+                                {c.defaultSameStaff && (
+                                  <span className="flex-shrink-0 inline-flex items-center gap-1 text-[11px] text-text-secondary bg-background border border-border rounded-full px-2 py-0.5">
+                                    <Icon name="Link" size={10} />
+                                    Same staff
+                                  </span>
+                                )}
+                              </div>
+                              {!c.defaultSameStaff && (
+                                <div className="mt-2">
+                                  <StaffPickRow
+                                    id={comboTherapistOverrides[c.serviceId] || null}
+                                    {...comboPick(index)}
+                                    problem={refusedStaff(comboPick(index).name, !!comboPick(index).name, comboProblemText(index))}
+                                    emptyLabel={`Pick ${staffLabel.toLowerCase()}`}
+                                    title={`${staffLabel} for step ${index + 1}`}
+                                    renderPicker={(close) => (
+                                      <StaffPicker
+                                        people={pickerPeople}
+                                        selectedIds={comboTherapistOverrides[c.serviceId] ? [comboTherapistOverrides[c.serviceId]] : []}
+                                        onChange={(ids) => { setComboTherapistOverrides((prev) => ({ ...prev, [c.serviceId]: ids[0] || '' })); close(); }}
+                                        max={1}
+                                        header={{ title: `${staffLabel} for step ${index + 1} · ${c.service?.name || 'Service'}`, sub: `${c.service?.name || 'Service'} · ${toClock(c.start)}–${toClock(c.end)}` }}
+                                        onNone={() => { setComboTherapistOverrides((prev) => ({ ...prev, [c.serviceId]: '' })); close(); }}
+                                        noneLabel={`No ${staffLabel.toLowerCase()} · assign later`}
+                                        staffLabel={staffLabel}
+                                        staffLabelPlural={staffLabelPlural}
+                                        slot={bookingDate ? { date: bookingDate, start: minToHHMM(c.base + c.start), end: minToHHMM(c.base + c.end) } : null}
+                                        serviceId={c.serviceId || null}
+                                        bookings={dayBookings}
+                                        offById={comboOff}
+                                        lockedById={Object.fromEntries(Object.entries(heldFor).map(([sid, oi]) => [sid, { pill: `With step ${oi + 1}`, line: `With step ${oi + 1} at this time` }]))}
+                                      />
+                                    )}
+                                  />
+                                </div>
+                              )}
+                              {c.defaultSameRoom === false && (
+                                <div className="mt-2">
+                                  <RoomPickRow rooms={rooms} bookings={bookings} date={bookingDate} startTime=""
+                                    value={comboRoomOverrides[c.serviceId] || ''}
+                                    onChange={(val) => setComboRoomOverrides(prev => ({ ...prev, [c.serviceId]: val }))}
+                                    anyLabel="Select room" anyHint="Pick the room for this part" title="Room for this part" />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             </>
             )}
 
             {bookingMode === 'group' && (
             <>
+            {(() => { const p = people[0] || {}; return (
+            <>
+            {(
+              <div data-qc-field="customer" className={fieldRing('customer')}>
+                <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                  Customer <span className="text-error">*</span>
+                  {p.kind === 'existing' && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
+                </label>
+                <CustomerPickRow invalid={flashSvc === 'customer' && !p.kind} kind={p.kind} name={p.name} phone={p.phone ? `${p.countryCode || '+977'}${p.phone}` : ''} sub={svcSubLine} branchId={branchId} onPick={handleContactPick} />
+              </div>
+            )}
+            {p.kind === 'walkin' && (
+              <div>
+                <label className="flex items-baseline justify-between font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+                  <span>Name</span><span className="text-xs font-normal text-text-secondary">optional</span>
+                </label>
+                <input type="text" value={p.label || ''} onChange={(e) => setPerson(0, { label: e.target.value })} placeholder="First name, e.g. Ram" maxLength={40}
+                  className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                <p className="mt-1.5 text-xs text-text-secondary">No customer profile is created. Guests left blank are walk-ins too.</p>
+              </div>
+            )}
+            {p.kind === 'existing' && canViewPrices && <EarlierBalanceNotice name={p.name} due={p.previousDue} />}
+            {p.kind === 'new' && personFields(p, 0)}
+            </>
+            ); })()}
+
             {/* Couple | Separate (+ How many? on the same row) */}
             <div>
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Group type</label>
@@ -1366,94 +1552,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 <div key={idx} className="border border-border rounded-[14px] p-3.5 space-y-3 bg-surface">
                   <div className="flex flex-col gap-0.5 md:flex-row md:items-baseline md:justify-between md:gap-2">
                     <span className="whitespace-nowrap text-sm font-body font-body-semibold text-text-primary">
-                      {idx === 0 ? 'Booking contact' : `Person ${idx + 1}`}
-                      {idx === 0 && <span className="text-error"> *</span>}
+                      {`Person ${idx + 1}`}
                     </span>
-                    {idx > 0 && <span className="text-xs text-text-secondary md:text-right">optional · blank uses the contact's details</span>}
+                    <span className="text-xs text-text-secondary md:text-right">{idx > 0 ? "optional · blank uses the contact's details" : 'the customer above'}</span>
                   </div>
 
-                  {idx === 0 && (
-                    <div data-qc-field="customer" className={fieldRing('customer')}>
-                      <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                        Customer <span className="text-error">*</span>
-                        {p.kind === 'existing' && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
-                      </label>
-                      <CustomerPickRow invalid={flashSvc === 'customer' && !p.kind} kind={p.kind} name={p.name} phone={p.phone ? `${p.countryCode || '+977'}${p.phone}` : ''} sub={svcSubLine} branchId={branchId} onPick={handleContactPick} />
-                    </div>
-                  )}
-                  {idx === 0 && p.kind === 'walkin' && (
-                    <div>
-                      <label className="flex items-baseline justify-between font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                        <span>Name</span><span className="text-xs font-normal text-text-secondary">optional</span>
-                      </label>
-                      <input type="text" value={p.label || ''} onChange={(e) => setPerson(0, { label: e.target.value })} placeholder="First name, e.g. Ram" maxLength={40}
-                        className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
-                      <p className="mt-1.5 text-xs text-text-secondary">No customer profile is created. Guests left blank are walk-ins too.</p>
-                    </div>
-                  )}
-                  {idx === 0 && p.kind === 'existing' && canViewPrices && <EarlierBalanceNotice name={p.name} due={p.previousDue} />}
 
-                  {(idx > 0 || p.kind === 'new') && (
-                  <>
-                  <div>
-                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                      Name {idx === 0 && <span className="text-error">*</span>}
-                      {p.customerId && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
-                    </label>
-                    <CustomerAutocomplete
-                      value={p.name}
-                      onChange={(v) => setPerson(idx, { name: v, customerId: null, previousDue: null })}
-                      onSelect={(c) => handleGuestCustomerSelect(idx, c)}
-                      branchId={branchId}
-                      searchBy="any"
-                      placeholder={idx === 0 ? 'Search or type a name' : `Name (blank = ${contactFirst}'s)`}
-                    />
-                  </div>
-
-                  <div {...(idx === 0 ? { 'data-qc-field': 'phone' } : {})} className={idx === 0 && flashSvc === 'phone' ? 'rounded-spa ring-2 ring-error' : ''}>
-                    <PhoneField
-                      label="Phone" required={idx === 0 && requireCustomerPhone} id={`qc-person-${idx}-phone`} walkInHint
-                      dial={p.countryCode || '+977'} national={p.phone || ''}
-                      placeholder={idx === 0 ? '98XXXXXXXX' : `Blank = ${contactFirst}'s`}
-                      showProblem={idx === 0 ? p.kind === 'new' : !p.customerId}
-                      onChange={({ dial, national }) => (dial !== (p.countryCode || '+977') ? setPerson(idx, { countryCode: dial }) : setPerson(idx, { phone: national, customerId: null, previousDue: null }))}
-                    />
-                  </div>
-
-                  {canViewPrices && <EarlierBalanceNotice name={p.name} due={p.previousDue} />}
-
-                  <div>
-                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Email</label>
-                    <input
-                      type="email"
-                      value={p.email}
-                      onChange={(e) => setPerson(idx, { email: e.target.value })}
-                      placeholder={idx === 0 ? 'customer@email.com' : `Blank = ${contactFirst}'s`}
-                      className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Gender</label>
-                    <div className="flex gap-2">
-                      {['Male', 'Female'].map((g) => (
-                        <button
-                          key={g}
-                          type="button"
-                          onClick={() => setPerson(idx, { gender: p.gender === g.toLowerCase() ? '' : g.toLowerCase() })}
-                          className={`px-4 py-2 text-sm border rounded-spa transition-colors ${
-                            p.gender === g.toLowerCase()
-                              ? 'border-primary bg-primary/10 text-primary font-medium'
-                              : 'border-border bg-surface text-text-secondary hover:bg-background'
-                          }`}
-                        >
-                          {g}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  </>
-                  )}
+                  {idx > 0 && personFields(p, idx)}
 
                   {serviceMode === 'different' && (
                     <div data-qc-field={`service-${idx}`}>
@@ -1469,7 +1574,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     <StaffPickRow
                       id={p.therapistId}
                       {...guestPick(idx)}
-                      problem={problemText(idx)}
+                      problem={refusedStaff(guestPick(idx).name, !!guestPick(idx).name, problemText(idx))}
                       emptyLabel={`Pick ${staffLabel.toLowerCase()}`}
                       title={`${staffLabel} for ${guestLabel(idx)}`}
                       renderPicker={(close) => (
@@ -1508,7 +1613,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             </>
             )}
 
-            {CUSTOMER_REFERRALS_ENABLED && customerName.trim() && customerPhone.replace(/\D/g, '').length >= 7 && !isExistingCustomer && (
+            {!edit && CUSTOMER_REFERRALS_ENABLED && customerName.trim() && customerPhone.replace(/\D/g, '').length >= 7 && !isExistingCustomer && (
               <div className="space-y-3">
                 <label className="block font-body font-body-medium text-sm text-text-primary -mb-2">
                   Referred by (customer)
@@ -1561,6 +1666,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   phone number or name and pick them from the suggestions, then choose their reward —
                   it'll be credited once this booking is completed and paid.
                 </p>
+              </div>
+            )}
+
+            {edit?.referredBy && (
+              <div data-edit-referred-by>
+                <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">Referred by</label>
+                <p className="px-3 py-2 text-sm rounded-spa bg-[#F4F4F6] text-text-primary">{edit.referredBy}</p>
               </div>
             )}
 

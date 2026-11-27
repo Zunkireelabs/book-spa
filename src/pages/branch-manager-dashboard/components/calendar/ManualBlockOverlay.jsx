@@ -9,7 +9,7 @@ import { formatClockTime } from './timeFormat';
 // with a delete × and a bottom-edge resize handle layered on top. The inner controls stop
 // `pointerdown` propagation because dnd-kit's drag activation listens on it specifically.
 // Own component (not inline in a .map()) because useDraggable is a hook.
-function ManualBlockOverlay({ range, blockTop, blockHeight, onDeleteClick, onResizeStart, onClick, use24h = false }) {
+function ManualBlockOverlay({ range, blockTop, blockHeight, onDeleteClick, onResizeStart, onClick, passThrough = false, use24h = false }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     // colId disambiguates a whole-branch block, which renders one instance per column.
     id: `manual-block-${range.blockId}-${range.day}-${range.colId}`,
@@ -33,7 +33,7 @@ function ManualBlockOverlay({ range, blockTop, blockHeight, onDeleteClick, onRes
       {...attributes}
       data-block-overlay="true"
       onClick={(e) => { e.stopPropagation(); if (range.blockId) onClick?.(); }}
-      className={`group absolute inset-x-0.5 rounded-spa border border-border overflow-hidden px-2 py-1 ${range.blockId ? 'cursor-grab active:cursor-grabbing' : ''}`}
+      className={`group absolute inset-x-0.5 ${passThrough ? 'pointer-events-none' : ''} rounded-spa border border-border overflow-hidden px-2 py-1 ${range.blockId ? 'cursor-grab active:cursor-grabbing' : ''}`}
       style={{
         top: blockTop,
         height: blockHeight,

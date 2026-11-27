@@ -253,8 +253,8 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         ...(outsideHours && !isDragging ? { boxShadow: `inset 0 0 0 1.5px ${OUTSIDE_HOURS_OUTLINE}` } : {}),
         // Linked highlight (all copies of the hovered/focused/open shared booking); the panel ring wins on the open card.
         ...(isLinkedActive && !isPanelSelected && !isDragging ? { outline: `1.5px solid ${colors.bar}`, outlineOffset: 1 } : {}),
-        // Same client as the hovered / focused / open booking (ZNLY-281): brand outline; a linked (spa) copy keeps its own status-colour outline.
-        ...(sameClient && !isLinkedActive && !isPanelSelected && !isDragging ? { outline: '2px solid #2D5A27', outlineOffset: 1 } : {}),
+        // Same visit as the hovered / focused / open booking (ZNLY-402): brand outline; same client but another visit: faint outline (sameClient.js); a linked (spa) copy keeps its own status-colour outline.
+        ...(sameClient && !isLinkedActive && !isPanelSelected && !isDragging ? { outline: sameClient === 'client' ? '1.5px solid rgba(45, 90, 39, 0.35)' : '2px solid #2D5A27', outlineOffset: 1 } : {}),
       }}
       onClick={(e) => {
         if (!isDragging && !isResizing) {

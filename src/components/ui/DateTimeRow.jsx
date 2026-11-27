@@ -5,13 +5,8 @@ import MiniMonthCalendar from '../../pages/branch-manager-dashboard/components/c
 import { todayStr } from '../../pages/branch-manager-dashboard/components/calendar/calendarDates';
 import { format12h, parseTimeInput, buildTimeOptions, formatDateChip } from '../../utils/timeInput';
 
-// ONE date chip + time field row (ZNLY-324), used by New booking (QuickCreatePanel) and Edit details (BookingActionModal).
-// Date: a chip that opens the month calendar. Time: a typable field with a 15-minute list.
-// `time` is "HH:MM" ('' while the typed text is incomplete); the typed text lives here and re-syncs when `time` changes from outside.
-const DateTimeRow = ({ date, time, onDateChange, onTimeChange, branchHours, timeRingClass = '', timeFieldAttr }) => {
-  const [dateOpen, setDateOpen] = useState(false);
-  const dateIntoView = usePopoverIntoView(dateOpen);
-  const dateRef = useRef(null);
+// The time field on its own (typable, 15-minute list, shown as "11:00pm"): the New booking panel's time AND each extra service's start use this one control.
+export const TimeField = ({ time, onTimeChange, branchHours, ringClass = '', fieldAttr, ariaLabel = 'Time', disabled = false }) => {
   const [timeOpen, setTimeOpen] = useState(false);
   const timeRef = useRef(null);
   const listRef = useRef(null);
@@ -21,15 +16,6 @@ const DateTimeRow = ({ date, time, onDateChange, onTimeChange, branchHours, time
   useEffect(() => {
     if ((parseTimeInput(timeText) ?? '') !== (time || '')) setTimeText(time ? format12h(time) : '');
   }, [time]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!dateOpen) return undefined;
-    const onDown = (e) => { if (dateRef.current && !dateRef.current.contains(e.target)) setDateOpen(false); };
-    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); setDateOpen(false); } };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
-  }, [dateOpen]);
 
   useEffect(() => {
     if (!timeOpen) return undefined;
@@ -43,6 +29,62 @@ const DateTimeRow = ({ date, time, onDateChange, onTimeChange, branchHours, time
   }, [timeOpen]);
 
   const options = useMemo(() => buildTimeOptions(branchHours, time), [branchHours, time]);
+
+  return (
+      <div className={`relative ${ringClass}`} {...(fieldAttr ? { 'data-qc-field': fieldAttr } : {})} ref={timeRef}>
+        <Icon name="Clock" size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
+        <input
+          type="text"
+          aria-label={ariaLabel}
+          disabled={disabled}
+          value={timeText}
+          onChange={(e) => {
+            // Reflect whatever is typed; commit only once it parses to a valid time.
+            const raw = e.target.value;
+            setTimeText(raw);
+            onTimeChange(parseTimeInput(raw) ?? '');
+          }}
+          onFocus={(e) => { e.target.select(); setTimeOpen(true); }}
+          onBlur={() => { setTimeText(time ? format12h(time) : ''); }}
+          placeholder="--:--"
+          autoComplete="off"
+          className="w-full h-9 pl-8 pr-2 text-[13px] font-body text-text-primary bg-surface border border-border rounded-spa focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-[#F4F4F6] disabled:text-text-secondary"
+        />
+        {timeOpen && (
+          <div ref={(n) => { listRef.current = n; timeIntoView(n); }} className="absolute top-full left-0 mt-1 w-28 max-h-48 overflow-y-auto bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown">
+            {options.map((t) => (
+              <button
+                key={t}
+                type="button"
+                data-selected={t === time}
+                onClick={() => { onTimeChange(t); setTimeText(format12h(t)); setTimeOpen(false); }}
+                className={`w-full text-left px-3 py-1.5 text-[13px] font-body cursor-pointer hover:bg-background ${t === time ? 'bg-background font-body-medium text-text-primary' : 'text-text-primary'}`}
+              >
+                {format12h(t)}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+  );
+};
+
+// ONE date chip + time field row (ZNLY-324), used by New booking (QuickCreatePanel) and Edit details (BookingActionModal).
+// Date: a chip that opens the month calendar. Time: a typable field with a 15-minute list.
+// `time` is "HH:MM" ('' while the typed text is incomplete); the typed text lives here and re-syncs when `time` changes from outside.
+const DateTimeRow = ({ date, time, onDateChange, onTimeChange, branchHours, timeRingClass = '', timeFieldAttr, timeDisabled = false }) => {
+  const [dateOpen, setDateOpen] = useState(false);
+  const dateIntoView = usePopoverIntoView(dateOpen);
+  const dateRef = useRef(null);
+  useEffect(() => {
+    if (!dateOpen) return undefined;
+    const onDown = (e) => { if (dateRef.current && !dateRef.current.contains(e.target)) setDateOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); setDateOpen(false); } };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [dateOpen]);
+
 
   return (
     <div className="grid grid-cols-2 gap-2">
@@ -67,40 +109,7 @@ const DateTimeRow = ({ date, time, onDateChange, onTimeChange, branchHours, time
           </div>
         )}
       </div>
-      <div className={`relative ${timeRingClass}`} {...(timeFieldAttr ? { 'data-qc-field': timeFieldAttr } : {})} ref={timeRef}>
-        <Icon name="Clock" size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
-        <input
-          type="text"
-          aria-label="Time"
-          value={timeText}
-          onChange={(e) => {
-            // Reflect whatever is typed; commit only once it parses to a valid time.
-            const raw = e.target.value;
-            setTimeText(raw);
-            onTimeChange(parseTimeInput(raw) ?? '');
-          }}
-          onFocus={(e) => { e.target.select(); setTimeOpen(true); }}
-          onBlur={() => { setTimeText(time ? format12h(time) : ''); }}
-          placeholder="--:--"
-          autoComplete="off"
-          className="w-full h-9 pl-8 pr-2 text-[13px] font-body text-text-primary bg-surface border border-border rounded-spa focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-        />
-        {timeOpen && (
-          <div ref={(n) => { listRef.current = n; timeIntoView(n); }} className="absolute top-full left-0 mt-1 w-28 max-h-48 overflow-y-auto bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown">
-            {options.map((t) => (
-              <button
-                key={t}
-                type="button"
-                data-selected={t === time}
-                onClick={() => { onTimeChange(t); setTimeText(format12h(t)); setTimeOpen(false); }}
-                className={`w-full text-left px-3 py-1.5 text-[13px] font-body cursor-pointer hover:bg-background ${t === time ? 'bg-background font-body-medium text-text-primary' : 'text-text-primary'}`}
-              >
-                {format12h(t)}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <TimeField time={time} onTimeChange={onTimeChange} branchHours={branchHours} ringClass={timeRingClass} fieldAttr={timeFieldAttr} disabled={timeDisabled} />
     </div>
   );
 };

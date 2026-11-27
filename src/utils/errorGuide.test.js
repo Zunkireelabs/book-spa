@@ -21,6 +21,11 @@ describe('describeError', () => {
     expect(c.actions.map((a) => a.label)).toEqual(['Book at 1:30 pm', 'Book at 2:00 pm', 'Pick a room']);
     expect(c.actions[0]).toMatchObject({ intent: 'set-time', value: '13:30' });
   });
+  it('availability refusal: the server sentence always ends with a full stop before the how', () => {
+    const c = describeError({ code: 'OVERLAP', message: 'Rojina K already has a booking 14:00–14:30' }, ctx);
+    expect(c.lead).toBe('Rojina K already has a booking 14:00–14:30.');
+    expect(`${c.lead} ${c.how}`).toBe('Rojina K already has a booking 14:00–14:30. They already have a booking then. Pick another time, or someone else.');
+  });
   it('staff busy: offers the free person', () => {
     const c = describeError({ code: 'THERAPIST_CONFLICT' }, ctx);
     expect(c.field).toBe('staff'); expect(c.how).toBe('Free then: Aksa.');
@@ -43,7 +48,7 @@ describe('describeError', () => {
   });
   it('availability codes reuse the guard message', () => {
     const c = describeError({ code: 'ON_BREAK', message: 'Susan is on a break 1:00 pm–2:00 pm' }, ctx);
-    expect(c.lead).toBe('Susan is on a break 1:00 pm–2:00 pm'); expect(c.field).toBe('staff');
+    expect(c.lead).toBe('Susan is on a break 1:00 pm–2:00 pm.'); expect(c.field).toBe('staff');
   });
   it('a code only named in the text still resolves', () => {
     expect(describeError({ message: 'ROOM_AT_CAPACITY: full' }, ctx).code).toBe('ROOM_AT_CAPACITY');
@@ -55,6 +60,11 @@ describe('describeError', () => {
   it('23P01 exclusion -> staff clash, or room clash when the constraint names a room', () => {
     expect(describeError({ code: '23P01', rawMessage: 'conflicting key value violates exclusion constraint "excl_therapist_overlap"' }, ctx).code).toBe('THERAPIST_CONFLICT');
     expect(describeError({ code: '23P01', rawMessage: 'violates exclusion constraint "excl_room_overlap"' }, ctx).code).toBe('ROOM_CONFLICT');
+  });
+  it('a visit_* server refusal with no catalog entry shows its own sentence, not the generic system card (ZNLY-402)', () => {
+    const c = describeError({ code: 'NOTHING_TO_CHANGE', message: 'Nothing was changed.', plain: true, refusal: true });
+    expect(c).toMatchObject({ kind: 'fix', code: 'NOTHING_TO_CHANGE', lead: 'Nothing was changed.' });
+    expect(describeError({ code: 'NOTHING_TO_CHANGE', message: 'Nothing was changed.', plain: true }).kind).toBe('system'); // not flagged = still generic
   });
   it('23505 unique -> DUPLICATE with no technical text; other Postgres codes stay system', () => {
     const c = describeError({ code: '23505', rawMessage: 'duplicate key value violates unique constraint "services_name_key"' });

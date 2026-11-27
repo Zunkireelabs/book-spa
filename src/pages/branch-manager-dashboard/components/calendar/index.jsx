@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { refreshLight } from './refreshLight';
-import { buildClientIndex, clientDayInfo } from './sameClient';
+import { clientRules } from '../../../../utils/visitGate';
 import { viewerAccess } from 'services/dataMasking';
 import UnlinkedLoginNotice from 'components/ui/UnlinkedLoginNotice';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -20,6 +20,7 @@ import CalendarToolbar from './CalendarToolbar';
 import DragPreviewOverlay from './DragPreviewOverlay';
 import ReassignConfirmDialog from './ReassignConfirmDialog';
 import QuickCreatePanel from './QuickCreatePanel';
+import MoveBookingDialog from '../../../../components/ui/MoveBookingDialog';
 import { GuideNotice } from '../../../../components/ui/GuideCard';
 import { describeError } from '../../../../utils/errorGuide';
 import { useCalendarData } from './hooks/useCalendarData';
@@ -47,7 +48,7 @@ import { offStaffReasons } from '../../../../utils/staffFit';
 
 const OperationalCalendar = ({ branchId }) => {
   const { profile } = useAuth();
-  const { orgSettings, enforceStaffAvailability } = useOrg();
+  const { orgSettings, enforceStaffAvailability, multiServiceBookings } = useOrg();
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   // Deep link from the Therapists list ("See on calendar"): ?view=calendar&therapist=<id> shows only that person's column.
@@ -237,10 +238,10 @@ const OperationalCalendar = ({ branchId }) => {
     blockDeleteRequest, setBlockDeleteRequest, lastBlockWasRoomOnly,
     transferModalTarget, setTransferModalTarget, editingTransferTherapist, setEditingTransferTherapist,
     blockPanelOpen, blockRetarget,
-    servicesCache, servicesLoading, rebookSource, rebookCardRef, reschedulePending,
+    servicesCache, servicesLoading, rebookSource, rebookCardRef, reschedulePending, visitMove, setVisitMove, handleRebookCancel,
     waitlistCollapsed, setWaitlistCollapsed, waitlistRefreshToken, handleBookInFromWaitlist,
     openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick,
-    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleAddServiceStart, handleRebookStart, handleRescheduleStart,
+    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleAddServiceStart, handleEditFormStart, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,
   } = useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, showGuide, gridRef, canViewCustomerDetails });
   const waitlist = useWaitlistEntries(branchId, waitlistRefreshToken);
@@ -327,10 +328,13 @@ const OperationalCalendar = ({ branchId }) => {
   // ── Derived data ───────────────────────────────────────────
 
   // ZNLY-281: "N bookings today for this client" in the open panel / sheet (same index the grid uses).
-  const clientIndexAll = useMemo(() => buildClientIndex(calendarData?.bookings), [calendarData?.bookings]);
+  // ZNLY-402: "Also booked today" (visit rules) only for orgs with "Several services in one booking" ON; others keep "N bookings today for this client".
+  const clientIndexAll = useMemo(() => clientRules(multiServiceBookings).buildIndex(calendarData?.bookings), [calendarData?.bookings, multiServiceBookings]);
   const selectedClientDay = useMemo(
-    () => (selectedBooking ? clientDayInfo(clientIndexAll, { customerId: selectedBooking.customerId, date: selectedBooking.date }) : null),
-    [clientIndexAll, selectedBooking]
+    () => (selectedBooking
+      ? clientRules(multiServiceBookings).dayInfo(clientIndexAll, selectedBooking)
+      : null),
+    [clientIndexAll, selectedBooking, multiServiceBookings]
   );
   // People who are off / on leave on the shown day (the Staff picker lists them under "Off today", not selectable). Day view only:
   // the attendance + shift data is for one day, so other views keep the old rule of hiding them.
@@ -388,6 +392,12 @@ const OperationalCalendar = ({ branchId }) => {
         onDragCancel={handleDragCancel}
       >
         <div className="bg-surface overflow-clip flex flex-col h-full pb-2">
+          {rebookSource?.visit && (
+            <div role="status" data-pick-new-time className="flex items-center justify-between gap-3 px-4 min-h-11 bg-success/10 text-success text-[13px] font-medium border-b border-success/20">
+              <span>Pick a new time for {String(rebookSource.customerName || 'this').split(' ')[0]}&apos;s booking ({rebookSource.visit.count} services)</span>
+              <button type="button" onClick={handleRebookCancel} aria-label="Stop moving this booking" className="p-1.5 rounded-spa hover:bg-success/10"><Icon name="X" size={16} /></button>
+            </div>
+          )}
           <CalendarToolbar
             staffLabel={staffLabel}
             staffLabelPlural={staffLabelPlural}
@@ -498,6 +508,7 @@ const OperationalCalendar = ({ branchId }) => {
                   onResizeManualBlock={handleResizeManualBlock}
                   draftGhost={(quickCreateSlot || blockPanelOpen) && !draftGhost?.hidden ? draftGhost : null}
                   selectedBookingId={modalOpen ? (selectedBooking?.bookingId || previewBooking?.bookingId || previewBooking?.id || null) : null}
+                  pickMode={!!rebookSource}
                   onEditManualBlock={(range) => runThroughPanelGuard(() => openOnlyPanel(() => setEditingBlock({ blockId: range.blockId, day: range.day })))}
                   onEditTransfer={transfersAvailable ? (col) => runThroughPanelGuard(() => openOnlyPanel(() => setEditingTransferTherapist({ id: col.id, name: col.name }))) : undefined}
                   hideSensitive={hideSensitive}
@@ -572,6 +583,18 @@ const OperationalCalendar = ({ branchId }) => {
         />
       </DndContext>
 
+      {visitMove && (
+        <MoveBookingDialog
+          visitKey={visitMove.visitKey}
+          date={visitMove.date}
+          startTime={visitMove.startTime}
+          lines={visitMove.lines}
+          canOverride={['manager', 'admin'].includes(profile?.role)}
+          onClose={() => setVisitMove(null)}
+          onDone={() => { setVisitMove(null); handleRebookCancel(); showToast('Booking moved.'); refreshLight(refreshCalendar); }}
+        />
+      )}
+
       {/* Rebook floating cursor card */}
       {rebookSource && (
         <div
@@ -615,6 +638,7 @@ const OperationalCalendar = ({ branchId }) => {
       <BookingActionModal
         variant="panel"
         liveBackdrop
+        use24h={use24h}
         initialTab={openTab}
         isOpen={modalOpen}
         previewBooking={previewBooking}
@@ -637,6 +661,7 @@ const OperationalCalendar = ({ branchId }) => {
         onAddServiceStart={isOverallBranch(branchId) ? undefined : handleAddServiceStart}
         onRebookStart={isOverallBranch(branchId) ? undefined : handleRebookStart}
         onRescheduleStart={isOverallBranch(branchId) ? undefined : handleRescheduleStart}
+        onEditForm={isOverallBranch(branchId) ? undefined : handleEditFormStart}
         onGroupPaymentRecorded={handleGroupPaymentRecorded}
         canViewCustomerDetails={canViewCustomerDetails}
         onViewBooking={(bookingId) => handleBookingClick({ bookingId })}
