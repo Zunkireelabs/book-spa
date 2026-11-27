@@ -142,7 +142,7 @@ const SortableColumnHeader = ({ id, children, minWidth }) => {
   return (
     <div
       ref={setNodeRef}
-      className={`relative ${isDragging ? 'z-dropdown' : ''}`}
+      className={`relative outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-inset ${isDragging ? 'z-dropdown' : ''}`}
       style={style}
       {...attributes}
       {...listeners}
@@ -1315,8 +1315,14 @@ const CalendarGrid = ({
                     />
                   )}
                 </span>
-                <span className={`font-body ${phoneDay ? 'text-[12px] max-w-[94%]' : 'text-[13px] max-w-full'} font-medium leading-tight text-text-primary truncate`}>
-                  {col.type === 'therapist' && phoneDay ? shortName(col.name) : col.name}
+                <span className={`flex items-center justify-center gap-0.5 min-w-0 ${phoneDay ? 'max-w-[94%]' : 'max-w-full'}`}>
+                  <span className={`font-body ${phoneDay ? 'text-[12px]' : 'text-[13px]'} font-medium leading-tight text-text-primary truncate`}>
+                    {col.type === 'therapist' && phoneDay ? shortName(col.name) : col.name}
+                  </span>
+                  {/* Affordance: this name opens the staff menu (manager/admin, day view). */}
+                  {staffDayActions && col.type === 'therapist' && viewMode === 'day' && (
+                    <Icon name={staffMenu?.col.id === col.id ? 'ChevronUp' : 'ChevronDown'} size={12} className="flex-shrink-0 text-text-tertiary" />
+                  )}
                 </span>
                 {col.type === 'therapist' && statusLine(true)}
               </>
