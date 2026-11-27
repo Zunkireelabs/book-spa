@@ -14,11 +14,7 @@ export function fmtDuration(min) {
 
 /** 930 -> '3:30 pm'. */
 export function fmtClock(min) {
-  if (readUse24h()) return formatClockNow(`${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`);
-  const h24 = Math.floor(min / 60) % 24;
-  const m = min % 60;
-  const h = h24 % 12 || 12;
-  return `${h}${m ? `:${String(m).padStart(2, '0')}` : ''} ${h24 < 12 ? 'am' : 'pm'}`;
+  return formatClockNow(`${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`);
 }
 
 const minHm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;

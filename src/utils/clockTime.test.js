@@ -6,6 +6,11 @@ describe('clock time', () => {
     expect(formatClockTime(i, false)).toBe(h12);
     expect(formatClockTime(i, true)).toBe(h24);
   });
+  it('24:00 is midnight: 12:00am in 12h, unchanged in 24h', () => {
+    expect(formatClockTime('24:00', false)).toBe('12:00am');
+    expect(formatClockTime('24:00', true)).toBe('24:00');
+    expect(formatClockRange('22:00', '24:00', false)).toBe('10:00pm–12:00am');
+  });
   it('empty stays empty', () => { expect(formatClockTime('', true)).toBe(''); expect(formatClockIso(null, false)).toBe(''); expect(formatClockIso('nope', false)).toBe(''); });
   it('hour labels', () => {
     expect([0, 12, 13].map((h) => formatHourLabel(h, false))).toEqual(['12am', '12pm', '1pm']);

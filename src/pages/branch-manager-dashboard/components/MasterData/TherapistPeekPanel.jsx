@@ -23,8 +23,6 @@ import { fetchServices, fetchServiceEligibility } from '../../../../services/api
 
 // "7–19" / "10:30–19" (whole hours drop the minutes): the week chips are tight.
 const shortHour = (t) => { const [h, m] = String(t).split(':'); return m && m !== '00' ? `${Number(h)}:${m}` : `${Number(h)}`; };
-// 12-hour without am/pm so a visiting window fits a week cell: "17:25" -> "5:25".
-const hour12 = (t) => { const [h, m] = String(t).split(':'); const h12 = Number(h) % 12 || 12; return m && m !== '00' ? `${h12}:${m}` : `${h12}`; };
 // "5:25 – 6:25pm": the am/pm is written once when both ends share it.
 const rangeText = (a, b) => {
   const f = (t) => formatClockNow(String(t).slice(0, 5));
@@ -65,7 +63,7 @@ const TherapistPeekPanel = ({ t, branchName, totalServices, canSeeRates, ratesRe
     // The window's own hours on a given day, clipped to that day: '4:20–6:20' (null when the window does not touch the day).
     const hoursOn = (date) => {
       if (!start || !end || date < start.date || date > end.date) return null;
-      return `${hour12(start.date === date ? start.time : '00:00')}–${hour12(end.date === date ? end.time : '24:00')}`;
+      return formatClockRange(start.date === date ? start.time : '00:00', end.date === date ? end.time : '24:00', readUse24h());
     };
     return { state: d.state, pill, here, hoursOn };
   }, [visitor, t.transfer, today]);

@@ -1134,11 +1134,7 @@ const CalendarGrid = ({
   const todayStr = nowParts?.date;
   const nowTime = (nowParts?.time || '00:00').replace(/^24:/, '00:');
   const nowTop = timeToTop(`${nowTime}:00`);
-  const nowLabel = (() => {
-    const [h, m] = nowTime.split(':').map(Number);
-    if (use24h) return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-    return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')}`;
-  })();
+  const nowLabel = formatClockTime(nowTime, use24h);
 
   // Scroll the grid to the current time once, when the calendar opens on today.
   // Deferred via rAF so it runs after the flex layout has sized the scroll

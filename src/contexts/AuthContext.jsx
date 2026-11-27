@@ -160,9 +160,10 @@ async function fetchProfileRaw(userId, accessToken) {
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null);
+  const [profile, setProfileState] = useState(null);
+  // Plain (non-React) text builders read the same saved 12h/24h choice: set it with the profile (before children render), not during render.
+  const setProfile = useCallback((p) => { setClockProfile(p); setProfileState(p); }, []);
   const [loading, setLoading] = useState(true);
-  setClockProfile(profile);
   // True once supabase has reported the stored session (INITIAL_SESSION), so "no user yet" can be told apart from "no session".
   const [sessionResolved, setSessionResolved] = useState(false);
   // True when we have an authenticated session but the profile could not be

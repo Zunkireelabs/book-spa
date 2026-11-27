@@ -5,8 +5,9 @@ import { readUse24h } from './clockPref';
 // the "HH:MM"/"HH:MM:SS" values bookings are stored/compared in. Customer-facing text stays 12h and does not use it.
 export function formatClockTime(timeStr, use24h) {
   if (!timeStr) return '';
-  const [h, m] = timeStr.split(':').map(Number);
-  if (use24h) return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  const [h0, m] = timeStr.split(':').map(Number);
+  if (use24h) return `${String(h0).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  const h = h0 % 24; // "24:00" (end of day) is midnight: 12:00am in 12h; it stays "24:00" in 24h
   const period = h >= 12 ? 'pm' : 'am';
   const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
   return `${h12}:${String(m).padStart(2, '0')}${period}`;

@@ -24,7 +24,7 @@ const LEGEND = [
 const hourLabel = (m) => (readUse24h() ? formatHourLabel(m / 60, true) : `${(m / 60) % 12 || 12}${m === 720 ? 'pm' : ''}`);
 const initials = (name) => String(name || '').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 
-const compact = (m) => fmtClock(m).replace(' ', ''); // "11:45 am" -> "11:45am" (the app's compact time), so the status stays on one line
+const compact = (m) => fmtClock(m);
 const subline = (t, nowMin) => {
   if (nowMin == null) return t.blocks[0] ? `first ${t.blocks.find((b) => b.booking_id)?.from || t.shift_from}` : 'free all day';
   const cur = t.blocks.find((b) => b.from_min <= nowMin && nowMin < b.to_min);
