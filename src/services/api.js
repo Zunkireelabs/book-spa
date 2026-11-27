@@ -3629,16 +3629,17 @@ export async function fetchGroupBookings({ bookingGroupId, customerName, date, e
   }
 }
 
-// ZNLY-402 piece 4 (org setting multi_service_bookings ON): EVERY row of one booking (bookings.visit_id), cancelled rows included, any payment state.
-// Read-only, for the "This booking" block in the booking panel. No visit_id = its own booking: nothing to fetch (the block stays hidden).
+// ZNLY-402 piece 4 / ZNLY-435: EVERY row of one booking (bookings.visit_id), cancelled rows included, any payment state.
+// Read-only, for the "This booking" card in the booking panel. No visit_id = its own booking: the card is that one row (by bookingId).
 // customerId is the same safety check as above: a visit never spans two customers.
-export async function fetchBookingServices({ visitId, customerId }) {
+export async function fetchBookingServices({ visitId, customerId, bookingId }) {
   try {
-    if (!visitId) return { data: [], error: null };
+    if (!visitId && !bookingId) return { data: [], error: null };
     let query = supabase
       .from('bookings')
-      .select('id, booking_number, customer_id, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service_id, room_id, therapist_id, service_name_snapshot, service:services(name, duration_minutes, is_couple), room:rooms(name), therapist:therapists(name), booking_therapists(therapist_id, therapist:therapists(name)), payments(amount), payment_refunds(amount)')
-      .eq('visit_id', visitId);
+      .select('id, booking_number, customer_id, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service_id, room_id, therapist_id, service_name_snapshot, service:services(name, duration_minutes, is_couple), room:rooms(name), therapist:therapists(name), booking_therapists(therapist_id, therapist:therapists(name)), payments(amount), payment_refunds(amount)');
+    // ZNLY-435: a booking with no visit (an org with the setting OFF, or an older booking) is its own one-row card.
+    query = visitId ? query.eq('visit_id', visitId) : query.eq('id', bookingId);
     if (customerId) query = query.eq('customer_id', customerId);
     const { data, error } = await query.order('start_time');
     if (error) throw error;
@@ -6980,18 +6981,19 @@ export async function getCalendarBookings(branchId, startDate, endDate, opts = {
         'customer_phone',   // fetched always; masked below when withheld — see maskPhone
         'status', 'payment_status',
         'date', 'start_time', 'end_time', 'start_datetime', 'end_datetime', 'created_at', 'created_by',
-        'therapist_id', 'room_id',
+        'therapist_id', 'room_id', 'service_id', // service_id: ZNLY-435, so the panel's card can be drawn from these rows on first paint
         // ZNLY-402: visit link (migration 427; bookings_safe carries it since migration 428). Only read when the org setting multi_service_bookings is ON.
         'visit_id', 'booking_group_id', // booking_group_id: the earlier-balance chip drops the checkout's group siblings (ZNLY-403)
         vis.canViewPrices && 'base_amount, discount_amount, final_amount',
         'special_requests', 'referred_by',
-        'service:services(name, duration_minutes, requires_therapist)',
+        'service:services(name, duration_minutes, requires_therapist, is_couple)',
         'therapist:therapists(id, name)',
         'room:rooms(id, name)',
         'creator:users!created_by(full_name)',
         'booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name), room:rooms(id, name))',
         'booking_combo_items(id, service_id, therapist_id, room_id, start_time, end_time, display_order, service:services(name, duration_minutes), therapist:therapists(id, name))',
         vis.canViewPrices && 'payments(amount, payment_mode)',
+        vis.canViewPrices && 'payment_refunds(amount)', // ZNLY-435: the instant card's paid = payments - refunds, exactly as the fetched card
       ].filter(Boolean).join(', ');
 
       let bookingsQuery = supabase

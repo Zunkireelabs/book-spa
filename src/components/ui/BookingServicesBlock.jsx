@@ -1,9 +1,9 @@
 import React from 'react';
 import Icon from '../AppIcon';
-import { formatClockTime } from '../../pages/branch-manager-dashboard/components/calendar/timeFormat';
+import { formatClockTime, formatClockRange } from '../../utils/clockTime';
 import { useUse24h } from '../../hooks/useUse24h';
 
-// ZNLY-402 piece 4: the constant "This booking" block of the booking panel (org setting multi_service_bookings ON, 2+ services).
+// ZNLY-402 piece 4 / ZNLY-435: the constant "This booking" card of the booking panel: every booking, every org (1 service = a card with 1 row).
 // Pure display: the numbers come from utils/bookingBlock.js, the actions from the panel. Words (U1): "booking" and "services" only.
 //   mode 'full'  : Details = the home. Every service with its own Start / Done / Remove, total, paid state.
 //   mode 'strip' : Staff / Discount / Payment. A compact list (header only on a phone until opened).
@@ -27,16 +27,31 @@ const Chip = ({ status }) => {
 };
 
 const RowMain = ({ r, compact, use24h }) => {
-  const clock = (t) => formatClockTime(t, use24h);
   return (
   <div className="flex-1 min-w-0">
     <p className={`text-[13px] font-medium truncate ${r.dead ? 'line-through text-text-tertiary' : 'text-text-primary'}`}>{r.name}</p>
     <p className="text-[12px] text-text-secondary truncate">
-      {[r.start ? `${clock(r.start)}${r.end && !compact ? ` – ${clock(r.end)}` : ''}` : '', r.minutes ? `${r.minutes} min` : '', r.staff.length ? r.staff.join(', ') : '', r.room || ''].filter(Boolean).join(' · ')}
+      {[r.start ? (compact ? formatClockTime(r.start, use24h) : formatClockRange(r.start, r.end, use24h)) : '', r.minutes ? `${r.minutes} min` : '', r.staff.length ? r.staff.join(', ') : '', r.room || ''].filter(Boolean).join(' · ')}
     </p>
   </div>
   );
 };
+
+const Bar = ({ cls }) => <div className={`bg-gray-100 rounded ${cls}`} />;
+const BlockSkeleton = ({ dateLabel }) => (
+  <section className="rounded-spa-lg border border-border bg-surface mb-5 animate-pulse" data-booking-block data-loading="true" aria-busy="true" aria-label="This booking">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 min-h-11 py-1.5 border-b border-border">
+      <span className="text-[11px] font-medium uppercase tracking-wider text-text-tertiary">This booking</span>
+      {dateLabel && <span className="text-[13px] text-text-secondary">{dateLabel}</span>}
+      <Bar cls="h-3.5 w-16" /><Bar cls="h-3.5 w-20" />
+    </div>
+    <div className="flex items-center gap-2 px-3 py-2.5">
+      <div className="flex-1 min-w-0 space-y-1.5"><Bar cls="h-3.5 w-40" /><Bar cls="h-3 w-56" /></div>
+      <Bar cls="h-3.5 w-16" /><div className="h-5 w-14 bg-gray-100 rounded-full" />
+    </div>
+    <div className="flex items-center gap-2 px-3 pb-2.5"><div className="h-8 w-14 bg-gray-100 rounded-spa" /></div>
+  </section>
+);
 
 const BookingServicesBlock = ({
   block,            // buildBookingBlock() result
@@ -50,9 +65,15 @@ const BookingServicesBlock = ({
   dateLabel = '',
   collect,          // { disabled, reason, run } | null: the ONE main button of the Details home
   note,             // small hint under the list (Staff tab)
+  earlierRows = [], // the unpaid earlier bookings behind `earlier`: tap the line to list them (ZNLY-403)
+  onViewEarlier,
+  earlier = 0,      // the client's balance from earlier bookings: shown under To pay, never added to it
+  loading = false,  // rows not loaded yet: the pulse placeholder (never another layout)
 }) => {
   const [use24hPref] = useUse24h();
   const use24h = use24hProp ?? use24hPref;
+  const [showEarlier, setShowEarlier] = React.useState(false);
+  if (loading) return <BlockSkeleton dateLabel={dateLabel} />;
   if (!block?.show) return null;
   // Staff / Discount / Payment: just ONE plain summary line (the tab body lists the services itself, with that tab's control on each row).
   if (mode === 'strip') {
@@ -84,12 +105,12 @@ const BookingServicesBlock = ({
             const acts = mode === 'full' && rowAction ? rowAction(r) : null;
             const clickable = !!onSelect && !here;
             return (
-              <li key={r.id} data-block-row={r.id} data-open={here ? 'true' : undefined} className={here ? 'bg-primary/5' : ''}>
+              <li key={r.id} data-block-row={r.id} data-open={here ? 'true' : undefined} className={here && block.rows.length > 1 ? 'bg-primary/5' : ''}>
                 <div className="flex items-center gap-2 px-3 py-2.5">
                   <button type="button" disabled={!clickable} onClick={() => clickable && onSelect(r.id)}
                     aria-current={here ? 'true' : undefined}
                     className={`flex items-center gap-2 flex-1 min-w-0 text-left ${clickable ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}>
-                    {here && <span className="w-1.5 h-6 rounded-full bg-primary flex-shrink-0" aria-hidden="true" />}
+                    {here && block.rows.length > 1 && <span className="w-1.5 h-6 rounded-full bg-primary flex-shrink-0" aria-hidden="true" />}
                     <RowMain r={r} compact={mode === 'strip'} use24h={use24h} />
                     {canViewPrices && <span className={`text-[13px] tabular-nums flex-shrink-0 ${r.dead ? 'line-through text-text-tertiary' : 'text-text-primary'}`}>{npr(r.final)}</span>}
                     <Chip status={r.status} />
@@ -121,6 +142,23 @@ const BookingServicesBlock = ({
               {paidState && <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${paidState.cls}`}>{paidState.label}</span>}
             </span>
           </div>
+          {earlier > 0 && (
+            <>
+              <button type="button" onClick={() => setShowEarlier((v) => !v)} aria-expanded={showEarlier} className="w-full flex justify-between text-[12px] text-warning hover:underline" data-block-earlier>
+                <span>Earlier balance · {earlierRows.length} booking{earlierRows.length === 1 ? '' : 's'} {showEarlier ? '⌃' : '›'}</span><span className="tabular-nums">{npr(earlier)}</span>
+              </button>
+              {showEarlier && (
+                <div className="border border-border rounded-spa divide-y divide-border overflow-hidden" data-earlier-list>
+                  {earlierRows.map((pb) => (
+                    <button key={pb.bookingId} type="button" disabled={!onViewEarlier} onClick={() => onViewEarlier?.(pb.bookingId)} className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-background">
+                      <span className="flex-1 min-w-0 text-xs text-text-primary truncate">{pb.serviceName} · #{pb.bookingNumber}</span>
+                      <span className="text-xs tabular-nums text-warning">{npr(pb.amountDue)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
           {block.waiting > 0 && <p className="text-[12px] text-warning" data-block-waiting>{waitingNote(block.waiting)}</p>}
           {collect && (
             <div className="pt-2">

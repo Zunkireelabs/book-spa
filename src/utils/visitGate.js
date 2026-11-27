@@ -1,8 +1,6 @@
 // ZNLY-402 / ZNLY-423: the ONE place that picks old vs visit behaviour from the org setting multi_service_bookings (OrgContext.multiServiceBookings).
 // false = the original rules (booking group, else customer name + date; sameClient.js); true = the visit rules (visit_id; sameVisit.js).
 import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchVisitRelatedUnpaidBookings, fetchVisitSiblings } from '../services/api';
-import { buildClientIndex, clientDayInfo } from '../pages/branch-manager-dashboard/components/calendar/sameClient';
-import { buildVisitIndex, visitDayInfo } from '../pages/branch-manager-dashboard/components/calendar/sameVisit';
 
 /** { related(booking), siblings(booking) } for the Payment / Discount tabs. `booking` is a transformed booking. */
 export const relatedFetchers = (multi) => (multi
@@ -14,6 +12,3 @@ export const relatedFetchers = (multi) => (multi
     related: (b) => fetchRelatedUnpaidBookings({ customerName: b.customerName, date: b.date, excludeBookingId: b.bookingId, bookingGroupId: b.bookingGroupId, customerId: b.customerId }),
     siblings: (b) => fetchGroupBookings({ bookingGroupId: b.bookingGroupId, customerName: b.customerName, date: b.date, excludeBookingId: b.bookingId }),
   });
-
-/** { buildIndex, dayInfo } for the calendar banner / index. */
-export const clientRules = (multi) => (multi ? { buildIndex: buildVisitIndex, dayInfo: visitDayInfo } : { buildIndex: buildClientIndex, dayInfo: clientDayInfo });

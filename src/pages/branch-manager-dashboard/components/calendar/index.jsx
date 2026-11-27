@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { refreshLight } from './refreshLight';
-import { clientRules } from '../../../../utils/visitGate';
+import { buildVisitIndex, visitDayInfo } from './sameVisit';
+import { visitKey } from '../../../../utils/visit';
 import { viewerAccess } from 'services/dataMasking';
 import UnlinkedLoginNotice from 'components/ui/UnlinkedLoginNotice';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -49,7 +50,7 @@ import { offStaffReasons } from '../../../../utils/staffFit';
 
 const OperationalCalendar = ({ branchId }) => {
   const { profile } = useAuth();
-  const { orgSettings, enforceStaffAvailability, multiServiceBookings } = useOrg();
+  const { orgSettings, enforceStaffAvailability } = useOrg();
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   // Deep link from the Therapists list ("See on calendar"): ?view=calendar&therapist=<id> shows only that person's column.
@@ -325,13 +326,21 @@ const OperationalCalendar = ({ branchId }) => {
 
   // ZNLY-281: "N bookings today for this client" in the open panel / sheet (same index the grid uses).
   // ZNLY-402: "Also booked today" (visit rules) only for orgs with "Several services in one booking" ON; others keep "N bookings today for this client".
-  const clientIndexAll = useMemo(() => clientRules(multiServiceBookings).buildIndex(calendarData?.bookings), [calendarData?.bookings, multiServiceBookings]);
+  const clientIndexAll = useMemo(() => buildVisitIndex(calendarData?.bookings), [calendarData?.bookings]);
   const selectedClientDay = useMemo(
     () => (selectedBooking
-      ? clientRules(multiServiceBookings).dayInfo(clientIndexAll, selectedBooking)
+      ? visitDayInfo(clientIndexAll, selectedBooking)
       : null),
-    [clientIndexAll, selectedBooking, multiServiceBookings]
+    [clientIndexAll, selectedBooking]
   );
+  // ZNLY-435: the open booking's visit rows, straight from the calendar data, so the panel's card is drawn on first paint (it then refreshes quietly). Any view.
+  const instantRows = useMemo(() => {
+    if (!selectedBooking || !calendarData?.bookings) return null;
+    const key = visitKey(selectedBooking);
+    const seen = new Set();
+    const rows = calendarData.bookings.filter((b) => visitKey(b) === key && (!selectedBooking.customerId || !b.customer_id || b.customer_id === selectedBooking.customerId) && !seen.has(b.id) && seen.add(b.id));
+    return rows.length ? rows : null;
+  }, [calendarData?.bookings, selectedBooking]);
   // People who are off / on leave on the shown day (the Staff picker lists them under "Off today", not selectable). Day view only:
   // the attendance + shift data is for one day, so other views keep the old rule of hiding them.
   const offStaff = useMemo(
@@ -646,6 +655,7 @@ const OperationalCalendar = ({ branchId }) => {
         onClose={handleModalClose}
         booking={selectedBooking}
         clientDay={selectedClientDay}
+        instantRows={instantRows}
         therapists={therapistsForModal}
         dayBookings={viewMode === 'day' ? (calendarData?.bookings || []) : null}
         offStaff={offStaff}

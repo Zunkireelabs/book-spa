@@ -2,7 +2,7 @@ import React from 'react';
 import CustomSelect from './CustomSelect';
 import StaffPickRow from './StaffPickRow';
 import StaffPicker from './StaffPicker';
-import { formatClockTime } from '../../pages/branch-manager-dashboard/components/calendar/timeFormat';
+import { formatClockTime, formatClockRange } from '../../pages/branch-manager-dashboard/components/calendar/timeFormat';
 import { pickedRowStatusMulti, staffDayRanges, clockToMin, rangeLabel } from '../../utils/staffFit';
 import { nepalNow } from '../../utils/customerDirectory';
 import { useUse24h } from '../../hooks/useUse24h';
@@ -45,7 +45,7 @@ const BookingStaffRows = ({
           <div key={r.id} className="rounded-spa-lg border border-border p-3 space-y-2.5" data-staff-row={r.id}>
             <div>
               <p className="text-[13px] font-medium text-text-primary">{r.name}</p>
-              <p className="text-[12px] text-text-secondary">{[r.start ? `${formatClockTime(r.start, use24h)}${r.end ? ` – ${formatClockTime(r.end, use24h)}` : ''}` : '', r.minutes ? `${r.minutes} min` : ''].filter(Boolean).join(' · ')}</p>
+              <p className="text-[12px] text-text-secondary">{[r.start ? formatClockRange(r.start, r.end, use24h) : '', r.minutes ? `${r.minutes} min` : ''].filter(Boolean).join(' · ')}</p>
             </div>
             <StaffPickRow
               key={`${r.id}-${(r.staffIds || []).join(',')}`}

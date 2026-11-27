@@ -10,8 +10,11 @@ vi.mock('../../contexts/OrgContext', () => ({ useOrg: () => ({ org: { id: 'o1', 
 vi.mock('../../hooks/useBlockOverlap', () => ({ useBlockOverlap: () => ({ message: null }), useDayBlocks: () => [] }));
 vi.mock('../../hooks/useDayAvailability', () => ({ useDayAvailability: () => ({ ready: false, bookings: [], offById: {} }) }));
 
+// ZNLY-435: every booking is the "This booking" card, so the panel reads its rows from fetchBookingServices (one row here).
+const rows = [{ id: 'uuid-1', booking_number: 'BK-1', status: 'Confirmed', payment_status: 'unpaid', date: '2026-11-22', start_time: '12:00:00', end_time: '14:00:00', base_amount: 8400, discount_amount: 0, final_amount: 8400, service_id: 's1', therapist_id: 't1', service: { name: 'ENERGISE BODY', duration_minutes: 120 }, therapist: { name: 'Susan Nagarkoti' }, booking_therapists: [], payments: [], payment_refunds: [] }];
 vi.mock('../../services/api', async (importOriginal) => ({
   ...(await importOriginal()),
+  fetchBookingServices: vi.fn(async () => ({ data: rows, error: null })),
   fetchRelatedUnpaidBookings: vi.fn(async () => ({ data: [] })),
   fetchGroupBookings: vi.fn(async () => ({ data: [] })),
   getCustomerOutstandingBalance: vi.fn(async () => ({ data: { bookings: [] } })),
