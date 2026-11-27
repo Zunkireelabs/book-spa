@@ -920,6 +920,40 @@ export async function setMultiServiceBookings({ enabled }) {
   }
 }
 
+// ZNLY-407: per-org "Let staff make an appointment longer" (migration 434). Admin only. Returns the effective value.
+export async function setExtendByDrag({ enabled }) {
+  try {
+    const { data, error } = await supabase.rpc('set_extend_by_drag', { p_value: !!enabled });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setExtendByDrag error:', error.message);
+    return { data: null, error: plainError(error) };
+  }
+}
+
+/**
+ * ZNLY-407: make a booking longer (or back to its own length). `extraMinutes` = minutes on top of the service's length (0 = back to normal, steps of 5).
+ * Length only: the price never changes. Refusals come back as { code, message, overridable } with a plain sentence (never SQL text); outside the person's
+ * working hours is the usual manager/admin "Book anyway" (pass overrideReason on the repeat, via the override guard).
+ */
+export async function extendBooking({ bookingId, extraMinutes, overrideReason }) {
+  try {
+    const { data, error } = await supabase.rpc('extend_booking', { p_booking_id: bookingId, p_extra_minutes: extraMinutes, p_override_reason: overrideReasonOf(overrideReason) });
+    if (error) {
+      const availabilityErr = availabilityFailure(error);
+      if (availabilityErr) return availabilityErr;
+      const m = String(error.message || '').match(/^(EXTEND_[A-Z]+|DAY_LOCKED):\s*(.+)$/s);
+      if (m) return { data: null, error: { code: m[1], message: m[2].trim(), plain: true } };
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] extendBooking error:', error.message);
+    return { data: null, error: plainError(error, "Couldn't change the length. Nothing was changed.") };
+  }
+}
+
 export async function setRequireCustomerPhone({ enabled }) {
   try {
     const { data, error } = await supabase.rpc('set_require_customer_phone', { p_value: !!enabled });

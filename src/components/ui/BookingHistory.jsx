@@ -28,6 +28,8 @@ const describe = (log) => {
       // ZNLY-418: booked someone who is not on the service's staff list (same audit action, distinct code)
       if (d.code === 'THERAPIST_NOT_ELIGIBLE') return { icon: 'ShieldAlert', title: 'Booked with someone who doesn\'t usually do this service', detail: [d.therapist_name, d.service_name].filter(Boolean).join(' · '), reason: d.override_reason };
       return { icon: 'ShieldAlert', title: `Booked outside availability (${d.message || d.code})`, reason: d.override_reason };
+    case 'LENGTH_CHANGED': // ZNLY-407
+      return { icon: 'Clock', title: `Length changed ${log.old_data?.length_minutes} → ${d.length_minutes} min`, reason: log.reason };
     case 'ADMIN_CORRECTION':
       return { icon: 'PenLine', title: 'Corrected by admin', reason: log.reason };
     case 'STATUS_CHANGE':
