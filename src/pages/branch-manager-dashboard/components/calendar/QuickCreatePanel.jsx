@@ -149,13 +149,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [referringCustomerName, setReferringCustomerName] = useState('');
   const [referringRewardAmount, setReferringRewardAmount] = useState('');
 
-  const checkPreviousDue = useCallback(async (phone) => {
+  const checkPreviousDue = useCallback(async (phone, customerId) => {
     const digits = (phone || '').replace(/\D/g, '');
     if (digits.length < 7) {
       setPreviousDue(null);
       return;
     }
-    const { data } = await getCustomerOutstandingBalance({ customerPhone: phone, branchId });
+    const { data } = await getCustomerOutstandingBalance({ customerPhone: phone, customerId, branchId });
     setPreviousDue(data && data.totalDue > 0 ? data : null);
   }, [branchId]);
 
@@ -175,7 +175,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setReferringCustomerCountryCode('+977');
     setReferringCustomerName('');
     setReferringRewardAmount('');
-    checkPreviousDue(customer.phone);
+    checkPreviousDue(customer.phone, customer.id);
   }, [checkPreviousDue]);
 
   const handleCustomerPick = (choice) => {
@@ -555,7 +555,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     const { dial, national } = parsePhone(customer.phone);
     setPerson(idx, { name: customer.full_name, phone: national, countryCode: dial, email: customer.email || '', gender: customer.gender || '', customerId: customer.id, previousDue: null });
     if (canViewPrices) {
-      const { data } = await getCustomerOutstandingBalance({ customerPhone: customer.phone, branchId });
+      const { data } = await getCustomerOutstandingBalance({ customerPhone: customer.phone, customerId: customer.id, branchId });
       setPeople((prev) => prev.map((q, i) => (i === idx && q.customerId === customer.id ? { ...q, previousDue: data && data.totalDue > 0 ? data : null } : q)));
     }
   };

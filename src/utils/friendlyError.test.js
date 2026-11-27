@@ -119,3 +119,21 @@ describe('friendlyError', () => {
     expect(friendlyError({ message: 'update_org_profile_settings: unknown setting key calendar_show_full_day' })).toBe(GENERIC_SAVE_ERROR_COPY);
   });
 });
+
+describe('admin correction / delete refusals (ZNLY-403)', () => {
+  it('delete blocked: one plain sentence, no SQL words', () => {
+    const m = friendlyError({ message: 'BOOKING_HAS_FINANCIAL_RECORDS: this booking cannot be deleted because it has 1 payment(s). Cancel it with a correction reason instead' });
+    expect(m).toMatch(/can't be deleted/);
+    expect(m).not.toMatch(/correction reason/);
+  });
+  it('correction below paid: no "Record a refund first", points to cancel and refund', () => {
+    const m = friendlyError({ message: 'CORRECTION_BELOW_PAID: this correction would set the total to 1000.00 while 1500.00 has already been paid. Record a refund first, then correct the amount.' });
+    expect(m).toContain('NPR 1,500');
+    expect(m).toMatch(/cancel the booking and refund/);
+    expect(m).not.toMatch(/Record a refund first/);
+  });
+  it('closed day and same-amount refusals', () => {
+    expect(friendlyError({ message: 'admin_correct_payment_amount: that day has already been closed for this branch' })).toMatch(/already closed/);
+    expect(friendlyError({ message: 'admin_correct_payment_amount: new amount is the same as the current amount' })).toMatch(/already has/);
+  });
+});

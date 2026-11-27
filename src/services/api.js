@@ -111,6 +111,7 @@ import { buildCustomerDirectory, buildPanelDetail, nepalNow, avgPaidPerVisit } f
 import { addDays as addDaysISO } from '../utils/reportPeriod';
 import { attendanceDays, busyMinutesInSpans } from '../pages/branch-manager-dashboard/components/Performance/therapistInnerView';
 import { summarizeMoney, classifyBooking, roundMoney, paidPaisa } from '../utils/bookingMoney';
+import { earlierBalanceKey, ownsEarlierBalance, isCheckoutSibling } from '../utils/earlierBalance';
 import { planClose, runCloseSteps } from '../utils/closeBooking';
 import { friendlyError } from '../utils/friendlyError';
 import { staffWord, staffWordPlural, wordBranch, wordBranches } from '../utils/industryTerms';
@@ -2190,7 +2191,7 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
     const rows = await pageAllRows(() => {
       let query = supabase
         .from('bookings')
-        .select('id, booking_number, customer_name, customer_phone, date, status, final_amount, payment_status, due_holder_name, service_name_snapshot, is_locked, payments(amount), payment_refunds(amount)')
+        .select('id, booking_number, customer_id, customer_name, customer_phone, date, status, final_amount, payment_status, due_holder_name, service_name_snapshot, is_locked, payments(amount), payment_refunds(amount)')
         .in('status', ['In-Progress', 'Completed'])
         .order('id');
       if (from) query = query.gte('date', from);
@@ -2208,6 +2209,7 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
       groups[key].bookings.push({
         bookingId: b.id,
         bookingNumber: b.booking_number,
+        customerId: b.customer_id || null,
         customerName: b.customer_name,
         customerPhone: b.customer_phone,
         date: b.date,
@@ -2305,7 +2307,7 @@ export async function getDueReportByBranch({ from, to } = {}) {
       let query = supabase
         .from('bookings')
         .select(
-          'id, booking_number, branch_id, branches(name), customer_name, customer_phone, date, status, final_amount, payment_status, therapist_name_snapshot, client_request_id, created_by, creator:users!created_by(full_name), payments(amount)', opts)
+          'id, booking_number, branch_id, branches(name), customer_id, customer_name, customer_phone, date, status, final_amount, payment_status, therapist_name_snapshot, client_request_id, created_by, creator:users!created_by(full_name), payments(amount)', opts)
         .in('payment_status', ['unpaid', 'partial'])
         .not('status', 'in', '("Cancelled","No Show")');
       if (from) query = query.gte('date', from);
@@ -2330,6 +2332,7 @@ export async function getDueReportByBranch({ from, to } = {}) {
         date: b.date,
         status: b.status,
         paymentStatus: b.payment_status,
+        customerId: b.customer_id || null,
         customerName: b.customer_name,
         customerPhone: b.customer_phone,
         therapistName: b.therapist_name_snapshot || null,
@@ -2358,11 +2361,14 @@ export async function getDueReportByBranch({ from, to } = {}) {
 // than as an exact string, since the same real customer is often recorded with
 // slightly different phone formatting (with/without country code) across visits.
 // customerName is accepted but purely cosmetic — it is never used to filter.
-export async function getCustomerOutstandingBalance({ customerPhone, branchId, excludeBookingId } = {}) {
+// anyOwner (a phone typed on purpose, Collect payment): every due on that phone, whoever owns it; each row carries customerId + customerName.
+// Every booking-keyed caller leaves it off and keeps the strict owner rule.
+export async function getCustomerOutstandingBalance({ customerPhone, customerId, branchId, excludeBookingId, anyOwner = false } = {}) {
   try {
     const normalizedPhone = toE164(customerPhone);
-    // Need a full number (country code + national) before matching — a stray fragment must not sweep up unrelated bookings.
-    if (!normalizedPhone || normalizedPhone.length < 11) return { data: dueSummary(summarizeMoney([], { today: nepalNow().today })), error: null };
+    // ONE key rule (utils/earlierBalance.js): the customer when the caller knows one, else the full normalised phone. A stray phone fragment must not sweep up unrelated bookings.
+    const key = earlierBalanceKey({ customerId, phone: normalizedPhone });
+    if (!key) return { data: dueSummary(summarizeMoney([], { today: nepalNow().today })), error: null };
     const today = nepalNow().today;
     // DUE only (the one money model): rendered visits (In-Progress / Completed), paid = payments − refunds. Candidates are chosen by
     // status, NEVER by payment_status (it can be stale, and the pre-filter must never exclude a booking that is truly due). Filtered on the
@@ -2372,13 +2378,14 @@ export async function getCustomerOutstandingBalance({ customerPhone, branchId, e
       let query = supabase
         .from('bookings')
         .select(DUE_COLUMNS)
-        .eq('customer_phone', normalizedPhone)
         .in('status', ['In-Progress', 'Completed'])
         .order('id');
+      // Phone key owns only rows WITHOUT a customer_id (utils/earlierBalance.js): a customer-linked row belongs to its customer.
+      query = key.customerId ? query.eq('customer_id', key.customerId) : (anyOwner ? query.eq('customer_phone', key.phone) : query.eq('customer_phone', key.phone).is('customer_id', null));
       if (excludeBookingId) query = query.neq('id', excludeBookingId);
       return withBranch(query, branchId);
     });
-    const mine = rows.filter((b) => samePhone(b.customer_phone, normalizedPhone));
+    const mine = key.customerId ? rows : rows.filter((b) => (anyOwner || !b.customer_id) && samePhone(b.customer_phone, key.phone));
     return { data: dueSummary(summarizeMoney(mine, { today, excludeBookingId })), error: null };
   } catch (error) {
     console.error('[API] getCustomerOutstandingBalance error:', error.message);
@@ -2392,7 +2399,7 @@ const DUE_COLUMNS = 'id, booking_number, customer_id, customer_name, customer_ph
 // from here (the day is closed), so they are reported separately (lockedDue / lockedBookings) and never bundled.
 const dueSummary = (m) => {
   const row = (b) => ({
-    bookingId: b.id, bookingNumber: b.booking_number, customerName: b.customer_name, date: b.date,
+    bookingId: b.id, bookingNumber: b.booking_number, customerId: b.customer_id || null, customerName: b.customer_name, date: b.date,
     serviceName: b.service_name_snapshot || '—', finalAmount: b.money.price, amountPaid: b.money.paid, amountDue: b.money.due,
     paymentStatus: b.payment_status, isLocked: !!b.is_locked,
   });
@@ -6975,7 +6982,7 @@ export async function getCalendarBookings(branchId, startDate, endDate, opts = {
         'date', 'start_time', 'end_time', 'start_datetime', 'end_datetime', 'created_at', 'created_by',
         'therapist_id', 'room_id',
         // ZNLY-402: visit link (migration 427; bookings_safe carries it since migration 428). Only read when the org setting multi_service_bookings is ON.
-        'visit_id',
+        'visit_id', 'booking_group_id', // booking_group_id: the earlier-balance chip drops the checkout's group siblings (ZNLY-403)
         vis.canViewPrices && 'base_amount, discount_amount, final_amount',
         'special_requests', 'referred_by',
         'service:services(name, duration_minutes, requires_therapist)',
@@ -7121,44 +7128,45 @@ export async function getCalendarBookings(branchId, startDate, endDate, opts = {
         return undefined;
       }
     })().catch(() => undefined), CALENDAR_LOOKUP_TIMEOUT_MS, undefined);
-    // Same definition as getCustomerOutstandingBalance (what the payment modal bundles as "Previous due"): the same phone's
-    // other unpaid/partial, non-cancelled bookings in this branch (any date), amount = final_amount − payments, excluding
-    // the booking itself and — as BookingActionModal does — its same-name/same-date unpaid "related services".
+    // Same definition as getCustomerOutstandingBalance (what the payment modal bundles as the earlier balance): the same owner's
+    // other rendered-and-unpaid bookings in this branch (any date), amount = final_amount − payments, excluding the booking itself
+    // and its siblings. Owner = ONE key rule (utils/earlierBalance.js): customer_id when the booking has one, else the phone.
+    // Siblings = the same visit_id in an org with "Several services in one booking" ON; otherwise (as BookingActionModal does) its
+    // same-name/same-date bookings with NOTHING paid.
     const previousDuePromise = failOpenAfter((async () => {
       const phoneOf = (b) => { const p = toE164(b.customer_phone); return p && p.length >= 11 ? p : null; };
-      const visiblePhones = new Set((bookings || []).map(phoneOf).filter(Boolean));
-      if (visiblePhones.size === 0) return {};
+      const keyOf = (b) => earlierBalanceKey({ customerId: b.customer_id, phone: phoneOf(b) });
+      const keyed = (bookings || []).map((b) => [b, keyOf(b)]).filter(([, k]) => k);
+      if (keyed.length === 0) return {};
       try {
+        const multi = await multiServiceCache.get(resolvedBranchId).catch(() => false);
         // Only DUE counts (rendered visits owing money); future appointments never do. Candidates by status only (payment_status can be
-        // stale); paid = payments − refunds. Server-side filter on the normalised phones that are on screen (chunked: PostgREST puts .in()
-        // lists in the URL), so the calendar no longer downloads the branch's whole history; the phoneOf() check stays as a safety net.
-        const phoneList = [...visiblePhones];
-        const openAll = [];
-        for (let i = 0; i < phoneList.length; i += 40) {
-          openAll.push(...await pageAllRows(() => supabase
-            .from('bookings')
-            .select('id, customer_name, customer_phone, date, status, final_amount, payment_status, payments(amount), payment_refunds(amount)')
-            .eq('branch_id', resolvedBranchId)
-            .in('customer_phone', phoneList.slice(i, i + 40))
-            .in('status', ['In-Progress', 'Completed'])
-            .order('id')));
-        }
-        const open = openAll.filter((o) => visiblePhones.has(phoneOf(o)));
-        const byPhone = {};
-        for (const o of summarizeMoney(open, { today: nepalNow().today }).dueBookings) {
-          const ph = phoneOf(o);
-          if (!ph) continue;
-          // "Related services" bundled in the payment panel are same-name / same-date bookings with NOTHING paid on them: decided from the
-          // payments (bookingMoney), never from payment_status, so it can't disagree with the due amount.
-          (byPhone[ph] ||= []).push({ id: o.id, name: o.customer_name, date: o.date, unpaid: o.money.paid === 0, due: o.money.due });
-        }
+        // stale); paid = payments − refunds. Server-side filter on the owners on screen (chunked: PostgREST puts .in() lists in the
+        // URL), so the calendar no longer downloads the branch's whole history; ownsEarlierBalance() stays as the exact check.
+        const ids = [...new Set(keyed.map(([, k]) => k.customerId).filter(Boolean))];
+        const phones = [...new Set(keyed.map(([, k]) => k.phone).filter(Boolean))];
+        const openAll = new Map();
+        const fetchBy = async (column, list) => {
+          for (let i = 0; i < list.length; i += 40) {
+            const rows = await pageAllRows(() => supabase
+              .from('bookings')
+              .select('id, customer_id, visit_id, booking_group_id, customer_name, customer_phone, date, status, final_amount, payment_status, payments(amount), payment_refunds(amount)')
+              .eq('branch_id', resolvedBranchId)
+              .in(column, list.slice(i, i + 40))
+              .in('status', ['In-Progress', 'Completed'])
+              .order('id'));
+            rows.forEach((r) => openAll.set(r.id, r));
+          }
+        };
+        await fetchBy('customer_id', ids);
+        await fetchBy('customer_phone', phones);
+        const dueRows = summarizeMoney([...openAll.values()], { today: nepalNow().today }).dueBookings;
         const out = {};
-        for (const b of (bookings || [])) {
-          const ph = phoneOf(b);
-          if (!ph || !byPhone[ph]) continue;
-          const list = byPhone[ph].filter(o => o.id !== b.id && !(o.unpaid && o.name === b.customer_name && o.date === b.date));
+        for (const [b, key] of keyed) {
+          const list = dueRows.filter((o) => o.id !== b.id && ownsEarlierBalance(key, { customer_id: o.customer_id, phone: phoneOf(o) })
+            && !(multi ? (b.visit_id && o.visit_id === b.visit_id) : isCheckoutSibling(b, o, o.money.paid)));
           if (list.length === 0) continue;
-          out[b.id] = { count: list.length, amount: Math.round(list.reduce((sum, o) => sum + o.due, 0) * 100) / 100 };
+          out[b.id] = { count: list.length, amount: Math.round(list.reduce((sum, o) => sum + o.money.due, 0) * 100) / 100 };
         }
         return out;
       } catch (e) {
@@ -19647,14 +19655,19 @@ export async function correctPaymentAmount({ paymentId, newAmount, reason }) {
   }
 }
 
+// How many package sessions were redeemed on this booking (one of the things that stops it being deleted). 0 on any read error: the server still refuses.
+export async function fetchBookingPackageUseCount(bookingId) {
+  const { count } = await supabase.from('package_redemptions').select('id', { count: 'exact', head: true }).eq('booking_id', bookingId);
+  return count || 0;
+}
+
 /**
  * Permanently delete a booking that should never have existed.
  *
  * Refuses when payments, refunds, referrals or package redemptions reference
  * the booking — those FKs are RESTRICT/NO ACTION so the database would refuse
- * regardless. The RPC raises BOOKING_HAS_FINANCIAL_RECORDS naming what blocked
- * it; surface that message rather than a generic failure, because the caller's
- * next step (cancel with a reason instead) depends on knowing why.
+ * regardless. The panel builds the same list up front (utils/deleteBlockers.js); if the RPC still
+ * raises BOOKING_HAS_FINANCIAL_RECORDS, friendlyError words it.
  */
 export async function adminDeleteBooking({ bookingId, reason }) {
   try {
@@ -19673,15 +19686,6 @@ export async function adminDeleteBooking({ bookingId, reason }) {
       p_reason: reason.trim(),
     });
     if (error) {
-      if (typeof error.message === 'string' && error.message.includes('BOOKING_HAS_FINANCIAL_RECORDS')) {
-        return {
-          data: null,
-          error: {
-            code: 'BOOKING_HAS_FINANCIAL_RECORDS',
-            message: error.message.replace(/^.*BOOKING_HAS_FINANCIAL_RECORDS:\s*/, ''),
-          },
-        };
-      }
       throw error;
     }
 

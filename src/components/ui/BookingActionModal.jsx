@@ -24,6 +24,7 @@ import { paymentStatusLabel } from '../../utils/paymentStatusLabel';
 const payTone = (b) => ({ success: 'text-success', neutral: 'text-text-secondary', warning: 'text-warning' })[paymentStatusLabel(b).tone];
 import InvoicePrintModal from './InvoicePrintModal';
 import { relatedFetchers } from '../../utils/visitGate';
+import { deleteBlockers } from '../../utils/deleteBlockers';
 import { fetchBookingServices } from '../../services/api';
 import { buildBookingBlock } from '../../utils/bookingBlock';
 import { VisitStatusFlow } from './VisitStatusDialog';
@@ -35,7 +36,7 @@ import BookingServicesBlock, { waitingNote } from './BookingServicesBlock';
 import BookingStaffRows, { rowIds, rowRoom, rowChanged } from './BookingStaffRows';
 import BookingDiscountLines from './BookingDiscountLines';
 import { planBookingDiscount } from '../../utils/bookingDiscount';
-import { adminCorrectBooking, correctPaymentMode, adminDeleteBooking, correctPaymentAmount, fetchMemberDiscountContext, applyMemberDiscount,  fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, fetchBookingProductSales, refundProductSale, recordTip, getCustomerFirstBookingFlag, fetchInvoiceByBookingId, staffCanRequestDiscountApproval } from '../../services/api';
+import { adminCorrectBooking, correctPaymentMode, adminDeleteBooking, correctPaymentAmount, fetchMemberDiscountContext, applyMemberDiscount,  fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, fetchBookingProductSales, refundProductSale, recordTip, fetchBookingPackageUseCount, getCustomerFirstBookingFlag, fetchInvoiceByBookingId, staffCanRequestDiscountApproval } from '../../services/api';
 import { excludeRelatedFromPreviousDue, toDbStatus } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
@@ -578,9 +579,10 @@ const BookingActionModal = ({
       } else {
         setGroupSiblings([]);
       }
-      const duePromise = (activeTab === 'payment' && booking?.customerPhone)
+      const duePromise = (activeTab === 'payment' && (booking?.customerId || booking?.customerPhone))
         ? getCustomerOutstandingBalance({
             customerPhone: booking.customerPhone,
+            customerId: booking.customerId,
             branchId,
             excludeBookingId: booking.bookingId,
           })
@@ -676,6 +678,33 @@ const BookingActionModal = ({
     setRewardAmount('');
     setRewardError(null);
   }, [customerReferral?.referralId]);
+
+  // Admin correction: package sessions used on this booking (the one delete blocker the panel doesn't already hold).
+  const [packageUses, setPackageUses] = useState(0);
+  useEffect(() => {
+    setPackageUses(0);
+    if (showAdminCorrection && booking?.bookingId) fetchBookingPackageUseCount(booking.bookingId).then(setPackageUses).catch(() => {});
+  }, [showAdminCorrection, booking?.bookingId]);
+  const delBlock = showAdminCorrection ? deleteBlockers({
+    payments: booking?.payments, refunds: booking?.refunds, tips: booking?.tips,
+    hasReferral: !!customerReferral, packageUses, status: booking?.status, paymentStatus: booking?.paymentStatus,
+  }) : null;
+  // "Cancel and refund": the existing cancel path for a settled booking is the admin correction to Cancelled (the DB refunds the payments on that change).
+  const cancelAndRefund = () => { setCorrectionMode('correct'); setCorrectionField('status', 'Cancelled'); };
+  useEffect(() => { if (delBlock && correctionMode === 'delete') setCorrectionMode('correct'); }, [!!delBlock, correctionMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Earlier balance (this customer's unpaid earlier bookings): click the chip to see the list. Same rule as the calendar chip and the checkout rows.
+  const [earlierList, setEarlierList] = useState(null); // null = closed | 'loading' | rows
+  useEffect(() => { setEarlierList(null); }, [booking?.bookingId]);
+  const toggleEarlier = async () => {
+    if (earlierList) { setEarlierList(null); return; }
+    setEarlierList('loading');
+    const [due, rel] = await Promise.all([
+      getCustomerOutstandingBalance({ customerPhone: booking.customerPhone, customerId: booking.customerId, branchId, excludeBookingId: booking.bookingId }),
+      relatedFetchers(multiServiceBookings).related(booking),
+    ]);
+    setEarlierList(excludeRelatedFromPreviousDue(due.data?.bookings, rel.data || []));
+  };
 
   const handleResolveReferralReward = async () => {
     if (!customerReferral?.referralId) return;
@@ -2043,20 +2072,36 @@ const BookingActionModal = ({
               <div className="space-y-3 border border-warning/20 bg-warning/5 rounded-spa p-3 sm:p-4 mb-4 sm:mb-6">
                 <div className="flex items-center justify-between">
                   <span className="font-body font-body-medium text-xs text-text-secondary">Admin correction</span>
-                  <button
-                    type="button"
-                    onClick={() => setCorrectionMode((m) => (m === 'delete' ? 'correct' : 'delete'))}
-                    className="font-caption text-[11px] text-error hover:underline"
-                  >
-                    {correctionMode === 'delete' ? 'Cancel delete' : 'Delete this booking instead'}
-                  </button>
+                  {!delBlock && (
+                    <button
+                      type="button"
+                      onClick={() => setCorrectionMode((m) => (m === 'delete' ? 'correct' : 'delete'))}
+                      className="font-caption text-[11px] text-error hover:underline"
+                    >
+                      {correctionMode === 'delete' ? 'Cancel delete' : 'Delete this booking instead'}
+                    </button>
+                  )}
                 </div>
+
+                {delBlock && (
+                  <div className="bg-surface border border-border rounded-spa px-3 py-2 space-y-2" data-delete-blocked>
+                    <p className="font-body text-xs text-text-primary">{delBlock.title}</p>
+                    <p className="font-body text-xs text-text-secondary">{delBlock.advice}</p>
+                    {delBlock.canCancel && correctionFields?.status !== 'Cancelled' && (
+                      <button type="button" onClick={cancelAndRefund} className="h-8 px-3 text-xs font-body font-body-medium rounded-spa bg-error text-white hover:bg-error/90">
+                        {delBlock.refund > 0 ? `Cancel and refund ${Number(delBlock.refund).toLocaleString('en-IN')}` : 'Cancel booking'}
+                      </button>
+                    )}
+                    {delBlock.canCancel && correctionFields?.status === 'Cancelled' && (
+                      <p className="font-body text-xs text-text-secondary">Status is now Cancelled. Press Save and give a reason{delBlock.refund > 0 ? `; NPR ${Number(delBlock.refund).toLocaleString('en-IN')} is recorded as a refund` : ''}.</p>
+                    )}
+                  </div>
+                )}
 
                 {correctionMode === 'delete' && (
                   <div className="bg-error/5 border border-error/20 rounded-spa px-3 py-2 space-y-2">
                     <p className="font-body text-xs text-error">
-                      Deleting removes this booking entirely. It will disappear from past reports that counted it. A booking with a
-                      payment, refund, referral or package redemption attached cannot be deleted — cancel it instead.
+                      Deleting removes this booking entirely. It will disappear from past reports that counted it.
                     </p>
                     <div>
                       <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">
@@ -2071,7 +2116,7 @@ const BookingActionModal = ({
                   </div>
                 )}
 
-                {correctionError && (
+                {correctionError && !correctionConfirming && (
                   <div className="bg-error/5 border border-error/20 rounded-spa px-3 py-2 flex items-start space-x-2">
                     <Icon name="AlertCircle" size={14} className="text-error flex-shrink-0 mt-0.5" />
                     <p className="font-body text-xs text-error">{correctionError}</p>
@@ -2128,14 +2173,17 @@ const BookingActionModal = ({
                       {/* The only route past this lock. Admin-only, and every use is
                           recorded in audit_logs with a mandatory reason. */}
                       {userRole === 'admin' && !showAdminCorrection && (
+                        <div className="ml-auto flex flex-col items-end gap-0.5 flex-shrink-0">
                         <button
                           type="button"
                           onClick={openCorrection}
-                          className="ml-auto inline-flex items-center space-x-1 px-2 py-1 rounded-spa border border-warning/40 text-warning hover:bg-warning/10 spa-transition-fast font-body font-body-medium text-[11px] flex-shrink-0"
+                          className="inline-flex items-center space-x-1 px-2 py-1 rounded-spa border border-warning/40 text-warning hover:bg-warning/10 spa-transition-fast font-body font-body-medium text-[11px] flex-shrink-0"
                         >
                           <Icon name="Wrench" size={12} />
                           <span>Correct as admin</span>
                         </button>
+                        <span className="text-[10px] text-text-tertiary text-right">Change a settled booking. Needs a reason; it's logged.</span>
+                        </div>
                       )}
                     </div>
                   );
@@ -2252,8 +2300,25 @@ const BookingActionModal = ({
                             <button type="button" onClick={() => setActiveTab('payment')} className="text-[13px] text-primary hover:underline">Collect payment →</button>
                           )}
                           {booking.discountAmount > 0 && <span className="text-xs text-text-tertiary tabular-nums">−{npr(booking.discountAmount)} discount</span>}
-                          {extras?.previousDue?.amount > 0 && <span className="text-xs tabular-nums" style={{ color: '#7A5408' }}>· Prev. due {npr(extras.previousDue.amount)}</span>}
+                          {extras?.previousDue?.amount > 0 && (
+                            <button type="button" onClick={toggleEarlier} aria-expanded={!!earlierList} className="text-xs tabular-nums hover:underline" style={{ color: '#7A5408' }}>
+                              · Earlier balance {npr(extras.previousDue.amount)} · {extras.previousDue.count} booking{extras.previousDue.count === 1 ? '' : 's'} {earlierList ? '⌃' : '›'}
+                            </button>
+                          )}
                         </div>}
+                        {canViewPrices && !multiView && earlierList && (
+                          <div className="border border-border rounded-spa divide-y divide-border overflow-hidden" data-earlier-list>
+                            {earlierList === 'loading' ? <p className="px-3 py-2 text-xs text-text-secondary">Loading…</p>
+                              : earlierList.length === 0 ? <p className="px-3 py-2 text-xs text-text-secondary">Nothing is owed any more.</p>
+                              : earlierList.map((pb) => (
+                                <button key={pb.bookingId} type="button" disabled={!onViewBooking} onClick={() => onViewBooking?.(pb.bookingId)} className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-background">
+                                  <span className="flex-1 min-w-0 text-xs text-text-primary truncate">{pb.serviceName} · #{pb.bookingNumber} · {pb.date && !Number.isNaN(new Date(`${pb.date}T00:00:00`).getTime()) ? new Date(`${pb.date}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : pb.date}</span>
+                                  <span className="text-xs tabular-nums text-warning">{npr(pb.amountDue)}</span>
+                                  {onViewBooking && <Icon name="ChevronRight" size={14} className="text-text-secondary" />}
+                                </button>
+                              ))}
+                          </div>
+                        )}
                       </div>
 
                       <AvailabilityNoteLine note={booking.availabilityNote} className="mb-2" />
