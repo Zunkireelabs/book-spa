@@ -18,7 +18,7 @@ import { useClock } from '../../../../hooks/useUse24h';
 // bookings) for ITS OWN staff and time, and reports the reason upward, so Create stays off with the reason on THIS row (nothing is made before every row passes).
 const ExtraRow = ({
   r, i, t, svc, patch, remove, problem, ownProblem, onProblem, errorRow, errorText, flashRow, editMode = false, errorStaff = false, isFirst = false, solo = false, first1 = null, staffRing = '',
-  services, branchId, canViewPrices, pickerPeople, dayBookings, dayOff, bookingDate, allowStaffOverlap, staffLabel, staffLabelPlural, branchHours, siblings = [],
+  services, branchId, canViewPrices, pickerPeople, dayBookings, dayOff, bookingDate, allowStaffOverlap, staffLabel, staffLabelPlural, branchHours, siblings = [], offset = 0,
 }) => {
   const clock = useClock();
   const needsStaff = !svc || svc.requires_therapist !== false;
@@ -28,7 +28,7 @@ const ExtraRow = ({
     rangesById: dayBookings && bookingDate ? staffDayRanges(allowStaffOverlap ? [...dayBookings, ...ownRowBookings(siblings, bookingDate)] : dayBookings, { date: bookingDate }) : {}, // ON orgs: the booking's other rows count too (same person twice in one booking)
     offById: dayOff, date: bookingDate, today: nepalNow().today, busyOk: allowStaffOverlap,
   });
-  const n = i + 1;   // the number shown: Service 1 is the panel's own service, extras follow
+  const n = i + 1 + offset;   // the number shown: Service 1 is the panel's own service, extras follow
   const locked = r.locked || '';   // Edit booking: a started / done / paid service is shown read-only with the plain reason
   const pre = useAvailabilityPrecheck({ branchId, date: bookingDate, startTime: t.start, durationMin: svc?.duration_minutes || 0, therapistId: needsStaff ? r.therapistId : null, enabled: !!svc && !isFirst && !locked });   // Service 1's verdict is the panel's own card, never doubled here
   const text = locked ? '' : ownProblem || (pre.verdict ? `${pre.verdict.message}` : '') || info.problem || '';
@@ -47,10 +47,10 @@ const ExtraRow = ({
   return (
     <div data-qc-field={isFirst ? 'service' : `service-x${i - 1}`} data-row-problem={shown ? 'true' : undefined} className={`rounded-spa-lg border ${locked ? 'bg-[#F4F4F6] opacity-90' : 'bg-background'} p-3 space-y-2.5 ${!shown ? 'border-border' : overridable ? 'border-amber-300 ring-2 ring-amber-200' : 'border-error ring-2 ring-error/20'}`}>
       {locked && solo && <p className="flex items-center gap-1 text-xs text-text-secondary" data-row-locked><Icon name="Lock" size={12} /> {locked}</p>}
-      {!solo && (
+      {(!solo || offset > 0) && (
         <div className="flex items-center justify-between">
           <p className="font-body font-body-medium text-[13px] text-text-primary">Service {n}</p>
-          {locked ? <span className="inline-flex items-center gap-1 text-xs text-text-secondary" data-row-locked><Icon name="Lock" size={12} /> {locked}</span> : (
+          {locked ? <span className="inline-flex items-center gap-1 text-xs text-text-secondary" data-row-locked><Icon name="Lock" size={12} /> {locked}</span> : solo ? null : (
           <button type="button" onClick={() => remove(r.key)} aria-label={`Remove service ${n}`}
             className="inline-flex h-8 items-center gap-1 rounded-spa px-2 text-xs text-text-secondary hover:bg-surface hover:text-error spa-transition-fast">
             <Icon name="X" size={14} /> Remove
@@ -61,7 +61,7 @@ const ExtraRow = ({
       <ServicePickRow required disabled={!!locked} invalid={flashRow === (isFirst ? -1 : i - 1) && !r.serviceId} services={services} value={r.serviceId}
         // Service 1 keeps the staff already picked (e.g. from the calendar column), as the single-service form always did; extras start clean.
         onChange={(val) => patch(r.key, isFirst ? { serviceId: val } : { serviceId: val, therapistId: '' })} branchId={branchId} canViewPrices={canViewPrices}
-        title={solo ? 'Service for the booking' : `Service ${n}`} ariaLabel={solo ? 'Service' : undefined}
+        title={solo && !offset ? 'Service for the booking' : `Service ${n}`} ariaLabel={solo && !offset ? 'Service' : undefined}
         loading={isFirst && first1?.loading} openSignal={isFirst ? first1?.openSignal || 0 : 0} onSignalConsumed={isFirst ? first1?.onSignalConsumed : null} />
       {needsStaff && (svc || isFirst) && (
         <div {...(isFirst ? { 'data-qc-field': 'staff' } : {})} className={isFirst ? staffRing : ''}>
@@ -107,14 +107,14 @@ const ExtraRow = ({
 
 const ExtraServiceRows = ({
   rows, setRows, times, services, first, firstCard, canAdd = true, staffRing = '', branchId, canViewPrices, pickerPeople, dayBookings, dayOff, bookingDate,
-  allowStaffOverlap, staffLabel, staffLabelPlural, branchHours, errorRow = null, errorText = '', flashRow = null, problems = {}, ownProblems = {}, onProblem = () => {}, onRemoved = null, editMode = false, errorStaff = false,
+  allowStaffOverlap, staffLabel, staffLabelPlural, branchHours, offset = 0, addTo = null, errorRow = null, errorText = '', flashRow = null, problems = {}, ownProblems = {}, onProblem = () => {}, onRemoved = null, editMode = false, errorStaff = false,
 }) => {
   const patch = (key, p) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
   const remove = (key) => { const gone = rows.find((r) => r.key === key); if (gone?.bookingId) onRemoved?.(gone.bookingId); setRows((rs) => rs.filter((r) => r.key !== key)); };
   const byId = new Map((services || []).map((s) => [s.id, s]));
   const sum = bookingTotal(first, rows, services);
 
-  const shared = { services, branchId, canViewPrices, pickerPeople, dayBookings, dayOff, bookingDate, allowStaffOverlap, staffLabel, staffLabelPlural, branchHours };
+  const shared = { services, branchId, canViewPrices, pickerPeople, dayBookings, dayOff, bookingDate, allowStaffOverlap, staffLabel, staffLabelPlural, branchHours, offset };
   // Service 1 (the panel's own service): the same card as every extra, mapped onto the panel's state. Its start IS the top date/time field.
   const f = firstCard;
   const firstStartMin = (() => { const m = /^(\d{1,2}):(\d{2})/.exec(f?.start || ''); return m ? Number(m[1]) * 60 + Number(m[2]) : 0; })();
@@ -148,8 +148,8 @@ const ExtraServiceRows = ({
       </button>}
       {sum.count > 1 && (
         <div className="flex items-baseline justify-between rounded-spa bg-primary/[0.07] px-3 py-2 text-[13px] font-medium text-[#1f3f1b]" data-booking-total>
-          <span>{sum.count} services</span>
-          {canViewPrices && sum.known && <span>Total {sum.approx ? 'from ' : ''}{formatNPR(sum.total)}</span>}
+          {addTo ? <span>Adding {sum.count} services{canViewPrices && sum.known ? ` · ${sum.approx ? 'from ' : ''}${formatNPR(sum.total)}` : ''}</span> : <span>{sum.count} services</span>}
+          {canViewPrices && sum.known && (addTo ? addTo.total != null && <span>New booking total {formatNPR(addTo.total + sum.total)}</span> : <span>Total {sum.approx ? 'from ' : ''}{formatNPR(sum.total)}</span>)}
         </div>
       )}
     </div>

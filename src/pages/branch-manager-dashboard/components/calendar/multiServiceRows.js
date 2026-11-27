@@ -37,9 +37,9 @@ export function bookingTotal(first, rows, services) {
 }
 
 /** Why Create must wait, or '' when every extra row is filled. */
-export const rowsIncompleteReason = (rows) => {
+export const rowsIncompleteReason = (rows, offset = 0) => {
   const k = (rows || []).findIndex((r) => !r.serviceId);
-  return k < 0 ? '' : `Pick a service for service ${k + 2}`;
+  return k < 0 ? '' : `Pick a service for service ${k + 2 + offset}`;
 };
 
 /** The `services` list createBookingGroup takes: the first service, then each extra row, with its own start and staff. */
@@ -59,13 +59,13 @@ export function toGroupServices({ first, firstStart, firstTherapistIds, rows, se
  * The same staff member in two services of THIS booking at overlapping times (refused by the database unless the org allows overlap).
  * `slots`: [{ ids: [staffId], startMin, endMin }] in service order (the first service, then each extra row). Returns { rowIndex (0 = first service): text } for the LATER service of each clash.
  */
-export function ownOverlaps(slots, nameOf = () => 'This person') {
+export function ownOverlaps(slots, nameOf = () => 'This person', offset = 0) {
   const out = {};
   for (let i = 1; i < slots.length; i++) {
     for (let j = 0; j < i && out[i] == null; j++) {
       const shared = (slots[i].ids || []).find((id) => id && (slots[j].ids || []).includes(id));
       if (shared && slots[i].startMin < slots[j].endMin && slots[j].startMin < slots[i].endMin) {
-        out[i] = `${nameOf(shared)} is already in service ${j + 1} at this time. Pick another time or someone else.`;
+        out[i] = `${nameOf(shared)} is already in service ${j + 1 + offset} at this time. Pick another time or someone else.`;
       }
     }
   }

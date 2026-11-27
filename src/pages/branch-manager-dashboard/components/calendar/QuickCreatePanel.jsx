@@ -43,7 +43,7 @@ import { formatClockRange } from '../../../../utils/clockTime';
 
 
 // ZNLY-365: the client row when the panel was opened from a booking ("+ Service" / Rebook). Not editable: same client as that booking.
-const LockedClientCard = ({ client, name }) => {
+const LockedClientCard = ({ client, name, sub = '' }) => {
   const label = client.kind === 'walkin' ? `Walk-in${client.walkInLabel ? ` · ${client.walkInLabel}` : ''}` : (name || client.name || 'Client');
   const initials = client.kind === 'walkin' ? 'WI' : label.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
   return (
@@ -52,18 +52,18 @@ const LockedClientCard = ({ client, name }) => {
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-semibold text-text-primary">{label}</span>
         <span className="block truncate text-xs text-text-secondary">
-          {client.phone ? client.phone : client.bookingNumber ? `Same client as ${client.bookingNumber}` : 'Same client'}
-          {client.kind === 'walkin' && <span className="ml-1.5 rounded-full bg-[#FDF1DC] px-2 py-px text-[11px] font-medium text-secondary">Walk-in</span>}
+          {sub || (client.phone ? client.phone : client.bookingNumber ? `Same client as ${client.bookingNumber}` : 'Same client')}
+          {!sub && client.kind === 'walkin' && <span className="ml-1.5 rounded-full bg-[#FDF1DC] px-2 py-px text-[11px] font-medium text-secondary">Walk-in</span>}
         </span>
       </span>
-      {!client.phone && <span className="flex flex-shrink-0 items-center gap-1 text-[11px] text-[#8A8A90]"><Icon name="Lock" size={12} />same client</span>}
+      {!sub && !client.phone && <span className="flex flex-shrink-0 items-center gap-1 text-[11px] text-[#8A8A90]"><Icon name="Lock" size={12} />same client</span>}
     </div>
   );
 };
 
 // ── Quick Create Panel ────────────────────────────────────────
 
-const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings: bookingsProp = [], onClose, onSubmit, branchId, branchHours, retarget, onDraftChange, columnMode = 'therapist', allTherapists = [], guardRef, offStaff = {}, offDate = null, onRefreshCalendar }) => {
+const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings: bookingsProp = [], onClose, onSubmit, branchId, branchHours, retarget, onDraftChange, columnMode = 'therapist', allTherapists = [], guardRef, offStaff = {}, offDate = null, onRefreshCalendar, onBack }) => {
   const clock = useClock();
   const [use24h] = useUse24h();
   const edit = slotInfo?.edit || null;   // ZNLY-402 piece 5: Edit booking = this same form, prefilled with the whole booking
@@ -338,6 +338,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const serviceRequiresTherapist = selectedService ? selectedService.requires_therapist !== false : true;
   const isCoupleBooking = bookingMode === 'individual' && selectedTherapistIds.length > 1 && !!selectedService?.is_couple;
   // ZNLY-402 3b: "+ Add another service" needs the setting ON, Individual mode and a plain first service (a combo or couple service keeps its own flow).
+  // ZNLY-436: "+ Service" on an ON org adds to the booking's visit: the Customer box becomes a context card, rows continue the count, the day is locked.
+  const addMode = !!multiServiceBookings && !!slotInfo?.joinVisitOfBookingId && !edit && bookingMode === 'individual';
+  const svcOffset = addMode ? (slotInfo.visit?.count || 0) : 0;
   const canMulti = !!multiServiceBookings && bookingMode === 'individual' && !!selectedService && !selectedService.is_combo && !selectedService.is_couple;
   // ZNLY-402 U10: every business gets the same grey service card from the FIRST service (Individual mode). A combo / couple service keeps its own
   // layout (its staff and schedule rules differ). Only an ON org gets "Add another service" (canMulti).
@@ -345,7 +348,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const activeRows = canMulti ? extraRows : [];
   const extraServices = useMemo(() => pickerServices.filter((x) => !x.is_combo && !x.is_couple), [pickerServices]);
   const extraTimes = useMemo(() => rowTimes(activeRows, services, bookingTime, selectedService?.duration_minutes), [activeRows, services, bookingTime, selectedService]);
-  const extraIncomplete = rowsIncompleteReason(activeRows);
+  const extraIncomplete = rowsIncompleteReason(activeRows, svcOffset);
   // Live checks per extra row, reported by the rows themselves (shift / break / leave / clash: the same rule as a single booking). Nothing is created until every row passes.
   const [rowProblems, setRowProblems] = useState({});
   const onRowProblem = useCallback((key, text, overridable = false) => setRowProblems((p) => ((p[key]?.text || '') === (text || '') && !!p[key]?.overridable === !!overridable ? p : { ...p, [key]: { text: text || '', overridable: !!overridable } })), []);
@@ -354,10 +357,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     const nm = (id) => (therapists || []).find((x) => x.id === id)?.name || 'This person';
     const f0 = clockToMin(bookingTime);
     const slots = [{ ids: selectedTherapistIds, startMin: f0 ?? 0, endMin: (f0 ?? 0) + (selectedService?.duration_minutes || 60) }, ...activeRows.map((r, i) => ({ ids: r.therapistId ? [r.therapistId] : [], startMin: extraTimes[i].startMin, endMin: extraTimes[i].endMin }))];
-    return ownOverlaps(slots, nm);
-  }, [activeRows, allowStaffOverlap, therapists, bookingTime, selectedTherapistIds, selectedService, extraTimes]);
+    return ownOverlaps(slots, nm, svcOffset);
+  }, [activeRows, allowStaffOverlap, therapists, bookingTime, selectedTherapistIds, selectedService, extraTimes, svcOffset]);
   const firstRowProblem = (() => {
-    for (let i = 0; i < activeRows.length; i += 1) { const p = rowProblems[activeRows[i].key]; if (p?.text && !p.overridable) return `Service ${i + 2}: ${p.text}`; }
+    for (let i = 0; i < activeRows.length; i += 1) { const p = rowProblems[activeRows[i].key]; if (p?.text && !p.overridable) return `Service ${i + 2 + svcOffset}: ${p.text}`; }
     return '';
   })();
   // Rows whose only problem is an overridable availability verdict: a manager / admin may book anyway with a reason (asked once, before anything is created).
@@ -715,6 +718,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             : undefined,
           bookingDate,
           bookingTime,
+          serviceNumberOffset: svcOffset,
           referringCustomerId: (!isExistingCustomer && referringCustomerId) || undefined,
           referringRewardType: (!isExistingCustomer && referringCustomerId) ? 'wallet' : undefined,
           referringRewardAmount: (!isExistingCustomer && referringCustomerId && referringRewardAmount.trim())
@@ -771,6 +775,12 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     if (isDirty) setConfirm({ type: 'discard' });
     else onClose();
   }, [isDirty, onClose]);
+  // ZNLY-436: "+ Service" / Rebook / Edit carry the booking they came from: Back returns to it (same dirty guard as closing).
+  const canBack = !!slotInfo?.returnToBooking && !!onBack;
+  const requestBack = useCallback(() => {
+    if (isDirty) setConfirm({ type: 'back' });
+    else onBack?.();
+  }, [isDirty, onBack]);
 
   // ── Ghost block on the grid: report the draft (date, time, length, column) to the calendar ──
   const draftDuration = (services || []).find((t) => t.id === (bookingMode === 'group' ? groupServiceId : serviceId))?.duration_minutes || dragMinutes || 30;
@@ -973,7 +983,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         onClick={() => {
           const c = confirm;
           setConfirm(null);
-          if (c.type === 'move') applyRetarget(c.slot); else if (c.type === 'switch') c.action?.(); else onClose();
+          if (c.type === 'move') applyRetarget(c.slot); else if (c.type === 'switch') c.action?.(); else if (c.type === 'back') onBack?.(); else onClose();
         }}
         className="h-9 px-3 text-[13px] font-body font-body-medium bg-text-primary text-white rounded-spa hover:opacity-90 spa-transition-fast whitespace-nowrap"
       >
@@ -988,10 +998,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         : (createDisabled ? disabledReason : groupReadyNote)}</p>
       <button
         type="button"
-        onClick={requestClose}
+        onClick={canBack ? requestBack : requestClose}
         className="h-9 px-3 text-[13px] font-body font-body-medium border border-border rounded-spa hover:bg-background spa-transition-fast"
       >
-        Cancel
+        {canBack ? 'Back' : 'Cancel'}
       </button>
       <button
         type="submit"
@@ -1000,7 +1010,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         className="h-9 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 spa-transition-fast disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
       >
         {submitting && <div className="animate-spin w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full" />}
-        {submitting ? (edit ? 'Saving...' : 'Creating...') : edit ? 'Save changes' : bookingMode === 'group' ? `Create ${peopleCount} bookings` : (precheck.warn || anyRowOverride) ? 'Book anyway…' : 'Create booking'}
+        {submitting ? (edit ? 'Saving...' : addMode ? 'Adding...' : 'Creating...') : edit ? 'Save changes' : bookingMode === 'group' ? `Create ${peopleCount} bookings` : (precheck.warn || anyRowOverride) ? 'Book anyway…' : addMode ? 'Add to booking' : 'Create booking'}
       </button>
     </div>
   );
@@ -1016,6 +1026,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       timeRingClass={fieldRing('time')}
       timeFieldAttr="time"
       timeDisabled={!!firstEdit?.locked}
+      dateDisabled={addMode}
+      dateTitle={addMode ? 'Same day as this booking. For another day use Rebook.' : undefined}
     />
   );
 
@@ -1083,7 +1095,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   );
 
   return (
-    <SidePanel isOpen={isOpen} width={PANEL_WIDTH_BOOKING} title={slotInfo?.title || 'New booking'} onClose={requestClose} footer={footerNode}>
+    <SidePanel isOpen={isOpen} width={PANEL_WIDTH_BOOKING} title={slotInfo?.title || 'New booking'} onClose={requestClose} onBack={canBack ? requestBack : undefined} footer={footerNode}>
       <form id="quick-create-form" onSubmit={handleSubmit} className="px-5 py-5 space-y-4">
         {summaryRow}
 
@@ -1108,11 +1120,11 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             <>
             {/* Customer: one closed row (ZNLY-327), like Service and Staff */}
             <div data-qc-field="customer" className={fieldRing('customer')}>
-              <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+              {!addMode && <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                 Customer <span className="text-error">*</span>
                 {customerKind === 'existing' && <span className="ml-2 align-middle"><ExistingCustomerTag /></span>}
-              </label>
-              {slotInfo?.lockedClient ? <LockedClientCard client={slotInfo.lockedClient} name={customerName} /> : <CustomerPickRow invalid={flashSvc === 'customer' && !customerKind} kind={customerKind} name={customerName} phone={customerPhone ? `${customerCountryCode}${customerPhone}` : ''} sub={svcSubLine} branchId={branchId} onPick={handleCustomerPick} />}
+              </label>}
+              {slotInfo?.lockedClient ? <LockedClientCard client={slotInfo.lockedClient} name={customerName} sub={addMode && slotInfo.visit ? `${slotInfo.visit.count} service${slotInfo.visit.count === 1 ? '' : 's'} booked · ${formatClockRange(slotInfo.visit.start, slotInfo.visit.end, use24h)}` : ''} /> : <CustomerPickRow invalid={flashSvc === 'customer' && !customerKind} kind={customerKind} name={customerName} phone={customerPhone ? `${customerCountryCode}${customerPhone}` : ''} sub={svcSubLine} branchId={branchId} onPick={handleCustomerPick} />}
             </div>
 
             {customerKind === 'walkin' && !slotInfo?.lockedClient && (
@@ -1292,7 +1304,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             {/* ZNLY-402 3b: more services for the same person in one booking (org setting ON; nothing is drawn otherwise) */}
             {useCard && (
               <ExtraServiceRows
-                rows={activeRows} setRows={setExtraRows} times={extraTimes} services={extraServices} first={selectedService} canAdd={canMulti}
+                offset={svcOffset} addTo={addMode ? { total: slotInfo.visit?.total ?? null } : null} rows={activeRows} setRows={setExtraRows} times={extraTimes} services={extraServices} first={selectedService} canAdd={canMulti}
                 firstCard={{
                   locked: firstEdit?.locked || '',
                   serviceId, therapistId: selectedTherapistIds[0] || '', start: bookingTime, flash: flashSvc === 'service' && !serviceId,

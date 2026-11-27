@@ -75,7 +75,7 @@ export const TimeField = ({ time, onTimeChange, branchHours, ringClass = '', fie
 // ONE date chip + time field row (ZNLY-324), used by New booking (QuickCreatePanel) and Edit details (BookingActionModal).
 // Date: a chip that opens the month calendar. Time: a typable field with a 15-minute list.
 // `time` is "HH:MM" ('' while the typed text is incomplete); the typed text lives here and re-syncs when `time` changes from outside.
-const DateTimeRow = ({ date, time, onDateChange, onTimeChange, branchHours, timeRingClass = '', timeFieldAttr, timeDisabled = false }) => {
+const DateTimeRow = ({ date, time, onDateChange, onTimeChange, branchHours, timeRingClass = '', timeFieldAttr, timeDisabled = false, dateDisabled = false, dateTitle }) => {
   const [dateOpen, setDateOpen] = useState(false);
   const dateIntoView = usePopoverIntoView(dateOpen);
   const dateRef = useRef(null);
@@ -95,10 +95,12 @@ const DateTimeRow = ({ date, time, onDateChange, onTimeChange, branchHours, time
         <button
           type="button"
           onClick={() => setDateOpen((v) => !v)}
+          disabled={dateDisabled}
+          title={dateTitle}
           aria-haspopup="dialog"
           aria-expanded={dateOpen}
           aria-label="Date"
-          className="field-text w-full h-9 pl-8 pr-2 flex items-center text-[13px] font-body text-text-primary bg-surface border border-border rounded-spa hover:bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 text-left"
+          className="field-text w-full h-9 pl-8 pr-2 flex items-center text-[13px] font-body text-text-primary bg-surface border border-border rounded-spa hover:bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 text-left disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-surface"
         >
           <Icon name="Calendar" size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
           <span className="truncate">{formatDateChip(date)}</span>

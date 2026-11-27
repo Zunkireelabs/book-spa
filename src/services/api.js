@@ -69,12 +69,17 @@ const newVisitId = () => ((typeof crypto !== 'undefined' && crypto.randomUUID) ?
  * source FIRST (a normal update, so it is audited like any user action) and returned. If the new service then fails to create, the source keeping
  * a visit_id of its own is harmless: a visit of one booking looks exactly like a booking with no visit.
  */
-export async function joinVisitOfBooking({ sourceBookingId, branchId }) {
+export async function joinVisitOfBooking({ sourceBookingId, branchId, date = null }) {
   try {
     if (!sourceBookingId || !(await multiServiceCache.get(branchId))) return { data: null, error: null };
-    const { data: src, error: readErr } = await supabase.from('bookings').select('id, visit_id').eq('id', sourceBookingId).maybeSingle();
+    const { data: src, error: readErr } = await supabase.from('bookings').select('id, visit_id, date').eq('id', sourceBookingId).maybeSingle();
     if (readErr) throw readErr;
     if (!src) return { data: null, error: { code: 'SOURCE_NOT_FOUND', message: 'Could not find the booking to add this service to.' } };
+    // ZNLY-436: a visit is one day. The form locks the date; this is the backstop for any other caller.
+    if (date && src.date && String(date) !== String(src.date).slice(0, 10)) {
+      const day = new Date(`${String(src.date).slice(0, 10)}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+      return { data: null, error: { code: 'OTHER_DAY', message: `A service added to this booking must be on ${day}. For another day, use Rebook.`, plain: true } };
+    }
     if (src.visit_id) return { data: src.visit_id, error: null };
     const visitId = newVisitId();
     if (!visitId) return { data: null, error: null };

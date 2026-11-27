@@ -14,6 +14,7 @@ vi.mock('../lib/supabase', () => {
 });
 
 import { joinVisitOfBooking } from './api';
+import { friendlyError } from '../utils/friendlyError';
 
 beforeEach(() => { log.length = 0; results = []; });
 const orgFlag = (on) => ({ data: { organizations: { multi_service_bookings: on } }, error: null });
@@ -45,5 +46,17 @@ describe('joinVisitOfBooking (ZNLY-402)', () => {
     const r = await joinVisitOfBooking({ sourceBookingId: 's1', branchId: branch() });
     expect(r.data).toBeNull();
     expect(r.error).toBeTruthy();
+  });
+  it('ZNLY-436: a different day is refused with a plain sentence, nothing is written', async () => {
+    results = [orgFlag(true), { data: { id: 's1', visit_id: 'v1', date: '2026-11-27' }, error: null }];
+    const r = await joinVisitOfBooking({ sourceBookingId: 's1', branchId: branch(), date: '2026-11-28' });
+    expect(r.data).toBeNull();
+    expect(r.error.code).toBe('OTHER_DAY');
+    expect(friendlyError(r.error, 'x')).toBe('A service added to this booking must be on Fri 27 Nov. For another day, use Rebook.');
+    expect(log.some((e) => e.some((c) => c[0] === 'update'))).toBe(false);
+  });
+  it('ZNLY-436: the same day joins as before', async () => {
+    results = [orgFlag(true), { data: { id: 's1', visit_id: 'v1', date: '2026-11-27' }, error: null }];
+    expect(await joinVisitOfBooking({ sourceBookingId: 's1', branchId: branch(), date: '2026-11-27' })).toEqual({ data: 'v1', error: null });
   });
 });
