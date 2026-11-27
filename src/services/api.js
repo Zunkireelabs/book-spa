@@ -19,7 +19,7 @@ import { toE164, samePhone } from '../utils/phone';
 import { isNewCustomerBooking, walkInName } from '../utils/customerPick';
 import { expandBlockOccurrences } from '../utils/blockRecurrence';
 import { leafMethods, qrMethodDiff, validateQrFile } from '../utils/paymentQr';
-import { parseAvailabilityError, createEnforcementCache } from './availability';
+import { parseAvailabilityError, formatAvailabilityMessage, createEnforcementCache } from './availability';
 import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrphanTransferWindow } from './therapistBranchWindow';
 
 // ZNLY-266/268: the ONE place a raw database error becomes screen text. A write's catch block returns plainError(error): the same
@@ -1171,6 +1171,30 @@ export async function fetchServiceEligibility() {
     return { data: out, error: null };
   } catch (error) {
     console.error('[API] fetchServiceEligibility error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * ZNLY-418: everything the client needs to apply the "staff list" rule exactly like the database guard (see staffFit.eligibleFor):
+ * { lists: { [serviceId]: [therapistId…] }, home: { [therapistId]: homeBranchId }, names: { [serviceId]: 'service name, lower-cased' }, labels: { [serviceId]: 'Service name' } }.
+ * A service's list is judged per BRANCH (rows whose staff belong to that branch), so one branch's list never restricts another.
+ */
+export async function fetchServiceStaffIndex() {
+  try {
+    const [rows, staff, svcs] = await Promise.all([
+      pageAllRows(() => supabase.from('service_therapists').select('service_id, therapist_id').order('service_id').order('therapist_id')),
+      pageAllRows(() => supabase.from('therapists').select('id, branch_id').order('id')),
+      pageAllRows(() => supabase.from('services').select('id, name').order('id')),
+    ]);
+    const lists = {};
+    for (const r of rows) (lists[r.service_id] ||= []).push(r.therapist_id);
+    const home = {}; for (const t of staff) home[t.id] = t.branch_id;
+    const names = {}; const labels = {};
+    for (const s of svcs) { names[s.id] = String(s.name || '').trim().toLowerCase(); labels[s.id] = s.name; }
+    return { data: { lists, home, names, labels }, error: null };
+  } catch (error) {
+    console.error('[API] fetchServiceStaffIndex error:', error.message);
     return { data: null, error };
   }
 }
@@ -7757,11 +7781,15 @@ export async function createBooking({
       const primary = therapistsData.find(t => t.id === primaryTherapistId);
       therapistNameSnapshot = primary?.name || null;
 
-      if (eligibleIds && eligibleIds.length > 0) {
+      // ZNLY-418: not on the service's staff list. A manager/admin may book anyway with a reason (overridable: the caller's override guard asks
+      // for it and repeats with overrideReason; the DB re-checks the role and logs it). Visiting staff (home branch is not this one) are judged by
+      // the DB guard on their HOME list, so they are skipped here.
+      if (eligibleIds && eligibleIds.length > 0 && !availabilityOverride) {
         const eligibleSet = new Set(eligibleIds);
-        const ineligible = therapistsData.find(t => !eligibleSet.has(t.id));
+        const ineligible = therapistsData.find(t => t.branch_id === resolvedBranchId && !eligibleSet.has(t.id));
         if (ineligible) {
-          return { data: null, error: { code: 'THERAPIST_NOT_ELIGIBLE', message: `${ineligible.name} is not eligible for ${service.name}.` } };
+          const detail = { code: 'THERAPIST_NOT_ELIGIBLE', not_listed: true, therapist_id: ineligible.id, therapist_name: ineligible.name, service_name: service.name };
+          return { data: null, error: { code: 'THERAPIST_NOT_ELIGIBLE', message: formatAvailabilityMessage('THERAPIST_NOT_ELIGIBLE', detail), overridable: true, detail } };
         }
       }
     }
