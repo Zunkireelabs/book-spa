@@ -9,6 +9,7 @@ import { workedAtNote } from './visitorAttendance';
 import { computeReferralCommission, payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, computeNetPay, splitServiceRevenueByBranch, visitorPayrollHelpLine } from './payrollCalc';
 import { supabase, supabaseCustomer, supabaseProvision } from '../lib/supabase';
 import { groupBillUnits, billExists } from '../utils/buildBill';
+import { BILL_TEMPLATE_KEYS, DEFAULT_BILL_MESSAGE, badBillPlaceholders } from '../utils/billMessage';
 import { isReadingViaSafeViews } from '../lib/restrictedReads';
 import { maskCustomerName, maskPhone, viewerAccess, calendarColumnsFor } from './dataMasking';
 import { isOwnCalendar } from './staffAccessRules';
@@ -17916,6 +17917,54 @@ export async function upsertOutreachTemplate(payload) {
     console.error('[API] upsertOutreachTemplate error:', error.message);
     return { data: null, error };
   }
+}
+
+// ---- Bill message (ZNLY-410 step 2): wording for Send to ▾, set in Outreach → Rules ----
+
+// Both channels' wording, falling back to the default text when the org has no row (e.g. created after migration 437).
+export async function fetchBillMessages() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data, error } = await supabase
+      .from('outreach_templates')
+      .select('id, key, channel, subject, body, is_active')
+      .eq('org_id', profile.org_id)
+      .is('branch_id', null)
+      .in('key', Object.values(BILL_TEMPLATE_KEYS));
+    if (error) throw error;
+    const out = {};
+    for (const ch of ['email', 'whatsapp']) {
+      const row = (data || []).find((r) => r.key === BILL_TEMPLATE_KEYS[ch] && r.is_active);
+      out[ch] = row
+        ? { id: row.id, subject: ch === 'email' ? row.subject || DEFAULT_BILL_MESSAGE.email.subject : null, body: row.body }
+        : { id: null, ...DEFAULT_BILL_MESSAGE[ch] };
+    }
+    return { data: out, error: null };
+  } catch (error) {
+    console.error('[API] fetchBillMessages error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// channel 'email' | 'whatsapp' → { data: { subject, body }, error }
+export async function fetchBillMessage(channel) {
+  if (!BILL_TEMPLATE_KEYS[channel]) return { data: null, error: { code: 'VALIDATION', message: 'Unknown channel.' } };
+  const { data, error } = await fetchBillMessages();
+  if (error) return { data: null, error };
+  return { data: { subject: data[channel].subject, body: data[channel].body }, error: null };
+}
+
+// Admin saves one channel's wording. Only {first_name}, {business}, {bill_number} are allowed.
+export async function saveBillMessage(channel, { subject, body }) {
+  if (!BILL_TEMPLATE_KEYS[channel]) return { data: null, error: { code: 'VALIDATION', message: 'Unknown channel.' } };
+  const bad = [...badBillPlaceholders(body), ...(channel === 'email' ? badBillPlaceholders(subject) : [])];
+  if (bad.length) {
+    return { data: null, error: { code: 'VALIDATION', message: `Only first name, business and bill number can be used in this message. Remove {${bad[0]}}.` } };
+  }
+  if (!String(body || '').trim()) return { data: null, error: { code: 'VALIDATION', message: 'Write the message first.' } };
+  if (channel === 'email' && !String(subject || '').trim()) return { data: null, error: { code: 'VALIDATION', message: 'Write the email subject first.' } };
+  return upsertOutreachTemplate({ key: BILL_TEMPLATE_KEYS[channel], channel, subject: channel === 'email' ? subject : null, body });
 }
 
 export async function deleteOutreachTemplate(id) {

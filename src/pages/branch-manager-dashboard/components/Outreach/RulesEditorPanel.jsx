@@ -2,6 +2,7 @@ import { friendlyError } from '../../../../utils/friendlyError';
 import React, { useCallback, useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
+import BillMessageCard from './BillMessageCard';
 import {
   fetchOutreachRules,
   fetchOutreachTemplates,
@@ -45,7 +46,7 @@ const TRIGGER_PARAM_FIELDS = {
 };
 
 function buildRuleRow(triggerType, existingRule, templates) {
-  const compatibleTemplate = templates.find((t) => t.channel === (existingRule?.channel || 'email'));
+  const compatibleTemplate = templates.find((t) => t.channel === (existingRule?.channel || 'email') && !t.key.startsWith('bill_ready'));
   return {
     id: existingRule?.id || null,
     triggerType,
@@ -99,7 +100,8 @@ const RulesEditorPanel = () => {
     setDrafts((prev) => ({ ...prev, [triggerType]: { ...getRow(triggerType), ...patch } }));
   };
 
-  const templatesForChannel = (channel) => templates.filter((t) => t.channel === channel);
+  // bill_ready* wording belongs to the Bill card, not to a rule
+  const templatesForChannel = (channel) => templates.filter((t) => t.channel === channel && !t.key.startsWith('bill_ready'));
 
   const handleSave = async (triggerType) => {
     const row = getRow(triggerType);
@@ -187,6 +189,7 @@ const RulesEditorPanel = () => {
 
   return (
     <div className="space-y-3">
+      <BillMessageCard />
       {TRIGGER_TYPES.map((trigger) => {
         const row = getRow(trigger.key);
         const paramFields = TRIGGER_PARAM_FIELDS[trigger.key] || [];
