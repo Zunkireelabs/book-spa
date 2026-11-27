@@ -22,6 +22,9 @@ export const useBranch = () => {
   return context;
 };
 
+/** Active branch id, or null outside a provider (tests, public pages): never throws. */
+export const useActiveBranchId = () => useContext(BranchContext)?.branchId ?? null;
+
 export const BranchProvider = ({ children }) => {
   const { profile, loading: authLoading } = useAuth();
 

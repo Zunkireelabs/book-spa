@@ -691,9 +691,13 @@ const ServiceDetailPage = () => {
 
                     {restrictStaff && (
                       <div className="space-y-2">
-                        <p className="font-caption text-xs text-text-secondary">
-                          Checked staff can perform this service. Unchecked staff cannot.
-                        </p>
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="font-caption text-xs text-text-secondary">
+                            Checked staff can perform this service. Unchecked staff cannot.
+                          </p>
+                          <button type="button" onClick={() => setEligibleTherapistIds(allTherapists.map((t) => t.id))}
+                            className="flex-shrink-0 min-h-[44px] px-2 text-xs font-medium text-primary hover:underline">Select all staff</button>
+                        </div>
                         <Input
                           value={staffSearchQuery}
                           onChange={(e) => setStaffSearchQuery(e.target.value)}

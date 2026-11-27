@@ -1,9 +1,11 @@
 import React, { useEffect, useId, useMemo, useState } from 'react';
 import Icon from '../AppIcon';
 import { arrangeAssignees, STICKY_SEARCH_MIN } from '../../utils/assignList';
-import { arrangeByTime, offDayLabel, offReasonFor, staffDayRanges, rangeClock, clockAmPm, clockShort, pillRange } from '../../utils/staffFit';
+import { arrangeByTime, eligibleFor, offDayLabel, offReasonFor, staffDayRanges, rangeClock, clockAmPm, clockShort, pillRange } from '../../utils/staffFit';
 import { avatarColor } from '../../pages/branch-manager-dashboard/components/calendar/phoneCalendarLayout';
-import { fetchServiceEligibility } from '../../services/api';
+import { fetchServiceStaffIndex } from '../../services/api';
+import { useActiveBranchId } from '../../contexts/BranchContext';
+import { useAvailabilityGuard } from '../../contexts/AvailabilityOverrideContext';
 import { nepalNow } from '../../utils/customerDirectory';
 import { dayTag } from '../../utils/unassignedList';
 
@@ -16,8 +18,8 @@ import { dayTag } from '../../utils/unassignedList';
 // `header` {title, sub}: opened from a row (sheet / popover). `onNone`: adds the last "No staff · assign later" row.
 // `lockedById` values: a string ("Person 2") or { pill, line } for people held by another guest of the group.
 
-let eligibilityPromise = null; // service_therapists is small and static for a session: fetch once, share
-const loadEligibility = () => (eligibilityPromise ||= fetchServiceEligibility().then((r) => r.data || {}).catch(() => ({})));
+let eligibilityPromise = null; // the staff lists are small and static for a session: fetch once, share (ZNLY-418: the branch-aware index, see staffFit.eligibleFor)
+const loadEligibility = () => (eligibilityPromise ||= fetchServiceStaffIndex().then((r) => r.data || null).catch(() => null));
 export function useServiceEligibility(enabled) {
   const [map, setMap] = useState(null);
   useEffect(() => {
@@ -49,6 +51,9 @@ const StaffPicker = ({
   const eligibility = useServiceEligibility(timed && !!serviceId);
   const finite = Number.isFinite(max);
   const single = max === 1;
+  const branchId = useActiveBranchId();
+  const { canOverride } = useAvailabilityGuard(); // manager/admin may still pick someone not on the service's staff list (reason asked at save)
+  const serviceLabel = (serviceId && eligibility?.labels?.[serviceId]) || 'this service';
 
   const arr = useMemo(() => arrangeAssignees(people, { assignedIds, selectedIds, query }), [people, assignedIds, selectedIds, query]);
   const fit = useMemo(() => {
@@ -56,8 +61,8 @@ const StaffPicker = ({
     const s = toMin(slot.start);
     const e = toMin(slot.end) ?? s + 60;
     const rangesById = staffDayRanges(bookings, { date: slot.date, excludeBookingId, defaultMinutes: e - s });
-    return { s, e, ...arrangeByTime(people, { slotStart: s, slotEnd: e, rangesById, offById, eligibleIds: serviceId && eligibility ? eligibility[serviceId] : null, lastStaffId, max: finite ? max : 1, excludeIds: Object.keys(lockedById).length ? new Set(Object.keys(lockedById)) : null }) };
-  }, [timed, slot?.date, slot?.start, slot?.end, bookings, excludeBookingId, people, offById, serviceId, eligibility, lastStaffId, max, finite, lockedById]);
+    return { s, e, ...arrangeByTime(people, { slotStart: s, slotEnd: e, rangesById, offById, isEligible: serviceId && eligibility ? (p) => eligibleFor(eligibility, { serviceId, therapistId: p.id, branchId }).ok : null, lastStaffId, max: finite ? max : 1, excludeIds: Object.keys(lockedById).length ? new Set(Object.keys(lockedById)) : null }) };
+  }, [timed, slot?.date, slot?.start, slot?.end, bookings, excludeBookingId, people, offById, serviceId, eligibility, branchId, lastStaffId, max, finite, lockedById]);
   const best = fit ? new Set(fit.bestIds) : null;
   const matchIds = new Set(arr.rows.map((p) => p.id));
   const assigned = new Set(assignedIds);
@@ -73,16 +78,19 @@ const StaffPicker = ({
     const isSelected = selectedIds.includes(p.id);
     const hold = lockedById[p.id];
     const holdObj = typeof hold === 'string' ? { pill: hold, line: `${hold} at this time` } : hold;
-    const dim = !!extra.off || (!!holdObj && !isSelected);
-    const locked = disabled || dim || (!isSelected && finite && max > 1 && selectedIds.length >= max);
+    const staffOnlyBlock = !!extra.notListed && !canOverride && !isSelected; // staff cannot pick them; a manager/admin can (reason asked at save)
+    const dim = !!extra.off || !!extra.notListed || (!!holdObj && !isSelected);
+    const locked = disabled || !!extra.off || staffOnlyBlock || (!!holdObj && !isSelected) || (!isSelected && finite && max > 1 && selectedIds.length >= max);
     const order = selectedIds.indexOf(p.id) + 1;
     const gender = p.gender && String(p.gender).replace(/^./, (c) => c.toUpperCase());
     const today = extra.bookings != null && fit ? (extra.bookings ? `${extra.bookings} ${slot?.date && slot.date !== nepalNow().today ? `on ${dayTag(slot.date)}` : 'today'}` : null) : null;
     const sub = holdObj ? holdObj.line
+      : extra.notListed ? `Not on ${serviceLabel}'s staff list${canOverride ? " · You'll be asked for a reason" : ''}`
       : extra.off ? offReasonFor(extra.off, slot?.date, nepalNow().today)
         : extra.busy ? `Busy ${pillRange(extra.busy.start, extra.busy.end)} · free after ${clockAmPm(extra.busy.end)}`
           : [gender, fit ? today : (p.specialties?.length ? p.specialties.join(', ') : null)].filter(Boolean).join(' · ');
     const pill = holdObj ? { text: holdObj.pill, cls: 'bg-indigo-50 text-indigo-600' }
+      : extra.notListed ? { text: 'Not listed', cls: 'bg-rose-50 text-rose-700' }
       : extra.off ? { text: 'Off', cls: 'bg-background text-text-secondary' }
         : extra.busy ? { text: 'Busy', cls: 'bg-amber-100 text-amber-800' } : null;
     return (
@@ -129,7 +137,9 @@ const StaffPicker = ({
   } else {
     const keep = (x) => matchIds.has(x.person.id);
     const aFirst = (list) => [...list.filter((x) => assigned.has(x.person.id)), ...list.filter((x) => !assigned.has(x.person.id))];
-    const free = aFirst(fit.free.filter(keep)); const busy = fit.busy.filter(keep); const off = fit.off.filter(keep);
+    const listed = (x) => x.eligible; // ZNLY-418: people not on the service's staff list move to their own last group
+    const free = aFirst(fit.free.filter((x) => keep(x) && listed(x))); const busy = fit.busy.filter((x) => keep(x) && listed(x)); const off = fit.off.filter((x) => keep(x) && listed(x));
+    const notListed = [...fit.free, ...fit.busy, ...fit.off].filter((x) => keep(x) && !listed(x)).sort((a, b) => String(a.person.name || '').localeCompare(String(b.person.name || '')));
     body = (
       <>
         {fit.noneFree && fit.free.length === 0 && !query && (
@@ -142,6 +152,8 @@ const StaffPicker = ({
         {section(`Free ${rangeClock(fit.s, fit.e)}`, free.map((x) => row(x.person, { bookings: x.bookings })))}
         {section(`Busy at ${clockAmPm(fit.s)}`, busy.map((x) => row(x.person, { busy: x.busyRange, bookings: x.bookings })))}
         {section(offDayLabel(slot?.date, nepalNow().today), off.map((x) => row(x.person, { off: x.reason })))}
+        {section("Doesn't do this service", notListed.map((x) => row(x.person, { notListed: true, bookings: x.bookings })))}
+        {notListed.length > 0 && !canOverride && <p className="px-4 pt-1.5 pb-1 text-[12.5px] leading-snug text-text-secondary">Ask a manager to add them to the service&apos;s staff list.</p>}
       </>
     );
   }

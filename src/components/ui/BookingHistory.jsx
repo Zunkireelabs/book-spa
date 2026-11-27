@@ -25,6 +25,8 @@ const describe = (log) => {
   }
   switch (log.action_type) {
     case 'AVAILABILITY_OVERRIDE':
+      // ZNLY-418: booked someone who is not on the service's staff list (same audit action, distinct code)
+      if (d.code === 'THERAPIST_NOT_ELIGIBLE') return { icon: 'ShieldAlert', title: 'Booked staff not on the service list', detail: [d.therapist_name, d.service_name].filter(Boolean).join(' · '), reason: d.override_reason };
       return { icon: 'ShieldAlert', title: `Booked outside availability (${d.message || d.code})`, reason: d.override_reason };
     case 'ADMIN_CORRECTION':
       return { icon: 'PenLine', title: 'Corrected by admin', reason: log.reason };
@@ -71,6 +73,7 @@ const BookingHistory = ({ bookingId, paymentIds = [], reloadKey = 0 }) => {
             <Icon name={info.icon} size={13} className="mt-0.5 shrink-0 text-text-tertiary" />
             <div className="min-w-0">
               <p className="text-text-primary">{info.title}</p>
+              {info.detail && <p>{info.detail}</p>}
               {info.reason && <p>Reason: “{info.reason}”</p>}
               <p className="text-text-tertiary">{log.changed_by_name || 'System'} · {when(log.changed_at)}</p>
             </div>

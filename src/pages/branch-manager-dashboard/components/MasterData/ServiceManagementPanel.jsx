@@ -9,6 +9,7 @@ import { friendlyError } from '../../../../utils/friendlyError';
 import FilterBar from '../../../../components/ui/FilterBar';
 import {
   fetchServicesForManagement,
+  fetchServiceStaffIndex,
   fetchActiveCategories,
   toggleServiceActive,
   deleteService,
@@ -16,6 +17,7 @@ import {
 } from '../../../../services/api';
 import { useIndustry } from '../../../../hooks/useIndustry';
 import { formatNPR } from '../../../../services/bookingTransformers';
+import { useActiveBranchId, OVERALL_BRANCH_ID } from '../../../../contexts/BranchContext';
 
 // "NPR 2,500 – NPR 4,000" for a tiered service: its standard price and every tier price (a blank tier charges the standard price).
 const tierRangeLabel = (service, tiers) => {
@@ -90,15 +92,24 @@ const ServiceManagementPanel = () => {
     }
   }, []);
 
+  // ZNLY-418: "Open to everyone" / "N staff" chip: how many people at the active location are on the service's staff list (none = open to everyone)
+  const [staffIndex, setStaffIndex] = useState(null);
+  const activeBranchId = useActiveBranchId();
+  const staffChip = (s) => {
+    if (!staffIndex || !activeBranchId || activeBranchId === OVERALL_BRANCH_ID || s.requires_therapist === false) return null;
+    const n = (staffIndex.lists[s.id] || []).filter((t) => staffIndex.home[t] === activeBranchId).length;
+    return n === 0 ? 'Open to everyone' : `${n} staff`;
+  };
   const hasLoadedRef = useRef(false);
   const loadServices = useCallback(async () => {
     if (!hasLoadedRef.current) setLoading(true);
     setError(null);
-    const result = await fetchServicesForManagement();
+    const [result, staffIdx] = await Promise.all([fetchServicesForManagement(), fetchServiceStaffIndex()]);
     if (result.error) {
       setError(friendlyError(result.error, 'Failed to load services.'));
     } else {
       setServices(result.data || []);
+      setStaffIndex(staffIdx.data || null);
       // A tiered service charges by who does it, so the list shows its range, as the online page does.
       if ((result.data || []).some((x) => x.price_type === 'tiered')) {
         const tiers = await fetchTierPricesByService();
@@ -252,6 +263,7 @@ const ServiceManagementPanel = () => {
                     <span className="flex-shrink-0">· {s.duration_minutes} min ·</span>
                     <span className="flex-shrink-0 font-data text-text-primary">{price}</span>
                     {s.is_on_offer && <span className="flex-shrink-0 px-1.5 py-px rounded-[5px] bg-warning/10 text-warning text-[10px] font-medium">{offerBadge(s)}</span>}
+                    {staffChip(s) && <span data-staff-chip className="flex-shrink-0 px-1.5 py-px rounded-[5px] bg-[#F1F3F4] text-[10px] font-medium">{staffChip(s)}</span>}
                   </div>
                 </div>
                 <button type="button" onClick={(e) => { e.stopPropagation(); handleToggle(s); }} aria-label={s.is_active ? `Deactivate ${s.name}` : `Activate ${s.name}`}
@@ -296,7 +308,7 @@ const ServiceManagementPanel = () => {
             ) : (
               filteredServices.map((s) => (
                 <tr key={s.id} className={`border-b border-border last:border-b-0 ${rowTone(false, flashId === s.id)}`}>
-                  <td className={`px-4 py-3 font-body font-body-medium text-sm text-text-primary ${rowBar(flashId === s.id)}`}>{s.name}</td>
+                  <td className={`px-4 py-3 font-body font-body-medium text-sm text-text-primary ${rowBar(flashId === s.id)}`}>{s.name}{staffChip(s) && <span data-staff-chip className="ml-2 align-middle px-1.5 py-0.5 rounded bg-background text-[10px] font-medium text-text-secondary">{staffChip(s)}</span>}</td>
                   <td className="px-4 py-3 font-body text-sm text-text-secondary hidden lg:table-cell">{s.category || (isSpa ? 'Spa' : '—')}</td>
                   <td className="px-4 py-3 font-body text-sm text-text-secondary">{s.duration_minutes} min</td>
                   <td className="px-4 py-3 font-data text-sm text-text-primary">
