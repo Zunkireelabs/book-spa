@@ -4,8 +4,9 @@
 // Cancelled while its payment_status is paid/partial. So the "Cancel and refund" button only exists where that trigger really fires
 // (paid/partial, no refund yet — an earlier partial refund would be refunded a second time).
 import { isTendered } from '../lib/dayMoney';
+import { NEPAL_TZ } from './nepalTime';
 const npr = (n) => `NPR ${Number(n || 0).toLocaleString('en-IN')}`;
-const day = (ts) => (ts ? new Date(ts).toLocaleDateString('en-GB', { timeZone: 'Asia/Kathmandu', day: 'numeric', month: 'short' }) : '');
+const day = (ts) => (ts ? new Date(ts).toLocaleDateString('en-GB', { timeZone: NEPAL_TZ, day: 'numeric', month: 'short' }) : '');
 
 export function deleteBlockers({ payments = [], refunds = [], tips = [], hasReferral = false, packageUses = 0, status, paymentStatus } = {}) {
   const paid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);

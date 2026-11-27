@@ -4,7 +4,7 @@ import React from 'react';
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 
-vi.mock('../../../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { role: 'manager' } }) }));
+vi.mock('../../../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { role: 'manager' } }), useOptionalAuth: () => ({ profile: { role: 'manager' } }) }));
 vi.mock('../../../../contexts/OrgContext', () => ({ useOrg: () => ({ allowStaffOverlap: false, requireCustomerPhone: true }) }));
 vi.mock('../../../../hooks/useIndustry', () => ({ useIndustry: () => ({ staffLabel: 'Therapist', staffLabelPlural: 'Therapists', locationLabel: 'Room' }) }));
 const precheckMock = vi.hoisted(() => ({ value: { blocked: false, warn: false } }));

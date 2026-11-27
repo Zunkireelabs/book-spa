@@ -68,7 +68,7 @@ vi.mock('../../../../services/api', async (importOriginal) => ({
     },
   })),
 }));
-vi.mock('../../../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'u', org_id: 'o', role: 'manager' } }) }));
+vi.mock('../../../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'u', org_id: 'o', role: 'manager' } }), useOptionalAuth: () => ({ profile: { id: 'u', org_id: 'o', role: 'manager' } }) }));
 vi.mock('../../../../hooks/useIndustry', () => ({ useIndustry: () => ({ staffLabel: 'Therapist', staffLabelPlural: 'Therapists', locationLabel: 'Branch' }) }));
 vi.mock('../../../../hooks/useAutoRefresh', () => ({ useAutoRefresh: () => {} }));
 vi.mock('../../../../hooks/useAvailabilityConflictGuard', () => ({ useAvailabilityConflictGuard: () => ({ confirmConflicts: async () => true, conflictModal: null }) }));
