@@ -8,13 +8,11 @@ import {
   fetchTherapistsForManagement,
   fetchBranchWorkingHours,
   fetchRosterOverrides,
-  upsertRosterOverrides,
   fetchBlocksForRange,
 } from '../../../../services/api';
-import { useAvailabilityConflictGuard } from '../../../../hooks/useAvailabilityConflictGuard';
-import { rosterChange } from '../../../../services/availabilityConflicts';
 import { SHADE_STYLES } from '../../../../services/availabilityShading';
-import ModalShell from '../../../../components/ui/ModalShell';
+import RosterDayDialog from '../../../../components/ui/RosterDayDialog';
+import { weekDates, cellKind } from '../../../../utils/rosterWeek';
 import { wordBranch } from '../../../../utils/industryTerms';
 import { useClock } from '../../../../hooks/useUse24h';
 
@@ -42,18 +40,11 @@ function avatarColor(name) {
   return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
 }
 
-const formatDialogDate = (iso) => {
-  const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-};
-
 const cellKey = (therapistId, date) => `${therapistId}_${date}`;
 
-// Timely-style monthly roster: staff rows x date columns, each cell showing that day's
-// working hours (default from the staff member's recurring weekly hours, migration-275,
-// unless overridden for that specific date via migration-287's staff_roster_overrides).
-// "Set normal hours" deep-links to that staff member's weekly-hours editor instead of
-// duplicating it here — this grid only handles per-date exceptions.
+// Staff rows x day columns, each cell showing that day's working hours (the staff member's usual weekly hours,
+// migration-275, unless that date has its own hours, migration-287). Opens on the week starting today; a click opens
+// the one day box, which saves that day on its own. "Usual weekly hours" links to the staff page instead of duplicating it.
 const RosterPanel = ({ branchId }) => {
   const clock = useClock();
   const navigate = useNavigate();
@@ -61,34 +52,35 @@ const RosterPanel = ({ branchId }) => {
 
   const now = nepalLocalDate(); // the spa's day, not the device's
   const todayStr = toLocalISO(now);
+  const [view, setView] = useState('week');
+  const [weekOffset, setWeekOffset] = useState(0);
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
   const [staffFilter, setStaffFilter] = useState('all');
 
   const [therapists, setTherapists] = useState([]);
   const [defaultHours, setDefaultHours] = useState(new Map()); // therapistId -> [{dayOfWeek,startTime,endTime,isDayOff}]
-  const [overrides, setOverrides] = useState(new Map());       // cellKey -> {startTime,endTime,isDayOff}
-  const [pending, setPending] = useState(new Map());            // cellKey -> {startTime,endTime,isDayOff} (unsaved)
+  const [overrides, setOverrides] = useState(new Map());       // cellKey -> {startTime,endTime,isDayOff,breaks}
   const [closedDates, setClosedDates] = useState(new Set());    // dates with a whole-location Calendar block ("Business closed")
-  const [editDraft, setEditDraft] = useState({ startTime: '', endTime: '', breaks: [] });
-  const [editTarget, setEditTarget] = useState(null);           // { therapist, dateInfo } the date-change dialog is open for
-  const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
+  const [editTarget, setEditTarget] = useState(null);           // { therapist, dateInfo } the day box is open for
 
   const [staffLoading, setStaffLoading] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [notice, setNotice] = useState(null);
 
   const days = useMemo(() => {
-    const result = [];
-    const total = new Date(year, month, 0).getDate();
-    for (let d = 1; d <= total; d++) {
-      const date = new Date(year, month - 1, d);
-      result.push({ date: toLocalISO(date), day: d, weekday: WEEKDAY_SHORT[date.getDay()], dayOfWeek: isoDayOfWeek(date) });
+    const mk = (date) => ({ date: toLocalISO(date), day: date.getDate(), weekday: WEEKDAY_SHORT[date.getDay()], dayOfWeek: isoDayOfWeek(date) });
+    if (view === 'week') {
+      return weekDates(todayStr, weekOffset).map((iso) => { const [y, m, d] = iso.split('-').map(Number); return mk(new Date(y, m - 1, d)); });
     }
-    return result;
-  }, [month, year]);
+    const total = new Date(year, month, 0).getDate();
+    return Array.from({ length: total }, (_, i) => mk(new Date(year, month - 1, i + 1)));
+  }, [view, weekOffset, todayStr, month, year]);
+
+  const rangeLabel = useMemo(() => {
+    const f = (iso) => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', ''); };
+    return `${f(days[0].date)} – ${f(days[days.length - 1].date)}`;
+  }, [days]);
 
   const loadStaffAndDefaults = useCallback(async () => {
     setStaffLoading(true);
@@ -120,7 +112,6 @@ const RosterPanel = ({ branchId }) => {
       setError(friendlyError(blocksErr, 'Failed to load calendar blocks.'));
     } else {
       setOverrides(data || new Map());
-      setPending(new Map());
       // "Business closed" = a whole-location Calendar block (no specific therapist/room —
       // see AddBlockModal's "Whole location" + "Closed all day" options) touching that date.
       const closed = new Set((blockOccurrences || []).filter(occ => !occ.therapistId && !occ.roomId).map(occ => occ.date));
@@ -138,34 +129,30 @@ const RosterPanel = ({ branchId }) => {
     setYear(d.getFullYear());
   };
 
-  // Scrolls today's column to sit right after the sticky name column. A tick counter
-  // (rather than calling scrollIntoView directly) lets this fire even when the month/year
-  // don't actually change — e.g. clicking Today while already viewing the current month —
-  // and the effect below waits a frame so it runs after any month switch has re-rendered
-  // the day columns (and refreshed todayColRef) first.
+  // Month view: today's column sits right after the sticky name column. The tick starts at 1 so it also fires on
+  // open (not only on the Today click); the effect waits a frame so it runs after the day columns have rendered.
   const todayColRef = useRef(null);
-  const [scrollToTodayTick, setScrollToTodayTick] = useState(0);
+  const [scrollToTodayTick, setScrollToTodayTick] = useState(1);
   const jumpToToday = () => {
+    setWeekOffset(0);
     setMonth(now.getMonth() + 1);
     setYear(now.getFullYear());
     setScrollToTodayTick(t => t + 1);
   };
   const scrollContainerRef = useRef(null);
-  const STICKY_NAME_COL_WIDTH = 200; // matches the sticky name column's min-w-[200px] below
+  const STICKY_NAME_COL_WIDTH = 200; // matches the sticky name column's width below
   useEffect(() => {
-    if (scrollToTodayTick === 0) return;
+    if (view !== 'month' || staffLoading) return undefined;
     const raf = requestAnimationFrame(() => {
       const container = scrollContainerRef.current;
       const col = todayColRef.current;
       if (!container || !col) return;
-      // scrollIntoView's "start" would land today's column flush with the scroll
-      // container's own left edge — i.e. hidden behind the sticky name column, not
-      // after it. Compute the offset ourselves so today lands right past it instead.
+      // scrollIntoView's "start" would hide today's column behind the sticky name column; offset it ourselves.
       const delta = col.getBoundingClientRect().left - container.getBoundingClientRect().left - STICKY_NAME_COL_WIDTH;
       container.scrollBy({ left: delta, behavior: 'smooth' });
     });
     return () => cancelAnimationFrame(raf);
-  }, [scrollToTodayTick, days]);
+  }, [scrollToTodayTick, days, view, staffLoading]);
 
   const defaultForCell = useCallback((therapistId, dayOfWeek) => {
     const rows = defaultHours.get(therapistId);
@@ -173,142 +160,20 @@ const RosterPanel = ({ branchId }) => {
     return row || { startTime: null, endTime: null, isDayOff: true, breaks: [], noHours: !rows?.length };
   }, [defaultHours]);
 
-  // Effective state for a cell, preferring an unsaved edit, then a saved override, then
-  // falling back to the staff member's normal weekly hours for that weekday.
-  const stateForCell = useCallback((therapistId, dateInfo) => {
-    const key = cellKey(therapistId, dateInfo.date);
-    if (pending.has(key)) return { ...pending.get(key), source: 'pending' };
-    if (overrides.has(key)) return { ...overrides.get(key), source: 'override' };
-    return { ...defaultForCell(therapistId, dateInfo.dayOfWeek), source: 'default' };
-  }, [pending, overrides, defaultForCell]);
-
-  const setCell = (therapistId, date, patch) => {
-    setPending(prev => {
-      const next = new Map(prev);
-      const current = next.get(cellKey(therapistId, date)) || {};
-      next.set(cellKey(therapistId, date), { ...current, ...patch });
-      return next;
-    });
-  };
-
-  const toggleCell = (therapistId, dateInfo, state) => {
-    if (state.isDayOff) {
-      setCell(therapistId, dateInfo.date, {
-        isDayOff: false,
-        startTime: state.startTime || '10:00',
-        endTime: state.endTime || '18:00',
-        breaks: state.breaks || [],
-      });
-    } else {
-      setCell(therapistId, dateInfo.date, { isDayOff: true, startTime: null, endTime: null, breaks: [] });
-    }
-  };
-
-  // A date change replaces that day's weekly hours AND breaks, so the dialog starts from what applies today (breaks included).
-  const startEditing = (therapist, dateInfo, state) => {
-    setEditTarget({ therapist, dateInfo });
-    setEditDraft({
-      startTime: String(state.startTime || '10:00').slice(0, 5),
-      endTime: String(state.endTime || '18:00').slice(0, 5),
-      breaks: (state.breaks || []).map((b) => ({ name: b.name || '', startTime: b.startTime, endTime: b.endTime })),
-    });
-  };
-
-  const draftError = (() => {
-    if (!editTarget) return null;
-    const { startTime, endTime, breaks } = editDraft;
-    if (!startTime || !endTime || startTime >= endTime) return 'Start time must be before end time.';
-    for (const b of breaks) {
-      if (!b.startTime || !b.endTime || b.startTime >= b.endTime) return 'Each break needs a start before its end.';
-      if (b.startTime < startTime || b.endTime > endTime) return 'Breaks must sit inside the working hours.';
-    }
-    return null;
-  })();
-
-  const commitEdit = () => {
-    if (!editTarget || draftError) return;
-    setCell(editTarget.therapist.id, editTarget.dateInfo.date, {
-      isDayOff: false, startTime: editDraft.startTime, endTime: editDraft.endTime,
-      breaks: editDraft.breaks.filter((b) => b.startTime && b.endTime),
-    });
-    setEditTarget(null);
-  };
-
-  const handleSave = async () => {
-    if (pending.size === 0) return;
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-
-    const payload = Array.from(pending.entries()).map(([key, value]) => {
-      const [therapistId, date] = [key.slice(0, key.indexOf('_')), key.slice(key.indexOf('_') + 1)];
-      return { therapistId, date, isDayOff: value.isDayOff, startTime: value.startTime, endTime: value.endTime, breaks: value.isDayOff ? [] : (value.breaks || []) };
-    });
-
-    // List the upcoming bookings these date changes would strand before saving (kept either way).
-    const checks = payload.map((o) => ({
-      therapistId: o.therapistId,
-      name: therapists.find((t) => t.id === o.therapistId)?.name,
-      change: rosterChange({ date: o.date, isDayOff: o.isDayOff, start: o.startTime, end: o.endTime, breaks: o.breaks.map((b) => ({ start: b.startTime, end: b.endTime })) }),
-    }));
-    if (!(await confirmConflicts({ checks, summary: 'You are changing these dates in the roster.', titleFor: (n) => `${n} upcoming booking${n === 1 ? '' : 's'} ${n === 1 ? 'falls' : 'fall'} outside the new schedule`, saveLabel: 'Save roster' }))) {
-      setSaving(false);
-      return;
-    }
-
-    const { error: saveErr } = await upsertRosterOverrides(payload);
-    if (saveErr) {
-      setError(friendlyError(saveErr, 'Failed to save roster.'));
-      setSaving(false);
-      return;
-    }
-
-    setSaving(false);
-    setNotice('Roster saved.');
-    loadOverrides();
-  };
-
   const visibleTherapists = staffFilter === 'all' ? therapists : therapists.filter(t => t.id === staffFilter);
-  const hasPending = pending.size > 0;
+  const shift = (delta) => {
+    if (view === 'week') { setWeekOffset(w => w + delta); return; }
+    const d = new Date(year, month - 1 + delta, 1);
+    setMonth(d.getMonth() + 1);
+    setYear(d.getFullYear());
+  };
+  const arrow = 'w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-spa border border-border bg-surface text-text-secondary hover:border-primary hover:text-primary spa-transition-fast';
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          {/* No heading: the active tab right above is already "Roster". */}
-          <p className="font-body text-sm text-text-secondary">
-            Per-date working hours — overrides each staff member's normal weekly schedule.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={!hasPending || saving}
-          className={`relative inline-flex items-center gap-2 px-5 py-2.5 rounded-spa text-sm font-body font-body-semibold spa-transition-fast ${
-            hasPending && !saving
-              ? 'bg-primary text-white shadow-spa-resting hover:shadow-spa-elevated hover:bg-primary/90'
-              : 'bg-background text-text-tertiary border border-border cursor-not-allowed'
-          }`}
-        >
-          {saving ? (
-            <>
-              <Icon name="Loader2" size={15} className="animate-spin" />
-              <span>Saving…</span>
-            </>
-          ) : (
-            <>
-              <Icon name="Save" size={15} />
-              <span>Save roster</span>
-              {hasPending && (
-                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-white/20 text-[11px] font-data font-data-medium">
-                  {pending.size}
-                </span>
-              )}
-            </>
-          )}
-        </button>
-      </div>
+      <p className="font-body text-sm text-text-secondary">
+        Change one day's hours here. This doesn't change the person's usual weekly hours.
+      </p>
 
       {error && (
         <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm animate-fade-in">
@@ -317,16 +182,7 @@ const RosterPanel = ({ branchId }) => {
           <button onClick={() => setError(null)} className="ml-auto flex-shrink-0"><Icon name="X" size={14} /></button>
         </div>
       )}
-      {notice && (
-        <div className="flex items-center gap-2 p-3 bg-success/10 border border-success/20 rounded-spa text-success text-sm animate-fade-in">
-          <Icon name="CheckCircle2" size={16} className="flex-shrink-0" />
-          <span>{notice}</span>
-          <button onClick={() => setNotice(null)} className="ml-auto flex-shrink-0"><Icon name="X" size={14} /></button>
-        </div>
-      )}
 
-      {/* Toolbar card — every control is exactly h-9, one flat row, so nothing
-          visually bobbles up or down against its neighbors. */}
       <div className="flex items-center justify-between gap-3 flex-wrap p-3 border border-border rounded-spa-lg bg-surface shadow-spa-resting">
         <div className="flex items-center gap-2 flex-wrap">
           <div className="w-48">
@@ -341,36 +197,22 @@ const RosterPanel = ({ branchId }) => {
 
           <div className="w-px h-6 bg-border mx-0.5" />
 
-          <button
-            type="button"
-            onClick={() => shiftMonth(-1)}
-            aria-label="Previous month"
-            className="w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-spa border border-border bg-surface text-text-secondary hover:border-primary hover:text-primary spa-transition-fast"
-          >
+          <button type="button" onClick={() => shift(-1)} aria-label={view === 'week' ? 'Previous week' : 'Previous month'} className={arrow}>
             <Icon name="ChevronLeft" size={15} />
           </button>
-          <div className="w-32">
-            <CustomSelect
-              value={month}
-              onChange={(v) => setMonth(Number(v))}
-              options={MONTH_NAMES.map((m, i) => ({ value: i + 1, label: m }))}
-              size="sm"
-            />
-          </div>
-          <div className="w-[88px]">
-            <CustomSelect
-              value={year}
-              onChange={(v) => setYear(Number(v))}
-              options={[year - 1, year, year + 1].map(y => ({ value: y, label: String(y) }))}
-              size="sm"
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => shiftMonth(1)}
-            aria-label="Next month"
-            className="w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-spa border border-border bg-surface text-text-secondary hover:border-primary hover:text-primary spa-transition-fast"
-          >
+          {view === 'week' ? (
+            <span data-testid="roster-range" className="font-body font-body-medium text-sm text-text-primary px-1 whitespace-nowrap">{rangeLabel}</span>
+          ) : (
+            <>
+              <div className="w-32">
+                <CustomSelect value={month} onChange={(v) => setMonth(Number(v))} options={MONTH_NAMES.map((m, i) => ({ value: i + 1, label: m }))} size="sm" />
+              </div>
+              <div className="w-[88px]">
+                <CustomSelect value={year} onChange={(v) => setYear(Number(v))} options={[year - 1, year, year + 1].map(y => ({ value: y, label: String(y) }))} size="sm" />
+              </div>
+            </>
+          )}
+          <button type="button" onClick={() => shift(1)} aria-label={view === 'week' ? 'Next week' : 'Next month'} className={arrow}>
             <Icon name="ChevronRight" size={15} />
           </button>
 
@@ -383,6 +225,19 @@ const RosterPanel = ({ branchId }) => {
           >
             Today
           </button>
+          <div className="inline-flex h-9 rounded-spa border border-border overflow-hidden" role="group" aria-label="Roster range">
+            {[['week', 'Week'], ['month', 'Month']].map(([v, label]) => (
+              <button
+                key={v}
+                type="button"
+                aria-pressed={view === v}
+                onClick={() => { setView(v); if (v === 'month') setScrollToTodayTick(t => t + 1); }}
+                className={`px-3 text-sm font-body font-body-medium spa-transition-fast ${view === v ? 'bg-primary text-white' : 'bg-surface text-text-secondary hover:text-primary'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {loading && (
@@ -393,21 +248,15 @@ const RosterPanel = ({ branchId }) => {
         )}
       </div>
 
-      {/* Grid */}
       <div className="border border-border rounded-spa-lg shadow-spa-resting overflow-hidden bg-surface">
         <div ref={scrollContainerRef} className="overflow-auto max-h-[62vh]">
-          {/* border-separate (not border-collapse) — collapsed borders break solid
-              background painting on sticky cells in Chrome/Safari, which is what was
-              letting the scrolled-under columns ghost through the sticky name column
-              and header corner. */}
-          <table className="border-separate border-spacing-0 min-w-full">
+          {/* border-separate (not border-collapse): collapsed borders break solid background painting on sticky cells. */}
+          <table className={`border-separate border-spacing-0 min-w-full ${view === 'week' ? 'table-fixed' : ''}`} style={view === 'week' ? { minWidth: 200 + days.length * 92 } : undefined}>
             <thead>
               <tr>
-                {/* Sticky on BOTH axes — needs to outrank the plain top-sticky date headers
-                    (z-sticky-filter) it passes over while the grid scrolls horizontally, or
-                    their background briefly wins the paint order and ghosts through it. */}
-                <th className="sticky left-0 top-0 z-header bg-background border-b border-r border-border px-4 py-3 text-left font-body font-body-semibold text-sm text-text-primary min-w-[200px]">
-                  {MONTH_NAMES[month - 1]} {year}
+                {/* Sticky on BOTH axes: outranks the top-sticky date headers it passes over while scrolling sideways. */}
+                <th className="sticky left-0 top-0 z-header bg-background border-b border-r border-border px-4 py-3 text-left font-body font-body-semibold text-sm text-text-primary w-[200px] min-w-[200px]">
+                  {view === 'week' ? 'Staff' : `${MONTH_NAMES[month - 1]} ${year}`}
                 </th>
                 {days.map(d => {
                   const isToday = d.date === todayStr;
@@ -416,9 +265,8 @@ const RosterPanel = ({ branchId }) => {
                     <th
                       key={d.date}
                       ref={isToday ? todayColRef : null}
-                      className={`sticky top-0 z-sticky-filter border-b border-border px-1.5 py-2.5 text-center min-w-[76px] spa-transition-fast ${
-                        // Solid colors only — any alpha here would let the vertically-scrolled
-                        // body rows ghost through this sticky header, same bug as the corner cell.
+                      className={`sticky top-0 z-sticky-filter border-b border-border px-1.5 py-2.5 text-center ${view === 'month' ? 'min-w-[76px]' : ''} spa-transition-fast ${
+                        // Solid colors only: alpha would let scrolled rows ghost through this sticky header.
                         isToday ? 'bg-green-50' : isWeekend ? 'bg-stone-100' : 'bg-background'
                       }`}
                     >
@@ -439,7 +287,7 @@ const RosterPanel = ({ branchId }) => {
               {staffLoading ? (
                 Array.from({ length: 4 }).map((_, i) => (
                   <tr key={i}>
-                    <td className="sticky left-0 z-sticky-filter bg-surface border-r border-b border-border px-4 py-3 min-w-[200px]">
+                    <td className="sticky left-0 z-sticky-filter bg-surface border-r border-b border-border px-4 py-3">
                       <div className="flex items-center gap-2.5">
                         <div className="w-8 h-8 rounded-full bg-background animate-pulse" />
                         <div className="h-3 w-24 rounded bg-background animate-pulse" />
@@ -461,8 +309,8 @@ const RosterPanel = ({ branchId }) => {
                 </tr>
               ) : (
                 visibleTherapists.map(t => (
-                  <tr key={t.id} className="group/row hover:bg-background/40 spa-transition-fast">
-                    <td className="sticky left-0 z-sticky-filter bg-surface group-hover/row:bg-background border-r border-b border-border px-4 py-2.5 align-middle min-w-[200px] spa-transition-fast">
+                  <tr key={t.id} className="group/row">
+                    <td className="sticky left-0 z-sticky-filter bg-surface border-r border-b border-border px-4 py-2.5 align-middle">
                       <div className="flex items-center gap-2.5">
                         <div className={`flex-shrink-0 w-8 h-8 rounded-full ${avatarColor(t.name)} text-white flex items-center justify-center font-body font-body-semibold text-xs`}>
                           {initials(t.name)}
@@ -472,23 +320,29 @@ const RosterPanel = ({ branchId }) => {
                           <button
                             type="button"
                             onClick={() => navigate(`/${orgSlug}/staff/${t.id}#working-hours`)}
-                            className="font-caption text-[11px] text-primary opacity-0 group-hover/row:opacity-100 focus:opacity-100 hover:underline spa-transition-fast inline-flex items-center gap-0.5"
+                            className="font-caption text-[11px] text-primary hover:underline inline-flex items-center gap-0.5"
                           >
-                            <Icon name="Clock" size={10} />
-                            <span>Set normal hours</span>
+                            Usual weekly hours ›
                           </button>
                         </div>
                       </div>
                     </td>
                     {days.map(d => {
-                      const isToday = d.date === todayStr;
+                      const key = cellKey(t.id, d.date);
+                      const usual = defaultForCell(t.id, d.dayOfWeek);
+                      const override = overrides.get(key);
+                      const { kind, changed } = cellKind({ closed: closedDates.has(d.date), override, usual });
+                      const eff = override || usual;
+                      const tdCls = `border-b border-border text-center align-middle p-1 ${d.date === todayStr ? 'bg-primary/5' : ''}`;
 
-                      if (closedDates.has(d.date)) {
+                      if (kind === 'closed') {
                         return (
-                          <td key={d.date} className={`border-b border-border text-center align-middle p-1.5 ${isToday ? 'bg-primary/5' : ''}`}>
+                          <td key={d.date} className={tdCls}>
                             <div
-                              className="w-full h-16 flex items-center justify-center rounded-spa bg-slate-700 text-white text-[10px] font-body font-body-medium gap-1"
+                              className="w-full h-16 flex items-center justify-center rounded-spa text-text-tertiary text-[11px] font-body font-body-medium gap-1 border border-border"
+                              style={{ background: 'repeating-linear-gradient(45deg,#f3f4f6,#f3f4f6 6px,#e5e7eb 6px,#e5e7eb 12px)' }}
                               title="Business closed"
+                              data-cell="closed"
                             >
                               <Icon name="Lock" size={11} />
                               <span>Closed</span>
@@ -497,87 +351,36 @@ const RosterPanel = ({ branchId }) => {
                         );
                       }
 
-                      const state = stateForCell(t.id, d);
-                      const key = cellKey(t.id, d.date);
-                      const isModified = state.source !== 'default';
-
-                      // Shared segmented ✕/✓ pill — always visible (not a hover-only corner
-                      // badge) so the undo path for a toggle is never a mystery. The active
-                      // side is filled solid; the inactive side is the click target.
-                      const renderToggle = (onCardTone) => (
-                        <div className={`mt-1.5 inline-flex items-center gap-0.5 rounded-full p-0.5 ${onCardTone ? 'bg-white/15' : 'bg-surface border border-border shadow-sm'}`}>
-                          <span
-                            title={state.isDayOff ? 'Not working' : 'Working'}
-                            className={`w-5 h-5 rounded-full flex items-center justify-center ${
-                              state.isDayOff
-                                ? (onCardTone ? 'bg-white/25 text-white' : 'bg-text-tertiary/15 text-text-secondary')
-                                : (onCardTone ? 'bg-white/25 text-white' : 'bg-primary text-white')
-                            }`}
-                          >
-                            <Icon name={state.isDayOff ? 'X' : 'Check'} size={10} />
-                          </span>
+                      const brk = eff.breaks || [];
+                      return (
+                        <td key={d.date} className={tdCls}>
                           <button
                             type="button"
-                            title={state.isDayOff ? 'Mark as working' : 'Mark as not working'}
-                            onClick={(e) => { e.stopPropagation(); toggleCell(t.id, d, state); }}
-                            className={`w-5 h-5 rounded-full flex items-center justify-center spa-transition-fast ${
-                              onCardTone ? 'text-white/70 hover:bg-white/25 hover:text-white' : 'text-text-tertiary hover:bg-primary hover:text-white'
+                            data-cell={kind}
+                            data-changed={changed || undefined}
+                            onClick={() => setEditTarget({ therapist: t, dateInfo: d })}
+                            title="Change hours for this day"
+                            className={`w-full h-16 flex flex-col items-center justify-center gap-0.5 rounded-spa border text-center spa-transition-fast hover:shadow-spa-resting ${
+                              changed ? 'border-amber-400 bg-amber-50' : kind === 'off' ? 'border-dashed border-border bg-background/60' : 'border-border bg-surface'
                             }`}
                           >
-                            <Icon name={state.isDayOff ? 'Check' : 'X'} size={10} />
-                          </button>
-                        </div>
-                      );
-
-                      if (state.isDayOff) {
-                        return (
-                          <td key={d.date} className={`border-b border-border text-center align-middle p-1.5 ${isToday ? 'bg-primary/5' : ''}`}>
-                            <div
-                              className={`flex flex-col items-center justify-center h-16 rounded-spa border spa-transition-fast ${
-                                isModified
-                                  ? 'bg-amber-50 border-amber-200'
-                                  : 'border-dashed border-border/70 bg-background/30 hover:bg-background/70 hover:border-border'
-                              }`}
-                            >
-                              <span className={`font-caption text-[10px] font-caption-medium ${isModified ? 'text-amber-700' : 'text-text-tertiary'}`}>
-                                {isModified ? 'Day off' : state.noHours ? 'No set hours' : 'Off'}
-                              </span>
-                              {renderToggle(false)}
-                            </div>
-                          </td>
-                        );
-                      }
-
-                      return (
-                        <td key={d.date} className={`border-b border-border text-center align-middle p-1.5 ${isToday ? 'bg-primary/5' : ''}`}>
-                          <div
-                            className={`flex flex-col items-center justify-center min-h-[64px] py-1 rounded-spa spa-transition-fast hover:shadow-spa-resting ${
-                              isModified
-                                ? 'bg-gradient-to-br from-amber-400 to-amber-500 text-white'
-                                : 'bg-gradient-to-br from-primary to-primary/85 text-white'
-                            }`}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => startEditing(t, d, state)}
-                              title="Click to change hours and breaks"
-                              className="flex flex-col items-center leading-tight hover:underline"
-                            >
-                              <span className="font-data text-[11px] font-data-medium">{clock(state.startTime)}</span>
-                              <span className="font-data text-[11px] opacity-90">{clock(state.endTime)}</span>
-                            </button>
-                            {(state.breaks || []).length > 0 && (
+                            {kind === 'off' ? (
+                              <span className="font-body text-[11px] text-text-tertiary">{usual.noHours && !override ? 'No set hours' : 'Off'}</span>
+                            ) : (
+                              <span className="font-data text-[10.5px] leading-tight text-text-secondary">{clock(String(eff.startTime).slice(0, 5))}–{clock(String(eff.endTime).slice(0, 5))}</span>
+                            )}
+                            {kind === 'usual' && brk.length > 0 && (
                               <span
                                 data-testid="roster-cell-breaks"
-                                title={state.breaks.map((b) => `${b.name || 'Break'} ${b.startTime}–${b.endTime}`).join(', ')}
-                                className="mt-1 inline-flex items-center rounded px-1 font-data text-[9px] leading-4 whitespace-nowrap"
+                                title={brk.map((b) => `${b.name || 'Break'} ${b.startTime}–${b.endTime}`).join(', ')}
+                                className="inline-flex items-center rounded px-1 font-data text-[9px] leading-4 whitespace-nowrap"
                                 style={{ background: SHADE_STYLES.break.solid, color: SHADE_STYLES.break.color }}
                               >
-                                {state.breaks.length === 1 ? `${state.breaks[0].name ? `${state.breaks[0].name} ` : ''}${state.breaks[0].startTime}–${state.breaks[0].endTime}` : `${state.breaks.length} breaks`}
+                                {brk.length === 1 ? `${brk[0].name ? `${brk[0].name} ` : ''}${brk[0].startTime}–${brk[0].endTime}` : `${brk.length} breaks`}
                               </span>
                             )}
-                            {renderToggle(true)}
-                          </div>
+                            {changed && <span className="font-caption text-[9.5px] font-caption-medium text-amber-700">Changed</span>}
+                          </button>
                         </td>
                       );
                     })}
@@ -589,88 +392,36 @@ const RosterPanel = ({ branchId }) => {
         </div>
       </div>
 
-      {editTarget && (
-        <ModalShell onClose={() => setEditTarget(null)} className="max-w-sm" aria-label="Change hours for this date" data-testid="roster-date-dialog">
-          <div>
-            <div className="flex items-center justify-between p-4 border-b border-border">
-              <h4 className="font-heading font-heading-semibold text-base text-text-primary">
-                {formatDialogDate(editTarget.dateInfo.date)} · {editTarget.therapist.name}
-              </h4>
-              <button type="button" onClick={() => setEditTarget(null)} className="p-1.5 rounded-spa hover:bg-background" aria-label="Close"><Icon name="X" size={18} className="text-text-secondary" /></button>
-            </div>
-            <div className="p-4 space-y-4">
-              <div>
-                <p className="font-caption text-xs text-text-secondary mb-1.5">Works</p>
-                <div className="flex items-center gap-2">
-                  <input type="time" aria-label="Works from" value={editDraft.startTime} onChange={(e) => setEditDraft((p) => ({ ...p, startTime: e.target.value }))}
-                    className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data text-sm" />
-                  <span className="text-text-tertiary">–</span>
-                  <input type="time" aria-label="Works until" value={editDraft.endTime} onChange={(e) => setEditDraft((p) => ({ ...p, endTime: e.target.value }))}
-                    className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data text-sm" />
-                </div>
-              </div>
-              <div>
-                <p className="font-caption text-xs text-text-secondary mb-1.5">Breaks that day</p>
-                <div className="space-y-2">
-                  {editDraft.breaks.map((b, i) => {
-                    const setBreak = (patch) => setEditDraft((p) => ({ ...p, breaks: p.breaks.map((x, n) => (n === i ? { ...x, ...patch } : x)) }));
-                    return (
-                      <div key={i} className="space-y-1.5 rounded-spa border border-border/70 p-2">
-                        <div className="flex items-center gap-2">
-                          <input type="text" aria-label={`Break ${i + 1} name`} placeholder="Name, e.g. Tea" maxLength={40} value={b.name || ''} onChange={(e) => setBreak({ name: e.target.value })}
-                            className="min-w-0 flex-1 px-2 py-1.5 rounded-spa border border-border bg-surface font-body text-sm" />
-                          <button type="button" aria-label={`Remove break ${i + 1}`} onClick={() => setEditDraft((p) => ({ ...p, breaks: p.breaks.filter((_, n) => n !== i) }))} className="p-1.5 rounded-spa hover:bg-background text-text-tertiary hover:text-error">
-                            <Icon name="X" size={14} />
-                          </button>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <input type="time" aria-label={`Break ${i + 1} from`} value={b.startTime} onChange={(e) => setBreak({ startTime: e.target.value })}
-                            className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data text-sm" />
-                          <span className="text-text-tertiary">–</span>
-                          <input type="time" aria-label={`Break ${i + 1} until`} value={b.endTime} onChange={(e) => setBreak({ endTime: e.target.value })}
-                            className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data text-sm" />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    onClick={() => setEditDraft((p) => ({ ...p, breaks: [...p.breaks, { name: '', startTime: '13:00', endTime: '14:00' }] }))}
-                    className="inline-flex items-center gap-1 font-caption text-xs text-primary hover:underline"
-                  >
-                    <Icon name="Plus" size={12} /> Add break
-                  </button>
-                </div>
-              </div>
-              {draftError && <p role="alert" className="font-caption text-xs text-error">{draftError}</p>}
-              <p className="font-caption text-[11px] text-text-tertiary">A date change replaces that day's usual hours and breaks.</p>
-            </div>
-            <div className="flex items-center justify-end gap-2 p-4 border-t border-border">
-              <button type="button" onClick={() => setEditTarget(null)} className="h-9 px-3 text-[13px] font-body font-body-medium border border-border rounded-spa hover:bg-background">Cancel</button>
-              <button type="button" onClick={commitEdit} disabled={!!draftError} className="h-9 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed">Apply to date</button>
-            </div>
-          </div>
-        </ModalShell>
-      )}
-      {conflictModal}
+      {editTarget && (() => {
+        const { therapist, dateInfo } = editTarget;
+        const usual = defaultForCell(therapist.id, dateInfo.dayOfWeek);
+        const override = overrides.get(cellKey(therapist.id, dateInfo.date));
+        return (
+          <RosterDayDialog
+            therapist={therapist}
+            date={dateInfo.date}
+            current={override || usual}
+            usual={usual}
+            changed={!!override}
+            onClose={() => setEditTarget(null)}
+            onSaved={() => { setEditTarget(null); loadOverrides(); }}
+          />
+        );
+      })()}
 
-      {/* Legend */}
       <div className="flex items-center gap-2 flex-wrap">
         <span className="font-caption font-caption-medium text-[11px] uppercase tracking-wide text-text-tertiary mr-1">Key</span>
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background text-xs text-text-secondary">
-          <Icon name="Check" size={11} /> Working
+          <span className="w-2.5 h-2.5 rounded-full border border-border bg-surface inline-block" /> Usual hours
         </span>
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background text-xs text-text-secondary">
-          <Icon name="X" size={11} /> Not working
+          <span className="w-2.5 h-2.5 rounded-full border border-amber-400 bg-amber-50 inline-block" /> Changed for that day
         </span>
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background text-xs text-text-secondary">
-          <span className="w-2.5 h-2.5 rounded-full bg-gradient-to-br from-primary to-primary/85 inline-block" /> Normal hours
+          <span className="w-2.5 h-2.5 rounded-full border border-dashed border-border bg-background inline-block" /> Off
         </span>
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background text-xs text-text-secondary">
-          <span className="w-2.5 h-2.5 rounded-full bg-gradient-to-br from-amber-400 to-amber-500 inline-block" /> Modified date
-        </span>
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background text-xs text-text-secondary">
-          <span className="w-2.5 h-2.5 rounded-full bg-slate-700 inline-block" /> Business closed
+          <span className="w-2.5 h-2.5 rounded-full bg-gray-300 inline-block" /> Business closed
           <button
             type="button"
             onClick={() => navigate(`/${orgSlug}/dashboard?view=closed-dates`)}
@@ -681,9 +432,7 @@ const RosterPanel = ({ branchId }) => {
           </button>
         </span>
       </div>
-      <p className="font-caption text-[11px] text-text-tertiary">
-        Click a cell to adjust its hours for that date. Hover the check mark to mark a working day off, or the ✕ to reopen it.
-      </p>
+      <p className="font-caption text-[11px] text-text-tertiary">Click any day to change its hours. Each day saves on its own.</p>
     </div>
   );
 };

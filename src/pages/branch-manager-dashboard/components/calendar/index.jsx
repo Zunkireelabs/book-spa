@@ -31,7 +31,9 @@ import { useCalendarPanels } from './hooks/useCalendarPanels';
 import { useCalendarShortcuts } from './hooks/useCalendarShortcuts';
 import { useGoTodaySignal } from './calendarSignals';
 import { useBookingActions } from './hooks/useBookingActions';
-import { isOverallBranch, assignTherapist } from '../../../../services/api';
+import { isOverallBranch, assignTherapist, fetchBranchWorkingHours } from '../../../../services/api';
+import RosterDayDialog from '../../../../components/ui/RosterDayDialog';
+import { hoursFromShiftRow, dbDowOfDate } from '../../../../utils/staffDay';
 import { supabase } from '../../../../lib/supabase';
 import { useAvailabilityGuard } from '../../../../contexts/AvailabilityOverrideContext';
 import AssignFlow from './AssignFlow';
@@ -163,6 +165,17 @@ const OperationalCalendar = ({ branchId }) => {
     setTimeout(tick, 250);
   };
 
+
+  // Staff header menu -> "Change hours for <day>": the same day box the Roster uses, then the shading re-reads.
+  const [dayHoursBox, setDayHoursBox] = useState(null); // { therapist, date, current, usual, changed }
+  const openDayHours = async (col) => {
+    const date = currentDate;
+    const row = shiftsByTherapist?.[col.id]?.[date];
+    const { data: map } = await fetchBranchWorkingHours(branchId);
+    const usual = (map?.get(col.id) || []).find((r) => r.dayOfWeek === dbDowOfDate(date)) || { isDayOff: true, startTime: null, endTime: null, breaks: [] };
+    const hrs = hoursFromShiftRow(row);
+    setDayHoursBox({ therapist: { id: col.id, name: col.name }, date, usual, changed: hrs.source === 'override', current: hrs.missing || hrs.source === 'none' ? usual : hrs });
+  };
 
   const {
     calendarData, setCalendarData, error, attendanceMap, attendanceByTherapist, shiftsByTherapist, blocksAvailable, transfersAvailable,
@@ -516,6 +529,11 @@ const OperationalCalendar = ({ branchId }) => {
                   pickMode={!!rebookSource}
                   onEditManualBlock={(range) => runThroughPanelGuard(() => openOnlyPanel(() => setEditingBlock({ blockId: range.blockId, day: range.day })))}
                   onEditTransfer={transfersAvailable ? (col) => runThroughPanelGuard(() => openOnlyPanel(() => setEditingTransferTherapist({ id: col.id, name: col.name }))) : undefined}
+                  staffDayActions={['manager', 'admin'].includes(userRole) && !isOverallBranch(branchId) ? {
+                    changeHours: openDayHours,
+                    usualHours: (col) => navigate(`/${orgSlug}/staff/${col.id}#working-hours`),
+                    profile: (col) => navigate(`/${orgSlug}/staff/${col.id}`),
+                  } : undefined}
                   hideSensitive={hideSensitive}
                   startHour={calendarStartHour}
                   endHour={calendarEndHour}
@@ -632,6 +650,14 @@ const OperationalCalendar = ({ branchId }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {dayHoursBox && (
+        <RosterDayDialog
+          {...dayHoursBox}
+          onClose={() => setDayHoursBox(null)}
+          onSaved={() => { setDayHoursBox(null); refreshCalendar(); }}
+        />
       )}
 
       {printReportOpen && (
