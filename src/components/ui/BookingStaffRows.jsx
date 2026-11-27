@@ -2,7 +2,7 @@ import React from 'react';
 import CustomSelect from './CustomSelect';
 import StaffPickRow from './StaffPickRow';
 import StaffPicker from './StaffPicker';
-import { formatClockTime, formatClockRange } from '../../pages/branch-manager-dashboard/components/calendar/timeFormat';
+import { formatClockTime, formatClockRange } from '../../utils/clockTime';
 import { pickedRowStatusMulti, staffDayRanges, clockToMin, rangeLabel } from '../../utils/staffFit';
 import { nepalNow } from '../../utils/customerDirectory';
 import { useUse24h } from '../../hooks/useUse24h';
