@@ -27,7 +27,9 @@ function useMediaQuery(query) {
 // `onClose` is called for ×, Esc and the scrim — callers put any dirty-draft guard behind it. Both variants are portalled to <body>.
 // `header`: replaces the default title row entirely (the caller then renders its own × and the element with `titleId`).
 // `width`: any CSS width for the docked panel (default 420px), booking-work panels pass PANEL_WIDTH_BOOKING.
-const SidePanel = ({ isOpen, title, onClose, onBack, children, footer, headerExtra, header, titleId: titleIdProp, width = `${PANEL_WIDTH}px` }) => {
+// `above`: open over a modal (e.g. the checkout success screen), at the popover layer instead of the modal layer.
+const SidePanel = ({ isOpen, title, onClose, onBack, children, footer, headerExtra, header, titleId: titleIdProp, width = `${PANEL_WIDTH}px`, above = false }) => {
+  const zc = above ? 'z-popover' : 'z-modal';
   const docked = useMediaQuery('(min-width: 1024px)');
   const autoId = useId();
   const titleId = titleIdProp || `side-panel-title-${autoId}`;
@@ -47,6 +49,14 @@ const SidePanel = ({ isOpen, title, onClose, onBack, children, footer, headerExt
     const raf = requestAnimationFrame(() => setShown(true));
     return () => cancelAnimationFrame(raf);
   }, [isOpen]);
+
+  // A panel opened over a modal owns Esc: it closes alone, the modal / panel underneath stays (Back/Esc rule).
+  useEffect(() => {
+    if (!isOpen || !above) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose?.(); } };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [isOpen, above, onClose]);
 
   // Esc closes (through the caller's guard) unless an inner control already handled it.
   useEffect(() => {
@@ -104,7 +114,7 @@ const SidePanel = ({ isOpen, title, onClose, onBack, children, footer, headerExt
       <aside
         aria-hidden={!isOpen}
         data-side-panel="true"
-        className="fixed top-0 right-0 h-screen z-modal bg-surface border-l border-border overflow-hidden transition-transform duration-200 ease-out motion-reduce:transition-none"
+        className={`fixed top-0 right-0 h-screen ${zc} bg-surface border-l border-border overflow-hidden transition-transform duration-200 ease-out motion-reduce:transition-none`}
         style={{
           width,
           maxWidth: '100vw',
@@ -123,8 +133,8 @@ const SidePanel = ({ isOpen, title, onClose, onBack, children, footer, headerExt
   // the overlay beneath the sticky app header, so the scrim would not cover the whole viewport.
   return createPortal(
     <>
-      <div className="fixed inset-0 z-modal bg-black/10" onClick={onClose} aria-hidden="true" />
-      <div className="fixed top-0 right-0 h-full w-full sm:w-[400px] max-w-full z-modal border-l border-border shadow-spa-elevated">
+      <div className={`fixed inset-0 ${zc} bg-black/10`} onClick={onClose} aria-hidden="true" />
+      <div className={`fixed top-0 right-0 h-full w-full sm:w-[400px] max-w-full ${zc} border-l border-border shadow-spa-elevated`}>
         {inner}
       </div>
     </>,

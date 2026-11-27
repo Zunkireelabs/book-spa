@@ -89,6 +89,7 @@ export const OrgProvider = ({ children }) => {
     org,
     orgId: profile?.org_id || null,
     orgName: org?.name || null,
+    orgLogoUrl: org?.logo_url || null, // ZNLY-410: the bill shows it when there is one (no business has uploaded one yet)
     orgCode: org?.code || null,
     orgTimezone: org?.timezone || NEPAL_TZ,
     orgCurrency: org?.currency || 'NPR',

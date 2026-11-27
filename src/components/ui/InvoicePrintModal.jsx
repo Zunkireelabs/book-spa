@@ -1,160 +1,15 @@
-import { NEPAL_TZ } from '../../utils/nepalTime';
 import React, { useState, useEffect } from 'react';
 import Button from './Button';
 import ModalShell from './ModalShell';
 import { RadioCards, InlineError } from './PanelFormKit';
-import { issueInvoice, recordInvoicePrint, fetchInvoiceDialogInfo } from '../../services/api';
-import { formatNPR } from '../../services/bookingTransformers';
-
-// Same posture as calendar/PrintReportModal.jsx: no PDF library, no
-// server-side rendering. "Print to PDF" is just the browser's own print
-// destination — this builds a clean HTML document in a new window and calls
-// window.print() on it. Two layouts off the same frozen invoice snapshot.
-function escapeHtml(str) {
-  return String(str ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
-function formatIssuedAt(isoString) {
-  return new Date(isoString).toLocaleString('en-GB', {
-    timeZone: NEPAL_TZ,
-    day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, // customer-facing: always 12h, never the staff setting
-  });
-}
-
-const TAX_MODE_LABEL = { inclusive: 'VAT included', addon: 'VAT added', none: 'No VAT' };
-
-function buildA4Html(invoice, copyLabel) {
-  const lines = (invoice.line_items || []).map((item) => `
-    <tr>
-      <td>${escapeHtml(item.description)}</td>
-      <td class="num">${formatNPR(item.amount)}</td>
-    </tr>`).join('');
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Invoice ${escapeHtml(invoice.invoice_number)}</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: Inter, system-ui, -apple-system, sans-serif; color: #111827; padding: 40px; }
-    .copy-label { text-align: right; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: #6B7280; }
-    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #111827; padding-bottom: 16px; margin-bottom: 16px; }
-    .seller h1 { font-size: 20px; }
-    .seller .meta { font-size: 12px; color: #4B5563; margin-top: 4px; line-height: 1.5; }
-    .invoice-meta { text-align: right; font-size: 12px; color: #4B5563; }
-    .invoice-meta .num { font-size: 16px; font-weight: 700; color: #111827; }
-    .buyer { margin-bottom: 20px; font-size: 13px; }
-    .buyer .label { font-size: 11px; text-transform: uppercase; color: #9CA3AF; letter-spacing: 0.05em; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-    th { text-align: left; font-size: 11px; text-transform: uppercase; color: #6B7280; border-bottom: 1px solid #E5E7EB; padding: 8px 0; }
-    td { padding: 8px 0; border-bottom: 1px solid #F3F4F6; font-size: 13px; }
-    .num { text-align: right; font-family: ui-monospace, monospace; }
-    .totals { margin-left: auto; width: 280px; font-size: 13px; }
-    .totals-row { display: flex; justify-content: space-between; padding: 4px 0; }
-    .totals-row.total { border-top: 1px solid #111827; margin-top: 6px; padding-top: 8px; font-weight: 700; font-size: 15px; }
-    .footer { margin-top: 32px; font-size: 12px; color: #6B7280; white-space: pre-wrap; }
-    @media print { body { padding: 0 24px; } }
-  </style>
-</head>
-<body>
-  <div class="copy-label">${copyLabel}</div>
-  <div class="header">
-    <div class="seller">
-      <h1>${escapeHtml(invoice.seller_name)}</h1>
-      <div class="meta">
-        ${invoice.seller_address ? `${escapeHtml(invoice.seller_address)}<br/>` : ''}
-        ${invoice.seller_phone ? `${escapeHtml(invoice.seller_phone)} ` : ''}${invoice.seller_email ? escapeHtml(invoice.seller_email) : ''}<br/>
-        PAN: ${escapeHtml(invoice.seller_pan)}<br/>
-        ${invoice.branch_name ? `Branch: ${escapeHtml(invoice.branch_name)}${invoice.branch_address ? ` — ${escapeHtml(invoice.branch_address)}` : ''}` : ''}
-      </div>
-    </div>
-    <div class="invoice-meta">
-      <div class="num">TAX INVOICE</div>
-      <div>${escapeHtml(invoice.invoice_number)}</div>
-      <div>${escapeHtml(formatIssuedAt(invoice.issued_at))}</div>
-      <div>${escapeHtml(TAX_MODE_LABEL[invoice.tax_mode] || invoice.tax_mode)}</div>
-    </div>
-  </div>
-
-  <div class="buyer">
-    <div class="label">Billed to</div>
-    <div>${escapeHtml(invoice.buyer_name)}</div>
-    ${invoice.buyer_phone ? `<div>${escapeHtml(invoice.buyer_phone)}</div>` : ''}
-    ${invoice.buyer_pan ? `<div>PAN: ${escapeHtml(invoice.buyer_pan)}</div>` : ''}
-  </div>
-
-  <table>
-    <thead><tr><th>Description</th><th class="num">Amount</th></tr></thead>
-    <tbody>${lines}</tbody>
-  </table>
-
-  <div class="totals">
-    <div class="totals-row"><span>Subtotal</span><span>${formatNPR(invoice.subtotal)}</span></div>
-    ${Number(invoice.discount_amount) > 0 ? `<div class="totals-row"><span>Discount</span><span>-${formatNPR(invoice.discount_amount)}</span></div>` : ''}
-    <div class="totals-row"><span>Taxable</span><span>${formatNPR(invoice.taxable_amount)}</span></div>
-    ${invoice.tax_mode !== 'none' ? `<div class="totals-row"><span>VAT ${invoice.vat_rate}%</span><span>${formatNPR(invoice.vat_amount)}</span></div>` : ''}
-    <div class="totals-row total"><span>TOTAL</span><span>${formatNPR(invoice.total_amount)}</span></div>
-    ${invoice.payment_mode ? `<div class="totals-row"><span>Paid via</span><span>${escapeHtml(invoice.payment_mode)}</span></div>` : ''}
-  </div>
-
-  ${invoice.footer_text ? `<div class="footer">${escapeHtml(invoice.footer_text)}</div>` : ''}
-</body>
-</html>`;
-}
-
-// 80mm thermal — ~42 characters per line, monospace, no page chrome.
-function buildThermalHtml(invoice, copyLabel) {
-  const lines = (invoice.line_items || []).map((item) => `
-    <div class="row"><span class="desc">${escapeHtml(item.description)}</span><span class="amt">${formatNPR(item.amount)}</span></div>`).join('');
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Invoice ${escapeHtml(invoice.invoice_number)}</title>
-  <style>
-    @page { size: 80mm auto; margin: 0; }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 11px; width: 80mm; padding: 6px 8px; color: #000; }
-    .center { text-align: center; }
-    .bold { font-weight: 700; }
-    .hr { border-top: 1px dashed #000; margin: 6px 0; }
-    .row { display: flex; justify-content: space-between; gap: 6px; }
-    .row .desc { flex: 1; word-break: break-word; }
-    .row .amt { flex-shrink: 0; text-align: right; }
-    .copy-label { text-align: center; font-weight: 700; margin-bottom: 4px; }
-  </style>
-</head>
-<body>
-  <div class="copy-label">${copyLabel}</div>
-  <div class="center bold">${escapeHtml(invoice.seller_name)}</div>
-  ${invoice.seller_address ? `<div class="center">${escapeHtml(invoice.seller_address)}</div>` : ''}
-  ${invoice.seller_phone ? `<div class="center">${escapeHtml(invoice.seller_phone)}</div>` : ''}
-  <div class="center">PAN: ${escapeHtml(invoice.seller_pan)}</div>
-  ${invoice.branch_name ? `<div class="center">${escapeHtml(invoice.branch_name)}</div>` : ''}
-  <div class="hr"></div>
-  <div>Invoice: ${escapeHtml(invoice.invoice_number)}</div>
-  <div>${escapeHtml(formatIssuedAt(invoice.issued_at))}</div>
-  <div>Bill to: ${escapeHtml(invoice.buyer_name)}</div>
-  <div class="hr"></div>
-  ${lines}
-  <div class="hr"></div>
-  <div class="row"><span>Subtotal</span><span>${formatNPR(invoice.subtotal)}</span></div>
-  ${Number(invoice.discount_amount) > 0 ? `<div class="row"><span>Discount</span><span>-${formatNPR(invoice.discount_amount)}</span></div>` : ''}
-  <div class="row"><span>Taxable</span><span>${formatNPR(invoice.taxable_amount)}</span></div>
-  ${invoice.tax_mode !== 'none' ? `<div class="row"><span>VAT ${invoice.vat_rate}%</span><span>${formatNPR(invoice.vat_amount)}</span></div>` : ''}
-  <div class="hr"></div>
-  <div class="row bold"><span>TOTAL</span><span>${formatNPR(invoice.total_amount)}</span></div>
-  ${invoice.payment_mode ? `<div>Paid via: ${escapeHtml(invoice.payment_mode)}</div>` : ''}
-  ${invoice.footer_text ? `<div class="hr"></div><div class="center">${escapeHtml(invoice.footer_text)}</div>` : ''}
-</body>
-</html>`;
-}
+import { issueInvoice, recordInvoicePrint, fetchInvoiceDialogInfo, fetchBillUnit, fixBillNumber } from '../../services/api';
+import { buildBill, billSource } from '../../utils/buildBill';
+import { printBill } from './Bill/Bill';
+import { useBillOrg } from './Bill/useBillOrg';
 
 const LAYOUT_OPTIONS = [
-  { value: 'a4', title: 'A4 tax invoice', detail: 'Full page. For a customer who asks for a bill with PAN.' },
-  { value: 'thermal', title: 'Thermal receipt (80 mm)', detail: 'Narrow roll printer at the desk.' },
+  { value: 'a4', title: 'A4 page', detail: 'Full page. For a customer who asks for a bill with PAN.' },
+  { value: 'thermal', title: 'Receipt printer (80 mm)', detail: 'Narrow roll printer at the desk.' },
 ];
 
 const maskPhone = (phone) => {
@@ -174,11 +29,12 @@ const FieldLabel = ({ children }) => (
   <span className="block mb-2 text-xs font-body font-body-medium uppercase tracking-[0.05em] text-text-secondary">{children}</span>
 );
 
-const InvoicePrintModal = ({ bookingId, onClose }) => {
+const InvoicePrintModal = ({ bookingId, onClose, initialLayout = 'a4' }) => {
+  const { orgInfo } = useBillOrg();
   const [info, setInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [layout, setLayout] = useState('a4');
+  const [layout, setLayout] = useState(initialLayout);
   const [working, setWorking] = useState(false);
 
   useEffect(() => {
@@ -209,14 +65,12 @@ const InvoicePrintModal = ({ bookingId, onClose }) => {
     const inv = issued.data;
     const recorded = await recordInvoicePrint({ invoiceId: inv.id, printType: layout });
     if (recorded.error) { setError("Couldn't record the print. Nothing was printed. Try again."); setWorking(false); return; }
-    const html = layout === 'a4' ? buildA4Html(inv, recorded.data.copyLabel) : buildThermalHtml(inv, recorded.data.copyLabel);
-    const printWindow = window.open('', '_blank', layout === 'a4' ? 'width=900,height=1000' : 'width=400,height=700');
+    // The invoice stays one per booking row (frozen at issue); only the drawing is the shared bill. fix_bill_number adds the booking number.
+    const [unit, num] = await Promise.all([fetchBillUnit({ bookingId, single: true }), fixBillNumber(bookingId, true)]);
+    if (!unit.data) { setError("Couldn't prepare the invoice for printing. It was issued and logged: print it again from the booking."); setWorking(false); return; }
+    const ok = await printBill(buildBill(billSource({ ...unit.data, billNumber: num.data }, orgInfo, recorded.data.copyLabel)), layout);
     setWorking(false);
-    if (!printWindow) { setError('The print window was blocked. Allow pop-ups for this site and try again.'); return; }
-    printWindow.document.write(html);
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => printWindow.print(), 150);
+    if (!ok) { setError('The print window was blocked. Allow pop-ups for this site and try again.'); return; }
     onClose();
   };
 

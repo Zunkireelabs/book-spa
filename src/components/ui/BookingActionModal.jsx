@@ -22,7 +22,7 @@ import PaymentModeCorrectionModal from './PaymentModeCorrectionModal';
 import TimeBoxInput from './TimeBoxInput';
 import { paymentStatusLabel } from '../../utils/paymentStatusLabel';
 const payTone = (b) => ({ success: 'text-success', neutral: 'text-text-secondary', warning: 'text-warning' })[paymentStatusLabel(b).tone];
-import InvoicePrintModal from './InvoicePrintModal';
+import BillActions from './Bill/BillActions';
 import { relatedFetchers } from '../../utils/visitGate';
 import { deleteBlockers } from '../../utils/deleteBlockers';
 import { fetchBookingServices } from '../../services/api';
@@ -358,7 +358,6 @@ const BookingActionModal = ({
   // Products added to this visit (V26, product_sales.booking_id): read-only lines on the Payment tab; a manager/admin can refund one.
   const [visitProducts, setVisitProducts] = useState([]);
   const [visitProductRefund, setVisitProductRefund] = useState(null); // the sale awaiting a refund confirmation
-  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   // Keeps "Print invoice" reachable for a booking invoiced before billing was
   // later disabled — the invoice data isn't orphaned, only this button would
   // be if it hid unconditionally on the toggle. See CustomerPaymentsTab for the
@@ -3653,6 +3652,13 @@ const BookingActionModal = ({
                   </div>
                 )}
 
+                {canViewCustomerDetails && booking.paymentStatus !== 'paid' && (['partial', 'refunded'].includes(booking.paymentStatus) || String(booking.status).toLowerCase() === 'completed') && (
+                  <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-spa border border-border" data-bill-row>
+                    <span className="text-xs sm:text-sm font-body-medium text-text-primary">Bill</span>
+                    <BillActions bookingId={booking.bookingId} up />
+                  </div>
+                )}
+
                 {canPay && (
                   <Button
                     variant="primary"
@@ -3671,16 +3677,7 @@ const BookingActionModal = ({
                         <Icon name="CheckCircle" size={14} className="text-success flex-shrink-0" />
                         <span className="font-body font-body-normal text-xs sm:text-sm text-success">Payment has been recorded.</span>
                       </div>
-                      {canViewCustomerDetails && (orgSettings?.billing_enabled === true || hasExistingInvoice) && (
-                        <button
-                          type="button"
-                          onClick={() => setShowInvoiceModal(true)}
-                          className="flex items-center gap-1 text-xs font-body-medium text-primary hover:underline flex-shrink-0"
-                        >
-                          <Icon name="Receipt" size={14} />
-                          Print invoice
-                        </button>
-                      )}
+                      {canViewCustomerDetails && <BillActions bookingId={booking.bookingId} up />}
                     </div>
                     {(booking.payments || []).map((p) => (
                       p.id && showAdminCorrection ? (
@@ -3815,9 +3812,6 @@ const BookingActionModal = ({
             loadVisitProducts();
           }}
         />
-      )}
-      {showInvoiceModal && (
-        <InvoicePrintModal bookingId={booking.bookingId} onClose={() => setShowInvoiceModal(false)} />
       )}
       {/* Cancel / No Show confirmation */}
       {visitStatusFlow && (
@@ -3991,6 +3985,7 @@ const BookingActionModal = ({
       {showPaymentModal && (
         <PaymentModal
           key={payMainId}
+          showBill={canViewCustomerDetails}
           savesProducts
           visitList={!legacyGroups}
           visitOrder={payOrder}
