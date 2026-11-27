@@ -7,6 +7,7 @@ import PaymentModal from '../../../components/ui/PaymentModal';
 import { submitCheckout } from '../../../services/checkoutSubmit';
 import { getCustomerOutstandingBalance, recordPayment, recordTip, fetchDueHolderNames, recordBundledAllocations } from '../../../services/api';
 import { useBranch } from '../../../contexts/BranchContext';
+import { oneOwner } from '../../../utils/earlierBalance';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -52,6 +53,7 @@ const CollectPaymentPanel = ({ onSuccess }) => {
     const { data, error: err } = await getCustomerOutstandingBalance({
       customerPhone: `${customerCountryCode}${digits}`,
       branchId,
+      anyOwner: true, // a phone typed on purpose: find every due on it, whoever owns it
     });
     setSearching(false);
     if (err) {
@@ -60,7 +62,8 @@ const CollectPaymentPanel = ({ onSuccess }) => {
       return;
     }
     setResult(data);
-    setSelectedIds(new Set((data?.bookings || []).map((b) => b.bookingId)));
+    // Pre-tick only when one person owns them all; otherwise staff pick (never bundle someone else's debt quietly).
+    setSelectedIds(oneOwner(data?.bookings) ? new Set((data?.bookings || []).map((b) => b.bookingId)) : new Set());
   };
 
   const resetLookup = () => {
@@ -208,6 +211,7 @@ const CollectPaymentPanel = ({ onSuccess }) => {
                 Pay{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
               </Button>
             </div>
+            {!oneOwner(result.bookings) && <p data-many-owners className="px-6 py-3 text-sm text-warning border-b border-border">This phone is used by more than one client. Tick the ones being paid.</p>}
             <div className="divide-y divide-border">
               {result.bookings.map((b) => {
                 const isChecked = selectedIds.has(b.bookingId);
@@ -223,7 +227,7 @@ const CollectPaymentPanel = ({ onSuccess }) => {
                       className="text-primary focus:ring-primary w-4 h-4 rounded"
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="font-body text-sm text-text-primary">{b.serviceName}</div>
+                      <div className="font-body text-sm text-text-primary">{b.customerName ? `${b.customerName} · ` : ''}{b.serviceName}</div>
                       <div className="font-caption text-xs text-text-secondary">
                         #{b.bookingNumber} · {b.date}
                       </div>

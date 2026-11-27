@@ -177,7 +177,7 @@ const DueReportPanel = () => {
   const openPay = async (row) => {
     setPayingRow(row);
     setOtherDueBookings([]);
-    if (!row.customerPhone) return;
+    if (!row.customerPhone && !row.customerId) return;
     const { data } = await getCustomerOutstandingBalance({
       customerPhone: row.customerPhone,
       customerId: row.customerId,

@@ -25,4 +25,15 @@ describe('deleteBlockers', () => {
   it('already cancelled: no button', () => {
     expect(deleteBlockers({ refunds: [{ amount: 1500 }], status: 'cancelled', paymentStatus: 'refunded' }).canCancel).toBe(false);
   });
+  it('a package session was used: no Cancel button, plain advice', () => {
+    const r = deleteBlockers({ packageUses: 1, status: 'confirmed', paymentStatus: 'unpaid' });
+    expect(r.canCancel).toBe(false);
+    expect(r.advice).toBe("It used a package session or wallet credit, which cancelling won't give back. Ask support.");
+  });
+  it('paid by wallet / voucher / package mode: no Cancel and refund; paid by cash or card still offers it', () => {
+    for (const m of ['Membership', 'VoucherWallet', 'ReferralWallet', 'SessionPackage']) {
+      expect(deleteBlockers({ payments: [{ ...pay, paymentMode: m }], status: 'completed', paymentStatus: 'paid' }).canCancel).toBe(false);
+    }
+    expect(deleteBlockers({ payments: [{ ...pay, paymentMode: 'Card' }], status: 'completed', paymentStatus: 'paid' }).canCancel).toBe(true);
+  });
 });

@@ -111,7 +111,7 @@ import { buildCustomerDirectory, buildPanelDetail, nepalNow, avgPaidPerVisit } f
 import { addDays as addDaysISO } from '../utils/reportPeriod';
 import { attendanceDays, busyMinutesInSpans } from '../pages/branch-manager-dashboard/components/Performance/therapistInnerView';
 import { summarizeMoney, classifyBooking, roundMoney, paidPaisa } from '../utils/bookingMoney';
-import { earlierBalanceKey, ownsEarlierBalance } from '../utils/earlierBalance';
+import { earlierBalanceKey, ownsEarlierBalance, isCheckoutSibling } from '../utils/earlierBalance';
 import { planClose, runCloseSteps } from '../utils/closeBooking';
 import { friendlyError } from '../utils/friendlyError';
 import { staffWord, staffWordPlural, wordBranch, wordBranches } from '../utils/industryTerms';
@@ -2361,7 +2361,9 @@ export async function getDueReportByBranch({ from, to } = {}) {
 // than as an exact string, since the same real customer is often recorded with
 // slightly different phone formatting (with/without country code) across visits.
 // customerName is accepted but purely cosmetic — it is never used to filter.
-export async function getCustomerOutstandingBalance({ customerPhone, customerId, branchId, excludeBookingId } = {}) {
+// anyOwner (a phone typed on purpose, Collect payment): every due on that phone, whoever owns it; each row carries customerId + customerName.
+// Every booking-keyed caller leaves it off and keeps the strict owner rule.
+export async function getCustomerOutstandingBalance({ customerPhone, customerId, branchId, excludeBookingId, anyOwner = false } = {}) {
   try {
     const normalizedPhone = toE164(customerPhone);
     // ONE key rule (utils/earlierBalance.js): the customer when the caller knows one, else the full normalised phone. A stray phone fragment must not sweep up unrelated bookings.
@@ -2379,11 +2381,11 @@ export async function getCustomerOutstandingBalance({ customerPhone, customerId,
         .in('status', ['In-Progress', 'Completed'])
         .order('id');
       // Phone key owns only rows WITHOUT a customer_id (utils/earlierBalance.js): a customer-linked row belongs to its customer.
-      query = key.customerId ? query.eq('customer_id', key.customerId) : query.eq('customer_phone', key.phone).is('customer_id', null);
+      query = key.customerId ? query.eq('customer_id', key.customerId) : (anyOwner ? query.eq('customer_phone', key.phone) : query.eq('customer_phone', key.phone).is('customer_id', null));
       if (excludeBookingId) query = query.neq('id', excludeBookingId);
       return withBranch(query, branchId);
     });
-    const mine = key.customerId ? rows : rows.filter((b) => !b.customer_id && samePhone(b.customer_phone, key.phone));
+    const mine = key.customerId ? rows : rows.filter((b) => (anyOwner || !b.customer_id) && samePhone(b.customer_phone, key.phone));
     return { data: dueSummary(summarizeMoney(mine, { today, excludeBookingId })), error: null };
   } catch (error) {
     console.error('[API] getCustomerOutstandingBalance error:', error.message);
@@ -2397,7 +2399,7 @@ const DUE_COLUMNS = 'id, booking_number, customer_id, customer_name, customer_ph
 // from here (the day is closed), so they are reported separately (lockedDue / lockedBookings) and never bundled.
 const dueSummary = (m) => {
   const row = (b) => ({
-    bookingId: b.id, bookingNumber: b.booking_number, customerName: b.customer_name, date: b.date,
+    bookingId: b.id, bookingNumber: b.booking_number, customerId: b.customer_id || null, customerName: b.customer_name, date: b.date,
     serviceName: b.service_name_snapshot || '—', finalAmount: b.money.price, amountPaid: b.money.paid, amountDue: b.money.due,
     paymentStatus: b.payment_status, isLocked: !!b.is_locked,
   });
@@ -6980,7 +6982,7 @@ export async function getCalendarBookings(branchId, startDate, endDate, opts = {
         'date', 'start_time', 'end_time', 'start_datetime', 'end_datetime', 'created_at', 'created_by',
         'therapist_id', 'room_id',
         // ZNLY-402: visit link (migration 427; bookings_safe carries it since migration 428). Only read when the org setting multi_service_bookings is ON.
-        'visit_id',
+        'visit_id', 'booking_group_id', // booking_group_id: the earlier-balance chip drops the checkout's group siblings (ZNLY-403)
         vis.canViewPrices && 'base_amount, discount_amount, final_amount',
         'special_requests', 'referred_by',
         'service:services(name, duration_minutes, requires_therapist)',
@@ -7148,7 +7150,7 @@ export async function getCalendarBookings(branchId, startDate, endDate, opts = {
           for (let i = 0; i < list.length; i += 40) {
             const rows = await pageAllRows(() => supabase
               .from('bookings')
-              .select('id, customer_id, visit_id, customer_name, customer_phone, date, status, final_amount, payment_status, payments(amount), payment_refunds(amount)')
+              .select('id, customer_id, visit_id, booking_group_id, customer_name, customer_phone, date, status, final_amount, payment_status, payments(amount), payment_refunds(amount)')
               .eq('branch_id', resolvedBranchId)
               .in(column, list.slice(i, i + 40))
               .in('status', ['In-Progress', 'Completed'])
@@ -7162,7 +7164,7 @@ export async function getCalendarBookings(branchId, startDate, endDate, opts = {
         const out = {};
         for (const [b, key] of keyed) {
           const list = dueRows.filter((o) => o.id !== b.id && ownsEarlierBalance(key, { customer_id: o.customer_id, phone: phoneOf(o) })
-            && !(multi ? (b.visit_id && o.visit_id === b.visit_id) : (o.money.paid === 0 && o.customer_name === b.customer_name && o.date === b.date)));
+            && !(multi ? (b.visit_id && o.visit_id === b.visit_id) : isCheckoutSibling(b, o, o.money.paid)));
           if (list.length === 0) continue;
           out[b.id] = { count: list.length, amount: Math.round(list.reduce((sum, o) => sum + o.money.due, 0) * 100) / 100 };
         }

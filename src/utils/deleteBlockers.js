@@ -3,6 +3,7 @@
 // Cancelling is the way out: the DB trigger handle_booking_cancellation_refund refunds EVERY payment in full when the booking goes to
 // Cancelled while its payment_status is paid/partial. So the "Cancel and refund" button only exists where that trigger really fires
 // (paid/partial, no refund yet — an earlier partial refund would be refunded a second time).
+import { isTendered } from '../lib/dayMoney';
 const npr = (n) => `NPR ${Number(n || 0).toLocaleString('en-IN')}`;
 const day = (ts) => (ts ? new Date(ts).toLocaleDateString('en-GB', { timeZone: 'Asia/Kathmandu', day: 'numeric', month: 'short' }) : '');
 
@@ -18,11 +19,14 @@ export function deleteBlockers({ payments = [], refunds = [], tips = [], hasRefe
   if (packageUses > 0) lines.push('a package session was used on it');
   if (!lines.length) return null;
 
+  // A package session, wallet balance or voucher was used: the cancel trigger refunds the payment row but gives none of that back.
+  const nonCash = packageUses > 0 || payments.some((p) => !isTendered(p.paymentMode));
   const cancelled = String(status || '').toLowerCase() === 'cancelled';
   const refundFires = paid > 0 && refunds.length === 0 && ['paid', 'partial'].includes(paymentStatus);
-  const canCancel = !cancelled && (paid === 0 || refundFires);
+  const canCancel = !cancelled && !nonCash && (paid === 0 || refundFires);
   let advice;
   if (cancelled) advice = 'It is already cancelled and stays in history.';
+  else if (nonCash) advice = "It used a package session or wallet credit, which cancelling won't give back. Ask support.";
   else if (canCancel && refundFires) advice = `Cancel it instead. The ${npr(paid)} is recorded as a refund; the booking stays in history.`;
   else if (canCancel) advice = 'Cancel it instead; the booking stays in history.';
   else advice = "It can't be cancelled with an automatic refund from here. Ask support.";
