@@ -251,7 +251,7 @@ const RosterPanel = ({ branchId }) => {
       <div className="border border-border rounded-spa-lg shadow-spa-resting overflow-hidden bg-surface">
         <div ref={scrollContainerRef} className="overflow-auto max-h-[62vh]">
           {/* border-separate (not border-collapse): collapsed borders break solid background painting on sticky cells. */}
-          <table className={`border-separate border-spacing-0 min-w-full ${view === 'week' ? 'table-fixed' : ''}`} style={view === 'week' ? { minWidth: 200 + days.length * 92 } : undefined}>
+          <table className={`border-separate border-spacing-0 min-w-full ${view === 'week' ? 'table-fixed w-full' : ''}`} style={view === 'week' ? { minWidth: 200 + days.length * 92 } : undefined}>
             <thead>
               <tr>
                 {/* Sticky on BOTH axes: outranks the top-sticky date headers it passes over while scrolling sideways. */}
@@ -367,7 +367,7 @@ const RosterPanel = ({ branchId }) => {
                             {kind === 'off' ? (
                               <span className="font-body text-[11px] text-text-tertiary">{usual.noHours && !override ? 'No set hours' : 'Off'}</span>
                             ) : (
-                              <span className="font-data text-[10.5px] leading-tight text-text-secondary">{clock(String(eff.startTime).slice(0, 5))}–{clock(String(eff.endTime).slice(0, 5))}</span>
+                              <span className="px-2 font-data text-[10.5px] leading-tight text-text-secondary"><span className="inline-block">{clock(String(eff.startTime).slice(0, 5))}–</span> <span className="inline-block">{clock(String(eff.endTime).slice(0, 5))}</span></span>
                             )}
                             {kind === 'usual' && brk.length > 0 && (
                               <span
