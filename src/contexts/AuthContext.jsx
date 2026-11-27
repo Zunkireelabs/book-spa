@@ -18,8 +18,11 @@ const PROFILE_FETCH_TIMEOUT_MS = 12000;
 
 const AuthContext = createContext(null);
 
+// null outside an AuthProvider (isolated renders) instead of throwing.
+export const useOptionalAuth = () => useContext(AuthContext);
+
 export const useAuth = () => {
-  const context = useContext(AuthContext);
+  const context = useOptionalAuth();
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }

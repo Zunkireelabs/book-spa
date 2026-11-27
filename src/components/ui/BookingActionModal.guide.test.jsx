@@ -4,7 +4,7 @@ import React from 'react';
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 
-vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { role: 'staff', id: 'u1' }, user: { id: 'u1' } }) }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { role: 'staff', id: 'u1' }, user: { id: 'u1' } }), useOptionalAuth: () => ({ profile: { role: 'staff', id: 'u1' }, user: { id: 'u1' } }) }));
 vi.mock('../../contexts/BranchContext', () => ({ useBranch: () => ({ activeBranch: { id: 'b1', name: 'Thamel' }, branchId: 'b1' }) }));
 vi.mock('../../contexts/OrgContext', () => ({ useOrg: () => ({ org: { id: 'o1', slug: 'nuad' }, paymentMethods: [], orgSettings: {}, staffLabel: 'Therapist', staffLabelPlural: 'Therapists' }) }));
 vi.mock('../../hooks/useBlockOverlap', () => ({ useBlockOverlap: () => ({ message: null }), useDayBlocks: () => [] }));

@@ -12,7 +12,7 @@ vi.mock('../../../../services/api', () => ({
   fetchRecentCustomerIds: vi.fn(async () => ({ data: [] })),
 }));
 vi.mock('../../../../contexts/BranchContext', () => ({ useBranch: () => ({ branchId: 'b1', branchName: 'Main', isOverall: false }) }));
-vi.mock('../../../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'u1' } }) }));
+vi.mock('../../../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'u1' } }), useOptionalAuth: () => ({ profile: { id: 'u1' } }) }));
 vi.mock('../../../../contexts/OrgContext', () => ({ useOrg: () => ({ paymentMethods: [] }) }));
 import NewPackagePanel from './NewPackagePanel';
 
