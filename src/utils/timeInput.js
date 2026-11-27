@@ -1,13 +1,5 @@
 // Time helpers shared by DateTimeRow (New booking + Edit details). "HH:MM" 24h strings in and out.
 
-/** 24h "HH:MM" -> "9:30am" (no space). */
-export function format12h(time24) {
-  const [h, m] = time24.split(':').map(Number);
-  const suffix = h >= 12 ? 'pm' : 'am';
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${h12}:${String(m).padStart(2, '0')}${suffix}`;
-}
-
 /** Free-typed time ("9", "9:30", "9:30am", "21:15") -> "HH:MM"; null while incomplete/invalid. */
 export function parseTimeInput(raw) {
   const match = String(raw ?? '').trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);

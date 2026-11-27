@@ -4,7 +4,9 @@ import Button from './Button';
 import ModalShell from './ModalShell';
 import { visitReschedule } from '../../services/visitApi';
 import { friendlyError } from '../../utils/friendlyError';
-import { time12 } from '../../utils/visitPreview';
+import { useClock } from '../../hooks/useUse24h';
+import { useOrg } from '../../contexts/OrgContext';
+import { overlapNote, overlapLine, clockToMin } from '../../utils/staffFit';
 
 // ZNLY-402 piece 5 (screen E2/E3): "Move this booking?". visit_reschedule dry run gives each service its verdict at the picked time:
 //   'change' = free, 'warn' = overridable (a manager books anyway with a reason), 'block' = a hard no, 'keep' = already started, stays.
@@ -13,13 +15,19 @@ const money = (n) => `NPR ${Number(n || 0).toLocaleString('en-IN')}`;
 const addMin = (t, m) => { const [h, mm] = String(t).split(':').map(Number); const x = h * 60 + (mm || 0) + (m || 0); return `${String(Math.floor(x / 60) % 24).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`; };
 const dayLabel = (d) => { try { return new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', ''); } catch { return d; } };
 
-const MoveBookingDialog = ({ visitKey, date, startTime, lines, canOverride, onClose, onDone }) => {
+// `onConfirm` (optional, async, returns { error }): a 1-service move confirms through its own existing path instead of visit_reschedule.
+// `staffIds` (optional): who the move lands on when that isn't the booking's own staff (the column that was clicked).
+const MoveBookingDialog = ({ visitKey, date, startTime, lines, canOverride, onClose, onDone, onConfirm, staffIds, dayBookings = [] }) => {
+  const clock = useClock();
+  const { allowStaffOverlap } = useOrg();
   const [preview, setPreview] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState('');
   useEffect(() => {
     let off = false;
+    // 1-service move (onConfirm): no dry run. It would judge the booking's OWN staff, not the one the move lands on; the real checks run at save (guard + reschedule_booking) and come back here as a sentence.
+    if (onConfirm) { setPreview({ rows: Object.keys(lines || {}).map((id) => ({ booking_id: id, verdict: 'change', start: startTime })) }); return undefined; }
     visitReschedule({ visitKey, date, startTime, dryRun: true }).then(({ data, error: e }) => {
       if (off) return;
       if (e) {
@@ -41,10 +49,20 @@ const MoveBookingDialog = ({ visitKey, date, startTime, lines, canOverride, onCl
   const reasonMissing = needReason && canOverride && !reason.trim();
   const cannotOverride = needReason && !canOverride;
   const tone = blocked ? 'error' : warned ? 'warning' : 'success';
+  // ZNLY-404: an org that allows overlaps gets no verdict from the server, so say here (without blocking) that the person already has a booking then.
+  const ownIds = rows.map((r) => r.booking_id);
+  const overlapOf = (r, l, start) => {
+    if (!allowStaffOverlap || r.verdict === 'block' || !l.minutes) return '';
+    const b = dayBookings.find((x) => x.id === r.booking_id);
+    const ids = staffIds || (b?.booking_therapists?.length ? b.booking_therapists.map((t) => t.therapist_id) : b?.therapist_id ? [b.therapist_id] : []);
+    const s = clockToMin(start);
+    for (const id of ids) { const n = s == null ? null : overlapNote(id, s, s + l.minutes, dayBookings.filter((x) => x.date === date), ownIds); if (n) return overlapLine(n); }
+    return '';
+  };
 
   const go = async () => {
     setBusy(true); setError(null);
-    const { error: e } = await visitReschedule({ visitKey, date, startTime, overrideReason: needReason ? reason.trim() : null });
+    const { error: e } = onConfirm ? await onConfirm() : await visitReschedule({ visitKey, date, startTime, overrideReason: needReason ? reason.trim() : null });
     setBusy(false);
     if (e) { setError(friendlyError(e, 'Nothing was moved. Try again.')); return; }
     onDone();
@@ -63,25 +81,27 @@ const MoveBookingDialog = ({ visitKey, date, startTime, lines, canOverride, onCl
           <button onClick={onClose} disabled={busy} aria-label="Close" className="p-2 rounded-spa hover:bg-background spa-transition-fast spa-touch-target"><Icon name="X" size={20} className="text-text-secondary" /></button>
         </div>
         <div className="p-5 space-y-4">
-          <p className="text-sm text-text-secondary">{dayLabel(date)} · from {time12(startTime)}</p>
+          <p className="text-sm text-text-secondary">{dayLabel(date)} · from {clock(startTime)}</p>
           <div className="border border-border rounded-spa">
             {moving.map((r) => {
               // booking_id is the ORIGINAL row (what the screen shows); the replacement is new_booking_id. r.start is the NEW start time.
               const l = lines?.[r.booking_id] || {};
               const start = r.start || startTime;
-              const range = l.minutes ? `${time12(start)}–${time12(addMin(String(start).slice(0, 5), l.minutes))}` : time12(start);
+              const range = l.minutes ? `${clock(start)}–${clock(addMin(String(start).slice(0, 5), l.minutes))}` : clock(start);
               const v = r.verdict;
+              const overlap = overlapOf(r, l, start);   // an overlap note means never a green tick or "free" beside it
               return (
                 <div key={r.booking_id} className="flex items-start gap-2.5 px-3 py-2 border-b border-border last:border-b-0">
                   <span className="mt-0.5 flex-shrink-0">
-                    {v === 'block' ? <Icon name="Ban" size={15} className="text-error" /> : v === 'warn' ? <Icon name="AlertTriangle" size={15} className="text-warning" /> : <Icon name="Check" size={15} className="text-success" />}
+                    {v === 'block' ? <Icon name="Ban" size={15} className="text-error" /> : (v === 'warn' || overlap) ? <Icon name="AlertTriangle" size={15} className="text-warning" /> : <Icon name="Check" size={15} className="text-success" />}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex justify-between gap-3">
                       <p className="text-sm font-medium text-text-primary truncate">{r.service || l.name || 'Booking'}</p>
                       {l.price != null && <span className="font-data text-sm tabular-nums flex-shrink-0">{money(l.price)}</span>}
                     </div>
-                    {r.booking_id !== 'all' && <p className="text-xs text-text-secondary">{range}{(r.staff || l.staff) ? ` · ${r.staff || l.staff}` : ''}{v === 'change' ? ' · free' : ''}</p>}
+                    {r.booking_id !== 'all' && <p className="text-xs text-text-secondary">{range}{(r.staff || l.staff) ? ` · ${r.staff || l.staff}` : ''}{v === 'change' && !overlap ? ' · free' : ''}</p>}
+                    {overlap && <p data-overlap-note className="text-xs mt-0.5 text-amber-800">{overlap}</p>}
                     {v !== 'change' && r.reason && <p className={`text-xs mt-0.5 ${v === 'block' ? 'text-error' : 'text-[#92400E]'}`}>{r.reason}</p>}
                   </div>
                 </div>

@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../../../components/AppIcon';
-import {
-  PanelShell, FormBody, DateField, TimeField, InfoRows, format12h, addMinutes, formatShortDate,
-} from '../../../components/ui/PanelFormKit';
+import { PanelShell, FormBody, DateField, TimeField, InfoRows, addMinutes, formatShortDate } from '../../../components/ui/PanelFormKit';
 import { toDateInputValue } from '../../../utils/date';
 import { friendlyError } from '../../../utils/friendlyError';
+import { useClock } from '../../../hooks/useUse24h';
 
 const FROM = '09:00';
 const TO = '20:30';
@@ -15,6 +14,7 @@ const plusDays = (ymd, n) => { const d = new Date(`${ymd}T00:00:00`); d.setDate(
 // branch window / check-out) is enforced by rescheduleBooking, so its verdict is shown after the inputs.
 // `onConfirm({ bookingId, newDate, newStartTime })` returns { error? }; on success the panel closes.
 const StaffReschedulePanel = ({ booking, onClose, onConfirm, staffLabel = 'Therapist' }) => {
+  const clock = useClock();
   const today = toDateInputValue(new Date());
   const minDate = plusDays(today, 1);
   const maxDate = plusDays(today, 14);
@@ -26,8 +26,8 @@ const StaffReschedulePanel = ({ booking, onClose, onConfirm, staffLabel = 'Thera
   const busyRef = useRef(false);
 
   const durationMin = parseInt(String(booking?.duration || '').replace(/\D/g, ''), 10) || 0;
-  const oldSlot = booking?.date && booking?.time ? `${formatShortDate(booking.date)} · ${format12h(booking.time)}` : '—';
-  const newSlot = date && time ? `${formatShortDate(date)} · ${format12h(time)}` : null;
+  const oldSlot = booking?.date && booking?.time ? `${formatShortDate(booking.date)} · ${clock(booking.time)}` : '—';
+  const newSlot = date && time ? `${formatShortDate(date)} · ${clock(time)}` : null;
   const ready = !!date && !!time;
   const reason = !date ? 'Pick the new date' : !time ? 'Pick the new time' : '';
 
@@ -35,7 +35,7 @@ const StaffReschedulePanel = ({ booking, onClose, onConfirm, staffLabel = 'Thera
     if (busyRef.current || reason) return;
     const e = {};
     if (date < minDate || date > maxDate) e.date = `Pick a date from ${formatShortDate(minDate)} to ${formatShortDate(maxDate)}.`;
-    if (time < FROM || time > TO) e.time = `Pick a time between ${format12h(FROM)} and ${format12h(TO)}.`;
+    if (time < FROM || time > TO) e.time = `Pick a time between ${clock(FROM)} and ${clock(TO)}.`;
     setErrors(e);
     setConflict(null);
     if (e.date || e.time) return;
@@ -63,7 +63,7 @@ const StaffReschedulePanel = ({ booking, onClose, onConfirm, staffLabel = 'Thera
 
   const rows = useMemo(() => [
     ['Current slot', oldSlot],
-    newSlot ? ['New slot', `${newSlot}${durationMin ? ` – ${format12h(addMinutes(time, durationMin))}` : ''}`, 'total'] : null,
+    newSlot ? ['New slot', `${newSlot}${durationMin ? ` – ${clock(addMinutes(time, durationMin))}` : ''}`, 'total'] : null,
     [staffLabel, booking?.therapist?.name || `${staffLabel} TBA`],
     booking?.roomName ? ['Room', booking.roomName] : null,
   ], [oldSlot, newSlot, durationMin, time, booking]);

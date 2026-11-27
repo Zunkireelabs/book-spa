@@ -1,4 +1,4 @@
-// ZNLY-402 piece 4: the numbers behind the "This booking" block (org setting multi_service_bookings ON, 2+ services).
+// ZNLY-402 piece 4 / ZNLY-435: the numbers behind the "This booking" card (every booking, every org: a 1-service booking is a card with 1 row).
 // Pure. One source for the count, the total and the paid state, so what the block says always equals the rows it shows (U4).
 // Input rows = raw `bookings` rows of ONE visit (fetchBookingServices); output rows are display-ready.
 
@@ -52,7 +52,7 @@ export function toBlockRow(r) {
 
 /**
  * rows (raw) + the open booking's id -> the block.
- *   show  : true only when the booking has 2+ rows (a cancelled row still counts as a row: it is shown struck through, S7)
+ *   show  : true when the booking has a row (a cancelled row still counts as a row: it is shown struck through, S7)
  *   live  : the rows that count (not cancelled / no show); count = live.length; total = sum of their final amounts
  *   paid / toPay : over the live rows only; toPay never negative.
  */
@@ -67,7 +67,7 @@ export function buildBookingBlock(rawRows, openId) {
   const waiting = live.length - payable.length;
   const payableToPay = r2(payable.reduce((s, r) => s + Math.max(r.final - r.paid, 0), 0));
   return {
-    show: rows.length >= 2,
+    show: rows.length >= 1,
     rows,
     live,
     count: live.length,

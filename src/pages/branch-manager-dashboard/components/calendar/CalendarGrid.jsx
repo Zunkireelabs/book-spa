@@ -1,4 +1,4 @@
-import { buildClientIndex, customerIdOf, isSameClient, clientDayInfo } from './sameClient';
+import { buildClientIndex, customerIdOf, isSameClient } from './sameClient';
 import { buildVisitIndex, bookingOf, highlightLevel, visitDayInfo } from './sameVisit';
 import { useOrg } from '../../../../contexts/OrgContext';
 import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
@@ -10,7 +10,7 @@ import Icon from '../../../../components/AppIcon';
 import CalendarBookingCard from './CalendarBookingCard';
 import { BookingHoverLayer, useHoverCardBookingId } from './BookingHoverCard';
 import { toKathmanduParts, addDays } from './calendarDates';
-import { formatClockTime, formatHourLabel } from './timeFormat';
+import { formatClockTime, formatHourLabel, formatClockRange } from '../../../../utils/clockTime';
 import SharedBookingLines from './SharedBookingLines';
 import { STATUS_DOT_COLOR, isClosedByBlocks } from '../../../../utils/todayStatusLine';
 import OverflowBadge from './OverflowBadge';
@@ -259,6 +259,8 @@ const CalendarGrid = ({
   // ZNLY-402: the visit rules (sameVisit.js) only for orgs with "Several services in one booking" ON; every other org keeps the same-client rules (sameClient.js) exactly as before.
   const { multiServiceBookings } = useOrg();
   const clientIndex = useMemo(() => (multiServiceBookings ? buildVisitIndex(bookings) : buildClientIndex(bookings)), [bookings, multiServiceBookings]); // one map for the whole render, no per-card scans
+  // ZNLY-435: "Also booked today" is the same rule for every org (a visit counts once); only the outline above differs by setting.
+  const dayIndex = useMemo(() => (multiServiceBookings ? clientIndex : buildVisitIndex(bookings)), [bookings, multiServiceBookings, clientIndex]);
   const activeKey = hoverClientId || popoverBookingId || selectedBookingId || null;
   const activeBooking = useMemo(() => (multiServiceBookings ? bookingOf(bookings, activeKey) : null), [bookings, activeKey, multiServiceBookings]);
   const activeCustomerId = useMemo(() => (multiServiceBookings ? null : customerIdOf(bookings, activeKey)), [bookings, activeKey, multiServiceBookings]);
@@ -976,7 +978,7 @@ const CalendarGrid = ({
   };
   const formatBackLabel = (ymd, hm) => {
     const [h, m] = (hm || '00:00').split(':').map(Number);
-    const t = `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`;
+    const t = formatClockTime(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, use24h);
     if (ymd === todayStr) return t;
     return `${new Date(`${ymd}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}, ${t}`;
   };
@@ -1134,11 +1136,7 @@ const CalendarGrid = ({
   const todayStr = nowParts?.date;
   const nowTime = (nowParts?.time || '00:00').replace(/^24:/, '00:');
   const nowTop = timeToTop(`${nowTime}:00`);
-  const nowLabel = (() => {
-    const [h, m] = nowTime.split(':').map(Number);
-    if (use24h) return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-    return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')}`;
-  })();
+  const nowLabel = formatClockTime(nowTime, use24h);
 
   // Scroll the grid to the current time once, when the calendar opens on today.
   // Deferred via rAF so it runs after the flex layout has sized the scroll
@@ -1488,7 +1486,7 @@ const CalendarGrid = ({
     pill.style.display = 'block';
     pill.style.top = `${top - 9}px`;
     pill.style.left = `${left + 3}px`;
-    pill.textContent = `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, '0')}${hour < 12 ? 'am' : 'pm'}`;
+    pill.textContent = formatClockTime(`${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`, use24h);
   };
 
   const renderHoverTime = () => (
@@ -1770,7 +1768,7 @@ const CalendarGrid = ({
                 sameClient={multiServiceBookings ? highlightLevel(clientIndex, activeBooking, booking) : isSameClient(clientIndex, activeCustomerId, booking)}
                 key={cardKey}
                 booking={(() => {
-                  const info = multiServiceBookings ? visitDayInfo(clientIndex, booking) : clientDayInfo(clientIndex, booking);
+                  const info = visitDayInfo(dayIndex, booking);
                   const o = outsideOf(col, day, booking);
                   return o || info ? { ...booking, ...(o ? { availabilityNote: o.note } : {}), ...(info ? { _clientDay: info } : {}) } : booking;
                 })()}
@@ -2099,7 +2097,7 @@ const CalendarGrid = ({
           {(overflowSheet || []).map((b) => (
             <button key={`${b.id}-${b._comboIndex ?? ''}`} type="button" className="w-full text-left py-3 px-1 min-h-[56px]"
               onClick={() => { setOverflowSheet(null); onBookingClick?.(b); }}>
-              <div className="font-data text-[12px] text-text-secondary">{formatClockTime(b.startTime, use24h)} – {formatClockTime(b.endTime, use24h)}</div>
+              <div className="font-data text-[12px] text-text-secondary">{formatClockRange(b.startTime, b.endTime, use24h)}</div>
               <div className="font-body text-[14px] font-semibold text-text-primary truncate">{hideSensitive ? '•••••' : coupleName(b.customerName || 'Guest', b.companionName)}</div>
               <div className="font-body text-[12px] text-text-secondary truncate">{b.serviceName}</div>
             </button>

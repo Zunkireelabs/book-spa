@@ -1,9 +1,27 @@
 import React from 'react';
 import Icon from '../../../../components/AppIcon';
-import { formatTimeDisplay } from './calendarDates';
+import { formatClockRange } from '../../../../utils/clockTime';
+import { readUse24h } from '../../../../utils/clockPref';
+import { useOrg } from '../../../../contexts/OrgContext';
+import { overlapNote, overlapLine, clockToMin } from '../../../../utils/staffFit';
 
 // Confirmation for a drag that changes a booking's column (reassign / consolidate) or reschedules a shared booking.
-const ReassignConfirmDialog = ({ pendingReassign, calendarData, staffLabel, locationLabel, onCancel, onConfirm }) => (
+// ZNLY-404: when the org allows overlaps, say (without blocking) that the person already has a booking at the new time.
+const useDropOverlap = (pr, calendarData) => {
+  const { allowStaffOverlap } = useOrg();
+  if (!allowStaffOverlap || !pr?.newStartTime) return '';
+  const ids = pr.type === 'therapist' && pr.targetColId && pr.targetColId !== 'unassigned' ? [pr.targetColId]
+    : (pr.timeOnly && pr.type === 'therapist' ? [pr.sourceColId] : []);
+  const s = clockToMin(pr.newStartTime); const e = clockToMin(pr.newEndTime);
+  if (!ids.length || s == null || e == null) return '';
+  const day = (calendarData?.bookings || []).filter((b) => b.date === (pr.newDate || pr.booking?.date));
+  for (const id of ids) { const n = overlapNote(id, s, e, day, [pr.bookingId]); if (n) return overlapLine(n); }
+  return '';
+};
+
+const ReassignConfirmDialog = ({ pendingReassign, calendarData, staffLabel, locationLabel, onCancel, onConfirm }) => {
+  const overlap = useDropOverlap(pendingReassign, calendarData);
+  return (
   <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-center justify-center p-4">
     <div className="bg-surface rounded-spa-lg spa-shadow-modal p-6 max-w-sm w-full animate-fade-in">
       <div className="flex items-center gap-2 mb-4">
@@ -33,12 +51,13 @@ const ReassignConfirmDialog = ({ pendingReassign, calendarData, staffLabel, loca
       )}
       {pendingReassign.timeChanged && (
         <p className="font-body text-xs text-text-secondary mb-3">
-          {pendingReassign.timeOnly ? 'New time' : 'Time'}: {formatTimeDisplay(pendingReassign.newStartTime)} – {formatTimeDisplay(pendingReassign.newEndTime)}
+          {pendingReassign.timeOnly ? 'New time' : 'Time'}: {formatClockRange(pendingReassign.newStartTime, pendingReassign.newEndTime, readUse24h())}
           {pendingReassign.newDate !== pendingReassign.booking.date && (
             <span> on {pendingReassign.newDate}</span>
           )}
         </p>
       )}
+      {overlap && <p data-overlap-note className="font-body text-xs text-amber-800 mb-3">{overlap}</p>}
       <div className="flex items-center justify-end gap-2 mt-4">
         <button
           onClick={onCancel}
@@ -55,6 +74,7 @@ const ReassignConfirmDialog = ({ pendingReassign, calendarData, staffLabel, loca
       </div>
     </div>
   </div>
-);
+  );
+};
 
 export default ReassignConfirmDialog;

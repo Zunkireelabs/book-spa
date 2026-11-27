@@ -3,6 +3,7 @@ import { NEPAL_TZ } from '../utils/nepalTime';
 // lead sentence, Needs-you-now, sorting, search, birthdays and the activity feed. No React, no Supabase: `today` is a Nepal
 // 'YYYY-MM-DD' passed in by the caller. Rows are fetchMemberships() rows (status: active / pending / lapsed / depleted).
 import { daysUntil, shortName, npr } from './packagesView';
+import { formatClockIsoNow } from '../utils/clockTime';
 
 export { daysUntil, shortName, npr };
 
@@ -287,8 +288,7 @@ const TZ = NEPAL_TZ;
 export function whenLabel(ts, today) {
   const dt = new Date(ts);
   const day = dt.toLocaleDateString('en-CA', { timeZone: TZ });
-  const [h, mi] = dt.toLocaleTimeString('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).split(':').map(Number);
-  const time = `${h % 12 === 0 ? 12 : h % 12}:${String(mi).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`;
+  const time = formatClockIsoNow(ts);
   const d = daysUntil(day, today);
   const [y, m, dd] = ymd(day);
   const label = d === 0 ? 'Today' : d === -1 ? 'Yesterday' : `${dd} ${MON[m - 1]}${String(y) !== String(today).slice(0, 4) ? ` ${y}` : ''}`;

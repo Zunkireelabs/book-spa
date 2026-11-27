@@ -6,7 +6,7 @@ import { render, screen, cleanup, fireEvent, within } from '@testing-library/rea
 import { MemoryRouter, useLocation } from 'react-router-dom';
 
 const state = vi.hoisted(() => ({ role: 'admin', rooms: true, overall: false, belowLg: true }));
-vi.mock('contexts/AuthContext', () => ({ useAuth: () => ({ profile: { role: state.role } }) }));
+vi.mock('contexts/AuthContext', () => ({ useAuth: () => ({ profile: { role: state.role } }), useOptionalAuth: () => ({ profile: { role: state.role } }) }));
 vi.mock('contexts/BranchContext', () => ({ useBranch: () => ({ isOverall: state.overall, loading: false, branchName: 'Lazimpat' }) }));
 vi.mock('hooks/useIndustry', () => ({ useIndustry: () => ({ locationLabelPlural: 'Rooms', enableRooms: state.rooms }) }));
 

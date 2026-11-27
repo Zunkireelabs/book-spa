@@ -5,6 +5,7 @@ import Icon from '../../components/AppIcon';
 import AppShell from '../../components/ui/AppShell';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchCustomerProfile, fetchOutreachMessages } from '../../services/api';
+import { formatStampNow } from '../../utils/clockTime';
 
 const STATUS_COLORS = {
   sent: 'bg-success/10 text-success',
@@ -14,7 +15,7 @@ const STATUS_COLORS = {
 };
 
 function formatDate(d) {
-  return d ? new Date(d).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  return d ? formatStampNow(d) : '—';
 }
 
 // Email bodies from automated outreach rules are stored as HTML — strip

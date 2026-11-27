@@ -9,12 +9,11 @@ import { describeTransfer, toTransferInput } from '../../../utils/transferText';
 import { useAutoRefresh } from '../../../hooks/useAutoRefresh';
 import { fetchStaffTransfers } from '../../../services/api';
 import { wordBranch } from '../../../utils/industryTerms';
+import { formatStampNow } from '../../../utils/clockTime';
 
 function formatDateTime(d) {
   if (!d) return '—';
-  return new Date(d).toLocaleString('en-GB', {
-    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
+  return formatStampNow(d);
 }
 
 function formatDateOnly(d) {

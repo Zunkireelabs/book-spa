@@ -7,6 +7,7 @@ import { setRestrictedReads } from '../lib/restrictedReads';
 import { invalidateAuthenticatedUser } from '../lib/authProfileCache';
 import { clearCalendarStatic } from '../lib/calendarStaticCache';
 import { isRestricted } from '../services/dataMasking';
+import { setClockProfile } from '../utils/clockPref';
 
 // Ceiling on how long the profile fetch may run before we give up and treat it
 // as "service unavailable" rather than leaving the app on a spinner forever.
@@ -17,8 +18,11 @@ const PROFILE_FETCH_TIMEOUT_MS = 12000;
 
 const AuthContext = createContext(null);
 
+// null outside an AuthProvider (isolated renders) instead of throwing.
+export const useOptionalAuth = () => useContext(AuthContext);
+
 export const useAuth = () => {
-  const context = useContext(AuthContext);
+  const context = useOptionalAuth();
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
@@ -159,7 +163,9 @@ async function fetchProfileRaw(userId, accessToken) {
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null);
+  const [profile, setProfileState] = useState(null);
+  // Plain (non-React) text builders read the same saved 12h/24h choice: set it with the profile (before children render), not during render.
+  const setProfile = useCallback((p) => { setClockProfile(p); setProfileState(p); }, []);
   const [loading, setLoading] = useState(true);
   // True once supabase has reported the stored session (INITIAL_SESSION), so "no user yet" can be told apart from "no session".
   const [sessionResolved, setSessionResolved] = useState(false);

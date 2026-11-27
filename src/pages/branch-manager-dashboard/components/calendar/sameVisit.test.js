@@ -30,7 +30,16 @@ describe('same visit / same client highlight (ZNLY-281, ZNLY-402)', () => {
   });
   it('banner counts the OTHER bookings that day, never the own visit, never cancelled; range = their first start to last end', () => {
     expect(visitDayInfo(idx, day[0])).toEqual({ count: 1, first: '17:00', last: '17:45' }); // only c is "also booked"
-    expect(visitDayInfo(idx, day[2])).toEqual({ count: 2, first: '14:00', last: '16:00' }); // a, b (x cancelled is not counted)
+    expect(visitDayInfo(idx, day[2])).toEqual({ count: 1, first: '14:00', last: '16:00' }); // visit v1 = ONE booking (a, b); x cancelled is not counted
+  });
+  it('ZNLY-435: a visit counts ONCE however many services it has, and the number is the same from either side', () => {
+    const rows = [bk('a1', 'm', '10:00', '10:30', 'confirmed', '2026-11-20', 'v1'), bk('a2', 'm', '10:30', '11:00', 'confirmed', '2026-11-20', 'v1'), bk('b1', 'm', '15:00', '16:00', 'confirmed', '2026-11-20', 'v2'), bk('b2', 'm', '16:00', '16:30', 'confirmed', '2026-11-20', 'v2'), bk('c', 'm', '18:00', '19:00', 'confirmed', '2026-11-20')];
+    const i = buildVisitIndex(rows);
+    expect(visitDayInfo(i, rows[0]).count).toBe(2); // v2 (2 rows) = 1, the lone booking c = 1
+    expect(visitDayInfo(i, rows[2]).count).toBe(2); // v1 = 1, c = 1
+    expect(visitDayInfo(i, rows[4])).toEqual({ count: 2, first: '10:00', last: '16:30' });
+    const off = buildVisitIndex([bk('p', 'm', '10:00', '11:00'), bk('q', 'm', '12:00', '13:00')]); // no visit_id (setting OFF): each booking is its own
+    expect(visitDayInfo(off, bk('p', 'm', '10:00', '11:00')).count).toBe(1);
   });
   it('banner is null when the client has nothing else that day (or is a walk-in)', () => {
     expect(visitDayInfo(idx, day[3])).toBeNull();

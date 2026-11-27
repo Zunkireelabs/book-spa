@@ -50,8 +50,8 @@ describe('half day', () => {
     expect(validateHalfDay({ offStart: '09:00', offEnd: '13:00', shift })).toBeNull();
     expect(validateHalfDay({ offStart: '', offEnd: '13:00', shift })).toBe('Enter both times.');
     expect(validateHalfDay({ offStart: '13:00', offEnd: '13:00', shift })).toBe('Off start must be before off end.');
-    expect(validateHalfDay({ offStart: '08:00', offEnd: '12:00', shift })).toBe('Must be inside the shift (09:00–18:00).');
-    expect(validateHalfDay({ offStart: '12:00', offEnd: '19:00', shift })).toBe('Must be inside the shift (09:00–18:00).');
+    expect(validateHalfDay({ offStart: '08:00', offEnd: '12:00', shift })).toBe('Must be inside the shift (9:00am–6:00pm).');
+    expect(validateHalfDay({ offStart: '12:00', offEnd: '19:00', shift })).toBe('Must be inside the shift (9:00am–6:00pm).');
     expect(validateHalfDay({ offStart: '12:00', offEnd: '19:00', shift: null })).toBeNull();   // nothing to check against
   });
 });

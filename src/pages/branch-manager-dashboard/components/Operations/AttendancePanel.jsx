@@ -21,7 +21,6 @@ import {
   fetchAttendancePunches, punchIn, punchOut, savePunch, deletePunch, punchTimeIso,
   fetchAttendanceGaps, fetchAttendanceSettings, fetchBranchesByOrgId, fetchTransfersForTherapists,
 } from '../../../../services/api';
-import { hmTo12h } from '../../../../services/visitorAttendance';
 import { useAvailabilityConflictGuard } from '../../../../hooks/useAvailabilityConflictGuard';
 import { leaveChange } from '../../../../services/availabilityConflicts';
 import {
@@ -30,6 +29,8 @@ import {
 import { useStickyBlock, SearchBox, useSlashFocus, Avatar, EmptyBlock, ErrorBlock } from '../Area/listKit';
 import AttendanceSidePanel from './AttendanceSidePanel';
 import { wordBranch } from '../../../../utils/industryTerms';
+import { formatClockTime, formatClockRange } from '../../../../utils/clockTime';
+import { useUse24h } from '../../../../hooks/useUse24h';
 
 // therapist_shifts_for_range row -> { start, end, breaks } (null when the person doesn't work that day).
 const shiftShape = (r) => (!r || !r.works || !r.start_time ? null : {
@@ -89,8 +90,9 @@ const AttendancePanel = ({ branchId }) => {
   const { profile } = useAuth();
   const navigate = useNavigate();
   const { orgSlug } = useParams();
-  const use24h = (() => { try { return localStorage.getItem(`bookspa_calendar_use24h_${profile?.org_id}_${profile?.id}`) === '1'; } catch { return false; } })();
-  const fmt = (hm) => (!hm ? '' : use24h ? String(hm).slice(0, 5) : hmTo12h(hm));
+  const [use24h] = useUse24h();
+  const fmt = (hm) => formatClockTime(String(hm || '').slice(0, 5), use24h);
+  const fmtRange = (a, b) => formatClockRange(String(a || '').slice(0, 5), String(b || '').slice(0, 5), use24h);
   const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -628,7 +630,7 @@ const AttendancePanel = ({ branchId }) => {
   const subLine = (r) => {
     const bits = [];
     if (r.visitor) {
-      const from = r.shift ? (r.visitAllDay ? 'here all day' : `here ${fmt(r.shift.start)} – ${fmt(r.shift.end)}`) : '';
+      const from = r.shift ? (r.visitAllDay ? 'here all day' : `here ${fmtRange(r.shift.start, r.shift.end)}`) : '';
       const why = r.d.kind === 'no_show' ? ` · no check-in ${minText(r.d.minAfterStart)} after start` : r.d.kind === 'no_checkout' ? ' · check-out missing' : r.d.checkedIn && !r.openHere && selectedDate === today ? ` · Done · ${minutesText(r.workedMin || 0)}` : '';
       return <span className="flex items-center gap-1.5 flex-wrap"><span className="px-1.5 rounded bg-[#EEF3FB] text-[#3B5B8C] text-[11px] font-medium">Visiting</span>{from}{why}</span>;
     }
@@ -640,7 +642,7 @@ const AttendancePanel = ({ branchId }) => {
     else if (r.d.lateMin > 0) bits.push(<span key="l" className="px-1.5 rounded bg-[#FEF3E2] text-[#B45309] text-[11px] font-medium">Late {minText(r.d.lateMin)}{r.lateDue ? ` (due ${fmt(r.lateDue.start)} at ${branchNameById[r.lateDue.branchId] || 'this branch'})` : ''}</span>);
     else if (r.d.minAfterStart > 0) bits.push(`${r.d.minAfterStart} min after start · within grace`);
     else if (r.d.kind === 'later' && r.shift) bits.push(`Starts ${fmt(r.shift.start)}`);
-    else if (isHalfDayStatus(r.status) && r.offStart) bits.push(`Half day · off ${fmt(r.offStart)} – ${fmt(r.offEnd)}`);
+    else if (isHalfDayStatus(r.status) && r.offStart) bits.push(`Half day · off ${fmtRange(r.offStart, r.offEnd)}`);
     else if (r.d.kind === 'leave') bits.push(r.status === 'Sick Leave' ? 'Sick leave' : r.status === 'Annual Leave' ? 'Annual leave' : 'Leave');
     if (r.d.kind === 'out' && selectedDate === today) bits.push(`Done · ${r.punchCount ? minutesText(r.workedMin) : durationText(r.checkInTime, r.checkOutTime)}`);
     const role = r.position && !bits.length ? r.position : null;
@@ -727,7 +729,7 @@ const AttendancePanel = ({ branchId }) => {
     const selectable = !r.visitor && !dayClosed && selectedDate === today;
     const k = KINDS[r.d.kind] || KINDS.not_scheduled;
     const pillKind = r.gap ? 'no_checkout' : r.d.kind;
-    const shiftText = r.shift ? `${fmt(r.shift.start)} – ${fmt(r.shift.end)}` : '—';
+    const shiftText = r.shift ? `${fmtRange(r.shift.start, r.shift.end)}` : '—';
     const showIn = r.gap ? `${dayWord(r.gap.date).split(' ')[0]} ${fmt(r.gap.checkInTime)}` : fmt(r.checkInTime);
     return (
       <tr className={`border-b border-[#F0F0EE] hover:bg-[#FCFCFB] ${selectedIds.includes(r.id) ? 'bg-primary/[0.04]' : ''}`} data-attendance-row={r.id} data-kind={pillKind}>
@@ -959,6 +961,7 @@ const AttendancePanel = ({ branchId }) => {
           canEdit={!dayClosed}
           staffLabel={staffLabel}
           fmt={fmt}
+          fmtRange={fmtRange}
           punches={panelPunches}
           branchId={branchId}
           branchNameById={branchNameById}

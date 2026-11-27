@@ -71,7 +71,8 @@ export const highlightLevel = (index, active, booking) => {
   return (index.clients.get(cid)?.keys.size || 0) >= 2 ? 'client' : null;
 };
 
-/** { count, first, last } of the client's OTHER bookings that day (not this booking's own visit, not cancelled), or null when there are none. */
+/** { count, first, last } of the client's OTHER bookings that day, or null when there are none. A visit counts ONCE however many services it has (ZNLY-435);
+ *  this booking's own visit and cancelled rows are not counted. Every org: a booking with no visit_id is its own visit. The one source of the banner's number. */
 export const visitDayInfo = (index, booking) => {
   const cid = cidOf(booking);
   const own = visitKey(booking);
@@ -83,5 +84,5 @@ export const visitDayInfo = (index, booking) => {
     if (r.st && (!first || r.st < first)) first = r.st;
     if (r.en && (!last || r.en > last)) last = r.en;
   }
-  return { count: others.length, first, last };
+  return { count: new Set(others.map((r) => r.vk)).size, first, last };
 };

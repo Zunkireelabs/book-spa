@@ -6,6 +6,7 @@ import { useMenuNav } from './useMenuNav';
 import CustomSelect from './CustomSelect';
 import usePopoverIntoView from '../../hooks/usePopoverIntoView';
 import MiniMonthCalendar from '../../pages/branch-manager-dashboard/components/calendar/MiniMonthCalendar';
+import { useClock } from '../../hooks/useUse24h';
 
 // Shared building blocks for the calendar's block / transfer forms so they look and behave like quick-create:
 // 13px labels, 40px controls, a "Mon 12 Oct" date button with the mini-month popover, a 12-hour time picker snapped to
@@ -14,13 +15,6 @@ import MiniMonthCalendar from '../../pages/branch-manager-dashboard/components/c
 // that isn't the calendar.
 
 export const CONTROL = 'w-full h-10 max-md:h-11 px-3 text-[13px] font-body text-text-primary bg-surface border border-border rounded-spa focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:opacity-60 disabled:cursor-not-allowed placeholder:text-text-tertiary';
-
-export const format12h = (time24) => {
-  if (!time24) return '';
-  const [h, m] = String(time24).split(':').map(Number);
-  if (Number.isNaN(h)) return '';
-  return `${h % 12 === 0 ? 12 : h % 12}:${String(m || 0).padStart(2, '0')}${h >= 12 && h < 24 ? 'pm' : 'am'}`;
-};
 
 export const addMinutes = (time24, minutes) => {
   const [h, m] = time24.split(':').map(Number);
@@ -337,13 +331,15 @@ export const DateField = ({ value, onChange, label, required, disabled, hint, mi
 };
 
 // 12-hour time picker: type ("6:50pm", "18:50") or pick from the list, snapped to `step` minutes.
-export const TimeField = ({ value, onChange, label, required, disabled, hint, step = 10, fromTime = '06:00', toTime = '23:50', formatTime = format12h }) => {
+export const TimeField = ({ value, onChange, label, required, disabled, hint, step = 10, fromTime = '06:00', toTime = '23:50', formatTime: formatTimeProp }) => {
+  const clock = useClock();
+  const formatTime = formatTimeProp ?? clock;
   const [text, setText] = useState(value ? formatTime(value) : '');
   const [open, setOpen] = useState(false);
   const timeIntoView = usePopoverIntoView(open);
   const ref = useRef(null);
   const listRef = useRef(null);
-  useEffect(() => { setText(value ? formatTime(value) : ''); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setText(value ? formatTime(value) : ''); }, [value, clock]); // eslint-disable-line react-hooks/exhaustive-deps -- clock: the 12h/24h choice changed
   const options = useMemo(() => {
     const [fh, fm] = fromTime.split(':').map(Number);
     const [th, tm] = toTime.split(':').map(Number);

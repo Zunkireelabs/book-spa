@@ -1,5 +1,7 @@
 // Staff-availability rule (ZNLY-100): error mapping + a data-driven pre-check over the rows
 import { wordBranch } from '../utils/industryTerms';
+import { formatClockRange, formatClockTime } from '../utils/clockTime';
+import { readUse24h } from '../utils/clockPref';
 // therapist_shifts_for_range (migration-354) returns. The database is the only place the rule is enforced
 // (check_therapist_booking_guards, migration-353); this module only turns its stable error codes into
 // messages and shows the same verdict early, while a form is being filled in.
@@ -31,7 +33,8 @@ export const hhmmToMinutes = (t) => {
 // "Rojina is on a break 14:00–14:30". `staffLabel` (from useIndustry) is only the fallback when the name is missing.
 export function formatAvailabilityMessage(code, detail = {}, { staffLabel = 'staff member' } = {}) {
   const who = detail.therapist_name || `This ${staffLabel}`;
-  const range = `${detail.range_start}–${detail.range_end}`;
+  const use24h = readUse24h(); // staff-facing text: follows the saved 12h/24h choice, like the screen around it
+  const range = formatClockRange(detail.range_start, detail.range_end, use24h);
   switch (code) {
     case 'ON_BREAK':
       return `${who} is on a break ${range}`;
@@ -44,8 +47,8 @@ export function formatAvailabilityMessage(code, detail = {}, { staffLabel = 'sta
     case 'OVERLAP':
       return `${who} already has a booking ${range}`;
     case 'OFF_SHIFT':
-      if (detail.reason === 'before_shift') return `${who} is off until ${detail.range_end}`;
-      if (detail.reason === 'after_shift') return `${who}'s shift ends at ${detail.range_start}`;
+      if (detail.reason === 'before_shift') return `${who} is off until ${formatClockTime(detail.range_end, use24h)}`;
+      if (detail.reason === 'after_shift') return `${who}'s shift ends at ${formatClockTime(detail.range_start, use24h)}`;
       return `${who} is not working on this date`;
     case 'OVERRIDE_NOT_ALLOWED':
       return 'Only a manager or admin can book outside a staff member\'s availability.';

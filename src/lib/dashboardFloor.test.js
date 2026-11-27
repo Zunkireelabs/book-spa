@@ -8,9 +8,9 @@ describe('formatting', () => {
     expect(fmtDuration(390)).toBe('6h 30m');
   });
   it('clock', () => {
-    expect(fmtClock(930)).toBe('3:30 pm');
-    expect(fmtClock(600)).toBe('10 am');
-    expect(fmtClock(720)).toBe('12 pm');
+    expect(fmtClock(930)).toBe('3:30pm');
+    expect(fmtClock(600)).toBe('10:00am');
+    expect(fmtClock(720)).toBe('12:00pm');
   });
 });
 

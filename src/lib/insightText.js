@@ -2,12 +2,14 @@ import { NEPAL_TZ } from '../utils/nepalTime';
 // Words for the Insights ✦ (get_dashboard_insights, migration-370). The server returns numbers only; the sentence is built here so
 // industry words come from useIndustry (`labels.staff` / `labels.staffPlural`), never from SQL. Pure.
 import { npr } from './dashboardMoney';
+import { formatClockNow, formatClockIsoNow } from '../utils/clockTime';
+import { readUse24h } from '../utils/clockPref';
 
 const plural = (n, one, many = `${one}s`) => `${n} ${Number(n) === 1 ? one : many}`;
 const pct = (share) => `${Math.min(100, Math.round(Number(share) * 100))}%`;  // booked minutes can pass available ones (breaks, leave, overbooking): never show over 100%
 const day = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 const weekday = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' });
-const hm = (t) => { const [h, m] = String(t).slice(0, 5).split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`; };
+const hm = (t) => { if (readUse24h()) return formatClockNow(String(t).slice(0, 5)); const [h, m] = String(t).slice(0, 5).split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`; };
 const span = (vals, unit) => { const lo = Math.min(...vals), hi = Math.max(...vals); return lo === hi ? `${lo} ${unit}` : `${lo}–${hi} ${unit}`; };
 const nameList = (list) => (list || []).map((c) => c.name).filter(Boolean).join(', ');
 const joinNames = (list) => {
@@ -98,6 +100,6 @@ export function describeInsight(item, labels = {}) {
 }
 
 export const sourceLine = (item) => {
-  const t = item.as_of ? new Date(item.as_of).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: NEPAL_TZ }) : '';
+  const t = item.as_of ? formatClockIsoNow(item.as_of) : '';
   return `Source: rule · ${item.rule} v${item.version} · data as of ${t}`;
 };

@@ -2,9 +2,10 @@ import React from 'react';
 import CustomSelect from './CustomSelect';
 import StaffPickRow from './StaffPickRow';
 import StaffPicker from './StaffPicker';
-import { formatClockTime } from '../../pages/branch-manager-dashboard/components/calendar/timeFormat';
+import { formatClockTime, formatClockRange } from '../../utils/clockTime';
 import { pickedRowStatusMulti, staffDayRanges, clockToMin, rangeLabel } from '../../utils/staffFit';
 import { nepalNow } from '../../utils/customerDirectory';
+import { useUse24h } from '../../hooks/useUse24h';
 
 // ZNLY-402 piece 4 (v3): the Staff tab of a booking with several services. EVERY service is a row with its own staff picker (and room
 // picker where the org uses rooms), the same pickers and the same Free / Busy check as the single-service Staff tab. One Save for all rows.
@@ -18,8 +19,10 @@ export const rowChanged = (r, picks) => !!picks[r.id] && (
 
 const BookingStaffRows = ({
   rows, picks, setPicks, editable, therapists, rooms, dayBookings, offStaff, allowOverlap,
-  staffLabel, staffLabelPlural, use24h, notes, setNotes, error, notesDisabled,
+  staffLabel, staffLabelPlural, use24h: use24hProp, notes, setNotes, error, notesDisabled,
 }) => {
+  const [use24hPref] = useUse24h();
+  const use24h = use24hProp ?? use24hPref;
   const staffLower = (staffLabel || 'team member').toLowerCase();
   const setPick = (r, patch) => setPicks((prev) => ({ ...prev, [r.id]: { ids: rowIds(r, prev), room: rowRoom(r, prev), ...patch } }));
   return (
@@ -42,7 +45,7 @@ const BookingStaffRows = ({
           <div key={r.id} className="rounded-spa-lg border border-border p-3 space-y-2.5" data-staff-row={r.id}>
             <div>
               <p className="text-[13px] font-medium text-text-primary">{r.name}</p>
-              <p className="text-[12px] text-text-secondary">{[r.start ? `${formatClockTime(r.start, use24h)}${r.end ? ` – ${formatClockTime(r.end, use24h)}` : ''}` : '', r.minutes ? `${r.minutes} min` : ''].filter(Boolean).join(' · ')}</p>
+              <p className="text-[12px] text-text-secondary">{[r.start ? formatClockRange(r.start, r.end, use24h) : '', r.minutes ? `${r.minutes} min` : ''].filter(Boolean).join(' · ')}</p>
             </div>
             <StaffPickRow
               key={`${r.id}-${(r.staffIds || []).join(',')}`}
@@ -51,6 +54,7 @@ const BookingStaffRows = ({
               statusLine={can ? info.statusLine : ''}
               pill={can ? info.pill : null}
               problem={can ? info.problem : ''}
+              note={can ? info.note : ''}
               assignedIds={r.staffIds}
               assignedNames={r.staff}
               disabled={!can}

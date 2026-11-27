@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import PickShell from './PickShell';
 import { roomStates, anyAvailableLine, statusText } from '../../utils/roomPick';
-import { fmt12 } from '../../utils/errorGuide';
+import { formatClockNow } from '../../utils/clockTime';
 
 // ZNLY-365: ONE "which room" row, built on PickShell exactly like ServicePickRow and StaffPickRow.
 // Closed row: room name on top, a status line under it (Free / "1 of 3 places left" / Full), ›.
@@ -22,7 +22,7 @@ export const slotLine = ({ serviceName, date, startTime, durationMin }) => {
   const day = new Date(Number(d[1]), Number(d[2]) - 1, Number(d[3]));
   const s = Number(m[1]) * 60 + Number(m[2]);
   const hhmm = (v) => `${String(Math.floor(v / 60) % 24).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
-  return [serviceName, `${DAYS[day.getDay()]} ${day.getDate()} ${MONTHS[day.getMonth()]}`, `${fmt12(startTime)}–${fmt12(hhmm(s + (durationMin || 60)))}`].filter(Boolean).join(' · ');
+  return [serviceName, `${DAYS[day.getDay()]} ${day.getDate()} ${MONTHS[day.getMonth()]}`, `${formatClockNow(startTime)}–${formatClockNow(hhmm(s + (durationMin || 60)))}`].filter(Boolean).join(' · ');
 };
 
 const beds = (r) => (r.amenities?.length ? r.amenities.join(', ') : '');

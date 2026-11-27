@@ -146,7 +146,7 @@ describe('buildTherapistsOverview', () => {
       weekDatesOf(DATE).map((d) => ({ therapist_id: 't2', shift_date: d, works: true, source: 'none', start_time: '09:00:00', end_time: '21:00:00', breaks: [], off: [] })));
     const t2 = buildTherapistsOverview({ ...base, shiftRows }, { date: DATE, nowTime: '12:00' }).therapists.find((t) => t.id === 't2');
     expect(t2.status.key).toBe('no-hours-open');
-    expect(todayLabels(t2)).toEqual({ title: 'No hours set', sub: 'bookable in branch hours 09:00–21:00' });
+    expect(todayLabels(t2)).toEqual({ title: 'No hours set', sub: 'bookable in branch hours 9:00am–9:00pm' });
     expect(segmentOf(t2)).toBe('noroster');
     expect(t2.weekMinutes).toBe(0);
   });
@@ -170,7 +170,7 @@ describe('strip + needs you now', () => {
     const s = stripStats(active, { nowTime: '12:00' });
     expect(s.working).toMatchObject({ count: 2, sub: 'of 3 service staff', hint: '1 checked in · 1 not yet' });
     expect(s.notin.count).toBe(1);
-    expect(s.notin.hint).toBe('Oldest: 10:00, 2 h 0 m ago');
+    expect(s.notin.hint).toBe('Oldest: 10:00am, 2 h 0 m ago');
     expect(s.off).toMatchObject({ count: 1, hint: 'Back tomorrow: 1' });
     expect(s.support.count).toBe(1);
   });

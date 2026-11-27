@@ -1,4 +1,6 @@
 import { NEPAL_TZ, nepalToday } from '../../utils/nepalTime';
+import { formatClockTime, formatClockIsoNow, formatClockRange } from '../../utils/clockTime';
+import { useUse24h } from '../../hooks/useUse24h';
 import { futureBookingMessage } from '../../services/bookingTransformers';
 import { friendlyError } from '../../utils/friendlyError';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -22,6 +24,7 @@ import { paymentStatusLabel } from '../../utils/paymentStatusLabel';
 const payTone = (b) => ({ success: 'text-success', neutral: 'text-text-secondary', warning: 'text-warning' })[paymentStatusLabel(b).tone];
 import InvoicePrintModal from './InvoicePrintModal';
 import { relatedFetchers } from '../../utils/visitGate';
+import { deleteBlockers } from '../../utils/deleteBlockers';
 import { fetchBookingServices } from '../../services/api';
 import { buildBookingBlock } from '../../utils/bookingBlock';
 import { VisitStatusFlow } from './VisitStatusDialog';
@@ -33,7 +36,7 @@ import BookingServicesBlock, { waitingNote } from './BookingServicesBlock';
 import BookingStaffRows, { rowIds, rowRoom, rowChanged } from './BookingStaffRows';
 import BookingDiscountLines from './BookingDiscountLines';
 import { planBookingDiscount } from '../../utils/bookingDiscount';
-import { adminCorrectBooking, correctPaymentMode, adminDeleteBooking, correctPaymentAmount, fetchMemberDiscountContext, applyMemberDiscount,  fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, fetchBookingProductSales, refundProductSale, recordTip, getCustomerFirstBookingFlag, fetchInvoiceByBookingId, staffCanRequestDiscountApproval } from '../../services/api';
+import { adminCorrectBooking, correctPaymentMode, adminDeleteBooking, correctPaymentAmount, fetchMemberDiscountContext, applyMemberDiscount,  fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, fetchBookingProductSales, refundProductSale, recordTip, fetchBookingPackageUseCount, getCustomerFirstBookingFlag, fetchInvoiceByBookingId, staffCanRequestDiscountApproval } from '../../services/api';
 import { excludeRelatedFromPreviousDue, toDbStatus } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
@@ -42,7 +45,6 @@ import BlockOverlapWarning from './BlockOverlapWarning';
 import SidePanel, { PANEL_WIDTH_BOOKING } from './SidePanel';
 import { DetentSheet, SheetExpandButton, useMediaQuery, releaseSheetEntry } from './BottomSheet';
 import ClientDayLine from '../../pages/branch-manager-dashboard/components/calendar/ClientDayLine';
-import { compactRange } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
 import BookingCustomerLine from './BookingCustomerLine';
 import WalkInClientLine from './WalkInClientLine';
 import { useNavigate } from 'react-router-dom';
@@ -83,24 +85,12 @@ function hasBookingStarted(booking) {
   return getNepalNow() >= start;
 }
 
-// Convert "HH:MM" or "HH:MM:SS" to 12h format
-function to12h(timeStr) {
-  if (!timeStr) return '';
-  const [h, m] = timeStr.split(':').map(Number);
-  const period = h >= 12 ? 'pm' : 'am';
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
-}
-
-// Format an ISO timestamp as "5 Jun 2026, 2:14 pm"
+// An ISO timestamp as "5 Jun 2026, 2:14pm" (Nepal time; the clock part follows the 12h/24h choice).
 function formatCreatedAt(iso) {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString('en-GB', {
-    day: 'numeric', month: 'short', year: 'numeric',
-    hour: 'numeric', minute: '2-digit', hour12: true,
-  });
+  return `${d.toLocaleDateString('en-GB', { timeZone: NEPAL_TZ, day: 'numeric', month: 'short', year: 'numeric' })}, ${formatClockIsoNow(iso)}`;
 }
 
 // Status badge styles
@@ -113,7 +103,7 @@ const whenShort = (ts) => {
   if (!ts) return '';
   const d = new Date(ts);
   const day = d.toLocaleDateString('en-CA', { timeZone: NEPAL_TZ });
-  const t = d.toLocaleTimeString('en-US', { timeZone: NEPAL_TZ, hour: 'numeric', minute: '2-digit' }).replace(' ', '').toLowerCase();
+  const t = formatClockIsoNow(ts);
   return `${day === nepalNow().today ? 'today' : d.toLocaleDateString('en-GB', { timeZone: NEPAL_TZ, day: 'numeric', month: 'short' })} ${t}`;
 };
 const MemberDiscountCard = ({ md, ctx, serviceLabel, busy, onApply, onDecline }) => {
@@ -303,7 +293,7 @@ const BookingActionModal = ({
   // get that affordance (same gate as issue_invoice(), migration-334).
   canViewCustomerDetails = true,
   variant = 'modal',
-  use24h = false,          // calendar's per-user 12h/24h display preference (cosmetic)
+  use24h: use24hProp,      // optional override; by default the staff member's own 12h/24h choice (useUse24h)
   previewBooking = null,   // panel only: the calendar card's already-known data, shown while the full booking loads
   onRefreshBooking,        // panel only: re-fetch the open booking after an in-place action (status change)
   liveBackdrop = false,    // panel on phones: the page behind stays live (calendar): no scrim, no focus trap at half
@@ -321,7 +311,12 @@ const BookingActionModal = ({
   onRescheduleStart,
   // ZNLY-402 piece 5: the pencil opens the shared booking form (prefilled with the whole booking) when the host provides it; else the inline Edit details.
   onEditForm,
+  // ZNLY-435: the calendar's day rows (raw `bookings` shape) so the card is drawn on first paint; every other host leaves it out and gets the placeholder.
+  instantRows = null,
 }) => {
+  const [use24hPref] = useUse24h();
+  const use24h = use24hProp ?? use24hPref;
+  const clock = (t) => formatClockTime(t, use24h);
   const { branchId } = useBranch();
   const { org: orgForNav, paymentMethods, orgSettings, staffLabel, staffLabelPlural, allowStaffOverlap, multiServiceBookings } = useOrg();
   const navigate = useNavigate();
@@ -353,8 +348,6 @@ const BookingActionModal = ({
   // Per-companion (non-primary therapist) room override for couple bookings where each
   // person is in a separate room — { [therapistId]: roomId }. Primary therapist (index 0
   // of selectedTherapists) always uses selectedRoom above.
-  const [therapistRoomOverrides, setTherapistRoomOverrides] = useState({});
-  const [companionName, setCompanionName] = useState('');
   const companionPhone = usePhoneState('');
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -443,7 +436,10 @@ const BookingActionModal = ({
   // Discount tab: same-day related bookings for combined discount application
   const [relatedBookings, setRelatedBookings] = useState([]);
   // ZNLY-402 piece 4: every row of this booking (visit_id) for the constant "This booking" block. Only fetched when the org setting is ON.
-  const [blockRows, setBlockRows] = useState([]);
+  // ZNLY-435: with the setting OFF the panel LOOKS the same, but group / same-day related bookings keep working as before (related list, discount ticks, paid siblings, checkout bundle).
+  const legacyGroups = !multiServiceBookings;
+  const [groupSiblings, setGroupSiblings] = useState([]);
+  const [blockRows, setBlockRows] = useState(null); // null = not loaded yet
   const [blockReload, setBlockReload] = useState(0);
   const [rowBusy, setRowBusy] = useState(null);
   const [rowPicks, setRowPicks] = useState({});        // Staff tab of a multi-service booking: { [bookingId]: { ids, room } }
@@ -454,7 +450,6 @@ const BookingActionModal = ({
   // Every sibling (ZNLY-402 ON: the other bookings of this visit_id; OFF: formal group, or same customer_name+date), any payment_status — display only, never used for
   // bundling (see fetchGroupBookings). Keeps a paid sibling
   // visible from every other sibling's modal instead of silently vanishing.
-  const [groupSiblings, setGroupSiblings] = useState([]);
   const [historyReload, setHistoryReload] = useState(0);
   const [correctionNote, setCorrectionNote] = useState(null);
   const [dueHolderSuggestions, setDueHolderSuggestions] = useState([]);
@@ -469,6 +464,7 @@ const BookingActionModal = ({
   // separate from `relatedBookings` (same-day services, used by the Discount tab).
   // Pre-selected by default so it's bundled into payment automatically.
   const [previousDueBookings, setPreviousDueBookings] = useState([]);
+  const [previousDueFor, setPreviousDueFor] = useState(null); // the booking the list above was loaded for
   const [selectedPreviousDueIds, setSelectedPreviousDueIds] = useState(new Set());
   const [selectedRelatedIds, setSelectedRelatedIds] = useState(new Set());
 
@@ -505,12 +501,6 @@ const BookingActionModal = ({
         : (booking.therapist?.id ? [booking.therapist.id] : []);
       setSelectedTherapists(ids);
       setSelectedRoom(booking.roomId || '');
-      const overrides = {};
-      (booking.therapists || []).forEach(t => {
-        if (t.roomId) overrides[t.id] = t.roomId;
-      });
-      setTherapistRoomOverrides(overrides);
-      setCompanionName(booking.companionName || '');
       companionPhone.reset(booking.companionPhone || '');
     }
   }, [booking?.bookingId]);
@@ -543,23 +533,26 @@ const BookingActionModal = ({
 
   useEffect(() => { setRowPicks({}); setPerService(false); }, [booking?.bookingId]);
   useEffect(() => {
-    if (!isOpen || !multiServiceBookings || !booking?.visitId) { setBlockRows([]); return undefined; }
+    if (!isOpen || !booking?.bookingId) { setBlockRows(null); return undefined; }
     let cancelled = false;
-    fetchBookingServices({ visitId: booking.visitId, customerId: booking.customerId }).then(({ data }) => { if (!cancelled) setBlockRows(data || []); });
+    setBlockRows((prev) => (prev?.some((r) => r.id === booking.bookingId) ? prev : null)); // another booking's rows never stand in for this one
+    fetchBookingServices({ visitId: booking.visitId, customerId: booking.customerId, bookingId: booking.bookingId }).then(({ data, error }) => { if (!cancelled) setBlockRows(error ? [] : (data || [])); });
     return () => { cancelled = true; };
-  }, [isOpen, multiServiceBookings, booking?.visitId, booking?.customerId, booking?.bookingId, booking?.status, booking?.paymentStatus, booking?.finalAmount, booking?.discountAmount, booking?.amountPaid, booking?.therapist?.id, booking?.startTime, blockReload]);
-  const block = useMemo(() => buildBookingBlock(blockRows, booking?.bookingId), [blockRows, booking?.bookingId]);
-  // The multi-service look is ONLY for a booking with 2+ services in an org with the setting ON: every other booking looks exactly as before.
-  const multiView = !!(multiServiceBookings && booking?.visitId && block.show && block.rows.some((r) => r.id === booking?.bookingId));
+  }, [isOpen, booking?.visitId, booking?.customerId, booking?.bookingId, booking?.status, booking?.paymentStatus, booking?.finalAmount, booking?.discountAmount, booking?.amountPaid, booking?.therapist?.id, booking?.startTime, blockReload]);
+  // ZNLY-435: ONE layout. Every booking, in every org, is the "This booking" card (1 service = 1 row). Rows come from the fetch; the calendar hands
+  // its day rows so the first paint is already the card (the fetch then refreshes it quietly). Until either has this booking: the placeholder, never another layout.
+  const fetchedRows = blockRows?.some((r) => r.id === booking?.bookingId) ? blockRows : null;
+  const usableInstant = instantRows?.some((r) => r.id === booking?.bookingId) ? instantRows : null;
+  const block = useMemo(() => buildBookingBlock(fetchedRows || usableInstant || [], booking?.bookingId), [fetchedRows, usableInstant, booking?.bookingId]);
+  const blockReady = block.rows.some((r) => r.id === booking?.bookingId);
   // Checkout (ZNLY-402 piece 5, B): every payable service is one equal row; the first TICKED one is the payment's main booking (the opened service when it is ticked).
   const payOrder = useMemo(() => {
-    if (!multiView) return [];
     const ids = new Set([booking?.bookingId, ...relatedBookings.filter((rb) => !(multiServiceBookings && rb.status === 'Pending')).map((rb) => rb.id)]);
     return block.rows.filter((r) => ids.has(r.id) && !r.dead).map((r) => r.id);
-  }, [multiView, block.rows, booking?.bookingId, relatedBookings, multiServiceBookings]);
+  }, [block.rows, booking?.bookingId, relatedBookings, multiServiceBookings]);
   const payTicked = payTicks || new Set(payOrder);
-  const payMainId = !multiView ? booking?.bookingId : (payTicked.has(booking?.bookingId) ? booking.bookingId : (payOrder.find((id) => payTicked.has(id)) || booking?.bookingId));
-  const payNoneTicked = multiView && payOrder.every((id) => !payTicked.has(id));
+  const payMainId = payTicked.has(booking?.bookingId) ? booking.bookingId : (payOrder.find((id) => payTicked.has(id)) || booking?.bookingId);
+  const payNoneTicked = payOrder.every((id) => !payTicked.has(id));
   // One service as the checkout wants it (the opened booking, or one of the related raw rows).
   const payRowView = (id) => {
     const info = block.rows.find((r) => r.id === id);
@@ -569,25 +562,22 @@ const BookingActionModal = ({
   };
   const togglePayTick = (id) => setPayTicks((prev) => { const n = new Set(prev || payOrder); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const payMainView = booking ? payRowView(payMainId) : null;
-  const visitStatusFlow = multiView && !!booking?.visitId && (pendingStatus === 'no show' || pendingStatus === 'cancelled');
+  const visitStatusFlow = block.rows.length > 1 && !!booking?.visitId && (pendingStatus === 'no show' || pendingStatus === 'cancelled');
 
   // Fetch related unpaid bookings when payment tab opens
   useEffect(() => {
-    // ZNLY-402 A1: with the setting ON the Details "Collect payment" opens the same checkout, so the related services load as soon as the panel opens (not only on the Payment / Discount tab): one source for both entry points.
-    const loadsRelated = activeTab === 'payment' || activeTab === 'discount' || (multiServiceBookings && !!booking?.visitId);
-    if (isOpen && loadsRelated && booking) {
+    // ZNLY-402 A1 / ZNLY-435: the Details card shows the earlier balance and its "Collect payment" opens the checkout, so related services and the earlier balance load as soon as the panel opens (not only on the Payment / Discount tab).
+    if (isOpen && booking) {
       // ZNLY-402: orgs with "Several services in one booking" ON: "related" = the rest of THIS visit (booking.visitId); no visit = none.
       // Every other org keeps the original rule: the booking group, else the same customer name + date.
       const fetchers = relatedFetchers(multiServiceBookings);
       const relatedPromise = fetchers.related(booking);
-      if (activeTab === 'payment') {
-        fetchers.siblings(booking).then(({ data }) => setGroupSiblings(data || []));
-      } else {
-        setGroupSiblings([]);
-      }
-      const duePromise = (activeTab === 'payment' && booking?.customerPhone)
+      if (legacyGroups && activeTab === 'payment') fetchers.siblings(booking).then(({ data }) => setGroupSiblings(data || []));
+      else setGroupSiblings([]);
+      const duePromise = (booking?.customerId || booking?.customerPhone)
         ? getCustomerOutstandingBalance({
             customerPhone: booking.customerPhone,
+            customerId: booking.customerId,
             branchId,
             excludeBookingId: booking.bookingId,
           })
@@ -611,27 +601,23 @@ const BookingActionModal = ({
           setRowDiscountOverrides({});
         }
 
-        if (activeTab === 'payment') {
+        {
           // Exclude any booking already shown under "Related Services" — a real
           // same-visit sibling that's unpaid always also matches
           // getCustomerOutstandingBalance's phone-wide criteria, so without this it would be
           // double-counted in the Grand Total (see BK-20260908-0011/-0012 incident).
           const bookings = excludeRelatedFromPreviousDue(dueResult.data?.bookings, related);
           setPreviousDueBookings(bookings);
+          setPreviousDueFor(booking.bookingId);
           // Auto-bundled by default — staff can uncheck individual items.
           setSelectedPreviousDueIds(new Set(bookings.map(b => b.bookingId)));
         }
       }).catch(err => {
         console.error('[BookingActionModal] related/previous-due bookings fetch failed:', err.message);
-        if (activeTab === 'payment') {
-          setPreviousDueBookings([]);
-          setSelectedPreviousDueIds(new Set());
-          setSelectedRelatedIds(new Set());
-        }
+        setPreviousDueBookings([]);
+        setSelectedPreviousDueIds(new Set());
+        setSelectedRelatedIds(new Set());
       });
-    } else if (isOpen && activeTab === 'payment') {
-      setPreviousDueBookings([]);
-      setSelectedPreviousDueIds(new Set());
     }
     if (isOpen && activeTab === 'payment' && booking?.bookingId) {
       fetchMembershipForBooking(booking.bookingId).then(result => {
@@ -683,6 +669,20 @@ const BookingActionModal = ({
     setRewardAmount('');
     setRewardError(null);
   }, [customerReferral?.referralId]);
+
+  // Admin correction: package sessions used on this booking (the one delete blocker the panel doesn't already hold).
+  const [packageUses, setPackageUses] = useState(0);
+  useEffect(() => {
+    setPackageUses(0);
+    if (showAdminCorrection && booking?.bookingId) fetchBookingPackageUseCount(booking.bookingId).then(setPackageUses).catch(() => {});
+  }, [showAdminCorrection, booking?.bookingId]);
+  const delBlock = showAdminCorrection ? deleteBlockers({
+    payments: booking?.payments, refunds: booking?.refunds, tips: booking?.tips,
+    hasReferral: !!customerReferral, packageUses, status: booking?.status, paymentStatus: booking?.paymentStatus,
+  }) : null;
+  // "Cancel and refund": the existing cancel path for a settled booking is the admin correction to Cancelled (the DB refunds the payments on that change).
+  const cancelAndRefund = () => { setCorrectionMode('correct'); setCorrectionField('status', 'Cancelled'); };
+  useEffect(() => { if (delBlock && correctionMode === 'delete') setCorrectionMode('correct'); }, [!!delBlock, correctionMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleResolveReferralReward = async () => {
     if (!customerReferral?.referralId) return;
@@ -890,13 +890,6 @@ const BookingActionModal = ({
     }
     return opts;
   }, [branchHours]);
-
-  const format12h = (time24) => {
-    const [h, m] = time24.split(':').map(Number);
-    const suffix = h >= 12 ? 'pm' : 'am';
-    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-    return `${h12}:${String(m).padStart(2, '0')} ${suffix}`;
-  };
 
   // TimeBoxInput lets staff type any time, unlike the old dropdown which only
   // ever offered times inside branch hours — not a hard rule (nothing blocks
@@ -1142,51 +1135,6 @@ const BookingActionModal = ({
     if (onClose) onClose();
   };
 
-  const handleAssignTherapist = async () => {
-    if (!booking) return;
-
-    if (selectedTherapists.length > 1 && currentServiceObj?.is_couple && companionPhone.problem) { setActionError(companionPhone.problem); return; }
-    setIsLoading(true);
-    setActionError(null);
-    try {
-      if (onAssignTherapist) {
-        // Overrides/companion info only make sense for a couple-flagged service with
-        // 2+ therapists selected -- gate on BOTH, not just therapist count, or this data
-        // ships even after the section that shows it has been hidden (e.g. staff picked
-        // 2 therapists on a couple service, then changed the service before saving).
-        const isCoupleAssignment = selectedTherapists.length > 1 && !!currentServiceObj?.is_couple;
-        const overridesToSend = isCoupleAssignment
-          ? Object.fromEntries(
-              selectedTherapists.slice(1).map(tid => [tid, therapistRoomOverrides[tid] || selectedRoom || null])
-            )
-          : undefined;
-        const assigned = await onAssignTherapist(
-          booking.bookingId,
-          selectedTherapists,
-          notes,
-          selectedRoom || null,
-          overridesToSend,
-          isCoupleAssignment ? (companionName.trim() || null) : undefined,
-          isCoupleAssignment ? (companionPhone.value || null) : undefined,
-          { inline: true }
-        );
-        if (assigned?.error) {
-          retryRef.current = () => handleAssignTherapist();
-          setActionError(guideFor(assigned.error));
-          return;
-        }
-      }
-      // The panel stays open on the updated booking (like status changes); the modal closes as before.
-      if (variant === 'panel') await onRefreshBooking?.(booking.bookingId);
-      else onClose();
-    } catch (error) {
-      retryRef.current = () => handleAssignTherapist();
-      setActionError(guideFor(error));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const handleStatusUpdate = async (newStatus, reason) => {
     if (!booking) return;
     setIsLoading(true);
@@ -1334,7 +1282,7 @@ const BookingActionModal = ({
     || !!String(discountValue || '').trim() || !!String(discountReason || '').trim()
     || (selectedTherapists.slice().sort().join(',') !== bookingTherapistIdsStr)
     || ((selectedRoom || '') !== (booking.roomId || ''))
-    || (multiView && block.rows.some((r) => rowChanged(r, rowPicks)))
+    || block.rows.some((r) => rowChanged(r, rowPicks))
     || Object.values(rowDiscountOverrides || {}).some((v) => String(v ?? '').trim())
   );
   useEffect(() => {
@@ -1461,7 +1409,6 @@ const BookingActionModal = ({
   // should still be possible right up until the service actually begins.
   // Admin correction bypasses this the same way it bypasses the Booking Details fields: its save path goes through adminCorrectBooking
   // (therapist_id/room_id are in its whitelist), not the normal onAssignTherapist call that the DB immutability trigger would reject.
-  const isAssignmentBlocked = isViewer || (!showAdminCorrection && (isTerminal || isLocked || isServiceStarted));
   // Multi-service Staff tab: one Save for every changed service. Saved one service at a time with the SAME assign call as the single-service
   // tab (no new write path): if one fails the earlier ones stay saved and the screen says which service did not.
   const multiStaffEditable = (r) => !r.dead && !isViewer && !isLocked && ['pending', 'confirmed'].includes(r.status);
@@ -1499,10 +1446,7 @@ const BookingActionModal = ({
 
   // Self-service rooms (Jacuzzi/Sauna/Steam) don't need a therapist to start — driven by
   // rooms.requires_therapist, not a hardcoded room/branch list.
-  const selectedRoomObj = rooms.find(r => r.id === selectedRoom);
-  const isTherapistOptional = selectedRoomObj?.requires_therapist === false;
   // Save assignment waits for a complete pick: someone, or both people for a couple service (ZNLY-300).
-  const assignIncomplete = staffPickIncomplete({ isCouple: !!currentServiceObj?.is_couple, optional: isTherapistOptional, count: selectedTherapists.length });
 
   const nextStatuses = isViewer ? [] : getNextStatuses(booking.status);
   // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).
@@ -1543,25 +1487,25 @@ const BookingActionModal = ({
   // (non-overridden) checked bookings for a fixed NPR amount so the pool's total discount
   // equals discountValue exactly. Percentage needs no pooling: the same % applied to each
   // booking's own base already sums to that % of the combined total.
+  // ZNLY-402 piece 4 (v3), setting ON + 2+ services: the lines come from the whole-rupee plan (utils/bookingDiscount.js); only lines with a
+  // discount are applied, the open service LAST (the calendar re-opens the panel on the last row it saved).
+  const mvRows = block.rows.filter((r) => !r.dead);
+  const mvEligible = mvRows.filter((r) => r.paymentStatus !== 'paid');
+  const planMV = planBookingDiscount({ rows: mvEligible.map((r) => ({ id: r.id, base: r.base })), type: discountType, value: discountValue, perLine: perService ? rowDiscountOverrides : null });
   const discountRowBase = (id) => id === booking.bookingId
     ? (booking.baseAmount || 0)
     : Number(relatedBookings.find(rb => rb.id === id)?.base_amount || 0);
-  // ZNLY-402 piece 4 (v3), setting ON + 2+ services: the lines come from the whole-rupee plan (utils/bookingDiscount.js); only lines with a
-  // discount are applied, the open service LAST (the calendar re-opens the panel on the last row it saved).
-  const mvRows = multiView ? block.rows.filter((r) => !r.dead) : [];
-  const mvEligible = mvRows.filter((r) => r.paymentStatus !== 'paid');
-  const planMV = multiView ? planBookingDiscount({ rows: mvEligible.map((r) => ({ id: r.id, base: r.base })), type: discountType, value: discountValue, perLine: perService ? rowDiscountOverrides : null }) : null;
-  const checkedRowIds = multiView
-    ? [...planMV.lines.filter((l) => l.amount > 0 && l.id !== booking.bookingId), ...planMV.lines.filter((l) => l.amount > 0 && l.id === booking.bookingId)].map((l) => l.id)
-    : [booking.bookingId, ...relatedBookings.map(rb => rb.id)].filter(id => selectedDiscountIds.has(id));
+  const checkedRowIds = legacyGroups
+    ? [booking.bookingId, ...relatedBookings.map(rb => rb.id)].filter(id => selectedDiscountIds.has(id))
+    : [...planMV.lines.filter((l) => l.amount > 0 && l.id !== booking.bookingId), ...planMV.lines.filter((l) => l.amount > 0 && l.id === booking.bookingId)].map((l) => l.id);
   // A3/A2: with ONE or more lines carrying a discount, a line planned at 0 (typed 0 or left blank) that already has a discount is CLEARED.
-  const mvClearIds = multiView && planMV.total > 0 ? planMV.lines.filter((l) => l.amount === 0 && (mvRows.find((r) => r.id === l.id)?.discount || 0) > 0).map((l) => l.id) : [];
+  const mvClearIds = !legacyGroups && planMV.total > 0 ? planMV.lines.filter((l) => l.amount === 0 && (mvRows.find((r) => r.id === l.id)?.discount || 0) > 0).map((l) => l.id) : [];
   const overriddenRowIds = checkedRowIds.filter(id => rowDiscountOverrides[id] !== undefined && rowDiscountOverrides[id] !== '');
   const pooledBase = checkedRowIds
     .filter(id => !overriddenRowIds.includes(id))
     .reduce((s, id) => s + discountRowBase(id), 0);
   const resolveRowDiscount = (id) => {
-    if (multiView) { const l = planMV.lines.find((x) => x.id === id); return { value: l?.amount || 0, amount: l?.amount || 0, base: l?.base || 0, effPercent: l?.limitPercent || 0, hasOverride: false }; }
+    if (!legacyGroups) { const l = planMV.lines.find((x) => x.id === id); return { value: l?.amount || 0, amount: l?.amount || 0, base: l?.base || 0, effPercent: l?.limitPercent || 0, hasOverride: false }; }
     const rowBase = discountRowBase(id);
     const hasOverride = overriddenRowIds.includes(id);
     const value = Number(hasOverride ? rowDiscountOverrides[id] : discountValue) || 0;
@@ -1590,7 +1534,7 @@ const BookingActionModal = ({
     setDiscountSuccess(false);
 
     if (checkedRowIds.length === 0) {
-      setDiscountError(multiView ? 'Enter a discount first.' : 'Select at least one service.');
+      setDiscountError(legacyGroups ? 'Select at least one service.' : 'Enter a discount first.');
       return;
     }
     const rowPlans = checkedRowIds.map(id => ({ id, ...resolveRowDiscount(id) }));
@@ -1635,8 +1579,8 @@ const BookingActionModal = ({
         const result = await onApplyDiscount(row.id, row.clear
           ? { discountType: 'fixed', discountValue: 0, discountReason: 'Discount cancelled' }
           : {
-            discountType: !multiView && discountType === 'percentage' ? 'percentage' : 'fixed',
-            discountValue: !multiView && discountType === 'percentage' ? row.value : row.amount,
+            discountType: legacyGroups && discountType === 'percentage' ? 'percentage' : 'fixed',
+            discountValue: legacyGroups && discountType === 'percentage' ? row.value : row.amount,
             discountReason: discountReason.trim(),
             requestedTo: exceedsLimit ? selectedApprover : undefined
           });
@@ -1710,11 +1654,11 @@ const BookingActionModal = ({
   // Panel header: name + status + pencil + ×, then the customer subline (phone · View profile · birthday). Restricted staff: name + status only.
   const openEdit = () => {
     const referredBy = booking.referredBy || (customerReferral ? [customerReferral.referrerName, customerReferral.referrerPhone].filter(Boolean).join(' · ') : '');
-    if (onEditForm) { onEditForm(booking, multiView ? block.rows : null, referredBy); return; }
-    setEditSlot(buildEditSlot({ booking, blockRows: multiView ? block.rows : null, referredBy }));
+    if (onEditForm) { onEditForm(booking, block.rows, referredBy); return; }
+    setEditSlot(buildEditSlot({ booking, blockRows: block.rows, referredBy }));
   };
   // The shared form handles started / paid services itself (read-only cards), so a 2+ service booking can be edited unless the day is closed.
-  const editAllowed = multiView ? !isLocked : !isMutationBlocked;
+  const editAllowed = !isLocked;
   const canEditDetails = !restricted && editAllowed && !!onEditBooking;
   // ZNLY-327: a walk-in with no client gets "＋ Add client" instead of View profile / phone / birthday; a walk-in that has one keeps a small tag.
   const walkInNoClient = !!booking.isWalkIn && !booking.customerId;
@@ -1797,19 +1741,10 @@ const BookingActionModal = ({
   const panelHeader = useSheet ? sheetHeader : desktopPanelHeader;
 
   // Primary next action for the booking's status; everything else lives in the "⋯" overflow.
-  const primaryStatusTarget = booking.status === 'pending' ? 'confirmed' : booking.status === 'confirmed' ? 'in-progress' : booking.status === 'in-progress' ? 'completed' : null;
   // ZNLY-275: a booking for a later day can't be started, completed or marked no-show; staff move it to today first.
   const futureStart = futureBookingMessage(booking.date, 'start');
   const futureComplete = futureBookingMessage(booking.date, 'complete');
   const futureNoShow = futureBookingMessage(booking.date, 'noshow');
-  const primaryAction = multiView ? null : (() => { // 2+ services: Start / Done / Confirm live on each service row, so the footer has no status button
-    if (isLocked || isViewer) return null;
-    if (booking.status === 'pending') return { key: 'confirm', label: 'Confirm', run: () => handleStatusUpdate('confirmed') };
-    if (booking.status === 'confirmed') return { key: 'start', label: 'Start', blocked: futureStart, run: () => handleStatusUpdate('in-progress') };
-    if (booking.status === 'in-progress') return { key: 'complete', label: 'Complete', blocked: futureComplete, run: () => handleStatusUpdate('completed') };
-    if (canPay && !(multiView && activeTab === 'details')) return { key: 'pay', label: 'Collect payment', run: () => { setActiveTab('payment'); setShowPaymentModal(true); } }; // multi-service Details: the block holds the ONE Collect payment
-    return null;
-  })();
   // ZNLY-402 piece 4: the "This booking" block's actions. Start / Done go through the SAME status action as the footer, per service
   // (onUpdateStatus with that service's id). Remove stays out until piece 5 (an atomic, previewed remove): no dead button on screen.
   const runRowStatus = async (rowId, status) => {
@@ -1822,12 +1757,19 @@ const BookingActionModal = ({
     } catch (e) { setActionError(guideFor(e)); }
     finally { setRowBusy(null); setBlockReload((n) => n + 1); }
   };
+  // The card's "Earlier balance": what the client still owes from OTHER bookings. Shown under To pay, never added to it.
+  const earlierBalance = previousDueFor === booking.bookingId ? previousDueBookings.reduce((sm, pb) => sm + Number(pb.amountDue || 0), 0) : 0;
+  const relatedRemaining = (rb) => Math.max(Number(rb.base_amount || 0) - Number(rb.discount_amount || 0), 0);
+  const relatedGroupLabel = booking.date === nepalToday() ? "Today's Services" : 'Other Day Services';
+  const blockDateLabel = booking.date && !Number.isNaN(new Date(`${booking.date}T00:00:00`).getTime()) ? new Date(`${booking.date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '') : '';
   const blockRowAction = (r) => {
     if (isViewer || isLocked || !onUpdateStatus || r.dead) return null;
     // Remove (U12): shown on every live service; the server dry run says whether it may go (started / paid ones give the plain reason).
     // A started / done / paid service has no Remove: it shows a lock chip with the plain reason instead (the dialog stays the server-side fallback).
     const lock = lockReasonOf(r);
-    const remove = restricted ? undefined : lock ? undefined : { run: () => setRemoveRow(r) };
+    // ZNLY-435: Remove on the only live service of the open booking IS cancelling the booking: the plain Cancel Booking dialog (reason required), same as the footer.
+    const onlyOne = block.live.length === 1 && r.id === booking.bookingId;
+    const remove = restricted ? undefined : lock ? undefined : { run: () => (onlyOne ? setPendingStatus('cancelled') : setRemoveRow(r)) };
     const lockChip = lock ? lock.replace(' – can\'t change', '') : undefined;
     if (r.status === 'confirmed') { const why = futureBookingMessage(r.date, 'start'); return { start: { disabled: !!why, reason: why, run: () => runRowStatus(r.id, 'in-progress') }, remove, lock: lockChip }; }
     if (r.status === 'in-progress') { const why = futureBookingMessage(r.date, 'complete'); return { done: { disabled: !!why, reason: why, run: () => runRowStatus(r.id, 'completed') }, remove, lock: lockChip }; }
@@ -1847,8 +1789,7 @@ const BookingActionModal = ({
     !isViewer && !restricted && !isTerminal && !isLocked && extendOptions.length > 0 && { key: 'extend', label: 'Extend', icon: 'Timer', run: () => { setActiveTab('details'); setShowExtendPanel(true); } },
   ].filter(Boolean);
   // Fit: footer width minus the ⋯ button, the primary action and gaps; each button's width is estimated from its label.
-  const primaryW = primaryAction ? 24 + primaryAction.label.length * 7.5 : 0;
-  let budget = (footerW || 600) - 36 - 8 - primaryW - 8;
+  let budget = (footerW || 600) - 36 - 8 - 8;
   const shownKeys = [];
   secondaryVisible.forEach((it) => {
     const w = 28 + it.label.length * 7 + 8;
@@ -1857,22 +1798,17 @@ const BookingActionModal = ({
   const visibleSecondary = secondaryVisible.filter((it) => shownKeys.includes(it.key));
   const noShowGated = !hasBookingStarted(booking);
   // A 2+ service booking whose opened service already started can still cancel / no-show the services that have not started (the preview lists what stays).
-  const visitCanCancel = multiView && block.rows.some((r) => !r.dead && ['pending', 'confirmed'].includes(r.status) && !lockReasonOf(r));
+  const visitCanCancel = block.rows.some((r) => !r.dead && ['pending', 'confirmed'].includes(r.status) && !lockReasonOf(r));
   const overflowItems = [
     ...secondaryVisible.filter((it) => !shownKeys.includes(it.key)),
     onEditBooking && editAllowed && !isEditing && { key: 'edit', label: 'Edit details', icon: 'Pencil', run: openEdit },
     onEditBooking && !editAllowed && !isEditing && !isTerminal && { key: 'edit', label: 'Edit details', icon: 'Pencil', disabled: true, reason: isLocked ? 'Booking is locked (day closed)' : isSettled ? 'Paid bookings can\'t be edited' : 'Locked once service has started', run: () => {} },
-    canPay && !multiView && primaryAction?.key !== 'pay' && { key: 'pay', label: 'Collect payment', icon: 'CreditCard', run: () => { setActiveTab('payment'); setShowPaymentModal(true); } },
-    // Other status transitions that aren't the primary action (e.g. Pending → Start isn't valid, so only no-show/cancel remain).
-    ...(multiView ? [] : nextStatuses)
-      .filter((st) => st !== 'cancelled' && st !== 'no show' && st !== primaryStatusTarget)
-      .map((st) => ({ key: `st-${st}`, label: st === 'in-progress' ? 'Start' : st.charAt(0).toUpperCase() + st.slice(1), icon: 'ArrowRight', disabled: (st === 'in-progress' && !!futureStart) || (st === 'completed' && !!futureComplete), reason: st === 'completed' ? futureComplete : futureStart, run: () => handleStatusUpdate(st) })),
     // Zennly-only: Reschedule creates a new booking and cancels this one (the caller runs the slot picker).
     !isViewer && onRescheduleStart && !isTerminal && !isLocked && (() => {
       // A 2+ service booking moves its waiting services; started / paid ones stay. Disabled only when nothing can move.
-      const nothingMovable = multiView ? !block.rows.some((r) => !lockReasonOf(r) && !r.dead) : (isServiceStarted || booking.paymentStatus === 'paid');
+      const nothingMovable = !block.rows.some((r) => !lockReasonOf(r) && !r.dead);
       const blocked = nothingMovable;
-      return { key: 'reschedule', label: 'Reschedule', icon: 'CalendarClock', disabled: blocked, reason: multiView ? 'Every service has started or is paid, so nothing can be moved.' : booking.paymentStatus === 'paid' ? 'Cannot reschedule a paid booking.' : 'This service has already started.', run: () => (multiView && booking.visitId
+      return { key: 'reschedule', label: 'Reschedule', icon: 'CalendarClock', disabled: blocked, reason: 'Every service has started or is paid, so nothing can be moved.', run: () => (block.rows.length > 1 && booking.visitId
         ? onRescheduleStart(booking, { visitKey: booking.visitId, count: block.count, minutes: block.live.reduce((m, r) => m + (r.minutes || 0), 0), lines: Object.fromEntries(block.rows.map((r) => [r.id, { name: r.name, price: r.final, minutes: r.minutes, staff: r.staff.join(', ') }])) })
         : onRescheduleStart(booking)) };
     })(),
@@ -1969,19 +1905,13 @@ const BookingActionModal = ({
             )}
           </div>
           <div className="flex-1" />
-          {activeTab === 'assign' && (multiView ? block.rows.some(multiStaffEditable) : !isAssignmentBlocked) ? (
-            <Button variant="primary" size="sm" onClick={multiView ? handleAssignAll : handleAssignTherapist} loading={isLoading} disabled={multiView ? (!multiStaffChanged.length || multiStaffIncomplete) : assignIncomplete}>Save assignment</Button>
-          ) : primaryAction ? (
-            <Button variant="primary" size="sm" onClick={primaryAction.run} loading={isLoading} disabled={!!primaryAction.blocked} title={primaryAction.blocked || undefined}>{primaryAction.label}</Button>
+          {activeTab === 'assign' && block.rows.some(multiStaffEditable) ? (
+            <Button variant="primary" size="sm" onClick={handleAssignAll} loading={isLoading} disabled={!multiStaffChanged.length || multiStaffIncomplete}>Save assignment</Button>
           ) : null}
         </>
       )}
     </div>
   );
-  // Visible reason next to the disabled Start / Complete / No-show (the same sentence is on their tooltips).
-  const futureNote = !multiView && !isTerminal && !isLocked && !isViewer && !panelConfirm && !isEditing && ((booking.status === 'confirmed' ? futureStart : booking.status === 'in-progress' ? futureComplete : null) || null);
-  const panelFooterWithNote = futureNote ? (<div><p className="px-1 pb-2 text-[12px] text-text-secondary" data-future-note>{futureNote}</p>{panelFooter}</div>) : panelFooter;
-
   // Equal-fit tab bar for the panel: never scrolls horizontally.
   const panelTabs = [
     { id: 'details', label: 'Details', icon: 'FileText' },
@@ -1999,17 +1929,15 @@ const BookingActionModal = ({
             role="tab"
             aria-selected={activeTab === tab.id}
             onClick={() => goTab(tab.id)}
-            className={`${multiView ? 'h-12' : 'h-11'} flex items-center justify-center gap-1.5 text-[13px] font-body font-body-medium border-b-2 -mb-px spa-transition-fast whitespace-nowrap ${
+            className={`h-12 flex items-center justify-center gap-1.5 text-[13px] font-body font-body-medium border-b-2 -mb-px spa-transition-fast whitespace-nowrap ${
               activeTab === tab.id ? 'border-primary text-primary' : 'border-transparent text-text-secondary hover:text-text-primary'
             }`}
           >
             <Icon name={tab.icon} size={14} />
-            {multiView ? (
-              <span className="flex flex-col items-start leading-tight text-left">
-                <span>{tab.label}</span>
-                <span className="text-[10px] font-normal text-text-tertiary">{tab.id === 'details' ? 'All services' : tab.id === 'assign' ? 'Each service' : 'Whole booking'}</span>
-              </span>
-            ) : <span>{tab.label}</span>}
+            <span className="flex flex-col items-start leading-tight text-left">
+              <span>{tab.label}</span>
+              <span className="text-[10px] font-normal text-text-tertiary">{tab.id === 'details' ? 'All services' : tab.id === 'assign' ? 'Each service' : 'Whole booking'}</span>
+            </span>
           </button>
         ))}
       </nav>
@@ -2057,20 +1985,36 @@ const BookingActionModal = ({
               <div className="space-y-3 border border-warning/20 bg-warning/5 rounded-spa p-3 sm:p-4 mb-4 sm:mb-6">
                 <div className="flex items-center justify-between">
                   <span className="font-body font-body-medium text-xs text-text-secondary">Admin correction</span>
-                  <button
-                    type="button"
-                    onClick={() => setCorrectionMode((m) => (m === 'delete' ? 'correct' : 'delete'))}
-                    className="font-caption text-[11px] text-error hover:underline"
-                  >
-                    {correctionMode === 'delete' ? 'Cancel delete' : 'Delete this booking instead'}
-                  </button>
+                  {!delBlock && (
+                    <button
+                      type="button"
+                      onClick={() => setCorrectionMode((m) => (m === 'delete' ? 'correct' : 'delete'))}
+                      className="font-caption text-[11px] text-error hover:underline"
+                    >
+                      {correctionMode === 'delete' ? 'Cancel delete' : 'Delete this booking instead'}
+                    </button>
+                  )}
                 </div>
+
+                {delBlock && (
+                  <div className="bg-surface border border-border rounded-spa px-3 py-2 space-y-2" data-delete-blocked>
+                    <p className="font-body text-xs text-text-primary">{delBlock.title}</p>
+                    <p className="font-body text-xs text-text-secondary">{delBlock.advice}</p>
+                    {delBlock.canCancel && correctionFields?.status !== 'Cancelled' && (
+                      <button type="button" onClick={cancelAndRefund} className="h-8 px-3 text-xs font-body font-body-medium rounded-spa bg-error text-white hover:bg-error/90">
+                        {delBlock.refund > 0 ? `Cancel and refund ${Number(delBlock.refund).toLocaleString('en-IN')}` : 'Cancel booking'}
+                      </button>
+                    )}
+                    {delBlock.canCancel && correctionFields?.status === 'Cancelled' && (
+                      <p className="font-body text-xs text-text-secondary">Status is now Cancelled. Press Save and give a reason{delBlock.refund > 0 ? `; NPR ${Number(delBlock.refund).toLocaleString('en-IN')} is recorded as a refund` : ''}.</p>
+                    )}
+                  </div>
+                )}
 
                 {correctionMode === 'delete' && (
                   <div className="bg-error/5 border border-error/20 rounded-spa px-3 py-2 space-y-2">
                     <p className="font-body text-xs text-error">
-                      Deleting removes this booking entirely. It will disappear from past reports that counted it. A booking with a
-                      payment, refund, referral or package redemption attached cannot be deleted — cancel it instead.
+                      Deleting removes this booking entirely. It will disappear from past reports that counted it.
                     </p>
                     <div>
                       <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">
@@ -2085,7 +2029,7 @@ const BookingActionModal = ({
                   </div>
                 )}
 
-                {correctionError && (
+                {correctionError && !correctionConfirming && (
                   <div className="bg-error/5 border border-error/20 rounded-spa px-3 py-2 flex items-start space-x-2">
                     <Icon name="AlertCircle" size={14} className="text-error flex-shrink-0 mt-0.5" />
                     <p className="font-body text-xs text-error">{correctionError}</p>
@@ -2094,26 +2038,115 @@ const BookingActionModal = ({
               </div>
             )}
 
-            {multiView && !(isEditing && activeTab === 'details') && (
+            {!(isEditing && activeTab === 'details') && (blockReady ? (
               <BookingServicesBlock
                 block={block}
                 mode={activeTab === 'details' ? 'full' : 'strip'}
                 canViewPrices={canViewPrices}
                 paidState={blockPaid}
                 collect={activeTab === 'details' ? blockCollect : null}
+                earlier={canViewPrices ? earlierBalance : 0}
+                earlierRows={previousDueFor === booking.bookingId ? previousDueBookings : []}
+                onViewEarlier={onViewBooking}
                 use24h={use24h}
-                dateLabel={booking.date && !Number.isNaN(new Date(`${booking.date}T00:00:00`).getTime()) ? new Date(`${booking.date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '') : ''}
+                dateLabel={blockDateLabel}
                 note={activeTab === 'assign' ? `Tap a service to change its ${(staffLabel || 'team member').toLowerCase()}.` : null}
                 onSelect={onViewBooking ? selectBlockRow : undefined}
                 rowAction={blockRowAction}
                 busyId={rowBusy}
               />
+            ) : blockRows ? (
+              <p className="mb-5 text-[13px] text-text-secondary" data-block-failed>This booking's services could not be loaded. Close the panel and open it again.</p>
+            ) : (
+              <BookingServicesBlock loading dateLabel={blockDateLabel} />
+            ))}
+
+            {/* ZNLY-435 (setting OFF): group / same-day related bookings, below the card. Same ticks and same bundling as before. */}
+            {legacyGroups && (activeTab === 'details' || activeTab === 'payment') && (
+              <div className="space-y-4 mb-5" data-related-section>
+                {/* Related services — same-session bookings discounted together on the
+                    Discount tab. Bundled into payment by default (all checked), but staff
+                    can uncheck one to pay it later — see combinedTotal/selectedCount above. */}
+                {relatedBookings.length > 0 && (
+                  <div className="space-y-2">
+                    <label className="font-body font-body-medium text-xs text-text-secondary uppercase flex items-center gap-1.5">
+                      <Icon name="Layers" size={13} />
+                      {relatedGroupLabel} ({relatedBookings.length})
+                    </label>
+                    <div className="border border-border rounded-spa divide-y divide-border overflow-hidden">
+                      {relatedBookings.map(rb => {
+                        const isChecked = selectedRelatedIds.has(rb.id);
+                        return (
+                          <label key={rb.id} className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-background/50 ${isChecked ? 'bg-primary/5' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                setSelectedRelatedIds(prev => {
+                                  const next = new Set(prev);
+                                  if (e.target.checked) next.add(rb.id);
+                                  else next.delete(rb.id);
+                                  return next;
+                                });
+                              }}
+                              className="text-primary focus:ring-primary w-4 h-4 rounded"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="font-body text-sm text-text-primary">{rb.service?.name || 'Service'}</div>
+                              <div className="font-caption text-xs text-text-secondary">
+                                #{rb.booking_number} · {clock(rb.start_time)}
+                                {Number(rb.discount_amount) > 0 && ` · discount -NPR ${Number(rb.discount_amount).toLocaleString('en-IN')}`}
+                              </div>
+                            </div>
+                            <span className="font-data text-sm text-text-primary flex-shrink-0">NPR {relatedRemaining(rb).toLocaleString('en-IN')}</span>
+                            {onViewBooking && (
+                              <button
+                                type="button"
+                                title="View this booking"
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onViewBooking(rb.id); }}
+                                className="flex-shrink-0 p-1 rounded hover:bg-background text-text-secondary hover:text-primary"
+                              >
+                                <Icon name="ChevronRight" size={16} />
+                              </button>
+                            )}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Group siblings already paid — display only (never bundled), so a paid
+                    sibling never silently vanishes just because it's no longer "unpaid".
+                    See the BK-20260915-0025/-0026/-0027 incident this closes. */}
+                {groupSiblings.some(gb => gb.payment_status === 'paid') && (
+                  <div className="space-y-2">
+                    <label className="font-body font-body-medium text-xs text-text-secondary uppercase flex items-center gap-1.5">
+                      <Icon name="CheckCircle2" size={13} className="text-success" />
+                      {booking?.bookingGroupId ? 'Already paid in this group' : 'Already paid for this customer today'}
+                    </label>
+                    <div className="border border-success/20 bg-success/5 rounded-spa divide-y divide-success/10 overflow-hidden">
+                      {groupSiblings.filter(gb => gb.payment_status === 'paid').map(gb => (
+                        <div key={gb.id} className="flex items-center gap-3 px-3 py-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-body text-sm text-text-primary">{gb.service?.name || 'Service'}</div>
+                            <div className="font-caption text-xs text-text-secondary">#{gb.booking_number}</div>
+                          </div>
+                          <span className="font-data text-sm text-success flex-shrink-0">
+                            NPR {Number(gb.final_amount || 0).toLocaleString('en-IN')} · Paid
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* Details Tab */}
             {activeTab === 'details' && (
               <div className={isPanel ? 'space-y-5' : 'space-y-4 sm:space-y-6'}>
-                <ClientDayLine info={clientDay} range={clientDay ? compactRange(clientDay.first, clientDay.last) : ''} />
+                <ClientDayLine info={clientDay} range={clientDay ? formatClockRange(clientDay.first, clientDay.last, use24h) : ''} />
                 {/* Lock / Immutability Banner — payment-aware on Completed so it complements the Record Payment button */}
                 {isMutationBlocked && (() => {
                   const banner = isLocked
@@ -2142,14 +2175,17 @@ const BookingActionModal = ({
                       {/* The only route past this lock. Admin-only, and every use is
                           recorded in audit_logs with a mandatory reason. */}
                       {userRole === 'admin' && !showAdminCorrection && (
+                        <div className="ml-auto flex flex-col items-end gap-0.5 flex-shrink-0">
                         <button
                           type="button"
                           onClick={openCorrection}
-                          className="ml-auto inline-flex items-center space-x-1 px-2 py-1 rounded-spa border border-warning/40 text-warning hover:bg-warning/10 spa-transition-fast font-body font-body-medium text-[11px] flex-shrink-0"
+                          className="inline-flex items-center space-x-1 px-2 py-1 rounded-spa border border-warning/40 text-warning hover:bg-warning/10 spa-transition-fast font-body font-body-medium text-[11px] flex-shrink-0"
                         >
                           <Icon name="Wrench" size={12} />
                           <span>Correct as admin</span>
                         </button>
+                        <span className="text-[10px] text-text-tertiary text-right">Change a settled booking. Needs a reason; it's logged.</span>
+                        </div>
                       )}
                     </div>
                   );
@@ -2218,26 +2254,6 @@ const BookingActionModal = ({
                 {isPanel && !isEditing && (() => {
                   // Alerts / previous due come from the calendar card's data (the panel's own fetch doesn't carry them).
                   const extras = previewBooking && (previewBooking.bookingId || previewBooking.id) === booking.bookingId ? previewBooking : null;
-                  const dlist = (booking.therapists?.length > 0 ? booking.therapists : [booking.therapist]).filter(Boolean);
-                  const mins = parseInt(booking.duration, 10) || 0;
-                  const [sh, sm] = (booking.time || booking.startTime || '').slice(0, 5).split(':').map(Number);
-                  const startM = Number.isFinite(sh) ? sh * 60 + (sm || 0) : null;
-                  const fmt = (m) => `${(Math.floor(m / 60) % 12) || 12}:${String(m % 60).padStart(2, '0')}`;
-                  const ap = (m) => (Math.floor(m / 60) % 24 >= 12 ? 'pm' : 'am');
-                  let range = '';
-                  if (startM !== null) {
-                    const endM = startM + mins;
-                    range = !mins ? `${fmt(startM)}${ap(startM)}`
-                      : ap(startM) === ap(endM) ? `${fmt(startM)}–${fmt(endM)}${ap(endM)}`
-                      : `${fmt(startM)}${ap(startM)}–${fmt(endM)}${ap(endM)}`;
-                  }
-                  const dObj = booking.date ? new Date(`${booking.date}T00:00:00`) : null;
-                  const dateLabel = dObj && !Number.isNaN(dObj.getTime())
-                    ? dObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '')
-                    : (booking.date || '');
-                  const payState = paymentStatusLabel(booking);
-                  const pay = { label: payState.label, cls: payState.tone === 'success' ? 'bg-success/10 text-success' : payState.tone === 'neutral' ? 'bg-border-muted text-text-secondary' : 'bg-warning/10 text-warning' };
-                  const npr = (n) => `NPR ${Number(n || 0).toLocaleString('en-IN')}`;
                   const copy = (v) => { try { navigator.clipboard?.writeText(v); } catch (_) { /* clipboard unavailable */ } };
                   const copyBtn = (value, label) => (
                     <button type="button" onClick={() => copy(value)} aria-label={label} title={label}
@@ -2248,33 +2264,6 @@ const BookingActionModal = ({
                   const sectionHead = 'font-body font-medium text-xs uppercase tracking-wider text-text-tertiary whitespace-nowrap';
                   return (
                     <>
-                      <div className={`space-y-2 ${multiView ? 'hidden' : ''}`} data-booking-summary>
-                        <p className="font-body text-[15px] font-semibold text-text-primary">{dateLabel}{range ? ` · ${range}` : ''}</p>
-                        <p className="font-body text-[13px] text-text-secondary">{booking.service}{mins ? ` · ${mins} min` : ''}</p>
-                        {(dlist.length > 0 || booking.roomName) && (
-                          <div className="flex items-center gap-2 text-[13px] text-text-primary min-w-0">
-                            {dlist.length > 0 && (
-                              <span className="flex -space-x-1.5 flex-shrink-0">
-                                {dlist.map((t) => (
-                                  <span key={t.id} className="w-5 h-5 rounded-full bg-gray-100 text-gray-700 ring-2 ring-surface flex items-center justify-center text-[9px] font-medium">
-                                    {String(t.name || '').split(/\s+/).filter((w) => w && !/^dr\.?$/i.test(w)).slice(0, 2).map((w) => w[0]).join('').toUpperCase()}
-                                  </span>
-                                ))}
-                              </span>
-                            )}
-                            <span className="truncate">{dlist.map((t) => t.name).join(', ')}{booking.roomName ? `${dlist.length ? ' · ' : ''}${booking.roomName}` : ''}</span>
-                          </div>
-                        )}
-                        {canViewPrices && !multiView && <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
-                          <span className="font-body text-[13px] font-medium text-text-primary tabular-nums">{npr(booking.finalAmount ?? booking.baseAmount)}</span>
-                          <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${pay.cls}`}>{pay.label}</span>
-                          {canPay && (
-                            <button type="button" onClick={() => setActiveTab('payment')} className="text-[13px] text-primary hover:underline">Collect payment →</button>
-                          )}
-                          {booking.discountAmount > 0 && <span className="text-xs text-text-tertiary tabular-nums">−{npr(booking.discountAmount)} discount</span>}
-                          {extras?.previousDue?.amount > 0 && <span className="text-xs tabular-nums" style={{ color: '#7A5408' }}>· Prev. due {npr(extras.previousDue.amount)}</span>}
-                        </div>}
-                      </div>
 
                       <AvailabilityNoteLine note={booking.availabilityNote} className="mb-2" />
                       <AlertsBlock customerNotes={extras?.customerNotes} specialRequests={booking.specialRequests} />
@@ -2318,7 +2307,7 @@ const BookingActionModal = ({
                       />
                       {editForm.startTime && !isWithinBranchHours(editForm.startTime) && (
                         <p className="font-caption text-[11px] text-warning mt-1.5">
-                          Outside branch hours ({format12h(branchHours?.openTime?.slice(0, 5) || '09:00')} – {format12h(branchHours?.closeTime?.slice(0, 5) || '21:00')})
+                          Outside branch hours ({formatClockRange(branchHours?.openTime?.slice(0, 5) || '09:00', branchHours?.closeTime?.slice(0, 5) || '21:00', use24h)})
                         </p>
                       )}
                       <BlockOverlapWarning message={editBlockMsg} className="mt-2" />
@@ -2535,7 +2524,7 @@ const BookingActionModal = ({
                             />
                             {editForm.startTime && !isWithinBranchHours(editForm.startTime) && (
                               <p className="font-caption text-[11px] text-warning">
-                                Outside branch hours ({format12h(branchHours?.openTime?.slice(0, 5) || '09:00')} – {format12h(branchHours?.closeTime?.slice(0, 5) || '21:00')})
+                                Outside branch hours ({formatClockRange(branchHours?.openTime?.slice(0, 5) || '09:00', branchHours?.closeTime?.slice(0, 5) || '21:00', use24h)})
                               </p>
                             )}
                           </div>
@@ -2543,7 +2532,7 @@ const BookingActionModal = ({
                         {isEditing ? (
                           <BlockOverlapWarning message={editBlockMsg} className="mt-2" />
                         ) : (
-                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.date} at {to12h(booking.time || booking.startTime)}</p>
+                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.date} at {clock(booking.time || booking.startTime)}</p>
                         )}
                       </div>
 {canViewPrices && <div>
@@ -2733,10 +2722,10 @@ const BookingActionModal = ({
                 {/* Panel meta line: booking number + created-by audit */}
                 {isPanel && !isEditing && (
                   <div className="border-t border-border pt-4 group flex items-center flex-wrap gap-x-1 text-xs text-text-tertiary">
-                    <span className="tabular-nums" data-booking-reference>{multiView ? block.reference : booking.id}</span>
-                    {multiView && block.reference !== booking.id && <span className="tabular-nums text-text-tertiary/80">· this service {booking.id}</span>}
+                    <span className="tabular-nums" data-booking-reference>{block.reference}</span>
+                    {block.reference !== booking.id && <span className="tabular-nums text-text-tertiary/80">· this service {booking.id}</span>}
                     {booking.id && (
-                      <button type="button" onClick={() => { try { navigator.clipboard?.writeText(String(multiView ? block.reference : booking.id)); } catch (_) { /* clipboard unavailable */ } }}
+                      <button type="button" onClick={() => { try { navigator.clipboard?.writeText(String(block.reference)); } catch (_) { /* clipboard unavailable */ } }}
                         aria-label="Copy booking number" title="Copy booking number"
                         className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 rounded-spa hover:text-primary hover:bg-background spa-transition-fast">
                         <Icon name="Copy" size={12} />
@@ -2772,7 +2761,7 @@ const BookingActionModal = ({
             )}
 
             {/* Assigned Tab */}
-            {activeTab === 'assign' && multiView && (
+            {activeTab === 'assign' && (
               <BookingStaffRows
                 rows={block.rows.filter((r) => !r.dead)}
                 picks={rowPicks}
@@ -2793,175 +2782,6 @@ const BookingActionModal = ({
                   <><InlineError error={actionError} onAction={onGuideAction} area="booking-panel" />{failedName && <p className="mt-1.5 text-xs text-text-secondary">Not saved for {failedName}. The services above it were saved.</p>}</>
                 )}
               />
-            )}
-            {activeTab === 'assign' && !multiView && (
-              <div className="space-y-4 sm:space-y-6">
-                {isAssignmentBlocked && (
-                  <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa ${isLocked ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50 border border-gray-200'}`}>
-                    <Icon name="Lock" size={16} className={isLocked ? 'text-amber-600' : 'text-gray-500'} />
-                    <span className={`font-body font-body-medium text-xs ${isLocked ? 'text-amber-700' : 'text-gray-600'}`}>
-                      Assignment is disabled — {isLocked ? 'day is closed' : isTerminal ? 'booking is immutable' : 'booking has started'}
-                    </span>
-                  </div>
-                )}
-
-                {(() => {
-                  // ZNLY-286: staff + room lists. One scroll area (the panel body); words come from the org's staff label.
-                  const TAG = 'ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-success/10 text-success';
-                  const isPlural = !!currentServiceObj?.is_couple || selectedTherapists.length > 1;
-                  const staffHeading = isPlural ? (staffLabelPlural || 'Team') : (staffLabel || 'Team member');
-                  const staffLower = (staffLabel || 'team member').toLowerCase();
-                  const assignedIds = (booking?.therapists?.length ? booking.therapists.map(t => t.id) : (booking?.therapist?.id ? [booking.therapist.id] : []));
-                  return (
-                    <>
-                      {/* Section 1: staff (shared row + list, ZNLY-300 / ZNLY-318) */}
-                      {(() => {
-                        const s0 = clockToMin(booking?.startTime); const e0 = clockToMin(booking?.endTime);
-                        const ownNames = Object.fromEntries([...(booking?.therapists || []), booking?.therapist].filter((t) => t?.id).map((t) => [t.id, t.name]));
-                        const nameFor = (tid) => (therapists || []).find((t) => t.id === tid)?.name || ownNames[tid] || '';
-                        const maxPick = currentServiceObj?.is_couple ? 2 : (selectedTherapists.length > 1 ? Infinity : 1);
-                        const picked = selectedTherapists.map((tid) => (therapists || []).find((t) => t.id === tid) || { id: tid, name: ownNames[tid] || 'Unknown' });
-                        const info = pickedRowStatusMulti(picked, {
-                          slot: effDayBookings && s0 != null ? { start: s0, end: e0 > s0 ? e0 : s0 + 60 } : null,
-                          rangesById: effDayBookings && booking?.date ? staffDayRanges(effDayBookings, { date: booking.date, excludeBookingId: booking.bookingId || null }) : {},
-                          offById: effOffStaff || {}, date: booking?.date, today: nepalNow().today, busyOk: allowStaffOverlap,
-                        });
-                        const savedPeople = assignedIds.map(nameFor).filter(Boolean);
-                        return (
-                          <div>
-                            <h3 className="mb-2 font-heading font-heading-medium text-sm sm:text-base text-text-primary">{staffHeading}{Number.isFinite(maxPick) && maxPick > 1 && <span className="ml-2 text-xs font-normal text-text-secondary">Pick {maxPick}</span>}</h3>
-                            <StaffPickRow
-                              key={booking?.bookingId}
-                              people={picked}
-                              max={maxPick}
-                              statusLine={isAssignmentBlocked ? '' : info.statusLine}
-                              pill={isAssignmentBlocked ? null : info.pill}
-                              problem={isAssignmentBlocked ? '' : info.problem}
-                              assignedIds={assignedIds}
-                              assignedNames={savedPeople}
-                              disabled={isAssignmentBlocked}
-                              emptyLabel={`Pick ${staffLower}`}
-                              title={`${staffHeading} for the booking`}
-                              renderPicker={(close) => (
-                                <StaffPicker
-                                  people={therapists}
-                                  selectedIds={selectedTherapists}
-                                  onChange={(ids) => { setSelectedTherapists(ids); if (maxPick === 1) close(); }}
-                                  max={maxPick}
-                                  header={{ title: `${staffHeading} for the booking${maxPick === 2 ? ' · pick 2' : ''}`, sub: [booking?.service || booking?.serviceName, s0 != null && e0 != null ? rangeLabel(s0, e0) : ''].filter(Boolean).join(' · ') }}
-                                  onNone={isTherapistOptional ? () => { setSelectedTherapists([]); close(); } : null}
-                                  noneLabel={`No ${staffLower} · self-service`}
-                                  staffLabel={staffLabel || 'Team member'}
-                                  staffLabelPlural={staffLabelPlural || 'Team'}
-                                  slot={booking?.date && booking?.startTime ? { date: booking.date, start: booking.startTime, end: booking.endTime } : null}
-                                  serviceId={booking?.serviceId || null}
-                                  bookings={effDayBookings}
-                                  excludeBookingId={booking?.bookingId || null}
-                                  offById={effOffStaff}
-                                  assignedIds={assignedIds}
-                                  disabled={isAssignmentBlocked}
-                                />
-                              )}
-                            />
-                            {isTherapistOptional && (
-                              <p className="mt-1 font-caption font-caption-normal text-xs text-text-secondary">
-                                Optional for {selectedRoomObj?.name} — self-service room, no {staffLower} required.
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })()}
-
-                      {/* Section 2: Room (same CustomSelect as New booking) */}
-                      {rooms.length > 0 && (
-                        <div>
-                          <h3 className="mb-2 font-heading font-heading-medium text-sm sm:text-base text-text-primary">Room</h3>
-                          <CustomSelect
-                            value={selectedRoom}
-                            onChange={(val) => setSelectedRoom(val)}
-                            disabled={isAssignmentBlocked}
-                            options={[
-                              { value: '', label: 'No room assigned' },
-                              ...rooms.map((room) => ({
-                                value: room.id,
-                                label: <>{room.name}{booking?.roomId === room.id && <span className={TAG}>Allocated</span>}</>,
-                                searchLabel: room.name,
-                              })),
-                            ]}
-                            placeholder="No room assigned"
-                            size="md"
-                            searchable
-                          />
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-
-                {/* Section 2b: Couple in separate rooms — surfaced only for a couple-flagged
-                    service with 2+ therapists selected, not any multi-therapist assignment. */}
-                {selectedTherapists.length > 1 && currentServiceObj?.is_couple && (
-                  <div className="space-y-3">
-                    <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
-                      Couple — separate rooms &amp; companion (optional)
-                    </h3>
-                    <p className="font-caption font-caption-normal text-xs text-text-secondary">
-                      Leave a companion's room unset to keep them in the room selected above.
-                    </p>
-                    <div className="space-y-2">
-                      {selectedTherapists.slice(1).map((tid) => {
-                        const t = therapists.find(th => th.id === tid);
-                        return (
-                          <div key={tid} className="flex items-center gap-3">
-                            <span className="font-body font-body-medium text-sm text-text-primary w-32 truncate flex-shrink-0">
-                              {t?.name || 'Companion'}
-                            </span>
-                            <CustomSelect
-                              value={therapistRoomOverrides[tid] || ''}
-                              onChange={(val) => setTherapistRoomOverrides(prev => ({ ...prev, [tid]: val }))}
-                              options={[
-                                { value: '', label: 'Same room as above' },
-                                ...rooms.map(r => ({ value: r.id, label: r.name })),
-                              ]}
-                              placeholder="Same room as above"
-                              size="sm"
-                              className="flex-1"
-                            />
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <input
-                        type="text"
-                        value={companionName}
-                        onChange={(e) => setCompanionName(e.target.value)}
-                        placeholder="Companion's name (optional)"
-                        className="w-full px-3 py-2 bg-background border border-border rounded-spa text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
-                      />
-                      <PhoneField {...companionPhone.field} id="assign-companion-phone" placeholder="Companion's phone (optional)" />
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-1.5 sm:space-y-2">
-                  <label className="font-body font-body-medium text-xs sm:text-sm text-text-primary">
-                    Assignment Notes
-                  </label>
-                  <textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder={`Add any special instructions for the ${(staffLabel || 'team member').toLowerCase()}...`}
-                    rows={3}
-                    disabled={isAssignmentBlocked}
-                    className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none disabled:opacity-60 disabled:cursor-not-allowed"
-                  />
-                </div>
-
-                {actionError && (
-                  <><InlineError error={actionError} onAction={onGuideAction} area="booking-panel" />{actionError && guideNote ? <p data-guide-note className="mt-1.5 text-xs text-text-secondary">{guideNote}</p> : null}</>
-                )}
-              </div>
             )}
 
             {/* Discount Tab */}
@@ -3128,7 +2948,7 @@ const BookingActionModal = ({
                       <p className="flex items-center gap-2 text-[12.5px] text-[#8A8A90]" data-member-card="none"><Icon name="Star" size={12} className="fill-current text-[#B4B4BA]" strokeWidth={0} />No {memberMd.tierName} discount on {memberMd.label} services</p>
                     )}
                     {(!memberCardOn || showManualDiscount) && (<>
-                    {multiView ? (
+                    {!legacyGroups ? (
                       <BookingDiscountLines
                         rows={mvRows}
                         plan={planMV}
@@ -3166,7 +2986,7 @@ const BookingActionModal = ({
 
                         // Per-row override input, reused for the primary booking and every related row —
                         // lets each checked service get its own rate instead of the shared value above.
-                        const renderOverrideInput = (id) => multiView ? null : (
+                        const renderOverrideInput = (id) => (
                           <div className="pl-5 mt-1 flex items-center gap-1.5">
                             <input
                               type="number"
@@ -3189,7 +3009,7 @@ const BookingActionModal = ({
                             {/* Current booking — checkbox + override only when multiple services */}
                             {multiRow ? (
                               <div className="mb-1">
-                                <label className={`flex items-start gap-2 ${multiView ? '' : 'cursor-pointer'}`}>
+                                <label className={`flex items-start gap-2 cursor-pointer`}>
                                   <input
                                     type="checkbox"
                                     checked={primaryChecked}
@@ -3202,12 +3022,12 @@ const BookingActionModal = ({
                                       });
                                       if (!e.target.checked) clearRowOverride(booking.bookingId);
                                     }}
-                                    disabled={multiView} className={`text-primary focus:ring-primary w-3.5 h-3.5 rounded mt-0.5 ${multiView ? 'hidden' : ''}`}
+                                    className="text-primary focus:ring-primary w-3.5 h-3.5 rounded mt-0.5"
                                   />
                                   <div className="flex-1 min-w-0">
                                     <span className="font-body font-body-medium text-xs text-text-primary">{booking.service}</span>
                                     <div className="font-caption text-[10px] text-text-secondary flex flex-wrap gap-x-2">
-                                      {booking.time && <span>{to12h(booking.startTime || booking.time)}{booking.startTime && booking.startTime !== booking.time ? '' : ''}</span>}
+                                      {booking.time && <span>{clock(booking.startTime || booking.time)}{booking.startTime && booking.startTime !== booking.time ? '' : ''}</span>}
                                       {booking.therapist?.name && <span>· {booking.therapist.name}</span>}
                                       {booking.roomName && <span>· {booking.roomName}</span>}
                                     </div>
@@ -3217,7 +3037,7 @@ const BookingActionModal = ({
                               </div>
                             ) : null}
                             <div className="flex items-center justify-between">
-                              <span className="font-body font-body-normal text-xs text-text-secondary">{multiView ? 'Price' : 'Base Amount'}</span>
+                              <span className="font-body font-body-normal text-xs text-text-secondary">Base Amount</span>
                               <span className="font-data text-sm text-text-primary">NPR {base.toLocaleString('en-IN')}</span>
                             </div>
                             {showDiscount && (
@@ -3231,7 +3051,7 @@ const BookingActionModal = ({
                               </div>
                             )}
                             <div className="flex items-center justify-between">
-                              <span className="font-body font-body-normal text-xs text-text-secondary">{multiView ? 'New price' : 'Subtotal'}</span>
+                              <span className="font-body font-body-normal text-xs text-text-secondary">Subtotal</span>
                               <span className={`font-data text-sm ${primaryLive ? 'text-warning' : 'text-text-primary'}`}>
                                 NPR {previewFinal.toLocaleString('en-IN')}
                               </span>
@@ -3265,7 +3085,7 @@ const BookingActionModal = ({
                                   const rbPreviewFinal = Math.max(rbBase - rbPreviewDiscount, 0);
                                   return (
                                     <div key={rb.id} className="space-y-1">
-                                      <label className={`flex items-start gap-2 ${multiView ? '' : 'cursor-pointer'}`}>
+                                      <label className={`flex items-start gap-2 cursor-pointer`}>
                                         <input
                                           type="checkbox"
                                           checked={rbChecked}
@@ -3278,7 +3098,7 @@ const BookingActionModal = ({
                                             });
                                             if (!e.target.checked) clearRowOverride(rb.id);
                                           }}
-                                          disabled={multiView} className={`text-primary focus:ring-primary w-3.5 h-3.5 rounded mt-0.5 ${multiView ? 'hidden' : ''}`}
+                                          className="text-primary focus:ring-primary w-3.5 h-3.5 rounded mt-0.5"
                                         />
                                         <div className="flex-1 min-w-0">
                                           <div className="flex items-center justify-between">
@@ -3286,7 +3106,7 @@ const BookingActionModal = ({
                                             <span className="font-caption text-[10px] text-text-secondary">{rb.booking_number}</span>
                                           </div>
                                           <div className="font-caption text-[10px] text-text-secondary flex flex-wrap gap-x-2">
-                                            {rb.start_time && <span>{to12h(rb.start_time)}{rb.end_time ? ` – ${to12h(rb.end_time)}` : ''}</span>}
+                                            {rb.start_time && <span>{formatClockRange(rb.start_time, rb.end_time, use24h)}</span>}
                                             {rb.therapist?.name && <span>· {rb.therapist.name}</span>}
                                             {rb.room?.name && <span>· {rb.room.name}</span>}
                                           </div>
@@ -3294,7 +3114,7 @@ const BookingActionModal = ({
                                       </label>
                                       {rbChecked && renderOverrideInput(rb.id)}
                                       <div className="flex items-center justify-between pl-5">
-                                        <span className="font-body font-body-normal text-xs text-text-secondary">{multiView ? 'Price' : 'Base'}</span>
+                                        <span className="font-body font-body-normal text-xs text-text-secondary">Base</span>
                                         <span className="font-data text-sm text-text-primary">NPR {rbBase.toLocaleString('en-IN')}</span>
                                       </div>
                                       {(rbHasPreview || rbExistingDiscount > 0) && (
@@ -3308,7 +3128,7 @@ const BookingActionModal = ({
                                         </div>
                                       )}
                                       <div className="flex items-center justify-between pl-5">
-                                        <span className="font-body font-body-normal text-xs text-text-secondary">{multiView ? 'New price' : 'Subtotal'}</span>
+                                        <span className="font-body font-body-normal text-xs text-text-secondary">Subtotal</span>
                                         <span className={`font-data text-sm ${rbHasPreview ? 'text-warning' : 'text-text-primary'}`}>
                                           NPR {rbPreviewFinal.toLocaleString('en-IN')}
                                         </span>
@@ -3332,12 +3152,10 @@ const BookingActionModal = ({
                                 anyLive = anyLive || rbLive;
                                 total += rbLive ? Math.max(rbPlan.base - rbPlan.amount, 0) : Number(rb.final_amount || rb.base_amount || 0);
                               });
-                              // ZNLY-402 piece 4: services already paid (not in the list above) still belong to the booking's total, so it equals the block.
-                              if (multiView) total += Math.max(block.total - Number(booking.finalAmount || 0) - relatedBookings.reduce((sum, rb) => sum + Number(rb.final_amount || 0), 0), 0);
                               return (
                                 <div className="flex items-center justify-between border-t border-border pt-2 mt-1">
                                   <span className="font-body font-body-medium text-xs text-text-primary">
-                                    {multiView ? 'Total for the booking' : multiRow ? 'Overall Total' : 'Final Amount'}
+                                    {multiRow ? 'Overall Total' : 'Final Amount'}
                                   </span>
                                   <span className={`font-data font-data-medium text-sm ${anyLive ? 'text-warning' : 'text-primary'}`}>
                                     NPR {total.toLocaleString('en-IN')}
@@ -3380,10 +3198,10 @@ const BookingActionModal = ({
 
                     {/* Discount value */}
                     <div className="space-y-1.5 sm:space-y-2">
-                      {!(multiView && perService) && (<>
+                      {!perService && (<>
                       <label className="font-body font-body-medium text-xs sm:text-sm text-text-primary">
                         {discountType === 'percentage' ? 'Discount Percentage' : 'Discount Amount (NPR)'}
-                        {relatedBookings.length > 0 && !multiView && (
+                        {relatedBookings.length > 0 && legacyGroups && (
                           <span className="font-body font-body-normal text-text-secondary"> (shared default — override any service above for its own rate)</span>
                         )}
                       </label>
@@ -3391,7 +3209,7 @@ const BookingActionModal = ({
                         type="number"
                         min="0"
                         max={
-                          multiView
+                          !legacyGroups
                             ? (discountType === 'percentage' ? 100 : planMV.totalBase)
                             : discountType === 'percentage'
                               ? Math.min(100, Math.floor(((booking.baseAmount - (booking.amountPaid || 0)) / booking.baseAmount) * 100))
@@ -3401,7 +3219,7 @@ const BookingActionModal = ({
                         value={discountValue}
                         onWheel={(e) => e.target.blur()}
                         onChange={(e) => { setDiscountValue(e.target.value); setDiscountError(null); }}
-                        placeholder={discountType === 'percentage' ? `Max ${discountLimitLabel}` : `Max NPR ${Math.floor((multiView ? planMV.totalBase : (booking.baseAmount || 0)) * (userRole === 'admin' ? 1.00 : userRole === 'manager' ? 1.00 : 0.50))}`}
+                        placeholder={discountType === 'percentage' ? `Max ${discountLimitLabel}` : `Max NPR ${Math.floor((legacyGroups ? (booking.baseAmount || 0) : planMV.totalBase) * (userRole === 'admin' ? 1.00 : userRole === 'manager' ? 1.00 : 0.50))}`}
                         className={`w-full px-3 py-2.5 border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast ${
                           discountExceedsCap ? 'border-error' : 'border-border'
                         }`}
@@ -3465,7 +3283,7 @@ const BookingActionModal = ({
                           </div>
                           <div className="flex items-center justify-between">
                             <span className="text-text-secondary">Package</span>
-                            <span className="font-body-medium text-text-primary text-right">{multiView ? `${block.count} services` : (booking.service || '—')}</span>
+                            <span className="font-body-medium text-text-primary text-right">{legacyGroups ? (booking.service || '—') : `${block.count} service${block.count === 1 ? '' : 's'}`}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span className="text-text-secondary">Discount</span>
@@ -3538,7 +3356,7 @@ const BookingActionModal = ({
                     >
                       {discountExceedsLimit
                         ? 'Send Discount Request'
-                        : (multiView ? 'Apply discount' : checkedRowIds.length > 1 ? `Apply Discount to ${checkedRowIds.length} Services` : 'Apply Discount')}
+                        : (legacyGroups ? (checkedRowIds.length > 1 ? `Apply Discount to ${checkedRowIds.length} Services` : 'Apply Discount') : 'Apply discount')}
                     </Button>
                     </>)}
                   </>
@@ -3559,7 +3377,6 @@ const BookingActionModal = ({
               const selectedRelated = relatedBookings.filter(rb => selectedRelatedIds.has(rb.id));
               const relatedBookingsTotal = selectedRelated.reduce((sum, rb) => sum + relatedRemaining(rb), 0);
               const combinedTotal = (booking.finalAmount || 0) + relatedBookingsTotal + previousDueTotal;
-              const selectedCount = selectedRelatedIds.size + selectedPreviousDueIds.size;
               const paidThisVisit = (booking.payments || [])
                 .filter(p => canonicalMode(p.paymentMode) === 'Membership')
                 .reduce((s, p) => s + p.amount, 0);
@@ -3567,8 +3384,6 @@ const BookingActionModal = ({
               // "Today's" only when that day actually IS today, so a staffer looking at a
               // past booking (via search, not the live Calendar) doesn't see a misleading
               // "Today" label on services that happened days ago.
-              const todayStr = nepalToday();
-              const relatedGroupLabel = booking.date === todayStr ? "Today's Services" : 'Other Day Services';
 
               return (
               <div className="space-y-4 sm:space-y-6">
@@ -3580,7 +3395,7 @@ const BookingActionModal = ({
 
                 {/* ZNLY-402 piece 4: ONE invoice view for the whole booking (2+ services, setting ON): lines, discount, total, paid so far, to pay.
                     The numbers are the block's, so they equal the rows above. Methods and the one button stay below, as today. */}
-                {multiView && !showAdminCorrection && (
+                {!showAdminCorrection && (
                   <div className="bg-background rounded-spa p-3 sm:p-4 space-y-2" data-booking-invoice>
                     {block.rows.map((r) => (
                       <div key={r.id}>
@@ -3621,7 +3436,8 @@ const BookingActionModal = ({
                 )}
 
                 {/* Current booking */}
-                <div className={`bg-background rounded-spa p-3 sm:p-4 space-y-2 ${multiView && !showAdminCorrection ? 'hidden' : ''}`}>
+                {showAdminCorrection && (
+                <div className="bg-background rounded-spa p-3 sm:p-4 space-y-2">
                   {(previousDueBookings.length > 0 || relatedBookings.length > 0) && (
                     <div className="flex items-center gap-2 mb-1">
                       <Icon name="CheckSquare" size={14} className="text-primary" />
@@ -3735,83 +3551,9 @@ const BookingActionModal = ({
                     </>
                   )}
                 </div>
-
-                {/* Related services — same-session bookings discounted together on the
-                    Discount tab. Bundled into payment by default (all checked), but staff
-                    can uncheck one to pay it later — see combinedTotal/selectedCount above. */}
-                {relatedBookings.length > 0 && !multiView && (
-                  <div className="space-y-2">
-                    <label className="font-body font-body-medium text-xs text-text-secondary uppercase flex items-center gap-1.5">
-                      <Icon name="Layers" size={13} />
-                      {relatedGroupLabel} ({relatedBookings.length})
-                    </label>
-                    <div className="border border-border rounded-spa divide-y divide-border overflow-hidden">
-                      {relatedBookings.map(rb => {
-                        const isChecked = selectedRelatedIds.has(rb.id);
-                        return (
-                          <label key={rb.id} className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-background/50 ${isChecked ? 'bg-primary/5' : ''}`}>
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={(e) => {
-                                setSelectedRelatedIds(prev => {
-                                  const next = new Set(prev);
-                                  if (e.target.checked) next.add(rb.id);
-                                  else next.delete(rb.id);
-                                  return next;
-                                });
-                              }}
-                              className="text-primary focus:ring-primary w-4 h-4 rounded"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <div className="font-body text-sm text-text-primary">{rb.service?.name || 'Service'}</div>
-                              <div className="font-caption text-xs text-text-secondary">
-                                #{rb.booking_number} · {to12h(rb.start_time)}
-                                {Number(rb.discount_amount) > 0 && ` · discount -NPR ${Number(rb.discount_amount).toLocaleString('en-IN')}`}
-                              </div>
-                            </div>
-                            <span className="font-data text-sm text-text-primary flex-shrink-0">NPR {relatedRemaining(rb).toLocaleString('en-IN')}</span>
-                            {onViewBooking && (
-                              <button
-                                type="button"
-                                title="View this booking"
-                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onViewBooking(rb.id); }}
-                                className="flex-shrink-0 p-1 rounded hover:bg-background text-text-secondary hover:text-primary"
-                              >
-                                <Icon name="ChevronRight" size={16} />
-                              </button>
-                            )}
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
                 )}
 
-                {/* Group siblings already paid — display only (never bundled), so a paid
-                    sibling never silently vanishes just because it's no longer "unpaid".
-                    See the BK-20260915-0025/-0026/-0027 incident this closes. */}
-                {!multiView && groupSiblings.some(gb => gb.payment_status === 'paid') && (
-                  <div className="space-y-2">
-                    <label className="font-body font-body-medium text-xs text-text-secondary uppercase flex items-center gap-1.5">
-                      <Icon name="CheckCircle2" size={13} className="text-success" />
-                      {multiServiceBookings ? 'Already paid in this visit' : (booking?.bookingGroupId ? 'Already paid in this group' : 'Already paid for this customer today')}
-                    </label>
-                    <div className="border border-success/20 bg-success/5 rounded-spa divide-y divide-success/10 overflow-hidden">
-                      {groupSiblings.filter(gb => gb.payment_status === 'paid').map(gb => (
-                        <div key={gb.id} className="flex items-center gap-3 px-3 py-2">
-                          <div className="flex-1 min-w-0">
-                            <div className="font-body text-sm text-text-primary">{gb.service?.name || 'Service'}</div>
-                            <div className="font-caption text-xs text-text-secondary">#{gb.booking_number}</div>
-                          </div>
-                          <span className="font-data text-sm text-success flex-shrink-0">
-                            NPR {Number(gb.final_amount || 0).toLocaleString('en-IN')} · Paid
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+
 
                 {/* Pending bookings aren't payable yet — guide staff to confirm/complete first */}
                 {!canPay && booking.status === 'pending' && booking.paymentStatus !== 'paid' && !isLocked && (
@@ -3874,11 +3616,11 @@ const BookingActionModal = ({
                 )}
 
                 {/* Grand total */}
-                {(multiView ? selectedPreviousDueIds.size > 0 : selectedCount > 0) && (
+                {(legacyGroups ? (selectedRelatedIds.size + selectedPreviousDueIds.size) > 0 : selectedPreviousDueIds.size > 0) && (
                   <div className="bg-primary/5 border border-primary/20 rounded-spa p-3">
                     <div className="flex items-center justify-between">
                       <span className="font-body font-body-medium text-sm text-text-primary">
-                        {multiView ? 'Total with the other unpaid bookings' : `Grand Total (${1 + selectedCount} services)`}
+                        {legacyGroups ? `Grand Total (${1 + selectedRelatedIds.size + selectedPreviousDueIds.size} services)` : 'Total with the other unpaid bookings'}
                       </span>
                       <span className="font-data font-data-medium text-base text-primary">
                         NPR {combinedTotal.toLocaleString('en-IN')}
@@ -3911,23 +3653,15 @@ const BookingActionModal = ({
                   </div>
                 )}
 
-                {/* Payment status */}
-                <div className={`flex items-center justify-between px-1 ${multiView ? 'hidden' : ''}`}>
-                  <span className="font-body font-body-normal text-xs text-text-secondary">Status</span>
-                  <span className={`font-body font-body-medium text-sm ${payTone(booking)}`}>
-                    {paymentStatusLabel(booking, { partialText: 'Partial' }).label}
-                  </span>
-                </div>
-
                 {canPay && (
                   <Button
                     variant="primary"
                     onClick={() => setShowPaymentModal(true)}
                     iconName="CreditCard"
                     iconPosition="left"
-                    className={`w-full min-h-[44px] ${multiView ? '' : 'sm:w-auto'}`}
+                    className={`w-full min-h-[44px] `}
                   >
-                    {multiView ? 'Collect payment' : selectedCount > 0 ? `Pay ${1 + selectedCount} Services` : 'Record Payment'}
+                    Collect payment
                   </Button>
                 )}
                 {booking.paymentStatus === 'paid' && (
@@ -4258,19 +3992,21 @@ const BookingActionModal = ({
         <PaymentModal
           key={payMainId}
           savesProducts
-          visitList={multiView}
-          visitOrder={multiView ? payOrder : null}
-          headerNumber={multiView ? block.reference : ''}
+          visitList={!legacyGroups}
+          visitOrder={payOrder}
+          headerNumber={block.reference}
           mainTicked={!payNoneTicked}
-          onVisitToggle={multiView ? togglePayTick : undefined}
-          waitingRows={multiView ? block.rows.filter((r) => !r.dead && r.status === 'pending' && !payOrder.includes(r.id)).map((r) => ({ bookingId: r.id, name: r.name, minutes: r.minutes, staff: r.staff.join(', '), price: r.final })) : []}
+          onVisitToggle={togglePayTick}
+          waitingRows={block.rows.filter((r) => !r.dead && r.status === 'pending' && !payOrder.includes(r.id)).map((r) => ({ bookingId: r.id, name: r.name, minutes: r.minutes, staff: r.staff.join(', '), price: r.final }))}
           booking={payMainView}
           addOnCandidates={[
-            ...(multiView ? payOrder.filter((id) => id !== payMainId).map((id) => payRowView(id)) : relatedBookings.filter(rb => !(multiServiceBookings && rb.status === 'Pending')).map(rb => payRowView(rb.id))),
+            ...payOrder.filter((id) => id !== payMainId).map((id) => payRowView(id)),
+            ...(legacyGroups ? relatedBookings.map((rb) => payRowView(rb.id)) : []),
             ...previousDueBookings,
           ]}
           additionalBookings={[
-            ...(multiView ? payOrder.filter((id) => id !== payMainId && payTicked.has(id)).map((id) => payRowView(id)) : relatedBookings.filter(rb => selectedRelatedIds.has(rb.id)).map(rb => payRowView(rb.id))),
+            ...payOrder.filter((id) => id !== payMainId && payTicked.has(id)).map((id) => payRowView(id)),
+            ...(legacyGroups ? relatedBookings.filter((rb) => selectedRelatedIds.has(rb.id)).map((rb) => payRowView(rb.id)) : []),
             ...previousDueBookings.filter(pb => selectedPreviousDueIds.has(pb.bookingId)),
           ]}
           dueHolderSuggestions={dueHolderSuggestions}
@@ -4311,7 +4047,7 @@ const BookingActionModal = ({
             scrim={!liveBackdrop}
             titleId="booking-panel-title"
             header={panelHeader}
-            footer={panelFooterWithNote}
+            footer={panelFooter}
           >
             {panelTabsNode}
             {contentNode}
@@ -4322,7 +4058,7 @@ const BookingActionModal = ({
     }
     return (
       <>
-        <SidePanel isOpen={isOpen} width={PANEL_WIDTH_BOOKING} header={panelHeader} titleId="booking-panel-title" onClose={requestPanelClose} footer={panelFooterWithNote}>
+        <SidePanel isOpen={isOpen} width={PANEL_WIDTH_BOOKING} header={panelHeader} titleId="booking-panel-title" onClose={requestPanelClose} footer={panelFooter}>
           {panelTabsNode}
           {contentNode}
         </SidePanel>
@@ -4466,12 +4202,12 @@ const BookingActionModal = ({
                   <Button variant="outline" onClick={showAdminCorrection ? requestCorrectionClose : onClose} className="min-h-[44px] sm:min-h-0">
                     Close
                   </Button>
-                  {activeTab === 'assign' && (multiView ? block.rows.some(multiStaffEditable) : !isAssignmentBlocked) && (
+                  {activeTab === 'assign' && block.rows.some(multiStaffEditable) && (
                     <Button
                       variant="primary"
-                      onClick={multiView ? handleAssignAll : handleAssignTherapist}
+                      onClick={handleAssignAll}
                       loading={isLoading}
-                      disabled={multiView ? (!multiStaffChanged.length || multiStaffIncomplete) : assignIncomplete}
+                      disabled={!multiStaffChanged.length || multiStaffIncomplete}
                       className="min-h-[44px] sm:min-h-0"
                     >
                       Save Assignment

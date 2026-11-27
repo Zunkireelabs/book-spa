@@ -37,6 +37,17 @@ const KNOWN = [
   // set_user_pin (migration-416): a refused PIN save, in plain words.
   [/set_user_pin: (?:not allowed|no such user)/i, () => "You can't set this person's PIN. Ask an admin."],
   [/PIN must be exactly 4 digits/i, () => 'PIN must be 4 digits.'],
+  // Admin corrections / delete (migrations 232-336): the one place their refusals get plain words.
+  [/BOOKING_HAS_FINANCIAL_RECORDS/, () => "This booking has money or other records on it, so it can't be deleted. Cancel it instead; it stays in history."],
+  [/CORRECTION_BELOW_PAID/, (raw) => {
+    const m = String(raw).match(/total to ([\d.]+) while ([\d.]+) has/);
+    if (!m) return "The total can't go below what was already paid. To give the money back, cancel the booking and refund it.";
+    const n = (x) => `NPR ${Number(x).toLocaleString('en-IN')}`;
+    return `The total can't go below what was already paid (${n(m[2])}; new total ${n(m[1])}). To give the money back, cancel the booking and refund it.`;
+  }],
+  [/admin_correct_payment_(?:mode|amount): that day has already been closed/, () => "That day is already closed, so this payment can't be changed."],
+  [/admin_correct_payment_mode: new (?:payment )?mode is the same/, () => "That is the payment method it already has."],
+  [/admin_correct_payment_amount: new amount is the same/, () => "That is the amount it already has."],
   [/customers_org_nphone_uniq|duplicate key[\s\S]*phone|phone[\s\S]*duplicate key/i,
     () => 'A customer with this phone number already exists.'],
 ];

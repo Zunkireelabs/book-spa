@@ -1,7 +1,7 @@
 import React from 'react';
 import Icon from '../../../components/AppIcon';
 import TimeBoxInput from '../../../components/ui/TimeBoxInput';
-import { format12h } from '../../../components/ui/PanelFormKit';
+import { formatClockNow } from '../../../utils/clockTime';
 
 // No breaks concept here — branch_working_hours (migration-308) has no sibling breaks
 // table, unlike therapist_working_hours. Toggle-per-day + two time inputs only.
@@ -23,7 +23,7 @@ export const summarizeHours = (rows) => {
   const days = ranges.map(g => (g.start === g.end ? SHORT_DAYS[g.start] : `${SHORT_DAYS[g.start]}–${SHORT_DAYS[g.end]}`)).join(', ');
   const key = (r) => `${r.startTime}-${r.endTime}`;
   const same = open.every(r => key(r) === key(open[0]));
-  return same ? `${days} · ${format12h(open[0].startTime.slice(0, 5))}–${format12h(open[0].endTime.slice(0, 5))}` : `${days} · hours vary`;
+  return same ? `${days} · ${formatClockNow(open[0].startTime.slice(0, 5))}–${formatClockNow(open[0].endTime.slice(0, 5))}` : `${days} · hours vary`;
 };
 
 const BranchHoursEditor = ({ rows, onChange }) => {

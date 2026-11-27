@@ -1,9 +1,6 @@
+import { formatClockNow } from './clockTime';
 // Plain-language lines for the booking History panel (ZNLY-330). Rows come from log_booking_changes() (migration-408).
-const clock = (hhmm) => {
-  const [h, m] = String(hhmm || '').split(':').map(Number);
-  if (Number.isNaN(h)) return String(hhmm || '');
-  return `${h % 12 || 12}:${String(m || 0).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`;
-};
+const clock = (hhmm) => (Number.isNaN(Number(String(hhmm || '').split(':')[0])) ? String(hhmm || '') : formatClockNow(String(hhmm)));
 const day = (iso) => {
   const d = new Date(`${iso}T00:00:00`);
   return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });

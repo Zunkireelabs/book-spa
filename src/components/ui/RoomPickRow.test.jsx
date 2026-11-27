@@ -30,7 +30,7 @@ describe('RoomPickRow', () => {
     expect(text.indexOf('Any available')).toBeLessThan(text.indexOf('Free at this time'));
     expect(text.indexOf('Free at this time')).toBeLessThan(text.indexOf('Full at this time'));
     expect(text).toContain('1 of 3 places left');
-    expect(text).toContain('Full · free from 2:00 pm');
+    expect(text).toContain('Full · free from 2:00pm');
     expect(container.ownerDocument.querySelectorAll('[data-room-full]').length).toBe(2);
     expect(screen.queryByLabelText('HUA HIN')).toBeNull();
     fireEvent.click(screen.getByLabelText('BANGKOK'));
@@ -68,7 +68,7 @@ describe('RoomPickRow', () => {
   it('list header carries "<service> · <Day d Mon> · <start>–<end>"; none until a time is picked', () => {
     const { container } = render(<RoomPickRow {...base} serviceName="ENERGISE BODY" onChange={() => {}} />);
     open();
-    expect(container.ownerDocument.body.textContent).toContain('ENERGISE BODY · Sun 22 Nov · 12:00 pm–2:00 pm');
+    expect(container.ownerDocument.body.textContent).toContain('ENERGISE BODY · Sun 22 Nov · 12:00pm–2:00pm');
     cleanup();
     const again = render(<RoomPickRow {...base} startTime="" serviceName="ENERGISE BODY" onChange={() => {}} />);
     open();

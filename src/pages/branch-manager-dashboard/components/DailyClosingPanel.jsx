@@ -9,6 +9,8 @@ import ConfirmDialog from '../../../components/ui/ConfirmDialog';
 import { getDailySummary, closeDay, getDayUnfinishedBookings } from '../../../services/api';
 import { closeDayBlock, unpaidCloseWarning } from '../../../lib/closeDay';
 import { wordBranch } from '../../../utils/industryTerms';
+import { formatClockIso } from '../../../utils/clockTime';
+import { useUse24h } from '../../../hooks/useUse24h';
 
 function formatNPR(amount) {
   // Whole rupees show without decimals; paise show both digits (25,600 vs 1,234.50), never ".00" and never hidden.
@@ -23,6 +25,7 @@ function formatDate(dateStr) {
 }
 
 const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
+  const [use24h] = useUse24h();
   const today = nepalToday();
   const [selectedDate, setSelectedDate] = useState(today);
   const [summary, setSummary] = useState(null);
@@ -143,7 +146,7 @@ const DailyClosingPanel = ({ branchId, onOpenBooking }) => {
             </span>
             {summary.closedAt && (
               <span className="font-caption font-caption-normal text-xs text-text-secondary ml-auto">
-                at {new Date(summary.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                at {formatClockIso(summary.closedAt, use24h)}
               </span>
             )}
           </div>

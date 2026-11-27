@@ -6,7 +6,7 @@ import { CSS } from '@dnd-kit/utilities';
 
 import { getBookingStatusColors } from '../../../../utils/bookingStatusColors';
 import { useBookingHover, HOVER_CARD_ID } from './BookingHoverCard';
-import { formatClockTime } from './timeFormat';
+import { formatClockTime, formatClockRange } from '../../../../utils/clockTime';
 import { isNoShow } from '../../../../services/bookingTransformers';
 import { OUTSIDE_HOURS_OUTLINE } from '../../../../services/availabilityShading';
 import { cardTier, iconsForBooking, splitForShortCard, statusTag, shouldMoveNameDown, lockReason, fitTinyItems, planFullCard, LINE_PX } from '../../../../services/calendarCardLayout';
@@ -22,17 +22,6 @@ const IconRow = ({ icons, more = 0, uid, wrap = false, className = '', rowRef })
     {more > 0 && <Tooltip label={`${more} more: open the booking`}><span className="font-data text-[10px] text-text-tertiary leading-none">+{more}</span></Tooltip>}
   </span>
 );
-
-// Compact range: "2:30–3:15pm", or "11:30am–12:15pm" when the period differs; "14:30–15:15" in 24h mode
-function compactRange12h(startStr, endStr, use24h = false) {
-  if (!startStr) return '';
-  const start = formatClockTime(startStr, use24h);
-  if (!endStr) return start;
-  const end = formatClockTime(endStr, use24h);
-  if (use24h) return `${start}–${end}`;
-  const sp = start.slice(-2);
-  return sp === end.slice(-2) ? `${start.slice(0, -2)}–${end}` : `${start}–${end}`;
-}
 
 // Statuses that cannot be dragged (terminal states)
 const NON_DRAGGABLE_STATUSES = ['Completed', 'Cancelled', 'No Show'];
@@ -138,7 +127,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
     boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,0.2)' : undefined,
   } : {};
 
-  const rangeLabel = compactRange12h(booking.startTime, booking.endTime, use24h);
+  const rangeLabel = formatClockRange(booking.startTime, booking.endTime, use24h);
   const cardHeight = typeof style?.height === 'number' ? style.height : parseFloat(style?.height) || 0;
   const tier = cardTier(cardHeight);
   const uid = useId().replace(/:/g, '');

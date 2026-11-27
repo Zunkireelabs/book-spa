@@ -5,11 +5,11 @@ import Icon from '../../../../components/AppIcon';
 import ServicePickRow from '../../../../components/ui/ServicePickRow';
 import StaffPickRow from '../../../../components/ui/StaffPickRow';
 import StaffPicker from '../../../../components/ui/StaffPicker';
-import { staffDayRanges, pickedRowStatusMulti, rangeLabel } from '../../../../utils/staffFit';
+import { staffDayRanges, pickedRowStatusMulti, rangeLabel, ownRowBookings } from '../../../../utils/staffFit';
 import { nepalNow } from '../../../../utils/customerDirectory';
-import { format12h } from '../../../../utils/timeInput';
 import { formatNPR } from '../../../../services/bookingTransformers';
 import { bookingTotal, newRow, minToClock, staffRowProblem } from './multiServiceRows';
+import { useClock } from '../../../../hooks/useUse24h';
 
 // ZNLY-402 piece 3b: "+ Add another service" under the first Service / Staff rows of the New booking panel (Individual mode, org setting ON).
 // Same pickers as the first row (ServicePickRow, StaffPickRow + StaffPicker). Each row: service, staff, start (defaults to when the previous service
@@ -18,13 +18,14 @@ import { bookingTotal, newRow, minToClock, staffRowProblem } from './multiServic
 // bookings) for ITS OWN staff and time, and reports the reason upward, so Create stays off with the reason on THIS row (nothing is made before every row passes).
 const ExtraRow = ({
   r, i, t, svc, patch, remove, problem, ownProblem, onProblem, errorRow, errorText, flashRow, editMode = false, errorStaff = false, isFirst = false, solo = false, first1 = null, staffRing = '',
-  services, branchId, canViewPrices, pickerPeople, dayBookings, dayOff, bookingDate, allowStaffOverlap, staffLabel, staffLabelPlural, branchHours,
+  services, branchId, canViewPrices, pickerPeople, dayBookings, dayOff, bookingDate, allowStaffOverlap, staffLabel, staffLabelPlural, branchHours, siblings = [],
 }) => {
+  const clock = useClock();
   const needsStaff = !svc || svc.requires_therapist !== false;
   const picked = r.therapistId ? [pickerPeople.find((p) => p.id === r.therapistId) || { id: r.therapistId, name: 'Selected' }] : [];
   const info = pickedRowStatusMulti(picked, {
     slot: dayBookings && svc ? { start: t.startMin, end: t.endMin > t.startMin ? t.endMin : t.startMin + 60 } : null,
-    rangesById: dayBookings && bookingDate ? staffDayRanges(dayBookings, { date: bookingDate }) : {},
+    rangesById: dayBookings && bookingDate ? staffDayRanges(allowStaffOverlap ? [...dayBookings, ...ownRowBookings(siblings, bookingDate)] : dayBookings, { date: bookingDate }) : {}, // ON orgs: the booking's other rows count too (same person twice in one booking)
     offById: dayOff, date: bookingDate, today: nepalNow().today, busyOk: allowStaffOverlap,
   });
   const n = i + 1;   // the number shown: Service 1 is the panel's own service, extras follow
@@ -66,7 +67,7 @@ const ExtraRow = ({
         <div {...(isFirst ? { 'data-qc-field': 'staff' } : {})} className={isFirst ? staffRing : ''}>
           <p className="flex items-baseline justify-between mb-1.5 font-body font-body-medium text-[13px] text-text-primary">{staffLabel} <span className="text-xs font-normal text-text-secondary">optional</span></p>
           <StaffPickRow
-            people={picked} max={1} statusLine={hideChip ? '' : info.statusLine} pill={hideChip ? null : info.pill} problem={staffText}
+            people={picked} max={1} statusLine={hideChip ? '' : info.statusLine} pill={hideChip ? null : info.pill} problem={staffText} note={hideChip ? '' : info.note}
             emptyLabel={svc ? `Pick ${staffLabel.toLowerCase()}` : 'Pick a service first'} disabled={!svc || !!locked} title={`${staffLabel} for service ${n}`}
             renderPicker={(close) => (
               <StaffPicker
@@ -93,7 +94,7 @@ const ExtraRow = ({
           </div>
           )}
           <span className="text-xs text-text-secondary">
-            {svc.duration_minutes} min · ends {format12h(t.end)}{canViewPrices && (svc.effective_price_npr ?? svc.price_npr) != null ? ` · ${svc.price_type === 'tiered' ? 'from ' : ''}${formatNPR(Number(svc.effective_price_npr ?? svc.price_npr))}` : ''}
+            {svc.duration_minutes} min · ends {clock(t.end)}{canViewPrices && (svc.effective_price_npr ?? svc.price_npr) != null ? ` · ${svc.price_type === 'tiered' ? 'from ' : ''}${formatNPR(Number(svc.effective_price_npr ?? svc.price_npr))}` : ''}
           </span>
           {!isFirst && !locked && !r.bookingId && r.start && <button type="button" onClick={() => patch(r.key, { start: '' })} className="text-xs text-primary underline underline-offset-2">Start after the previous service</button>}
         </div>
@@ -120,6 +121,10 @@ const ExtraServiceRows = ({
   const firstDur = first?.duration_minutes || 0;
   const firstT = { start: f?.start || '', end: minToClock(firstStartMin + firstDur), startMin: firstStartMin, endMin: firstStartMin + firstDur };
   const firstRow = { key: 'first', serviceId: f?.serviceId || '', therapistId: f?.therapistId || '', start: f?.start || '', locked: f?.locked || '' };
+  // Every row of this booking (Service 1 + extras) as { key, staffId, start, end, service }: each row warns about the OTHER rows' staff too.
+  const allRows = [{ key: 'first', staffId: firstRow.therapistId, start: firstT.startMin, end: firstT.endMin, service: first?.name || '' },
+    ...rows.map((r, i) => ({ key: r.key, staffId: r.therapistId, start: times[i]?.startMin, end: times[i]?.endMin, service: byId.get(r.serviceId)?.name || '' }))];
+  const sibs = (key) => allRows.filter((x) => x.key !== key);
   const firstPatch = (_k, p) => {
     if ('serviceId' in p) f.onService(p.serviceId);
     if ('therapistId' in p) f.onStaff(p.therapistId);
@@ -129,13 +134,13 @@ const ExtraServiceRows = ({
     <div className="space-y-3" data-extra-services>
       {f && (
         <ExtraRow key="first" isFirst editMode={editMode} errorStaff={errorStaff} errorRow={errorRow} errorText={errorText} solo={rows.length === 0} first1={f} staffRing={staffRing} r={firstRow} i={0} t={firstT} svc={first || null} patch={firstPatch} remove={() => f.onRemove(rows[0])}
-          problem="" ownProblem="" onProblem={onProblem} flashRow={f.flash ? -1 : null} {...shared} services={f.firstServices && rows.length === 0 ? f.firstServices : services} />
+          problem="" ownProblem="" onProblem={onProblem} flashRow={f.flash ? -1 : null} {...shared} services={f.firstServices && rows.length === 0 ? f.firstServices : services} siblings={sibs('first')} />
       )}
       {rows.map((r, i) => (
         <ExtraRow key={r.key} r={r} i={i + 1} t={times[i]} svc={byId.get(r.serviceId) || null} patch={patch} remove={remove}
           problem={problems[r.key] || ''} ownProblem={ownProblems[i + 1] || ''} onProblem={onProblem}
           errorRow={errorRow} errorText={errorText} errorStaff={errorStaff} flashRow={flashRow}
-          {...shared} />
+          {...shared} siblings={sibs(r.key)} />
       ))}
       {canAdd && <button type="button" onClick={() => setRows((rs) => [...rs, newRow()])}
         className="inline-flex h-10 items-center gap-1.5 rounded-spa border border-dashed border-border px-3 text-[13px] font-body-medium text-primary hover:bg-background spa-transition-fast" data-add-service>

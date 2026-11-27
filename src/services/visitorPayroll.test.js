@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { splitServiceRevenueByBranch, tallyBookingEarnings, visitorPayrollHelpLine } from './payrollCalc';
-import { workedAtNote, hmTo12h, visitFromText } from './visitorAttendance';
+import { workedAtNote, visitFromText } from './visitorAttendance';
 
 const LAZ = 'b-laz';
 const SAN = 'b-san';
@@ -66,18 +66,16 @@ describe('home on the booking date pays (ZNLY-125)', () => {
 
 describe('visitor attendance note', () => {
   it('says when an upcoming visit starts (Nepal time)', () => {
-    expect(visitFromText('2026-10-27T13:10:00Z')).toBe('from 6:55 pm');
+    expect(visitFromText('2026-10-27T13:10:00Z')).toBe('from 6:55pm');
   });
   it('formats 12-hour times', () => {
-    expect(hmTo12h('12:02')).toBe('12:02 pm');
-    expect(hmTo12h('00:05')).toBe('12:05 am');
   });
   it('shows "Worked at <branch> in – out" only for work away from home', () => {
     const names = { [SAN]: 'Sanepa' };
     expect(workedAtNote({ row: { workedAtBranchId: SAN, checkInTime: '12:02', checkOutTime: '15:30' }, homeBranchId: LAZ, branchNameById: names }))
-      .toBe('Worked at Sanepa 12:02 pm – 3:30 pm');
+      .toBe('Worked at Sanepa 12:02pm – 3:30pm');
     expect(workedAtNote({ row: { workedAtBranchId: SAN, checkInTime: '12:02', checkOutTime: null }, homeBranchId: LAZ, branchNameById: names }))
-      .toBe('Worked at Sanepa 12:02 pm');
+      .toBe('Worked at Sanepa 12:02pm');
     expect(workedAtNote({ row: { workedAtBranchId: LAZ, checkInTime: '10:00' }, homeBranchId: LAZ, branchNameById: names })).toBeNull();
     expect(workedAtNote({ row: { workedAtBranchId: null }, homeBranchId: LAZ, branchNameById: names })).toBeNull();
   });

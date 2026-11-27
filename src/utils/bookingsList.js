@@ -5,6 +5,7 @@ import { futureBookingMessage } from '../services/bookingTransformers';
 import { classifyBooking } from './bookingMoney';
 import { phoneSearchDigits } from './customerDirectory';
 import { teamMemberWord } from './industryTerms';
+import { formatClockNow } from './clockTime';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -91,8 +92,7 @@ const dateOf = (b) => String(b?.date || '').slice(0, 10);
 export const clockLabel = (hm) => {
   const m = toMinutes(hm);
   if (m == null) return '';
-  const h = Math.floor(m / 60);
-  return `${h % 12 === 0 ? 12 : h % 12}:${pad(m % 60)}${h >= 12 ? 'pm' : 'am'}`;
+  return formatClockNow(`${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`);
 };
 
 // ── Row signals ─────────────────────────────────────────────────────────────────────────────────────────────────────────

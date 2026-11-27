@@ -1,5 +1,6 @@
 import React from 'react';
 import { formatClockTime } from '../../pages/branch-manager-dashboard/components/calendar/timeFormat';
+import { useUse24h } from '../../hooks/useUse24h';
 
 // ZNLY-402 piece 4 (v3): the Discount tab of a booking with several services. Every service is a line (time order, same as Details) with
 // its price and a live preview: "Discount - NPR x" and "New price", then the booking's new total. Whole rupees only.
@@ -8,7 +9,9 @@ const npr = (n) => `NPR ${Math.round(Number(n) || 0).toLocaleString('en-IN')}`;
 
 // A line planned at 0 while another line has a discount, and that already carries one: Apply CLEARS it (ZNLY-402 A2), the preview says so.
 const planOn = (plan) => (plan?.total || 0) > 0;
-const BookingDiscountLines = ({ rows, plan, perService, onTogglePer, type, values, onChange, use24h, canEdit, existingTotal, onRemove, removing }) => {
+const BookingDiscountLines = ({ rows, plan, perService, onTogglePer, type, values, onChange, use24h: use24hProp, canEdit, existingTotal, onRemove, removing }) => {
+  const [use24hPref] = useUse24h();
+  const use24h = use24hProp ?? use24hPref;
   const cleared = (r, l) => planOn(plan) && l.amount === 0 && r.discount > 0;
   const byId = Object.fromEntries((plan?.lines || []).map((l) => [l.id, l]));
   const newTotal = rows.reduce((s, r) => {

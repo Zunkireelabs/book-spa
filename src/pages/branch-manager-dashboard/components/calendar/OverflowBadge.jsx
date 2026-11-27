@@ -3,7 +3,7 @@ import { useDraggable } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
 import { canDragBooking } from './CalendarBookingCard';
 import { useBookingHover } from './BookingHoverCard';
-import { formatClockTime } from './timeFormat';
+import { formatClockRange } from '../../../../utils/clockTime';
 
 // One row in the overflow popover's hidden-bookings list. Draggable exactly
 // like CalendarBookingCard (same activation constraint tells clicks from
@@ -57,7 +57,7 @@ const OverflowPopoverRow = ({ booking, onClick, onDragChange, use24h, hideSensit
       >
         <div className="text-[11px] font-medium text-text-primary truncate">{hideSensitive ? '•••••' : (booking.customerName || 'Guest')}</div>
         <div className="text-[10px] text-text-secondary truncate">{booking.serviceName || 'Service'}</div>
-        <div className="text-[10px] font-data text-text-secondary/80">{formatClockTime(booking.startTime, use24h)} – {formatClockTime(booking.endTime, use24h)}</div>
+        <div className="text-[10px] font-data text-text-secondary/80">{formatClockRange(booking.startTime, booking.endTime, use24h)}</div>
       </button>
     </>
   );

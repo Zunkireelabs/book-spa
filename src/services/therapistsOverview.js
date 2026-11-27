@@ -3,6 +3,7 @@ import {
   dbDowOfDate, hoursFromShiftRow, dayWorkingMinutes, todayStatus, timeToMinutes,
 } from '../utils/staffDay';
 import { todayStatusLine, nextWorkingDay } from '../utils/todayStatusLine';
+import { formatClockNow } from '../utils/clockTime';
 
 // Pure shaping for the Therapists list (V28). api.js#fetchTherapistsOverview does the (few, batched) reads and hands the raw
 // rows here; everything that turns rows into "today" facts lives in this file so it can be unit-tested.
@@ -216,7 +217,7 @@ export function stripStats(active, { nowTime }) {
     .sort((a, b) => b[1] - a[1]).slice(0, 2).map(([p]) => p);
   return {
     working: { count: working.length, sub: `of ${service.length} service staff`, hint: `${checkedIn} checked in · ${working.length - checkedIn} not yet` },
-    notin: { count: notin.length, sub: 'shift started', hint: oldest ? `Oldest: ${oldest}, ${minutesAgoText(nowTime, oldest) || 'just now'}` : 'Everyone has checked in' },
+    notin: { count: notin.length, sub: 'shift started', hint: oldest ? `Oldest: ${formatClockNow(oldest)}, ${minutesAgoText(nowTime, oldest) || 'just now'}` : 'Everyone has checked in' },
     off: { count: off.length, sub: onLeave ? `${onLeave} on leave` : '', hint: backTomorrow ? `Back tomorrow: ${backTomorrow}` : '' },
     noroster: { count: noroster.length, sub: 'no hours', hint: 'Set their hours in their profile' },
     support: { count: support.length, sub: 'not bookable', hint: topPositions.join(', ') },

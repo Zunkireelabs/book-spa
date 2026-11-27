@@ -6,6 +6,7 @@ import BookingActionModal from '../../../components/ui/BookingActionModal';
 import StatusLegend from '../../../components/ui/StatusLegend';
 import { fetchBookingById } from '../../../services/api';
 import { transformBooking, futureBookingMessage } from '../../../services/bookingTransformers';
+import { useClock } from '../../../hooks/useUse24h';
 
 const DATE_RANGE_LABELS = {
   today: "Today's Appointments",
@@ -31,6 +32,7 @@ const STATUS_STYLES = {
 };
 
 const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignTherapist, onRecordPayment, onGroupPaymentRecorded, onApplyDiscount, userRole = 'staff', canViewCustomerDetails = true, onRefresh, dateRange = 'today' }) => {
+  const clock = useClock();
   const isPhone = useMediaQuery('(max-width: 767px)');
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [showActionModal, setShowActionModal] = useState(false);
@@ -91,13 +93,7 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
     onStatusUpdate(booking.bookingId, newStatus);
   };
 
-  const formatTime = (timeString) => {
-    return new Date(`2024-01-01 ${timeString}`).toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
-  };
+  const formatTime = clock;
 
   // Render action buttons based on status
   const renderActionButtons = (booking, isMobile = false) => {

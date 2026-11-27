@@ -4,6 +4,7 @@ import { STATUS_DOT_COLOR } from '../../../../utils/todayStatusLine';
 import TransferFitText from '../../../../components/ui/TransferFitText';
 import TransferPill from '../../../../components/ui/TransferPill';
 import { describeTransfer } from '../../../../utils/transferText';
+import { useClock } from '../../../../hooks/useUse24h';
 
 // Small shared bits of the Therapists list + peek (V28).
 
@@ -61,12 +62,13 @@ const MAX_DOTS = 8;
 
 /** "5 booked · next 12:30" over a row of dots (dark = done / happening now, light = still to come). */
 export const BookingsCell = ({ t }) => {
+  const clock = useClock();
   const b = t.bookings;
   if (b.count === 0) return <span className="text-[13px] text-[#8A8A90]">—</span>;
   const dots = b.dots.slice(0, MAX_DOTS);
   return (
     <div className="min-w-0" data-bookings-count={b.count}>
-      <div className="text-[13px] truncate"><b className="font-semibold">{b.count} booked</b>{b.firstOrNext && <span className="text-[#8A8A90]"> · {b.firstOrNext.kind} {b.firstOrNext.time}</span>}</div>
+      <div className="text-[13px] truncate"><b className="font-semibold">{b.count} booked</b>{b.firstOrNext && <span className="text-[#8A8A90]"> · {b.firstOrNext.kind} {clock(b.firstOrNext.time)}</span>}</div>
       <div className="flex gap-[3px] mt-1.5" aria-hidden="true">
         {dots.map((d, i) => <i key={i} className="h-1 w-[14px] rounded-full" style={{ background: DOT[d] }} />)}
         {b.dots.length > MAX_DOTS && <span className="text-[10px] text-[#8A8A90] leading-none -mt-0.5">+{b.dots.length - MAX_DOTS}</span>}

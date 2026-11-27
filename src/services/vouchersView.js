@@ -5,6 +5,7 @@ import { NEPAL_TZ } from '../utils/nepalTime';
 // VALUE (what the holder can spend) and `amountPaid` what was collected; a coupon (`percentOff`) is worth 0 and is "X% off one
 // visit", used once (`couponUsed`).
 import { daysUntil, shortName, npr } from './packagesView';
+import { formatClockIsoNow } from '../utils/clockTime';
 
 export { daysUntil, shortName, npr };
 
@@ -434,6 +435,5 @@ export function activityWhen(row, today) {
   const [y, m, dd] = ymd(row.date);
   const day = d === 0 ? 'Today' : d === -1 ? 'Yesterday' : `${dd} ${MON[m - 1]}${String(y) !== String(today).slice(0, 4) ? ` ${y}` : ''}`;
   if (!row.ts) return { day, time: '' };
-  const [h, mi] = new Date(row.ts).toLocaleTimeString('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).split(':').map(Number);
-  return { day, time: `${h % 12 === 0 ? 12 : h % 12}:${String(mi).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}` };
+  return { day, time: formatClockIsoNow(row.ts) };
 }
