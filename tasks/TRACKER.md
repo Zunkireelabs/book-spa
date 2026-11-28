@@ -2,11 +2,12 @@
 
 > **Generated from Plane by `/project-pm sync`. Do not edit by hand.** Plane (project **Zennly WebApp**, key `ZNLY`) is the source of truth.
 
-Last synced: **2026-11-27** by Project Manager · 382 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83, ZNLY-366)
+Last synced: **2026-11-27** by Project Manager · 375 open tickets (epics excluded: ZNLY-1, ZNLY-2, ZNLY-3, ZNLY-4, ZNLY-5, ZNLY-6, ZNLY-7, ZNLY-8, ZNLY-9, ZNLY-10, ZNLY-11, ZNLY-83, ZNLY-366)
 
 ---
 
 ## Flags from the last sync
+- **Open PRs:** not checked ([Errno 2] No such file or directory: '/Users/sadinshrestha/Projects/book-spa').
 - **Urgent/high with no owner:** ZNLY-336, ZNLY-335, ZNLY-258, ZNLY-256, ZNLY-220, ZNLY-218, ZNLY-216, ZNLY-213, ZNLY-210, ZNLY-209, ZNLY-208, ZNLY-207, ZNLY-206, ZNLY-199, ZNLY-197, ZNLY-196, ZNLY-183, ZNLY-179, ZNLY-26, ZNLY-18, ZNLY-15, ZNLY-14, ZNLY-13, ZNLY-12.
 
 ## In progress
@@ -33,9 +34,6 @@ Last synced: **2026-11-27** by Project Manager · 382 open tickets (epics exclud
 | ZNLY-349 | Sadin | high | Marketplace: studios with no reviews show "★ 0.0" on cards (reads as a terrible rating); show no rating or "New" until there are reviews |
 | ZNLY-367 | Sadin | high | Prod perf audit: calendar, branch switch, customers, business report, list pages |
 | ZNLY-406 | Sadin | high | Staff dropdown: rank staff who perform the selected service first |
-| ZNLY-407 | Sadin | high | Extend an appointment by dragging its end (per-org setting) |
-| ZNLY-409 | Sadin | high | Roster clean-up (opens on today) and per-day shift edit from the calendar staff header |
-| ZNLY-410 | Sadin | high | Invoice template redesign, "Send to" channel dropdown (WhatsApp/Email), editable and re-sendable from customer profile |
 | ZNLY-418 | Sadin | high | Staff not eligible for a service: warning + override reason, logged |
 | ZNLY-192 | Anish | medium | Wire 11 hardcoded "Therapist" labels to the dynamic staffLabel system |
 | ZNLY-255 | Sadin | medium | Safe dependency upgrades (router 6.x, vite 5.x, supabase-js, posthog, dompurify, postcss) before stage PR |
@@ -218,6 +216,9 @@ Last synced: **2026-11-27** by Project Manager · 382 open tickets (epics exclud
 | ZNLY-245 | Sadin | high | Sami's onboarding: import the Fresha export (staff, customers, services, products) into production, rehearsed and reconciled |
 | ZNLY-284 | Sadin | high | Interim: Staff › Access stops offering "(view only)" calendar options until ZNLY-283 enforces them; existing view-only logins get an honest note |
 | ZNLY-341 | Sadin | high | Marketplace data readiness: Sami's hours 09:00–20:00 (staging + prod), missing branch phones, Nuad branches with no staff/rooms, run readiness report on staging + prod |
+| ZNLY-407 | Sadin | high | Extend an appointment by dragging its end (per-org setting) |
+| ZNLY-409 | Sadin | high | Roster clean-up (opens on today) and per-day shift edit from the calendar staff header |
+| ZNLY-410 | Sadin | high | Invoice template redesign, "Send to" channel dropdown (WhatsApp/Email), editable and re-sendable from customer profile |
 | ZNLY-17 | — | medium | Flip STAGING_DOMAIN to dev-app.zennly.io and verify stage health check |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist |
 | ZNLY-136 | Anish | medium | Group booking (Fresha-style): book multiple people, one shared slot, one checkout |
@@ -231,7 +232,6 @@ Last synced: **2026-11-27** by Project Manager · 382 open tickets (epics exclud
 | ZNLY-188 | Anish | medium | Group booking: collect per-guest First/Last Name, Email, Phone, Gender (fixes shared-customer-record overwrite) |
 | ZNLY-189 | Anish | medium | Group booking: retry rollback + alert staff when a group booking gets stuck |
 | ZNLY-260 | — | medium | Four in-shell high-fidelity mockup redraws (team member panel, service pricing, checkout invoice dialog, calendar + waitlist) |
-| ZNLY-437 | Sadin | medium | Dialogs: use the shared frosted backdrop everywhere (sidebar and header stay sharp today) |
 
 ## Waiting on owner
 | Ticket | Owner | Priority | What |
@@ -404,9 +404,3 @@ Last synced: **2026-11-27** by Project Manager · 382 open tickets (epics exclud
 | ZNLY-432 | Sadin | low | Inbox notifications ignore the 12h/24h clock setting (text is fixed when the notification is created) |
 | ZNLY-433 | Sadin | low | Whole-booking reschedule gives the new services booking numbers in reverse time order |
 | ZNLY-419 | — | none | Review 66 Nuad booking groups before visit_id backfill |
-| ZNLY-438 | — | none | Meta Business verification for Zennly as WhatsApp tech provider (owner/Zennly setup) |
-| ZNLY-439 | — | none | Register each business's WhatsApp number on the WhatsApp Cloud API (coexistence with the WhatsApp Business app) |
-| ZNLY-440 | — | none | Get the "bill_ready" WhatsApp message template approved by Meta |
-| ZNLY-441 | — | none | Sami's email sender on prod: add the Resend from-address row in outreach_provider_config |
-| ZNLY-442 | — | none | Auto-send the bill after full payment (Outreach rework) |
-| ZNLY-443 | — | none | WhatsApp as a channel in Outreach rules (general) |

@@ -163,7 +163,7 @@ describe('availabilityNow', () => {
     expect(freeUntilLabel(toMin('14:30'), toMin('13:55'))).toBe('free until 2:30pm (35 min)');
     expect(freeUntilLabel(null, toMin('10:00'))).toBe('free all day');
     expect(freeUntilLabel(null, toMin('18:00'))).toBe('free all evening');
-    expect(nextSlot10(toMin('13:52'))).toBe(toMin('14:00'));
+    expect(nextSlot10(toMin('13:52'))).toBe(toMin('13:55'));
     expect(nextSlot10(toMin('14:00'))).toBe(toMin('14:00'));
     expect(clock(0)).toBe('12:00am');
   });

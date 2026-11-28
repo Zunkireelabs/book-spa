@@ -36,6 +36,7 @@ import { SHADE_STYLES, buildShadeSegments, shiftHeaderInfo, slotVerdict, outside
 import { hhmmToMinutes } from '../../../../services/availability';
 import { staffWord, wordBranch } from '../../../../utils/industryTerms';
 import BottomSheet from '../../../../components/ui/BottomSheet';
+import { CAL_STEP_MIN } from '../../../../utils/calendarStep';
 import {
   PHONE_HOUR_BASE, PHONE_MAX_LANES, phoneColumnCount, phoneColumnWidth, clampPhoneZoom, assignPhoneLanes, coupleName, shortName, avatarColor,
 } from './phoneCalendarLayout';
@@ -212,6 +213,8 @@ const CalendarGrid = ({
   blockOccurrences,
   onDeleteManualBlock,
   onResizeManualBlock,
+  canExtend = false, // ZNLY-407: bottom-edge grip on bookings (org setting)
+  onExtendBooking,
   onEditManualBlock,
   pickMode = false,
   draftGhost,
@@ -1049,7 +1052,7 @@ const CalendarGrid = ({
   };
 
   // Resize a manual block by dragging its bottom edge: live preview via `resizingBlock`
-  // state, snapped to 10 minutes and persisted on mouseup (scoped to this occurrence).
+  // state, snapped to 5 minutes and persisted on mouseup (scoped to this occurrence).
   const [resizingBlock, setResizingBlock] = useState(null); // { blockId, day, previewHeight }
   const blockResizeRef = useRef(null);
   const handleBlockResizeStart = useCallback((e, block, day) => {
@@ -1077,7 +1080,7 @@ const CalendarGrid = ({
       // A plain click (no real drag) must never commit a resize.
       if (Math.abs(upEvent.clientY - ref.startY) < 5) return;
       const rawHeight = Math.max(20, ref.startHeight + (upEvent.clientY - ref.startY));
-      const snappedMinutes = Math.max(10, Math.round((rawHeight / eHH * 60) / 10) * 10);
+      const snappedMinutes = Math.max(10, Math.round((rawHeight / eHH * 60) / CAL_STEP_MIN) * CAL_STEP_MIN);
       const originalMinutes = Math.round(ref.startHeight / eHH * 60);
       if (snappedMinutes === originalMinutes) return;
       onResizeManualBlock?.({ blockId: ref.blockId, day: ref.day, durationMinutes: snappedMinutes });
@@ -1445,7 +1448,7 @@ const CalendarGrid = ({
   // ── Hover time label ──────────────────────────────────────
   // One pill + one dashed hairline per grid container, moved by direct style
   // updates (no React state) so mousemove never re-renders the grid.
-  const HOVER_SNAP_MIN = 10;
+  const HOVER_SNAP_MIN = CAL_STEP_MIN; // ZNLY-407: 5 minutes, the same step as the move-drag (useCalendarDnd) and the +5/-5 buttons
   const hoverLineRef = useRef(null);
   const hoverPillRef = useRef(null);
   const dragCreateRef = useRef(null); // drag-to-create session (see handleGridPointerDown)
@@ -1513,7 +1516,7 @@ const CalendarGrid = ({
   }, [onBookingResize, eHH]);
 
   // ── Drag-to-create ────────────────────────────────────────
-  // Press on empty column space and drag vertically: a live dashed ghost (snapped to 10 min) is drawn straight into the
+  // Press on empty column space and drag vertically: a live dashed ghost (snapped to 5 min) is drawn straight into the
   // column's DOM (no React state, so no re-render per move). On release `onDragCreate` opens quick-create there.
   // < 5px of movement stays a plain click (existing menu / retarget behaviour). Mouse only; Esc cancels.
   const handleGridPointerDown = (e) => {
@@ -1785,6 +1788,9 @@ const CalendarGrid = ({
                   ...(pos ? { left: pos.left, width: pos.width, right: 'auto' } : {}),
                 }}
                 onClick={onBookingClick}
+                extendEnabled={canExtend}
+                onExtend={onExtendBooking}
+                pxPerMin={eHH / 60}
                 {...(v.cardInteractions ? {
                   onResize: handleBookingResize,
                   isSelected: selectedCardIds.has(cardKey),

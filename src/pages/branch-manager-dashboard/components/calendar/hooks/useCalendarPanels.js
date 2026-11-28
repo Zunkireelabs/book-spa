@@ -24,6 +24,7 @@ import { isCheckedOutBlockedSlot, DEFAULT_SLOT_MINUTES } from '../calendarSlots'
 import { teamMemberLower } from '../../../../../utils/industryTerms';
 import { useOrg } from '../../../../../contexts/OrgContext';
 import { singleMoveOverlap, clockToMin } from '../../../../../utils/staffFit';
+import { CAL_STEP_MIN } from '../../../../../utils/calendarStep';
 
 // Panel routing for the calendar: which panel is open (booking details, quick-create, block / transfer forms), the
 // dirty-guard refs and open/switch/close helpers, the empty-slot / drag-to-create / new-booking entry points, the
@@ -215,7 +216,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     let startMin = openMin;
     if (currentDate === toKathmanduParts(new Date().toISOString()).date) {
       const nowMin = toMin(toKathmanduParts(new Date().toISOString()).time, '00:00');
-      startMin = Math.min(Math.max(Math.ceil(nowMin / 10) * 10, openMin), lastMin);
+      startMin = Math.min(Math.max(Math.ceil(nowMin / CAL_STEP_MIN) * CAL_STEP_MIN, openMin), lastMin);
     }
     runThroughPanelGuard(() => {
       setModalOpen(false);

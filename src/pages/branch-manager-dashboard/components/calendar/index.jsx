@@ -31,7 +31,7 @@ import { useCalendarPanels } from './hooks/useCalendarPanels';
 import { useCalendarShortcuts } from './hooks/useCalendarShortcuts';
 import { useGoTodaySignal } from './calendarSignals';
 import { useBookingActions } from './hooks/useBookingActions';
-import { isOverallBranch, assignTherapist } from '../../../../services/api';
+import { isOverallBranch, assignTherapist, extendBooking } from '../../../../services/api';
 import { supabase } from '../../../../lib/supabase';
 import { useAvailabilityGuard } from '../../../../contexts/AvailabilityOverrideContext';
 import AssignFlow from './AssignFlow';
@@ -39,6 +39,8 @@ import { dayAssignCount } from '../../../../utils/unassignedList';
 import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
+import { formatClockRange } from '../../../../utils/clockTime';
+import { readUse24h } from '../../../../utils/clockPref';
 import WaitlistPanel, { useWaitlistEntries } from './WaitlistPanel';
 import { todayStr, addDays, addMonths, getStepDays } from './calendarDates';
 import { staffWord } from '../../../../utils/industryTerms';
@@ -50,7 +52,7 @@ import { offStaffReasons } from '../../../../utils/staffFit';
 
 const OperationalCalendar = ({ branchId }) => {
   const { profile } = useAuth();
-  const { orgSettings, enforceStaffAvailability } = useOrg();
+  const { orgSettings, enforceStaffAvailability, canExtend } = useOrg();
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   // Deep link from the Therapists list ("See on calendar"): ?view=calendar&therapist=<id> shows only that person's column.
@@ -124,7 +126,7 @@ const OperationalCalendar = ({ branchId }) => {
   const [assignOpen, setAssignOpen] = useState(false); // ZNLY-299: the Assign list / staff step (phone sheet, desktop side panel)
   const [assignedToast, setAssignedToast] = useState(null); // { msg, undo } — "Assigned to <name> · Undo", 6s
   const assignedToastTimer = useRef(null);
-  const { guard: assignGuard } = useAvailabilityGuard();
+  const { guard: assignGuard, canOverride } = useAvailabilityGuard();
 
   // Ref to the grid body for calculating time from cursor position
   const gridRef = useRef(null);
@@ -306,6 +308,33 @@ const OperationalCalendar = ({ branchId }) => {
   const canAssign = !ownOnly && profile?.role !== 'admin_viewer' && !isOverallBranch(branchId);
 
   const assignCount = useMemo(() => dayAssignCount(calendarData?.bookings || [], currentDate), [calendarData?.bookings, currentDate]);
+
+  const minutesOf = (t) => { const [h, m] = String(t).split(':').map(Number); return h * 60 + (m || 0); };
+  // ZNLY-407: make a booking longer by dragging its end. No confirm box: it saves on release, with Undo. A refusal leaves it as it was and says why.
+  const handleExtendBooking = async (booking, extraMinutes) => {
+    const id = booking.bookingId || booking.id;
+    const base = booking.serviceMinutes ?? booking.serviceDuration;
+    const before = Math.max(0, (booking.endTime && booking.startTime ? minutesOf(booking.endTime) - minutesOf(booking.startTime) : 0) - base);
+    const r = await assignGuard((overrideReason) => extendBooking({ bookingId: id, extraMinutes, overrideReason }));
+    if (r?.error) {
+      // staff cannot override working hours: a plain sentence that says who can
+      if (!r.error.cancelled) showToast(`${(r.error.message || "Couldn't change the length. Nothing was changed.").replace(/[.\s]+$/, '')}.${r.error.overridable && !canOverride ? ' Ask a manager.' : ''}`, 'error');
+      refreshLight(refreshCalendar);
+      return;
+    }
+    refreshLight(refreshCalendar);
+    const len = base + extraMinutes;
+    const endMin = minutesOf(booking.startTime) + len;
+    const hhmm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    const undo = async () => {
+      setAssignedToast(null);
+      const u = await assignGuard((overrideReason) => extendBooking({ bookingId: id, extraMinutes: before, overrideReason }));
+      if (u?.error) { showToast(u.error.message || "Couldn't undo. Open the booking to change it.", 'error'); return; }
+      showToast('Back to the old length');
+      refreshLight(refreshCalendar);
+    };
+    showAssignedToast({ msg: `${extraMinutes > before ? 'Made longer' : 'Made shorter'}: ${formatClockRange(hhmm(minutesOf(booking.startTime)), hhmm(endMin), readUse24h())} · ${len} min`, undo });
+  };
 
   const handleAssigned = ({ bookingId, date, names, prevRoomId, roomChanged }) => {
     refreshLight(refreshCalendar);
@@ -490,6 +519,8 @@ const OperationalCalendar = ({ branchId }) => {
                   checkedOutByTherapistAndDate={calendarData.checkedOutByTherapistAndDate}
                   onBookingClick={handleBookingClick}
                   onBookingResize={handleBookingResize}
+                  canExtend={canExtend}
+                  onExtendBooking={handleExtendBooking}
                   onMultiDrag={(getter) => { getSelectedBookingsRef.current = getter; }}
                   // Phones (ZNLY-285): with the booking sheet open, a tap on the empty grid only closes the sheet (through its dirty guard).
                   onEmptySlotClick={(slot) => {
