@@ -36,6 +36,8 @@ import { SHADE_STYLES, buildShadeSegments, shiftHeaderInfo, slotVerdict, outside
 import { hhmmToMinutes } from '../../../../services/availability';
 import { staffWord, wordBranch } from '../../../../utils/industryTerms';
 import BottomSheet from '../../../../components/ui/BottomSheet';
+import StaffDayMenu from './StaffDayMenu';
+import { dayLabel as staffDayText } from '../../../../components/ui/RosterDayDialog';
 import { CAL_STEP_MIN } from '../../../../utils/calendarStep';
 import {
   PHONE_HOUR_BASE, PHONE_MAX_LANES, phoneColumnCount, phoneColumnWidth, clampPhoneZoom, assignPhoneLanes, coupleName, shortName, avatarColor,
@@ -141,7 +143,7 @@ const SortableColumnHeader = ({ id, children, minWidth }) => {
   return (
     <div
       ref={setNodeRef}
-      className={`relative ${isDragging ? 'z-dropdown' : ''}`}
+      className={`relative outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-inset ${isDragging ? 'z-dropdown' : ''}`}
       style={style}
       {...attributes}
       {...listeners}
@@ -222,6 +224,7 @@ const CalendarGrid = ({
   onDragCreate,
   overlapOccurrences,
   onEditTransfer,
+  staffDayActions, // { changeHours(col), usualHours(col), profile(col) } — manager/admin only; undefined hides the header menu
   hideSensitive = false,
   startHour,
   endHour,
@@ -1200,6 +1203,8 @@ const CalendarGrid = ({
   }, [isHeaderDragging]);
   const hideHeaderTooltip = useCallback(() => setHeaderTooltip(null), []);
   const headerTipTimer = useRef(null);
+  const lastHeaderDragRef = useRef(0); // a click right after a header drag is the drag's release, not a tap
+  const [staffMenu, setStaffMenu] = useState(null); // { col, x, y, subtitle } — staff header menu
   useEffect(() => () => clearTimeout(headerTipTimer.current), []);
 
   // ── Header drag-to-reorder (nested DndContext) ────────────
@@ -1249,7 +1254,12 @@ const CalendarGrid = ({
         style={{ minWidth: minColWidth }}
         onMouseEnter={(e) => showHeaderTooltip(e, onlineUnassignedTooltip || [col.name, hdrShift?.full, trDesc?.sentence].filter(Boolean).join(' · '))}
         onMouseLeave={hideHeaderTooltip}
-        onClick={phoneDay && col.type === 'therapist' ? (e) => {
+        onClick={staffDayActions && col.type === 'therapist' && viewMode === 'day' ? (e) => {
+          if (Date.now() - lastHeaderDragRef.current < 300) return;
+          const r = e.currentTarget.getBoundingClientRect();
+          hideHeaderTooltip();
+          setStaffMenu({ col, x: r.left, y: r.bottom + 2, subtitle: hdrShift?.full || hdrShift?.text || null });
+        } : phoneDay && col.type === 'therapist' ? (e) => {
           // Touch: a tap shows the same full-sentence tooltip desktop shows on hover; it clears itself after a few seconds.
           showHeaderTooltip(e, [col.name, hdrShift?.full, trDesc?.sentence].filter(Boolean).join(' · '));
           clearTimeout(headerTipTimer.current);
@@ -1308,8 +1318,14 @@ const CalendarGrid = ({
                     />
                   )}
                 </span>
-                <span className={`font-body ${phoneDay ? 'text-[12px] max-w-[94%]' : 'text-[13px] max-w-full'} font-medium leading-tight text-text-primary truncate`}>
-                  {col.type === 'therapist' && phoneDay ? shortName(col.name) : col.name}
+                <span className={`flex items-center justify-center gap-0.5 min-w-0 ${phoneDay ? 'max-w-[94%]' : 'max-w-full'}`}>
+                  <span className={`font-body ${phoneDay ? 'text-[12px]' : 'text-[13px]'} font-medium leading-tight text-text-primary truncate`}>
+                    {col.type === 'therapist' && phoneDay ? shortName(col.name) : col.name}
+                  </span>
+                  {/* Affordance: this name opens the staff menu (manager/admin, day view). */}
+                  {staffDayActions && col.type === 'therapist' && viewMode === 'day' && (
+                    <Icon name={staffMenu?.col.id === col.id ? 'ChevronUp' : 'ChevronDown'} size={12} className="flex-shrink-0 text-text-tertiary" />
+                  )}
                 </span>
                 {col.type === 'therapist' && statusLine(true)}
               </>
@@ -1970,6 +1986,7 @@ const CalendarGrid = ({
 
   const handleHeaderDragEnd = useCallback((event) => {
     setIsHeaderDragging(false);
+    lastHeaderDragRef.current = Date.now();
     const { active, over } = event;
     const reorderFn = columnMode === 'room' ? onRoomReorder : onTherapistReorder;
     if (!over || active.id === over.id || !reorderFn) return;
@@ -2214,6 +2231,17 @@ const CalendarGrid = ({
       {isMultiDay ? renderMultiDayView() : renderDayView()}
       <BookingHoverLayer />
       {headerTooltip && <HeaderTooltip tip={headerTooltip} />}
+      {staffDayActions && (
+        <StaffDayMenu
+          menu={staffMenu}
+          phone={isPhone}
+          dayText={staffDayText(currentDate)}
+          onClose={() => setStaffMenu(null)}
+          onChangeHours={staffDayActions.changeHours}
+          onUsualHours={staffDayActions.usualHours}
+          onProfile={staffDayActions.profile}
+        />
+      )}
     </>
   );
 };

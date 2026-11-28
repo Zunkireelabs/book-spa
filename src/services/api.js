@@ -9786,6 +9786,21 @@ export async function upsertRosterOverrides(overrides) {
   }
 }
 
+// "Back to usual hours": removes one date's override (its breaks go with it, ON DELETE CASCADE). Manager/admin only (RLS).
+export async function deleteRosterOverride({ therapistId, date }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) return { error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    const { error } = await supabase.from('staff_roster_overrides').delete().eq('therapist_id', therapistId).eq('override_date', date);
+    if (error) throw error;
+    return { error: null };
+  } catch (error) {
+    console.error('[API] deleteRosterOverride error:', error.message);
+    return { error };
+  }
+}
+
 export async function toggleTherapistActive({ therapistId, isActive }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
