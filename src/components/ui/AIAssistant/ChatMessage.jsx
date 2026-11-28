@@ -1,15 +1,11 @@
 import React from 'react';
 import Icon from '../../AppIcon';
+import { formatClockIsoNow } from '../../../utils/clockTime';
 
 const ChatMessage = ({ message }) => {
   const isUser = message.role === 'user';
 
-  const formatTime = (date) => {
-    return new Date(date).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
+  const formatTime = (date) => formatClockIsoNow(date);
 
   return (
     <div className={`flex items-start gap-3 px-4 ${isUser ? 'flex-row-reverse' : ''}`}>

@@ -19,7 +19,7 @@ import { toE164, samePhone } from '../utils/phone';
 import { isNewCustomerBooking, walkInName } from '../utils/customerPick';
 import { expandBlockOccurrences } from '../utils/blockRecurrence';
 import { leafMethods, qrMethodDiff, validateQrFile } from '../utils/paymentQr';
-import { parseAvailabilityError, createEnforcementCache } from './availability';
+import { parseAvailabilityError, formatAvailabilityMessage, createEnforcementCache } from './availability';
 import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrphanTransferWindow } from './therapistBranchWindow';
 
 // ZNLY-266/268: the ONE place a raw database error becomes screen text. A write's catch block returns plainError(error): the same
@@ -54,6 +54,47 @@ const customerPhoneOptionalCache = createEnforcementCache(async (branchId) => {
   return data?.organizations?.require_customer_phone === false;
 });
 const customerPhoneOptional = (branchId) => customerPhoneOptionalCache.get(branchId);
+// ZNLY-402 / ZNLY-423: true = this org has "Several services in one booking" ON (organizations.multi_service_bookings, migration 428). Every creation path
+// writes bookings.visit_id ONLY when this is true; unknown / unreadable / OFF reads as false (nothing is written, exactly as before). Cleared when the admin flips the switch.
+const multiServiceCache = createEnforcementCache(async (branchId) => {
+  const { data, error } = await supabase.from('branches').select('organizations(multi_service_bookings)').eq('id', branchId).maybeSingle();
+  if (error) throw error;
+  return data?.organizations?.multi_service_bookings === true;
+});
+const newVisitId = () => ((typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : null);
+
+/**
+ * ZNLY-402: "+ Service" joins the visit of the booking it was opened from. Resolves { data: visitId | null, error }.
+ * OFF org -> { data: null } (nothing is written). ON org -> the source booking's visit_id; when the source has none, a new id is stamped on the
+ * source FIRST (a normal update, so it is audited like any user action) and returned. If the new service then fails to create, the source keeping
+ * a visit_id of its own is harmless: a visit of one booking looks exactly like a booking with no visit.
+ */
+export async function joinVisitOfBooking({ sourceBookingId, branchId, date = null }) {
+  try {
+    if (!sourceBookingId || !(await multiServiceCache.get(branchId))) return { data: null, error: null };
+    const { data: src, error: readErr } = await supabase.from('bookings').select('id, visit_id, date').eq('id', sourceBookingId).maybeSingle();
+    if (readErr) throw readErr;
+    if (!src) return { data: null, error: { code: 'SOURCE_NOT_FOUND', message: 'Could not find the booking to add this service to.' } };
+    // ZNLY-436: a visit is one day. The form locks the date; this is the backstop for any other caller.
+    if (date && src.date && String(date) !== String(src.date).slice(0, 10)) {
+      const day = new Date(`${String(src.date).slice(0, 10)}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+      return { data: null, error: { code: 'OTHER_DAY', message: `A service added to this booking must be on ${day}. For another day, use Rebook.`, plain: true } };
+    }
+    if (src.visit_id) return { data: src.visit_id, error: null };
+    const visitId = newVisitId();
+    if (!visitId) return { data: null, error: null };
+    const { data: stamped, error: stampErr } = await supabase.from('bookings').update({ visit_id: visitId }).eq('id', sourceBookingId).is('visit_id', null).select('visit_id');
+    if (stampErr) throw stampErr;
+    if (stamped && stamped.length) return { data: visitId, error: null };
+    // Someone stamped it between our read and write: use theirs.
+    const { data: again, error: againErr } = await supabase.from('bookings').select('visit_id').eq('id', sourceBookingId).maybeSingle();
+    if (againErr) throw againErr;
+    return { data: again?.visit_id || null, error: null };
+  } catch (error) {
+    console.error('[API] joinVisitOfBooking error:', error.message);
+    return { data: null, error: plainError(error, 'Could not add this service to the booking. Please try again.') };
+  }
+}
 const overrideReasonOf = (reason) => (typeof reason === 'string' && reason.trim() ? reason.trim() : null);
 // The reason authorises exactly one write; clear it afterwards so it can never be mistaken for a fresh override later.
 async function clearAvailabilityOverride(bookingId) {
@@ -75,6 +116,7 @@ import { buildCustomerDirectory, buildPanelDetail, nepalNow, avgPaidPerVisit } f
 import { addDays as addDaysISO } from '../utils/reportPeriod';
 import { attendanceDays, busyMinutesInSpans } from '../pages/branch-manager-dashboard/components/Performance/therapistInnerView';
 import { summarizeMoney, classifyBooking, roundMoney, paidPaisa } from '../utils/bookingMoney';
+import { earlierBalanceKey, ownsEarlierBalance, isCheckoutSibling } from '../utils/earlierBalance';
 import { planClose, runCloseSteps } from '../utils/closeBooking';
 import { friendlyError } from '../utils/friendlyError';
 import { staffWord, staffWordPlural, wordBranch, wordBranches } from '../utils/industryTerms';
@@ -865,6 +907,53 @@ export async function setAllowStaffOverlap({ enabled }) {
   }
 }
 
+// ZNLY-402 / ZNLY-423: per-org "Several services in one booking" (migration 428). Admin only, SECURITY DEFINER RPC like the two above.
+export async function setMultiServiceBookings({ enabled }) {
+  try {
+    const { data, error } = await supabase.rpc('set_multi_service_bookings', { p_value: !!enabled });
+    if (error) throw error;
+    multiServiceCache.clear();
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setMultiServiceBookings error:', error.message);
+    return { data: null, error: plainError(error) };
+  }
+}
+
+// ZNLY-407: per-org "Let staff make an appointment longer" (migration 434). Admin only. Returns the effective value.
+export async function setExtendByDrag({ enabled }) {
+  try {
+    const { data, error } = await supabase.rpc('set_extend_by_drag', { p_value: !!enabled });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setExtendByDrag error:', error.message);
+    return { data: null, error: plainError(error) };
+  }
+}
+
+/**
+ * ZNLY-407: make a booking longer (or back to its own length). `extraMinutes` = minutes on top of the service's length (0 = back to normal, steps of 5).
+ * Length only: the price never changes. Refusals come back as { code, message, overridable } with a plain sentence (never SQL text); outside the person's
+ * working hours is the usual manager/admin "Book anyway" (pass overrideReason on the repeat, via the override guard).
+ */
+export async function extendBooking({ bookingId, extraMinutes, overrideReason }) {
+  try {
+    const { data, error } = await supabase.rpc('extend_booking', { p_booking_id: bookingId, p_extra_minutes: extraMinutes, p_override_reason: overrideReasonOf(overrideReason) });
+    if (error) {
+      const availabilityErr = availabilityFailure(error);
+      if (availabilityErr) return availabilityErr;
+      const m = String(error.message || '').match(/^(EXTEND_[A-Z]+|DAY_LOCKED):\s*(.+)$/s);
+      if (m) return { data: null, error: { code: m[1], message: m[2].trim(), plain: true } };
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] extendBooking error:', error.message);
+    return { data: null, error: plainError(error, "Couldn't change the length. Nothing was changed.") };
+  }
+}
+
 export async function setRequireCustomerPhone({ enabled }) {
   try {
     const { data, error } = await supabase.rpc('set_require_customer_phone', { p_value: !!enabled });
@@ -1116,6 +1205,30 @@ export async function fetchServiceEligibility() {
     return { data: out, error: null };
   } catch (error) {
     console.error('[API] fetchServiceEligibility error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * ZNLY-418: everything the client needs to apply the "staff list" rule exactly like the database guard (see staffFit.eligibleFor):
+ * { lists: { [serviceId]: [therapistId…] }, home: { [therapistId]: homeBranchId }, names: { [serviceId]: 'service name, lower-cased' }, labels: { [serviceId]: 'Service name' } }.
+ * A service's list is judged per BRANCH (rows whose staff belong to that branch), so one branch's list never restricts another.
+ */
+export async function fetchServiceStaffIndex() {
+  try {
+    const [rows, staff, svcs] = await Promise.all([
+      pageAllRows(() => supabase.from('service_therapists').select('service_id, therapist_id').order('service_id').order('therapist_id')),
+      pageAllRows(() => supabase.from('therapists').select('id, branch_id').order('id')),
+      pageAllRows(() => supabase.from('services').select('id, name').order('id')),
+    ]);
+    const lists = {};
+    for (const r of rows) (lists[r.service_id] ||= []).push(r.therapist_id);
+    const home = {}; for (const t of staff) home[t.id] = t.branch_id;
+    const names = {}; const labels = {};
+    for (const s of svcs) { names[s.id] = String(s.name || '').trim().toLowerCase(); labels[s.id] = s.name; }
+    return { data: { lists, home, names, labels }, error: null };
+  } catch (error) {
+    console.error('[API] fetchServiceStaffIndex error:', error.message);
     return { data: null, error };
   }
 }
@@ -2141,7 +2254,7 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
     const rows = await pageAllRows(() => {
       let query = supabase
         .from('bookings')
-        .select('id, booking_number, customer_name, customer_phone, date, status, final_amount, payment_status, due_holder_name, service_name_snapshot, is_locked, payments(amount), payment_refunds(amount)')
+        .select('id, booking_number, customer_id, customer_name, customer_phone, date, status, final_amount, payment_status, due_holder_name, service_name_snapshot, is_locked, payments(amount), payment_refunds(amount)')
         .in('status', ['In-Progress', 'Completed'])
         .order('id');
       if (from) query = query.gte('date', from);
@@ -2159,6 +2272,7 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
       groups[key].bookings.push({
         bookingId: b.id,
         bookingNumber: b.booking_number,
+        customerId: b.customer_id || null,
         customerName: b.customer_name,
         customerPhone: b.customer_phone,
         date: b.date,
@@ -2256,7 +2370,7 @@ export async function getDueReportByBranch({ from, to } = {}) {
       let query = supabase
         .from('bookings')
         .select(
-          'id, booking_number, branch_id, branches(name), customer_name, customer_phone, date, status, final_amount, payment_status, therapist_name_snapshot, client_request_id, created_by, creator:users!created_by(full_name), payments(amount)', opts)
+          'id, booking_number, branch_id, branches(name), customer_id, customer_name, customer_phone, date, status, final_amount, payment_status, therapist_name_snapshot, client_request_id, created_by, creator:users!created_by(full_name), payments(amount)', opts)
         .in('payment_status', ['unpaid', 'partial'])
         .not('status', 'in', '("Cancelled","No Show")');
       if (from) query = query.gte('date', from);
@@ -2281,6 +2395,7 @@ export async function getDueReportByBranch({ from, to } = {}) {
         date: b.date,
         status: b.status,
         paymentStatus: b.payment_status,
+        customerId: b.customer_id || null,
         customerName: b.customer_name,
         customerPhone: b.customer_phone,
         therapistName: b.therapist_name_snapshot || null,
@@ -2309,11 +2424,14 @@ export async function getDueReportByBranch({ from, to } = {}) {
 // than as an exact string, since the same real customer is often recorded with
 // slightly different phone formatting (with/without country code) across visits.
 // customerName is accepted but purely cosmetic — it is never used to filter.
-export async function getCustomerOutstandingBalance({ customerPhone, branchId, excludeBookingId } = {}) {
+// anyOwner (a phone typed on purpose, Collect payment): every due on that phone, whoever owns it; each row carries customerId + customerName.
+// Every booking-keyed caller leaves it off and keeps the strict owner rule.
+export async function getCustomerOutstandingBalance({ customerPhone, customerId, branchId, excludeBookingId, anyOwner = false } = {}) {
   try {
     const normalizedPhone = toE164(customerPhone);
-    // Need a full number (country code + national) before matching — a stray fragment must not sweep up unrelated bookings.
-    if (!normalizedPhone || normalizedPhone.length < 11) return { data: dueSummary(summarizeMoney([], { today: nepalNow().today })), error: null };
+    // ONE key rule (utils/earlierBalance.js): the customer when the caller knows one, else the full normalised phone. A stray phone fragment must not sweep up unrelated bookings.
+    const key = earlierBalanceKey({ customerId, phone: normalizedPhone });
+    if (!key) return { data: dueSummary(summarizeMoney([], { today: nepalNow().today })), error: null };
     const today = nepalNow().today;
     // DUE only (the one money model): rendered visits (In-Progress / Completed), paid = payments − refunds. Candidates are chosen by
     // status, NEVER by payment_status (it can be stale, and the pre-filter must never exclude a booking that is truly due). Filtered on the
@@ -2323,13 +2441,14 @@ export async function getCustomerOutstandingBalance({ customerPhone, branchId, e
       let query = supabase
         .from('bookings')
         .select(DUE_COLUMNS)
-        .eq('customer_phone', normalizedPhone)
         .in('status', ['In-Progress', 'Completed'])
         .order('id');
+      // Phone key owns only rows WITHOUT a customer_id (utils/earlierBalance.js): a customer-linked row belongs to its customer.
+      query = key.customerId ? query.eq('customer_id', key.customerId) : (anyOwner ? query.eq('customer_phone', key.phone) : query.eq('customer_phone', key.phone).is('customer_id', null));
       if (excludeBookingId) query = query.neq('id', excludeBookingId);
       return withBranch(query, branchId);
     });
-    const mine = rows.filter((b) => samePhone(b.customer_phone, normalizedPhone));
+    const mine = key.customerId ? rows : rows.filter((b) => (anyOwner || !b.customer_id) && samePhone(b.customer_phone, key.phone));
     return { data: dueSummary(summarizeMoney(mine, { today, excludeBookingId })), error: null };
   } catch (error) {
     console.error('[API] getCustomerOutstandingBalance error:', error.message);
@@ -2343,7 +2462,7 @@ const DUE_COLUMNS = 'id, booking_number, customer_id, customer_name, customer_ph
 // from here (the day is closed), so they are reported separately (lockedDue / lockedBookings) and never bundled.
 const dueSummary = (m) => {
   const row = (b) => ({
-    bookingId: b.id, bookingNumber: b.booking_number, customerName: b.customer_name, date: b.date,
+    bookingId: b.id, bookingNumber: b.booking_number, customerId: b.customer_id || null, customerName: b.customer_name, date: b.date,
     serviceName: b.service_name_snapshot || '—', finalAmount: b.money.price, amountPaid: b.money.paid, amountDue: b.money.due,
     paymentStatus: b.payment_status, isLocked: !!b.is_locked,
   });
@@ -3569,6 +3688,84 @@ export async function fetchGroupBookings({ bookingGroupId, customerName, date, e
     return { data: data || [], error: null };
   } catch (error) {
     console.error('[API] fetchGroupBookings error:', error.message);
+    return { data: [], error };
+  }
+}
+
+// ZNLY-402 piece 4 / ZNLY-435: EVERY row of one booking (bookings.visit_id), cancelled rows included, any payment state.
+// Read-only, for the "This booking" card in the booking panel. No visit_id = its own booking: the card is that one row (by bookingId).
+// customerId is the same safety check as above: a visit never spans two customers.
+export async function fetchBookingServices({ visitId, customerId, bookingId }) {
+  try {
+    if (!visitId && !bookingId) return { data: [], error: null };
+    let query = supabase
+      .from('bookings')
+      .select('id, booking_number, customer_id, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service_id, room_id, therapist_id, service_name_snapshot, service:services(name, duration_minutes, is_couple), room:rooms(name), therapist:therapists(name), booking_therapists(therapist_id, therapist:therapists(name)), payments(amount), payment_refunds(amount)');
+    // ZNLY-435: a booking with no visit (an org with the setting OFF, or an older booking) is its own one-row card.
+    query = visitId ? query.eq('visit_id', visitId) : query.eq('id', bookingId);
+    if (customerId) query = query.eq('customer_id', customerId);
+    const { data, error } = await query.order('start_time');
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchBookingServices error:', error.message);
+    return { data: [], error };
+  }
+}
+
+// ZNLY-402 (org setting multi_service_bookings ON; OFF orgs use fetchRelatedUnpaidBookings above): "related" = the OTHER bookings of the SAME VISIT (bookings.visit_id, migration-427; one person, one Save), unpaid only: this is
+// "what to bundle into a payment". A booking with no visit_id is its own visit, so it has no related bookings: there is no fallback to
+// booking_group_id (a party of several people) or to customer_name + date (the old guess that merged two separate visits). customerId
+// (when known) stays as a safety check: a visit never spans two customers, so a stray row of another customer is never bundled into a
+// membership/wallet payment scoped to one customer (see the BK-20261011-0033/-0034 incident). Same unpaid / non-cancelled filters as before.
+export async function fetchVisitRelatedUnpaidBookings({ excludeBookingId, visitId, customerId }) {
+  try {
+    if (!visitId) return { data: [], error: null };
+    let query = supabase
+      .from('bookings')
+      .select('id, booking_number, customer_id, customer_name, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service:services(name, duration_minutes), room:rooms(name), therapist:therapists(name), payments(amount), payment_refunds(amount)')
+      .not('status', 'in', '("Cancelled","No Show")')
+      .neq('id', excludeBookingId)
+      .eq('visit_id', visitId);
+
+    if (customerId) {
+      query = query.eq('customer_id', customerId);
+    }
+
+    const { data, error } = await query.order('start_time');
+
+    if (error) throw error;
+    // "Unpaid" = nothing held on it (payments − refunds = 0), decided from the payments like every other money figure — the same rule the
+    // calendar's Prev. due uses to drop these siblings, so the two can never disagree.
+    return { data: (data || []).filter((b) => paidPaisa(b) === 0), error: null };
+  } catch (error) {
+    console.error('[API] fetchVisitRelatedUnpaidBookings error:', error.message);
+    return { data: [], error };
+  }
+}
+
+// Every other booking of the same visit, regardless of payment_status — unlike fetchVisitRelatedUnpaidBookings above, this is purely for
+// DISPLAY (so a sibling that's already been paid never silently disappears from another sibling's modal — see the
+// BK-20260915-0025/-0026/-0027 incident, where paying 0025 made it drop out of every other sibling's "related" view). Never used to decide
+// what to bundle into a payment — only fetchVisitRelatedUnpaidBookings governs that. Same visit rule as above (ZNLY-402): no visit_id = no siblings.
+export async function fetchVisitSiblings({ visitId, excludeBookingId, customerId }) {
+  try {
+    if (!visitId) return { data: [], error: null };
+
+    let query = supabase
+      .from('bookings')
+      .select('id, booking_number, payment_status, status, final_amount, service:services(name)')
+      .not('status', 'in', '("Cancelled","No Show")')
+      .neq('id', excludeBookingId)
+      .eq('visit_id', visitId);
+    if (customerId) query = query.eq('customer_id', customerId);
+
+    const { data, error } = await query.order('booking_number');
+
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchVisitSiblings error:', error.message);
     return { data: [], error };
   }
 }
@@ -6847,16 +7044,19 @@ export async function getCalendarBookings(branchId, startDate, endDate, opts = {
         'customer_phone',   // fetched always; masked below when withheld — see maskPhone
         'status', 'payment_status',
         'date', 'start_time', 'end_time', 'start_datetime', 'end_datetime', 'created_at', 'created_by',
-        'therapist_id', 'room_id',
+        'therapist_id', 'room_id', 'service_id', // service_id: ZNLY-435, so the panel's card can be drawn from these rows on first paint
+        // ZNLY-402: visit link (migration 427; bookings_safe carries it since migration 428). Only read when the org setting multi_service_bookings is ON.
+        'visit_id', 'booking_group_id', // booking_group_id: the earlier-balance chip drops the checkout's group siblings (ZNLY-403)
         vis.canViewPrices && 'base_amount, discount_amount, final_amount',
         'special_requests', 'referred_by',
-        'service:services(name, duration_minutes, requires_therapist)',
+        'service:services(name, duration_minutes, requires_therapist, is_couple)',
         'therapist:therapists(id, name)',
         'room:rooms(id, name)',
         'creator:users!created_by(full_name)',
         'booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name), room:rooms(id, name))',
         'booking_combo_items(id, service_id, therapist_id, room_id, start_time, end_time, display_order, service:services(name, duration_minutes), therapist:therapists(id, name))',
         vis.canViewPrices && 'payments(amount, payment_mode)',
+        vis.canViewPrices && 'payment_refunds(amount)', // ZNLY-435: the instant card's paid = payments - refunds, exactly as the fetched card
       ].filter(Boolean).join(', ');
 
       let bookingsQuery = supabase
@@ -6993,44 +7193,45 @@ export async function getCalendarBookings(branchId, startDate, endDate, opts = {
         return undefined;
       }
     })().catch(() => undefined), CALENDAR_LOOKUP_TIMEOUT_MS, undefined);
-    // Same definition as getCustomerOutstandingBalance (what the payment modal bundles as "Previous due"): the same phone's
-    // other unpaid/partial, non-cancelled bookings in this branch (any date), amount = final_amount − payments, excluding
-    // the booking itself and — as BookingActionModal does — its same-name/same-date unpaid "related services".
+    // Same definition as getCustomerOutstandingBalance (what the payment modal bundles as the earlier balance): the same owner's
+    // other rendered-and-unpaid bookings in this branch (any date), amount = final_amount − payments, excluding the booking itself
+    // and its siblings. Owner = ONE key rule (utils/earlierBalance.js): customer_id when the booking has one, else the phone.
+    // Siblings = the same visit_id in an org with "Several services in one booking" ON; otherwise (as BookingActionModal does) its
+    // same-name/same-date bookings with NOTHING paid.
     const previousDuePromise = failOpenAfter((async () => {
       const phoneOf = (b) => { const p = toE164(b.customer_phone); return p && p.length >= 11 ? p : null; };
-      const visiblePhones = new Set((bookings || []).map(phoneOf).filter(Boolean));
-      if (visiblePhones.size === 0) return {};
+      const keyOf = (b) => earlierBalanceKey({ customerId: b.customer_id, phone: phoneOf(b) });
+      const keyed = (bookings || []).map((b) => [b, keyOf(b)]).filter(([, k]) => k);
+      if (keyed.length === 0) return {};
       try {
+        const multi = await multiServiceCache.get(resolvedBranchId).catch(() => false);
         // Only DUE counts (rendered visits owing money); future appointments never do. Candidates by status only (payment_status can be
-        // stale); paid = payments − refunds. Server-side filter on the normalised phones that are on screen (chunked: PostgREST puts .in()
-        // lists in the URL), so the calendar no longer downloads the branch's whole history; the phoneOf() check stays as a safety net.
-        const phoneList = [...visiblePhones];
-        const openAll = [];
-        for (let i = 0; i < phoneList.length; i += 40) {
-          openAll.push(...await pageAllRows(() => supabase
-            .from('bookings')
-            .select('id, customer_name, customer_phone, date, status, final_amount, payment_status, payments(amount), payment_refunds(amount)')
-            .eq('branch_id', resolvedBranchId)
-            .in('customer_phone', phoneList.slice(i, i + 40))
-            .in('status', ['In-Progress', 'Completed'])
-            .order('id')));
-        }
-        const open = openAll.filter((o) => visiblePhones.has(phoneOf(o)));
-        const byPhone = {};
-        for (const o of summarizeMoney(open, { today: nepalNow().today }).dueBookings) {
-          const ph = phoneOf(o);
-          if (!ph) continue;
-          // "Related services" bundled in the payment panel are same-name / same-date bookings with NOTHING paid on them: decided from the
-          // payments (bookingMoney), never from payment_status, so it can't disagree with the due amount.
-          (byPhone[ph] ||= []).push({ id: o.id, name: o.customer_name, date: o.date, unpaid: o.money.paid === 0, due: o.money.due });
-        }
+        // stale); paid = payments − refunds. Server-side filter on the owners on screen (chunked: PostgREST puts .in() lists in the
+        // URL), so the calendar no longer downloads the branch's whole history; ownsEarlierBalance() stays as the exact check.
+        const ids = [...new Set(keyed.map(([, k]) => k.customerId).filter(Boolean))];
+        const phones = [...new Set(keyed.map(([, k]) => k.phone).filter(Boolean))];
+        const openAll = new Map();
+        const fetchBy = async (column, list) => {
+          for (let i = 0; i < list.length; i += 40) {
+            const rows = await pageAllRows(() => supabase
+              .from('bookings')
+              .select('id, customer_id, visit_id, booking_group_id, customer_name, customer_phone, date, status, final_amount, payment_status, payments(amount), payment_refunds(amount)')
+              .eq('branch_id', resolvedBranchId)
+              .in(column, list.slice(i, i + 40))
+              .in('status', ['In-Progress', 'Completed'])
+              .order('id'));
+            rows.forEach((r) => openAll.set(r.id, r));
+          }
+        };
+        await fetchBy('customer_id', ids);
+        await fetchBy('customer_phone', phones);
+        const dueRows = summarizeMoney([...openAll.values()], { today: nepalNow().today }).dueBookings;
         const out = {};
-        for (const b of (bookings || [])) {
-          const ph = phoneOf(b);
-          if (!ph || !byPhone[ph]) continue;
-          const list = byPhone[ph].filter(o => o.id !== b.id && !(o.unpaid && o.name === b.customer_name && o.date === b.date));
+        for (const [b, key] of keyed) {
+          const list = dueRows.filter((o) => o.id !== b.id && ownsEarlierBalance(key, { customer_id: o.customer_id, phone: phoneOf(o) })
+            && !(multi ? (b.visit_id && o.visit_id === b.visit_id) : isCheckoutSibling(b, o, o.money.paid)));
           if (list.length === 0) continue;
-          out[b.id] = { count: list.length, amount: Math.round(list.reduce((sum, o) => sum + o.due, 0) * 100) / 100 };
+          out[b.id] = { count: list.length, amount: Math.round(list.reduce((sum, o) => sum + o.money.due, 0) * 100) / 100 };
         }
         return out;
       } catch (e) {
@@ -7203,6 +7404,7 @@ export async function createBooking({
   companionName,
   companionPhone,
   bookingGroupId,
+  visitId,   // ZNLY-402: bookings.visit_id; callers pass it only for orgs with the setting ON (createBookingGroup, "+ Service")
   referringCustomerId,
   referringRewardType,
   referringRewardAmount,
@@ -7613,11 +7815,15 @@ export async function createBooking({
       const primary = therapistsData.find(t => t.id === primaryTherapistId);
       therapistNameSnapshot = primary?.name || null;
 
-      if (eligibleIds && eligibleIds.length > 0) {
+      // ZNLY-418: not on the service's staff list. A manager/admin may book anyway with a reason (overridable: the caller's override guard asks
+      // for it and repeats with overrideReason; the DB re-checks the role and logs it). Visiting staff (home branch is not this one) are judged by
+      // the DB guard on their HOME list, so they are skipped here.
+      if (eligibleIds && eligibleIds.length > 0 && !availabilityOverride) {
         const eligibleSet = new Set(eligibleIds);
-        const ineligible = therapistsData.find(t => !eligibleSet.has(t.id));
+        const ineligible = therapistsData.find(t => t.branch_id === resolvedBranchId && !eligibleSet.has(t.id));
         if (ineligible) {
-          return { data: null, error: { code: 'THERAPIST_NOT_ELIGIBLE', message: `${ineligible.name} is not eligible for ${service.name}.` } };
+          const detail = { code: 'THERAPIST_NOT_ELIGIBLE', not_listed: true, therapist_id: ineligible.id, therapist_name: ineligible.name, service_name: service.name };
+          return { data: null, error: { code: 'THERAPIST_NOT_ELIGIBLE', message: formatAvailabilityMessage('THERAPIST_NOT_ELIGIBLE', detail), overridable: true, detail } };
         }
       }
     }
@@ -7696,6 +7902,7 @@ export async function createBooking({
       special_requests: specialRequests || null,
       created_by: authUser?.id || null,
       booking_group_id: bookingGroupId || null,
+      ...(visitId ? { visit_id: visitId } : {}),
       referral_source: referralSource || null,
       referral_source_detail: referralSourceDetail || null,
       client_request_id: clientRequestId,
@@ -7886,7 +8093,11 @@ export async function createBooking({
 // mid-way failure cancels whatever was already created so the customer is never left
 // silently half-booked. The residual window is small but real, and cancelled rows do
 // remain visible to staff — that trade is deliberate.
-export async function createBookingGroup({ services, date, startTime, therapistId, ...common }) {
+// Staff multi-service booking ("Several services in one booking", ZNLY-402): every service may carry its own `startTime` and `therapistIds`
+// (default: back-to-back from `startTime` with `therapistId`, as for the online flow). `staffRollback: true` (the desk, a signed-in user): the rows made so far
+// are cancelled when a later one fails, because public_cancel_booking_group only releases anonymous online rows (created_by IS NULL). `visitId` may be passed
+// (e.g. "+ Service" joining an existing visit); otherwise an ON org gets a new one. A failure carries `failedRow` (index of the service that failed).
+export async function createBookingGroup({ services, date, startTime, therapistId, staffRollback = false, ...common }) {
   if (!services || services.length === 0) {
     return { data: null, error: { code: 'NO_SERVICES', message: 'Select at least one service.' } };
   }
@@ -7906,25 +8117,32 @@ export async function createBookingGroup({ services, date, startTime, therapistI
   const bookingGroupId = (typeof crypto !== 'undefined' && crypto.randomUUID)
     ? crypto.randomUUID()
     : `grp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  // ZNLY-402: one person, several services, one Save = one visit (ON orgs only; the booking_group_id above stays as before).
+  const visitId = common.visitId || ((await multiServiceCache.get(common.branchId)) ? newVisitId() : null);
 
-  // Lay the services out back-to-back so each row gets its own real slot.
+  // Lay the services out back-to-back so each row gets its own real slot (unless the caller gave a row its own start time).
   let cursor = startTime;
   const planned = services.map((service) => {
-    const slot = { service, startTime: cursor };
-    cursor = addMinutesToTime(cursor, service.duration_minutes);
+    const slot = { service, startTime: service.startTime || cursor };
+    cursor = addMinutesToTime(slot.startTime, service.duration_minutes);
     return slot;
   });
 
   const created = [];
-  for (const { service, startTime: slotStart } of planned) {
+  for (const [rowIndex, { service, startTime: slotStart }] of planned.entries()) {
     // eslint-disable-next-line no-await-in-loop
     const { data, error } = await createBooking({
       ...common,
       serviceId: service.id,
       date,
       startTime: slotStart,
-      therapistId,
-      bookingGroupId,
+      therapistId: service.therapistIds ? undefined : therapistId,
+      therapistIds: service.therapistIds || undefined,
+      overrideReason: service.overrideReason,   // only the rows that needed it (staff multi-service); the online flow passes none
+      // ZNLY-402 (A5): the desk's one-person visit on an ON org carries ONLY visit_id. booking_group_id means a party of several people.
+      // The online flow keeps it: its rollback RPC (public_cancel_booking_group) finds the rows by it.
+      bookingGroupId: staffRollback && visitId ? null : bookingGroupId,
+      visitId,
     });
 
     if (error) {
@@ -7935,8 +8153,10 @@ export async function createBookingGroup({ services, date, startTime, therapistI
       if (created.length > 0) {
         try {
           // eslint-disable-next-line no-await-in-loop
-          const { error: rollbackError } = await supabase
-            .rpc('public_cancel_booking_group', { p_booking_group_id: bookingGroupId });
+          const { error: rollbackError } = staffRollback
+            // The desk: a signed-in user made these rows (created_by is set), which the anonymous RPC deliberately ignores, so cancel them directly.
+            ? await supabase.from('bookings').update({ status: 'Cancelled', cancellation_reason: 'Not created: the booking could not be completed.' }).in('id', created.map((b) => b.id))
+            : await supabase.rpc('public_cancel_booking_group', { p_booking_group_id: bookingGroupId });
           if (rollbackError) throw rollbackError;
         } catch (cancelError) {
           // Surfaced loudly: the customer now holds bookings they weren't told about.
@@ -7945,6 +8165,8 @@ export async function createBookingGroup({ services, date, startTime, therapistI
             data: null,
             error: {
               code: 'BOOKING_GROUP_PARTIAL',
+              failedRow: rowIndex,
+              partial: true,
               message: `${service.name} could not be booked, and we could not automatically release the services booked before it. Please contact the ${wordBranch()} to confirm what is reserved.`,
             },
           };
@@ -7954,7 +8176,8 @@ export async function createBookingGroup({ services, date, startTime, therapistI
         data: null,
         error: {
           ...error,
-          message: `${service.name}: ${error.message || 'could not be booked.'}${created.length > 0 ? ' Your other services were released — please pick another time.' : ''}`,
+          failedRow: rowIndex,
+          message: `${service.name}: ${error.message || 'could not be booked.'}${created.length > 0 && !staffRollback ? ' Your other services were released — please pick another time.' : ''}`,
         },
       };
     }
@@ -8170,6 +8393,120 @@ export async function rescheduleBookingAsNewBooking({ bookingId, date, startTime
     console.error('[API] rescheduleBooking error:', error.message);
     return { data: null, error: plainError(error) };
   }
+}
+
+// ── ZNLY-402 piece 5: booking-level, all-or-nothing calls (migration 430). One exported function per server function. ─────────────────────────────
+// Every call returns { data, error }. A refusal is error { code, message, rows, overridable } with a plain-language message (never SQL text);
+// `data` still carries the per-row verdicts ({ ok, dry_run, rows:[{booking_id, booking_number, service, start, staff, verdict, reason}], totals }).
+// dryRun: true changes nothing and returns exactly what WOULD happen. code NEEDS_OVERRIDE = a manager/admin may repeat the call with overrideReason.
+// visit_update / visit_set_staff answer COMBO_USE_SINGLE_EDIT / MULTI_STAFF_USE_SINGLE_EDIT for a booking they cannot cover yet; the wrappers then run
+// TODAY'S single-booking paths (updateBookingDetails / assignTherapist / updateBookingStatus) so editing is never worse than before.
+const VISIT_SINGLE_EDIT_CODES = ['COMBO_USE_SINGLE_EDIT', 'MULTI_STAFF_USE_SINGLE_EDIT'];
+async function visitCall(fn, args) {
+  try {
+    const { data, error } = await supabase.rpc(fn, args);
+    if (error) return { data: null, error: plainError(error) };
+    if (data && data.ok === false) {
+      const e = data.error || {};
+      return {
+        data,
+        error: {
+          code: e.code || data.code || 'REFUSED',
+          message: e.message || data.message || 'This could not be saved. Nothing was changed.',
+          rows: data.rows || [],
+          overridable: (e.code || data.code) === 'NEEDS_OVERRIDE',
+          plain: true,
+          refusal: true, // a plain-sentence refusal written by the server (not a crash): the guidance card shows its own message
+        },
+      };
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error(`[API] ${fn} error:`, error.message);
+    return { data: null, error: plainError(error) };
+  }
+}
+
+export function visitCreate({ branchId, customer, services, overrideReason = null, dryRun = false }) {
+  const c = { ...(customer || {}) };
+  if (c.phone) c.phone = toE164(c.phone);
+  const svcs = (services || []).map((s) => ({ ...s, override_reason: overrideReasonOf(s.override_reason) || undefined }));
+  return visitCall('visit_create', { p_branch_id: resolveBranchId(branchId), p_customer: c, p_services: svcs, p_override_reason: overrideReasonOf(overrideReason), p_dry_run: !!dryRun });
+}
+
+export async function visitUpdate({ visitKey, changes, overrideReason = null, dryRun = false }) {
+  const res = await visitCall('visit_update', { p_visit_key: visitKey, p_changes: changes, p_override_reason: overrideReasonOf(overrideReason), p_dry_run: !!dryRun });
+  if (res.error && VISIT_SINGLE_EDIT_CODES.includes(res.error.code)) {
+    if (dryRun) return { data: { ok: true, dry_run: true, routed: 'single', rows: [], totals: {} }, error: null };
+    return visitUpdateViaSingleEdits({ changes, overrideReason });
+  }
+  return res;
+}
+
+// Today's per-booking path for a combo / multi-staff booking: the same calls the old Edit form made, one booking at a time.
+async function visitUpdateViaSingleEdits({ changes, overrideReason }) {
+  for (const line of changes?.services || []) {
+    if (!line.booking_id) return { data: null, error: { code: 'ADD_NOT_ALLOWED', message: 'A service cannot be added to this kind of booking here.', plain: true } };
+    if (line.remove) {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await updateBookingStatus({ bookingId: line.booking_id, newStatus: 'Cancelled', reason: line.remove_reason || line.reason });
+      if (r.error) return r;
+      continue;
+    }
+    // eslint-disable-next-line no-await-in-loop
+    const d = await updateBookingDetails({
+      bookingId: line.booking_id, serviceId: line.service_id || undefined, date: line.date || changes.date || undefined, startTime: line.start_time || undefined,
+      specialRequests: changes.special_requests, referredBy: changes.referred_by, overrideReason,
+    });
+    if (d.error) return d;
+    if (line.therapist_ids !== undefined || line.room_id !== undefined) {
+      // eslint-disable-next-line no-await-in-loop
+      const a = await assignTherapist({
+        bookingId: line.booking_id, therapistIds: line.therapist_ids || [],
+        roomId: line.room_id === undefined ? undefined : (line.room_id === 'none' ? null : line.room_id), overrideReason,
+      });
+      if (a.error) return a;
+    }
+  }
+  return { data: { ok: true, dry_run: false, routed: 'single', rows: [], totals: {} }, error: null };
+}
+
+export const visitSetStatus = ({ visitKey, status, reason = null, dryRun = false }) =>
+  visitCall('visit_set_status', { p_visit_key: visitKey, p_status: status, p_reason: reason, p_dry_run: !!dryRun });
+
+export const visitRemoveService = ({ bookingId, reason = null, dryRun = false }) =>
+  visitCall('visit_remove_service', { p_booking_id: bookingId, p_reason: reason, p_dry_run: !!dryRun });
+
+export const visitReschedule = ({ visitKey, date, startTime, overrideReason = null, reason = 'Rescheduled', dryRun = false }) =>
+  visitCall('visit_reschedule', { p_visit_key: visitKey, p_date: date, p_start_time: startTime, p_override_reason: overrideReasonOf(overrideReason), p_reason: reason, p_dry_run: !!dryRun });
+
+// lines: [{ booking_id, type: '%' | 'NPR', value }]; value 0 / blank clears that row. requestedTo = the approver when a line is over the role's limit.
+export const visitApplyDiscount = ({ visitKey, lines, reason, requestedTo = null, dryRun = false }) =>
+  visitCall('visit_apply_discount', { p_visit_key: visitKey, p_lines: lines, p_reason: reason ?? null, p_requested_to: requestedTo, p_dry_run: !!dryRun });
+
+// lines: [{ booking_id, therapist_id, room_id }]; notes (when not undefined) replaces the special requests of the whole booking.
+export async function visitSetStaff({ visitKey, lines, notes, overrideReason = null, dryRun = false }) {
+  const res = await visitCall('visit_set_staff', { p_visit_key: visitKey, p_lines: lines, p_notes: notes === undefined ? null : notes, p_override_reason: overrideReasonOf(overrideReason), p_dry_run: !!dryRun });
+  if (res.error && VISIT_SINGLE_EDIT_CODES.includes(res.error.code)) {
+    if (dryRun) return { data: { ok: true, dry_run: true, routed: 'single', rows: [], totals: {} }, error: null };
+    for (const line of lines || []) {
+      // eslint-disable-next-line no-await-in-loop
+      const a = await assignTherapist({
+        bookingId: line.booking_id, therapistIds: line.therapist_id ? [line.therapist_id] : [],
+        roomId: line.room_id === undefined ? undefined : (line.room_id === 'none' ? null : line.room_id), overrideReason,
+      });
+      if (a.error) return a;
+    }
+    if (notes !== undefined) {
+      for (const line of lines || []) {
+        // eslint-disable-next-line no-await-in-loop
+        const d = await updateBookingDetails({ bookingId: line.booking_id, specialRequests: notes });
+        if (d.error) return d;
+      }
+    }
+    return { data: { ok: true, dry_run: false, routed: 'single', rows: [], totals: {} }, error: null };
+  }
+  return res;
 }
 
 // Public/customer-facing referral lookup — exact phone match, scoped to the org by
@@ -19387,14 +19724,19 @@ export async function correctPaymentAmount({ paymentId, newAmount, reason }) {
   }
 }
 
+// How many package sessions were redeemed on this booking (one of the things that stops it being deleted). 0 on any read error: the server still refuses.
+export async function fetchBookingPackageUseCount(bookingId) {
+  const { count } = await supabase.from('package_redemptions').select('id', { count: 'exact', head: true }).eq('booking_id', bookingId);
+  return count || 0;
+}
+
 /**
  * Permanently delete a booking that should never have existed.
  *
  * Refuses when payments, refunds, referrals or package redemptions reference
  * the booking — those FKs are RESTRICT/NO ACTION so the database would refuse
- * regardless. The RPC raises BOOKING_HAS_FINANCIAL_RECORDS naming what blocked
- * it; surface that message rather than a generic failure, because the caller's
- * next step (cancel with a reason instead) depends on knowing why.
+ * regardless. The panel builds the same list up front (utils/deleteBlockers.js); if the RPC still
+ * raises BOOKING_HAS_FINANCIAL_RECORDS, friendlyError words it.
  */
 export async function adminDeleteBooking({ bookingId, reason }) {
   try {
@@ -19413,15 +19755,6 @@ export async function adminDeleteBooking({ bookingId, reason }) {
       p_reason: reason.trim(),
     });
     if (error) {
-      if (typeof error.message === 'string' && error.message.includes('BOOKING_HAS_FINANCIAL_RECORDS')) {
-        return {
-          data: null,
-          error: {
-            code: 'BOOKING_HAS_FINANCIAL_RECORDS',
-            message: error.message.replace(/^.*BOOKING_HAS_FINANCIAL_RECORDS:\s*/, ''),
-          },
-        };
-      }
       throw error;
     }
 

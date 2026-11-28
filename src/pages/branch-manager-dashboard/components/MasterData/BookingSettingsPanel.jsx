@@ -6,7 +6,7 @@ import Button from '../../../../components/ui/Button';
 import ModalShell from '../../../../components/ui/ModalShell';
 import { useIndustry } from '../../../../hooks/useIndustry';
 import { DB_DOW_LABELS } from '../../../../utils/staffDay';
-import { updateOrgBookingSetting, fetchAvailabilityRolloutCheck, setEnforceStaffAvailability, setAllowStaffOverlap, setRequireCustomerPhone } from '../../../../services/api';
+import { updateOrgBookingSetting, fetchAvailabilityRolloutCheck, setEnforceStaffAvailability, setAllowStaffOverlap, setRequireCustomerPhone, setMultiServiceBookings, setExtendByDrag } from '../../../../services/api';
 import { localizeBranch } from '../../../../utils/industryTerms';
 import SettingsSectionHeading from '../../../../components/ui/SettingsSectionHeading';
 
@@ -103,7 +103,7 @@ const RolloutCheck = ({ check, staffLabel, staffLabelPlural, branchWord = 'branc
 
 const BookingSettingsPanel = () => {
   const org = useOrg();
-  const { refreshOrg, orgId, enforceStaffAvailability, allowStaffOverlap, requireCustomerPhone } = org;
+  const { refreshOrg, orgId, enforceStaffAvailability, allowStaffOverlap, requireCustomerPhone, multiServiceBookings, canExtend } = org;
   const { staffLabel, staffLabelPlural, branchWord } = useIndustry();
   const [saving, setSaving] = useState(null);
   const [error, setError] = useState(null);
@@ -236,6 +236,52 @@ const BookingSettingsPanel = () => {
           >
             <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
               requireCustomerPhone ? 'translate-x-6' : 'translate-x-1'
+            }`} />
+          </button>
+        </label>
+        <label className="flex items-center justify-between p-3 border border-border rounded-spa cursor-pointer hover:bg-background" data-testid="multi-service-row">
+          <div className="pr-4">
+            <span className="font-body font-body-medium text-sm text-text-primary">Several services in one booking</span>
+            <p className="font-caption text-xs text-text-secondary">
+              Services booked together for one person stay together as one booking: shown together on the calendar and paid and discounted together. Turn this off to keep working as before. Bookings already made stay as they are.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={multiServiceBookings}
+            aria-label="Several services in one booking"
+            disabled={saving === 'multi_service_bookings'}
+            onClick={() => saveRule('multi_service_bookings', setMultiServiceBookings, !multiServiceBookings)}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full spa-transition-fast ${
+              multiServiceBookings ? 'bg-success' : 'bg-border'
+            } ${saving === 'multi_service_bookings' ? 'opacity-50' : ''}`}
+          >
+            <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+              multiServiceBookings ? 'translate-x-6' : 'translate-x-1'
+            }`} />
+          </button>
+        </label>
+        <label className="flex items-center justify-between p-3 border border-border rounded-spa cursor-pointer hover:bg-background" data-testid="extend-row">
+          <div className="pr-4">
+            <span className="font-body font-body-medium text-sm text-text-primary">Let staff make an appointment longer</span>
+            <p className="font-caption text-xs text-text-secondary">
+              Drag the end of a booking on the calendar, or use +5 / −5 in the booking. The price stays the same. On by default for beauty businesses.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={canExtend}
+            aria-label="Let staff make an appointment longer"
+            disabled={saving === 'extend_by_drag'}
+            onClick={() => saveRule('extend_by_drag', setExtendByDrag, !canExtend)}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full spa-transition-fast ${
+              canExtend ? 'bg-success' : 'bg-border'
+            } ${saving === 'extend_by_drag' ? 'opacity-50' : ''}`}
+          >
+            <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+              canExtend ? 'translate-x-6' : 'translate-x-1'
             }`} />
           </button>
         </label>

@@ -18,9 +18,13 @@ import { useBranch } from '../../../../../contexts/BranchContext';
 import { useAvailabilityGuard } from '../../../../../contexts/AvailabilityOverrideContext';
 import { friendlyError, isNetworkError, NETWORK_CHECK_CALENDAR_COPY } from '../../../../../utils/friendlyError';
 import { submitQuickCreate } from '../quickCreateSubmit';
+import { buildEditSlot } from '../editBookingSlot';
 import { buildAddServiceSlot } from '../addServiceSlot';
 import { isCheckedOutBlockedSlot, DEFAULT_SLOT_MINUTES } from '../calendarSlots';
 import { teamMemberLower } from '../../../../../utils/industryTerms';
+import { useOrg } from '../../../../../contexts/OrgContext';
+import { singleMoveOverlap, clockToMin } from '../../../../../utils/staffFit';
+import { CAL_STEP_MIN } from '../../../../../utils/calendarStep';
 
 // Panel routing for the calendar: which panel is open (booking details, quick-create, block / transfer forms), the
 // dirty-guard refs and open/switch/close helpers, the empty-slot / drag-to-create / new-booking entry points, the
@@ -30,6 +34,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   const [searchParams, setSearchParams] = useSearchParams();
   const { guard } = useAvailabilityGuard();
   const { branches } = useBranch();
+  const { allowStaffOverlap } = useOrg();
   const activeBranch = (branches || []).find((b) => b.id === branchId);
 
   // Modal state
@@ -92,6 +97,8 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   const [rebookSource, setRebookSource] = useState(null);
   // A reschedule RPC is in flight: pick mode stays up (with a spinner on the card) and slot clicks / Escape are ignored until it answers.
   const [reschedulePending, setReschedulePending] = useState(false);
+  // ZNLY-402 piece 5 (screen E): the slot picked for a WHOLE-booking move -> the "Move this booking?" dialog. { visitKey, date, startTime, lines }
+  const [visitMove, setVisitMove] = useState(null);
   const reschedulePendingRef = useRef(false);
   const lastMouseRef = useRef(null);
   useEffect(() => {
@@ -209,7 +216,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     let startMin = openMin;
     if (currentDate === toKathmanduParts(new Date().toISOString()).date) {
       const nowMin = toMin(toKathmanduParts(new Date().toISOString()).time, '00:00');
-      startMin = Math.min(Math.max(Math.ceil(nowMin / 10) * 10, openMin), lastMin);
+      startMin = Math.min(Math.max(Math.ceil(nowMin / CAL_STEP_MIN) * CAL_STEP_MIN, openMin), lastMin);
     }
     runThroughPanelGuard(() => {
       setModalOpen(false);
@@ -248,7 +255,8 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       therapistId: slotInfo.colType === 'therapist' ? slotInfo.colId : null,
       roomId: slotInfo.colType === 'room' ? slotInfo.colId : null,
     });
-    if (manualBlock) {
+    // Pick mode (reschedule / rebook) places on a block too: the Move dialog then shows the server's verdict for that time.
+    if (manualBlock && !rebookSource) {
       showToast(describeBlockOverlap(manualBlock), 'error');
       return;
     }
@@ -267,22 +275,47 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       const therapistId = slotInfo.colType === 'therapist' ? slotInfo.colId : null;
       const roomId = slotInfo.colType === 'room' ? slotInfo.colId : null;
 
+      if (source.isReschedule && source.visit) {
+        // Whole booking (2+ services): the dialog previews every service at that time, then visit_reschedule moves them all or none.
+        setVisitMove({ visitKey: source.visit.visitKey, date: slotInfo.day, startTime, lines: source.visit.lines });
+        return;
+      }
+      // The same move for both 1-service paths below: new booking + cancel the original in one transaction.
+      const moveSingle = () => guard((overrideReason) => rescheduleBookingAsNewBooking({
+        bookingId: source.originalBookingId,
+        date: slotInfo.day,
+        startTime,
+        therapistId,
+        roomId,
+        reason: `Rescheduled to ${slotInfo.day} ${startTime}`,
+        overrideReason,
+      }));
       if (source.isReschedule) {
+        // ZNLY-404: overlap allowed + the staff member is busy then -> the same Move dialog as a 2-service booking, as the confirmation only.
+        const b = source.booking || {};
+        const minutes = clockToMin(b.endTime) - clockToMin(b.startTime);
+        if (singleMoveOverlap({ allow: allowStaffOverlap, staffId: therapistId, date: slotInfo.day, startTime, minutes, bookings: calendarData?.bookings, ownId: source.originalBookingId })) {
+          setVisitMove({
+            visitKey: b.visitId || source.originalBookingId, date: slotInfo.day, startTime, staffIds: [therapistId],
+            lines: { [source.originalBookingId]: { name: b.service, price: b.finalAmount, minutes, staff: (calendarData?.therapists || []).find((t) => t.id === therapistId)?.name || b.therapist } },
+            onConfirm: async () => {
+              const result = await moveSingle();
+              if (result.error) { if (isNetworkError(result.error)) refreshLight(refreshCalendar); return result; }
+              setRebookSource(null);
+              showToast('Booking rescheduled successfully.');
+              refreshLight(refreshCalendar);
+              return result;
+            },
+          });
+          return;
+        }
         // Single DB transaction (reschedule_booking RPC): creates the new booking and cancels the original atomically, and
         // carries discount / special requests / companion / referral fields over, so there is no partial-failure state.
         // Pick mode stays up while it runs (spinner on the card, further clicks ignored); on failure it simply stays, so the
         // user can pick another slot.
         reschedulePendingRef.current = true;
         setReschedulePending(true);
-        const result = await guard((overrideReason) => rescheduleBookingAsNewBooking({
-          bookingId: source.originalBookingId,
-          date: slotInfo.day,
-          startTime,
-          therapistId,
-          roomId,
-          reason: `Rescheduled to ${slotInfo.day} ${startTime}`,
-          overrideReason,
-        }));
+        const result = await moveSingle();
         reschedulePendingRef.current = false;
         setReschedulePending(false);
         if (result.error) {
@@ -314,6 +347,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       if (!sourceBooking.isWalkIn && !sourceBooking.customerId && (!source.customerPhone || !source.customerPhone.trim())) {
         openQuickCreateForSlot({
           ...slotInfo,
+          returnToBooking: sourceBooking,   // ZNLY-436: Back returns to the booking being rebooked
           defaultCustomerName: source.customerName,
           defaultServiceId: source.serviceId,
         });
@@ -388,7 +422,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     // Overall is view-only for anything that creates data (booking, block, transfer): nothing to offer, so no menu.
     if (isOverallBranch(branchId)) return;
     setChoiceMenuSlot(slotInfo);
-  }, [rebookSource, branchId, refreshCalendar, calendarData, blocksAvailable, openQuickCreateForSlot, quickCreateSlot, modalOpen, addBlockSlot, editingBlock, transferModalTarget, editingTransferTherapist, guard]);
+  }, [rebookSource, allowStaffOverlap, branchId, refreshCalendar, calendarData, blocksAvailable, openQuickCreateForSlot, quickCreateSlot, modalOpen, addBlockSlot, editingBlock, transferModalTarget, editingTransferTherapist, guard]);
 
   // Block management from the calendar overlay: resize, and delete (via the in-app scope dialog).
   const handleDeleteManualBlock = useCallback(async ({ blockId, day, scope = 'this' }) => {
@@ -416,6 +450,13 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     setRetargetRequest(null);
     setDraftGhost(null);
   }, []);
+
+  // ZNLY-436 Back: the form (its own dirty guard already ran) closes and the booking panel it was opened from comes back. X / Esc still close everything.
+  const handleQuickCreateBack = useCallback(() => {
+    const back = quickCreateSlotRef.current?.returnToBooking;
+    handleQuickCreateClose();
+    if (back) { setSelectedBooking(back); setModalOpen(true); }
+  }, [handleQuickCreateClose]);
 
   // Auto-open the Quick Booking panel when the mobile FAB navigates here with
   // ?newBooking=1. Defaults to today + unassigned, no time. Param is stripped
@@ -445,11 +486,12 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   }, [searchParams, branchId, currentDate, handleEmptySlotClick, openQuickCreateForSlot, setSearchParams]);
 
   const handleQuickCreateSubmit = useCallback(async (formData) => {
-    const r = await submitQuickCreate({ formData, branchId, guard });
+    const slotNow = quickCreateSlotRef.current;
+    const r = await submitQuickCreate({ formData, branchId, guard, joinVisitOfBookingId: slotNow?.joinVisitOfBookingId || null });
     if (r.error) {
       // Part of a group, or a booking whose confirmation could not load, exists already: show the calendar as it really is.
       if (r.partial || ['BOOKING_CONFIRMATION_UNAVAILABLE', 'BOOKING_NOT_VISIBLE', 'BOOKING_GROUP_PARTIAL'].includes(r.code)) refreshLight(refreshCalendar);
-      return { message: r.error, code: r.code, raw: r.raw, partial: r.partial };
+      return { message: r.error, code: r.code, raw: r.raw, partial: r.partial, row: r.row };
     }
     showToast(r.toast.msg, r.toast.type);
     // The booking exists for real: flip the waitlist entry to 'booked'. Best-effort, a failure here never undoes the booking.
@@ -460,22 +502,34 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       setWaitlistRefreshToken((v) => v + 1);
     }
     setQuickCreateSlot(null);
-    refreshLight(refreshCalendar);
+    // ZNLY-436: after "+ Service" the booking panel comes back on the source booking (it now shows one more service).
+    // The source may have been stamped with its visit_id by this very save: the panel needs it to list every service of the visit.
+    const back = slotNow?.joinVisitOfBookingId && r.visitId ? { ...slotNow.returnToBooking, visitId: r.visitId || slotNow.returnToBooking.visitId } : null;
+    if (back) { await refreshLight(refreshCalendar); setSelectedBooking(back); setModalOpen(true); } else refreshLight(refreshCalendar);
     return null;
   }, [branchId, refreshCalendar, guard, bookingWaitlistEntryId, showToast]);
 
   // ── Rebook "pick and place" handlers ───────────────────────
 
   // "+ Service" on a booking: the New booking panel, pre-filled and locked to the booking's client (ZNLY-365).
-  const handleAddServiceStart = useCallback((booking, mode = 'add-service') => {
+  const handleAddServiceStart = useCallback((booking, mode = 'add-service', blockRows = null) => {
     if (isOverallBranch(branchId)) return;
     runThroughPanelGuard(() => {
       setModalOpen(false);
       setSelectedBooking(null);
       setPreviewBooking(null);
-      openQuickCreateForSlot(buildAddServiceSlot({ booking, mode, rawBookings: calendarData?.bookings }));
+      openQuickCreateForSlot(buildAddServiceSlot({ booking, mode, rawBookings: calendarData?.bookings, blockRows }));
     });
   }, [branchId, calendarData, openQuickCreateForSlot]);
+
+  // The pencil: the same form as New booking, prefilled with the WHOLE booking (ZNLY-402 piece 5).
+  const handleEditFormStart = useCallback((booking, blockRows = null, referredBy = '') => {
+    if (isOverallBranch(branchId)) return;
+    runThroughPanelGuard(() => {
+      setModalOpen(false); setSelectedBooking(null); setPreviewBooking(null);
+      openQuickCreateForSlot(buildEditSlot({ booking, blockRows, referredBy }));
+    });
+  }, [branchId, openQuickCreateForSlot]);
 
   const handleRebookStart = useCallback((booking) => {
     if (isOverallBranch(branchId)) return;
@@ -492,15 +546,16 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   }, [branchId]);
 
   // "Reschedule": same pick-and-place as Rebook, but placing it runs the reschedule RPC (new booking + cancel the original).
-  const handleRescheduleStart = useCallback((booking) => {
+  const handleRescheduleStart = useCallback((booking, visit = null) => {
     if (isOverallBranch(branchId)) return;
     setRebookSource({
       booking,
+      visit, // { visitKey, count, minutes, lines }: moving the WHOLE booking (ON org, 2+ services)
       customerName: booking.customerName,
       customerPhone: booking.customerPhone,
       serviceId: booking.serviceId,
-      serviceName: booking.service,
-      duration: booking.duration,
+      serviceName: visit ? `${visit.count} services` : booking.service,
+      duration: visit ? `${visit.minutes} min` : booking.duration,
       isReschedule: true,
       originalBookingId: booking.bookingId,
     });
@@ -594,10 +649,10 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     blockDeleteRequest, setBlockDeleteRequest, lastBlockWasRoomOnly,
     transferModalTarget, setTransferModalTarget, editingTransferTherapist, setEditingTransferTherapist,
     blockPanelOpen, blockRetarget,
-    servicesCache, servicesLoading, rebookSource, rebookCardRef, reschedulePending,
+    servicesCache, servicesLoading, rebookSource, rebookCardRef, reschedulePending, visitMove, setVisitMove, handleRebookCancel,
     bookingWaitlistEntryId, waitlistCollapsed, setWaitlistCollapsed, waitlistRefreshToken, handleBookInFromWaitlist,
     openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick,
-    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleAddServiceStart, handleRebookStart, handleRescheduleStart,
+    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateBack, handleQuickCreateSubmit, handleAddServiceStart, handleEditFormStart, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,
   };
 }

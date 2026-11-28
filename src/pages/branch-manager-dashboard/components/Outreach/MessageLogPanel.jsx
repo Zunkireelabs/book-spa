@@ -5,10 +5,11 @@ import CustomSelect from '../../../../components/ui/CustomSelect';
 import { DateField } from '../../../../components/ui/PanelFormKit';
 import { htmlToText } from '../../../../utils/htmlToText';
 import { fetchOutreachMessages, fetchOutreachAnalytics } from '../../../../services/api';
+import { formatStampNow } from '../../../../utils/clockTime';
 
 function formatDateTime(d) {
   if (!d) return '—';
-  return new Date(d).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return formatStampNow(d);
 }
 
 const STATUS_OPTIONS = [

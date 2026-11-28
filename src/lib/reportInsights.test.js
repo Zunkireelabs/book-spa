@@ -19,7 +19,7 @@ describe('busy gap', () => {
     expect(i.detail).toContain('Lazimpat 71%');
     expect(i.detail).toContain('therapist');
     expect(i.why).toContain('312 h booked of 650 h working (48%)');
-    expect(i.source).toMatch(/^From bookings \+ roster · Last 30 days · computed \d\d:\d\d$/);
+    expect(i.source).toMatch(/^From bookings \+ roster · Last 30 days · computed \d{1,2}:\d\d(am|pm)$/);
   });
   it('does not fire under 15 points, when nobody is under 50%, or with one branch / no hours', () => {
     expect(rules(base({ branches: [branch('A', 0.6, 1, 1), branch('B', 0.48, 1, 1)] }))).toEqual([]);

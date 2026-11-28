@@ -8,9 +8,10 @@ vi.mock('../../pages/branch-manager-dashboard/components/calendar/MiniMonthCalen
 }));
 
 import DateTimeRow from './DateTimeRow';
-import { parseTimeInput, format12h, buildTimeOptions, formatDateChip } from '../../utils/timeInput';
+import { parseTimeInput, buildTimeOptions, formatDateChip } from '../../utils/timeInput';
 import { parsePhone } from './CountryCodeSelect';
 import { phoneToSave } from '../../utils/phone';
+import { formatClockTime } from '../../utils/clockTime';
 
 afterEach(cleanup);
 beforeAll(() => { Element.prototype.scrollIntoView = () => {}; });
@@ -33,9 +34,9 @@ describe('time helpers', () => {
     expect(parseTimeInput('13pm')).toBeNull();
   });
   it('formats and lists', () => {
-    expect(format12h('10:30')).toBe('10:30am');
-    expect(format12h('00:05')).toBe('12:05am');
-    expect(format12h('21:00')).toBe('9:00pm');
+    expect(formatClockTime('10:30', false)).toBe('10:30am');
+    expect(formatClockTime('00:05', false)).toBe('12:05am');
+    expect(formatClockTime('21:00', false)).toBe('9:00pm');
     const o = buildTimeOptions({ openTime: '09:00:00', closeTime: '10:00:00' }, '09:10');
     expect(o).toEqual(['09:00', '09:10', '09:15', '09:30', '09:45', '10:00']);
     expect(formatDateChip('2026-11-20')).toBe('Fri 20 Nov');

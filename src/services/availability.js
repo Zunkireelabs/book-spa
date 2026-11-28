@@ -1,13 +1,16 @@
 // Staff-availability rule (ZNLY-100): error mapping + a data-driven pre-check over the rows
 import { wordBranch } from '../utils/industryTerms';
+import { formatClockRange, formatClockTime } from '../utils/clockTime';
+import { readUse24h } from '../utils/clockPref';
 // therapist_shifts_for_range (migration-354) returns. The database is the only place the rule is enforced
 // (check_therapist_booking_guards, migration-353); this module only turns its stable error codes into
 // messages and shows the same verdict early, while a form is being filled in.
 
-export const AVAILABILITY_CODES = ['OFF_SHIFT', 'ON_BREAK', 'ON_LEAVE', 'BLOCKED', 'OTHER_BRANCH', 'OVERLAP', 'OVERRIDE_NOT_ALLOWED'];
+// ZNLY-418: THERAPIST_NOT_ELIGIBLE (person not set up for the service) travels the same road: a manager/admin may book anyway with a reason.
+export const AVAILABILITY_CODES = ['OFF_SHIFT', 'ON_BREAK', 'ON_LEAVE', 'BLOCKED', 'OTHER_BRANCH', 'OVERLAP', 'THERAPIST_NOT_ELIGIBLE', 'OVERRIDE_NOT_ALLOWED'];
 
 // Never overridable, not even by admins: leave is changed in Attendance, overlaps are physical.
-const OVERRIDABLE = new Set(['OFF_SHIFT', 'ON_BREAK', 'BLOCKED', 'OTHER_BRANCH']);
+const OVERRIDABLE = new Set(['OFF_SHIFT', 'ON_BREAK', 'BLOCKED', 'OTHER_BRANCH', 'THERAPIST_NOT_ELIGIBLE']);
 
 // Same order the guard uses to pick which reason to report first.
 const PRIORITY = ['ON_LEAVE', 'OVERLAP', 'OTHER_BRANCH', 'BLOCKED', 'ON_BREAK', 'OFF_SHIFT'];
@@ -31,7 +34,8 @@ export const hhmmToMinutes = (t) => {
 // "Rojina is on a break 14:00–14:30". `staffLabel` (from useIndustry) is only the fallback when the name is missing.
 export function formatAvailabilityMessage(code, detail = {}, { staffLabel = 'staff member' } = {}) {
   const who = detail.therapist_name || `This ${staffLabel}`;
-  const range = `${detail.range_start}–${detail.range_end}`;
+  const use24h = readUse24h(); // staff-facing text: follows the saved 12h/24h choice, like the screen around it
+  const range = formatClockRange(detail.range_start, detail.range_end, use24h);
   switch (code) {
     case 'ON_BREAK':
       return `${who} is on a break ${range}`;
@@ -44,11 +48,15 @@ export function formatAvailabilityMessage(code, detail = {}, { staffLabel = 'sta
     case 'OVERLAP':
       return `${who} already has a booking ${range}`;
     case 'OFF_SHIFT':
-      if (detail.reason === 'before_shift') return `${who} is off until ${detail.range_end}`;
-      if (detail.reason === 'after_shift') return `${who}'s shift ends at ${detail.range_start}`;
+      if (detail.reason === 'before_shift') return `${who} is off until ${formatClockTime(detail.range_end, use24h)}`;
+      if (detail.reason === 'after_shift') return `${who}'s shift ends at ${formatClockTime(detail.range_start, use24h)}`;
       return `${who} is not working on this date`;
+    case 'THERAPIST_NOT_ELIGIBLE': {
+      const svc = detail.service_name || 'this service';
+      return detail.visitor ? `${who} doesn't do ${svc} at their home ${wordBranch()}, so can't cover it here` : `${who} doesn't usually do ${svc}`;
+    }
     case 'OVERRIDE_NOT_ALLOWED':
-      return 'Only a manager or admin can book outside a staff member\'s availability.';
+      return detail.not_listed ? 'Only a manager can book someone for a service they don\'t do.' : 'Only a manager or admin can book outside a staff member\'s availability.';
     default:
       return 'This time is not available.';
   }
@@ -67,9 +75,9 @@ export function parseAvailabilityError(error, opts = {}) {
   } catch {
     detail = {};
   }
-  const message = detail && detail.range_start
+  const message = detail && (detail.range_start || (code === 'THERAPIST_NOT_ELIGIBLE' && detail.service_name))
     ? formatAvailabilityMessage(code, detail, opts)
-    : (code === 'OVERRIDE_NOT_ALLOWED' ? formatAvailabilityMessage(code) : error.message.replace(CODE_RE, '').trim());
+    : (code === 'OVERRIDE_NOT_ALLOWED' ? formatAvailabilityMessage(code, detail) : error.message.replace(CODE_RE, '').trim());
   return { code, message, overridable: OVERRIDABLE.has(code), detail };
 }
 

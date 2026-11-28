@@ -1,6 +1,5 @@
 import { NEPAL_TZ, nepalToday } from '../../../../utils/nepalTime';
 // Pure date/time helpers shared by the calendar orchestrator, the grid and the quick-create panel.
-import { to12h as to12hSpaced } from '../../../../services/bookingTransformers';
 
 export function toLocalISO(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -41,9 +40,6 @@ export function toKathmanduParts(isoString) {
     time: d.toLocaleTimeString('en-GB', { timeZone: NEPAL_TZ, hour: '2-digit', minute: '2-digit', hour12: false }),
   };
 }
-
-// Compact 12h ('2:00pm') to match the gutter and cards.
-export const to12h = (t) => to12hSpaced(t).replace(' ', '');
 
 // Sunday-first week start for a date, as a local-date string.
 export function startOfWeek(dateStr) {
@@ -88,9 +84,3 @@ export function calculateEndTime(startHour, startMinute, durationMinutes) {
   return `${String(endHour).padStart(2, '0')}:${String(endMinute).padStart(2, '0')}`;
 }
 
-export function formatTimeDisplay(time) {
-  if (!time) return '';
-  // Convert HH:MM to display format
-  const [h, m] = time.split(':').map(Number);
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}

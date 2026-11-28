@@ -1,38 +1,74 @@
+import { readUse24h } from './clockPref';
+import { formatClockRange } from './clockTime';
 // Time-aware staff list for the shared Staff picker (ZNLY-300). Pure: callers pass already-fetched data.
 // Minutes are Nepal-local minutes since midnight for ONE day. "Assigned" never appears here: it only ever means "on this booking".
 const ACTIVE = (b) => !['cancelled', 'no show', 'completed'].includes(String(b.status || '').toLowerCase());
 const mins = (t) => { if (t == null || t === '') return null; const [h, m] = String(t).slice(0, 5).split(':').map(Number); return h * 60 + (m || 0); };
 
 /** "1:15pm" / "1–2:30" helpers for the pill and group headings. */
-export const clockShort = (m) => { const h = Math.floor(m / 60) % 24; return `${h % 12 === 0 ? 12 : h % 12}:${String(m % 60).padStart(2, '0')}`; };
-const ap = (m) => (Math.floor(m / 60) % 24 >= 12 ? 'pm' : 'am');
+export const clockShort = (m) => { if (readUse24h()) return hhmm(m); const h = Math.floor(m / 60) % 24; return `${h % 12 === 0 ? 12 : h % 12}:${String(m % 60).padStart(2, '0')}`; };
+const hhmm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+const ap = (m) => (readUse24h() ? '' : Math.floor(m / 60) % 24 >= 12 ? 'pm' : 'am');
 const trim0 = (s) => s.replace(/:00$/, '');
-/** "1–2:30pm", "11:30am–12:15pm" */
-export function rangeLabel(a, b) {
-  const sa = trim0(clockShort(a)); const sb = trim0(clockShort(b));
-  return ap(a) === ap(b) ? `${sa}–${sb}${ap(b)}` : `${sa}${ap(a)}–${sb}${ap(b)}`;
-}
-/** Mockup heading style: "2:00–2:30pm" and "2:00pm" (minutes always shown). */
-export const rangeClock = (a, b) => (ap(a) === ap(b) ? `${clockShort(a)}–${clockShort(b)}${ap(b)}` : `${clockShort(a)}${ap(a)}–${clockShort(b)}${ap(b)}`);
+/** "11:00am–1:00pm", "2:00–2:30pm" (24h: "11:00–13:00"): the ONE range look, shared with every other staff screen. */
+export const rangeLabel = (a, b) => formatClockRange(hhmm(a), hhmm(b), readUse24h());
+export const rangeClock = rangeLabel;
 export const clockAmPm = (m) => `${clockShort(m)}${ap(m)}`;
-/** Pill text: "1–2:30" (no am/pm, as in the mockup). */
-export const pillRange = (a, b) => `${trim0(clockShort(a))}–${trim0(clockShort(b))}`;
+export const pillRange = rangeLabel; // Busy / Free lines use the same range look
 
-/** Raw calendar bookings (snake_case) of `date` -> { [staffId]: [{ start, end }] }, active only, `excludeBookingId` left out. */
-export function staffDayRanges(bookings, { date, excludeBookingId = null, defaultMinutes = 60 } = {}) {
+/** Raw calendar bookings (snake_case) of `date` (no date = all given) -> { [staffId]: [{ start, end, customer, service }] }, active only, `excludeBookingId` / `excludeIds` left out. */
+export function staffDayRanges(bookings, { date, excludeBookingId = null, excludeIds = null, defaultMinutes = 60 } = {}) {
   const out = {};
   for (const b of bookings || []) {
-    if (!ACTIVE(b) || b.date !== date || (excludeBookingId && b.id === excludeBookingId)) continue;
+    if (!ACTIVE(b) || (date && b.date !== date) || (excludeBookingId && b.id === excludeBookingId) || excludeIds?.has?.(b.id)) continue;
     const start = mins(b.start_time);
     if (start == null) continue;
     const end = mins(b.end_time) ?? start + defaultMinutes;
     const ids = b.booking_therapists?.length ? b.booking_therapists.map((bt) => bt.therapist_id) : b.therapist_id ? [b.therapist_id] : [];
-    for (const id of ids) (out[id] ||= []).push({ start, end });
+    const customer = b.customer_name || b.walk_in_label || '';
+    const service = b.service?.name || b.service_name_snapshot || '';
+    for (const id of ids) (out[id] ||= []).push({ start, end, customer, service });
   }
   return out;
 }
 
 const overlaps = (r, s, e) => s < r.end && e > r.start;
+
+/** ZNLY-404: the ONE wording for "this person already has a booking then" when the org allows overlaps (nothing is blocked; it only warns). */
+export const overlapLine = (c) => `⚠ Overlaps ${[c.customer, formatClockRange(hhmm(c.start), hhmm(c.end), readUse24h()), c.service && `(${c.service})`].filter(Boolean).join(' ')}. You can still book it.`;
+
+/** The first booking (earliest start) of `bookingsOfDay` that `person` (id or {id}) has inside [start, end) minutes, or null. Touching ends (end == start) do not clash. */
+export function overlapNote(person, start, end, bookingsOfDay, excludeIds = null) {
+  const id = person?.id ?? person;
+  const hit = (staffDayRanges(bookingsOfDay, { excludeIds: excludeIds ? new Set(excludeIds) : null })[id] || []).filter((r) => overlaps(r, start, end)).sort((a, b) => a.start - b.start)[0];
+  return hit ? { customer: hit.customer, service: hit.service, start: hit.start, end: hit.end } : null;
+}
+
+/** Rows of the booking being made ([{ staffId, start, end, service }] minutes) as day bookings, so a person picked twice in ONE booking also warns. */
+export const ownRowBookings = (rows, date = null, customer = 'this booking') => (rows || []).filter((r) => r.staffId && Number.isFinite(r.start) && Number.isFinite(r.end))
+  .map((r, i) => ({ id: `own-${i}`, date, status: 'Confirmed', therapist_id: r.staffId, start_time: hhmm(r.start), end_time: hhmm(r.end), customer_name: customer, service_name_snapshot: r.service || '' }));
+
+/**
+ * ZNLY-418: the ONE "does this person do this service?" rule, the same as the database guard (check_therapist_booking_guards).
+ * index = fetchServiceStaffIndex(): { lists, home, names }. A service with NO list rows at the booking's branch = everyone can do it.
+ * With rows, only listed staff do it. A visitor (home branch is not the booking's branch) is judged on the home branch's list of the
+ * same-named service. Unknown index / service / person = ok (never lock people on missing data). -> { ok, reason: 'not_listed' | null }
+ */
+export function eligibleFor(index, { serviceId, therapistId, branchId = null } = {}) {
+  if (!index || !serviceId || !therapistId) return { ok: true, reason: null };
+  const { lists = {}, home = {}, names = {} } = index;
+  const onList = (sid) => (lists[sid] || []).includes(therapistId);
+  const hasListAt = (sid, b) => !!b && (lists[sid] || []).some((t) => home[t] === b);
+  const mine = home[therapistId];
+  const at = branchId || mine;
+  let ok;
+  if (mine && at && mine !== at) {
+    const key = names[serviceId];
+    const same = key ? Object.keys(names).filter((sid) => names[sid] === key) : [serviceId];
+    ok = same.some((sid) => onList(sid) || !hasListAt(sid, mine));
+  } else ok = !hasListAt(serviceId, at) || onList(serviceId);
+  return ok ? { ok: true, reason: null } : { ok: false, reason: 'not_listed' };
+}
 
 /**
  * Group people for a slot [slotStart, slotEnd).
@@ -40,12 +76,12 @@ const overlaps = (r, s, e) => s < r.end && e > r.start;
  *  busy  = overlapping booking (still selectable); busyRange = the overlapping range(s) as { start, end }
  *  off   = off/leave (not selectable), reason from offById
  *  bestIds = up to `max` free + eligible people by the rule above, never one in `excludeIds` (not pickable, e.g. held by another guest); empty when nobody qualifies
- * eligibleIds null/empty = nobody is restricted (everyone can do it).
+ * eligibleIds null/empty = nobody is restricted (everyone can do it). `isEligible(person) => boolean` (eligibleFor) replaces eligibleIds when given.
  */
-export function arrangeByTime(people, { slotStart, slotEnd, rangesById = {}, offById = {}, eligibleIds = null, lastStaffId = null, max = 1, excludeIds = null } = {}) {
+export function arrangeByTime(people, { slotStart, slotEnd, rangesById = {}, offById = {}, eligibleIds = null, isEligible = null, lastStaffId = null, max = 1, excludeIds = null } = {}) {
   const elig = eligibleIds && eligibleIds.length ? new Set(eligibleIds) : null;
   const booked = (id) => (rangesById[id] || []).reduce((t, r) => t + (r.end - r.start), 0);
-  const info = (p) => ({ person: p, bookedMinutes: booked(p.id), bookings: (rangesById[p.id] || []).length, eligible: !elig || elig.has(p.id) });
+  const info = (p) => ({ person: p, bookedMinutes: booked(p.id), bookings: (rangesById[p.id] || []).length, eligible: isEligible ? !!isEligible(p) : (!elig || elig.has(p.id)) });
   const free = []; const busy = []; const off = [];
   for (const p of people) {
     if (offById[p.id]) { off.push({ ...info(p), reason: offById[p.id] }); continue; }
@@ -105,7 +141,8 @@ export function pickedRowStatus(person, { slot = null, rangesById = {}, offById 
   const hit = (rangesById[person.id] || []).filter((r) => overlaps(r, s, e));
   if (hit.length) {
     const range = pillRange(Math.min(...hit.map((r) => r.start)), Math.max(...hit.map((r) => r.end)));
-    return { name, statusLine: `Busy ${range}`, pill: 'busy', problem: busyOk ? '' : `${name} is busy ${range}` };
+    const first = [...hit].sort((a, b) => a.start - b.start)[0];
+    return { name, statusLine: `Busy ${range}`, pill: 'busy', problem: busyOk ? '' : `${name} is busy ${range}`, note: busyOk ? overlapLine(first) : '' };
   }
   return { name, statusLine: `Free ${rangeLabel(s, e)}`, pill: 'free', problem: '' };
 }
@@ -128,7 +165,7 @@ export function pickedRowStatusMulti(people, opts = {}) {
   const problem = all.find((x) => x.problem)?.problem || '';
   const worst = all.find((x) => x.pill !== 'free' && x.statusLine) || all.find((x) => x.statusLine) || all[0];
   const pill = all.some((x) => x.pill === 'busy') ? 'busy' : all.every((x) => x.pill === 'free') ? 'free' : null;
-  return { names: all.map((x) => x.name), statusLine: worst.statusLine, pill, problem };
+  return { names: all.map((x) => x.name), statusLine: worst.statusLine, pill, problem, note: all.find((x) => x.note)?.note || '' };
 }
 
 /** { [id]: 'Off today' | 'On leave' } from the calendar's attendance map (id -> 'Absent' | 'Leave' | ...) and shift rows for `date`. */
@@ -186,17 +223,17 @@ export function pickProblems(guests, { rangesById = {}, offById = {}, allowOverl
  * never picks Busy/Off, never a person held by an overlapping guest. Best fit (free + eligible, fewest minutes) first.
  * Returns { picks: { [idx]: staffId }, filled: [idx], unfilled: [idx] }. `unfilled` = empty guests nobody was free for.
  */
-export function fillFreeStaff(guests, { people = [], rangesById = {}, offById = {}, eligibleByService = null, lastStaffId = null } = {}) {
+export function fillFreeStaff(guests, { people = [], rangesById = {}, offById = {}, eligibility = null, branchId = null, lastStaffId = null } = {}) {
   const current = guests.map((g) => ({ ...g }));
   const picks = {}; const filled = []; const unfilled = [];
   for (const g of current) {
     if (g.staffId) continue;
     const { free } = arrangeByTime(people, {
       slotStart: g.start, slotEnd: g.end, rangesById, offById,
-      eligibleIds: g.serviceId && eligibleByService ? eligibleByService[g.serviceId] : null, lastStaffId, max: people.length,
+      isEligible: eligibility && g.serviceId ? (p) => eligibleFor(eligibility, { serviceId: g.serviceId, therapistId: p.id, branchId }).ok : null, lastStaffId, max: people.length,
     });
     const held = staffHeldByOthers(current)[g.idx];
-    const pick = free.find((x) => held[x.person.id] == null);
+    const pick = free.find((x) => x.eligible && held[x.person.id] == null); // ZNLY-418: never auto-pick someone not on the service's staff list
     if (!pick) { unfilled.push(g.idx); continue; }
     g.staffId = pick.person.id;
     picks[g.idx] = pick.person.id; filled.push(g.idx);
@@ -209,4 +246,11 @@ export function undoFill(staffByIdx, picks) {
   const next = { ...staffByIdx };
   for (const [idx, id] of Object.entries(picks || {})) if (next[idx] === id) next[idx] = '';
   return next;
+}
+
+/** ZNLY-404: a 1-service reschedule target that overlaps another booking of the staff member, when the org allows overlaps (else null: today's behaviour). */
+export function singleMoveOverlap({ allow, staffId, date, startTime, minutes, bookings, ownId }) {
+  const s = clockToMin(startTime);
+  if (!allow || !staffId || !minutes || s == null) return null;
+  return overlapNote(staffId, s, s + minutes, (bookings || []).filter((b) => b.date === date), [ownId]);
 }

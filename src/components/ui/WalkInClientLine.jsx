@@ -6,7 +6,7 @@ import { linkWalkInClient } from '../../services/api';
 import { friendlyError } from '../../utils/friendlyError';
 import { phoneProblem } from '../../utils/phone';
 import { seedFromSearch } from '../../utils/customerPick';
-import { format12h } from '../../utils/timeInput';
+import { useClock } from '../../hooks/useUse24h';
 
 // ZNLY-327: the booking-panel header line for a walk-in that has no client yet: "＋ Add client · No customer profile yet".
 // "＋ Add client" opens the shared customer list WITHOUT the Walk-in row. Pick an existing customer: linked at once. New customer: name + a valid
@@ -14,10 +14,11 @@ import { format12h } from '../../utils/timeInput';
 const FIELD = 'w-full h-9 px-2.5 rounded-spa border border-border bg-surface text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 min-w-0';
 
 const WalkInClientLine = ({ booking, canAdd, openSignal = 0, onLinked }) => {
+  const clock = useClock();
   const [form, setForm] = useState(null); // { name, phone, dial } while a new client is being typed
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const when = [booking?.date ? new Date(`${booking.date}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '', booking?.startTime ? format12h(String(booking.startTime).slice(0, 5)) : ''].filter(Boolean).join(' · ');
+  const when = [booking?.date ? new Date(`${booking.date}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '', booking?.startTime ? clock(String(booking.startTime).slice(0, 5)) : ''].filter(Boolean).join(' · ');
 
   const link = async (args) => {
     setSaving(true); setError('');

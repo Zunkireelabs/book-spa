@@ -11,7 +11,7 @@ vi.mock('../../../../services/api', () => ({
   enrollMember: vi.fn(async () => ({ data: null, error: null })),
 }));
 vi.mock('../../../../contexts/BranchContext', () => ({ useBranch: () => ({ branchId: 'b1' }) }));
-vi.mock('../../../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'u1', org_id: 'o1', role: 'manager' } }) }));
+vi.mock('../../../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'u1', org_id: 'o1', role: 'manager' } }), useOptionalAuth: () => ({ profile: { id: 'u1', org_id: 'o1', role: 'manager' } }) }));
 vi.mock('../../../../contexts/OrgContext', () => ({ useOrg: () => ({ paymentMethods: [] }) }));
 import EnrollMemberPanel from './EnrollMemberPanel';
 

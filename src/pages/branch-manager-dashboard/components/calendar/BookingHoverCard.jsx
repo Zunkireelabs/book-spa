@@ -7,6 +7,8 @@ import Icon from '../../../../components/AppIcon';
 import AvailabilityNoteLine from '../../../../components/ui/AvailabilityNoteLine';
 import { getBookingStatusColors } from '../../../../utils/bookingStatusColors';
 import { paymentStatusLabel } from '../../../../utils/paymentStatusLabel';
+import { formatClockRange } from '../../../../utils/clockTime';
+import { useUse24h } from '../../../../hooks/useUse24h';
 
 // ── Hover-card controller (module singleton) ──────────────────────────────────────────────────────────────────────────
 // One popover for the whole calendar. Cards report enter/leave/focus; this decides when to show it:
@@ -100,18 +102,7 @@ export function useHoverCardBookingId() {
 const AMBER = { fill: '#FBF5E6', text: '#7A5408' };
 const PILL_COLORS = { success: { fill: '#EAF6F0', text: '#125E41' }, warning: AMBER, neutral: { fill: '#F1F1EF', text: '#515152' } };
 
-function to12h(t) {
-  if (!t) return '';
-  const [h, m] = t.split(':').map(Number);
-  return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`;
-}
-export function compactRange(startStr, endStr) {
-  if (!startStr) return '';
-  const a = to12h(startStr);
-  if (!endStr) return a;
-  const b = to12h(endStr);
-  return a.slice(-2) === b.slice(-2) ? `${a.slice(0, -2)}–${b}` : `${a}–${b}`;
-}
+export const compactRange = formatClockRange; // kept so existing imports work
 const npr = (n) => `NPR ${Number(n || 0).toLocaleString('en-IN')}`;
 export const formatPhone = (raw) => {
   if (!raw) return '';
@@ -170,8 +161,9 @@ function Avatars({ names }) {
 }
 
 export function BookingHoverContent({ booking, draggable }) {
+  const [use24h] = useUse24h();
   const colors = getBookingStatusColors(isNoShow(booking) ? 'No Show' : booking.status);
-  const range = compactRange(booking.startTime, booking.endTime);
+  const range = compactRange(booking.startTime, booking.endTime, use24h);
   const names = (booking.therapistName || '').split(/,\s*/).filter(Boolean);
   const shownNames = names.length > 2 ? `${names.slice(0, 2).join(', ')} +${names.length - 2}` : names.join(', ');
   const amount = booking.finalAmount ?? booking.baseAmount;
@@ -196,7 +188,7 @@ export function BookingHoverContent({ booking, draggable }) {
       )}
 
       <AvailabilityNoteLine note={booking.availabilityNote} />
-      <ClientDayLine info={booking._clientDay} range={booking._clientDay ? compactRange(booking._clientDay.first, booking._clientDay.last) : ''} className="!mt-2" />
+      <ClientDayLine info={booking._clientDay} range={booking._clientDay ? compactRange(booking._clientDay.first, booking._clientDay.last, use24h) : ''} className="!mt-2" />
       <AlertsBlock customerNotes={booking.customerNotes} specialRequests={booking.specialRequests} className="!mt-3" />
       {booking.referredBy && <div className="text-xs text-text-secondary">Referred by {booking.referredBy}</div>}
 

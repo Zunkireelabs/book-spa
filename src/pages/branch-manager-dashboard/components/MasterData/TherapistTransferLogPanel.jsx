@@ -3,8 +3,9 @@ import Icon from '../../../../components/AppIcon';
 import { PanelShell, FormBody } from '../../../../components/ui/PanelFormKit';
 import TransferPill from '../../../../components/ui/TransferPill';
 import { describeTransfer, toTransferInput } from '../../../../utils/transferText';
+import { formatStampNow } from '../../../../utils/clockTime';
 
-const formatDateTime = (ts) => new Date(ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const formatDateTime = (ts) => formatStampNow(ts);
 const formatYmd = (ymd) => { if (!ymd) return '—'; const [y, m, d] = ymd.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); };
 
 // Read-only transfer history. `log` is null while loading. `inline` renders it as the page's Transfer log tab (V28); otherwise it is

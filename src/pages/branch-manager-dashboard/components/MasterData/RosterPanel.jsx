@@ -16,6 +16,7 @@ import { rosterChange } from '../../../../services/availabilityConflicts';
 import { SHADE_STYLES } from '../../../../services/availabilityShading';
 import ModalShell from '../../../../components/ui/ModalShell';
 import { wordBranch } from '../../../../utils/industryTerms';
+import { useClock } from '../../../../hooks/useUse24h';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -29,14 +30,6 @@ function toLocalISO(d) {
 // is 0=Monday..6=Sunday. This converts between the two.
 function isoDayOfWeek(d) {
   return (d.getDay() + 6) % 7;
-}
-
-function to12h(timeStr) {
-  if (!timeStr) return '';
-  const [h, m] = timeStr.split(':').map(Number);
-  const period = h >= 12 ? 'pm' : 'am';
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${h12}:${String(m).padStart(2, '0')}${period}`;
 }
 
 function initials(name) {
@@ -62,6 +55,7 @@ const cellKey = (therapistId, date) => `${therapistId}_${date}`;
 // "Set normal hours" deep-links to that staff member's weekly-hours editor instead of
 // duplicating it here — this grid only handles per-date exceptions.
 const RosterPanel = ({ branchId }) => {
+  const clock = useClock();
   const navigate = useNavigate();
   const { orgSlug } = useParams();
 
@@ -569,8 +563,8 @@ const RosterPanel = ({ branchId }) => {
                               title="Click to change hours and breaks"
                               className="flex flex-col items-center leading-tight hover:underline"
                             >
-                              <span className="font-data text-[11px] font-data-medium">{to12h(state.startTime)}</span>
-                              <span className="font-data text-[11px] opacity-90">{to12h(state.endTime)}</span>
+                              <span className="font-data text-[11px] font-data-medium">{clock(state.startTime)}</span>
+                              <span className="font-data text-[11px] opacity-90">{clock(state.endTime)}</span>
                             </button>
                             {(state.breaks || []).length > 0 && (
                               <span

@@ -5,13 +5,11 @@ import { createBlock } from '../../../../services/api';
 import { useAvailabilityConflictGuard } from '../../../../hooks/useAvailabilityConflictGuard';
 import { blockChange } from '../../../../services/availabilityConflicts';
 import { countBookingsInRange, bookingsInRangeMessage } from '../../../../utils/bookingsInRange';
-import {
-  PanelShell, FormBody, Field, TextInput, NumberInput, SelectField, Segmented, TabBar, DateField, TimeField,
-  InlineError, InlineWarning, format12h, addMinutes, formatShortDate,
-} from '../../../../components/ui/PanelFormKit';
+import { PanelShell, FormBody, Field, TextInput, NumberInput, SelectField, Segmented, TabBar, DateField, TimeField, InlineError, InlineWarning, addMinutes, formatShortDate } from '../../../../components/ui/PanelFormKit';
 import { staffWord } from '../../../../utils/industryTerms';
 import { useIndustry } from '../../../../hooks/useIndustry';
 import { teamMemberLower, teamMemberWord } from '../../../../utils/industryTerms';
+import { useClock } from '../../../../hooks/useUse24h';
 
 const TABS = [
   { id: 'details', label: 'Details', icon: 'FileText' },
@@ -40,6 +38,7 @@ const AddBlockModal = ({
   variant = 'modal', branchId, slotInfo, therapists, rooms, bookings = [], branchHours, retarget, guardRef,
   onClose, onSuccess, onRoomOnlyChange, onDraftChange,
 }) => {
+  const clock = useClock();
   const { orgId } = useOrg();
   const { enableRooms, locationLabel } = useIndustry();
   const roomWord = locationLabel.toLowerCase();
@@ -124,7 +123,7 @@ const AddBlockModal = ({
       const proceed = await confirmConflicts({
         therapistId,
         change: blockChange({ date, start: startTime, durationMinutes: Number(durationMinutes) }),
-        summary: `Block ${format12h(startTime)} for ${durationMinutes} min${description.trim() ? ` (${description.trim()})` : ''}.`,
+        summary: `Block ${clock(startTime)} for ${durationMinutes} min${description.trim() ? ` (${description.trim()})` : ''}.`,
         titleFor: (n) => `${n} booking${n === 1 ? '' : 's'} ${n === 1 ? 'falls' : 'fall'} inside this block`,
         saveLabel: 'Add block, keep bookings',
       });
@@ -165,7 +164,7 @@ const AddBlockModal = ({
   const moveOverride = moveConfirm ? (
     <div role="alertdialog" aria-label="Move block" className="flex items-center gap-3">
       <p className="flex-1 min-w-0 text-[13px] text-text-primary">
-        Move this block to {[formatShortDate(moveConfirm.day), format12h(slotTime(moveConfirm))].filter(Boolean).join(' · ')}?
+        Move this block to {[formatShortDate(moveConfirm.day), clock(slotTime(moveConfirm))].filter(Boolean).join(' · ')}?
       </p>
       <button type="button" onClick={() => setMoveConfirm(null)} className="h-9 px-3 text-[13px] font-body font-body-medium border border-border rounded-spa hover:bg-background whitespace-nowrap">Keep here</button>
       <button type="button" onClick={() => { applyRetarget(moveConfirm); setMoveConfirm(null); }} className="h-9 px-3 text-[13px] font-body font-body-medium bg-text-primary text-white rounded-spa hover:opacity-90 whitespace-nowrap">Move</button>
@@ -238,7 +237,7 @@ const AddBlockModal = ({
             <Field
               label="Duration (minutes)"
               required
-              hint={startTime && dur ? `Opens back up at ${format12h(addMinutes(startTime, dur))}` : undefined}
+              hint={startTime && dur ? `Opens back up at ${clock(addMinutes(startTime, dur))}` : undefined}
             >
               <NumberInput min="5" step="5" value={durationMinutes} onChange={(e) => setDurationMinutes(e.target.value)} />
             </Field>

@@ -14,7 +14,8 @@ import TransferPill from '../../../../components/ui/TransferPill';
 import { describeTransfer, transferState } from '../../../../utils/transferText';
 import { homeServiceNameSet, servicesBookableHere } from '../../../../utils/visitorServices';
 import { toKathmanduParts } from '../calendar/calendarDates';
-import { formatClockTime } from '../calendar/timeFormat';
+import { formatClockNow, formatClockRange } from '../../../../utils/clockTime';
+import { readUse24h } from '../../../../utils/clockPref';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useBranch } from '../../../../contexts/BranchContext';
 import { fetchTherapistEarnings } from '../../../../services/therapistProfileApi';
@@ -22,11 +23,9 @@ import { fetchServices, fetchServiceEligibility } from '../../../../services/api
 
 // "7–19" / "10:30–19" (whole hours drop the minutes): the week chips are tight.
 const shortHour = (t) => { const [h, m] = String(t).split(':'); return m && m !== '00' ? `${Number(h)}:${m}` : `${Number(h)}`; };
-// 12-hour without am/pm so a visiting window fits a week cell: "17:25" -> "5:25".
-const hour12 = (t) => { const [h, m] = String(t).split(':'); const h12 = Number(h) % 12 || 12; return m && m !== '00' ? `${h12}:${m}` : `${h12}`; };
 // "5:25 – 6:25pm": the am/pm is written once when both ends share it.
 const rangeText = (a, b) => {
-  const f = (t) => formatClockTime(String(t).slice(0, 5), false);
+  const f = (t) => formatClockNow(String(t).slice(0, 5));
   const [x, y] = [f(a), f(b)];
   return x.slice(-2) === y.slice(-2) ? `${x.slice(0, -2)} – ${y}` : `${x} – ${y}`;
 };
@@ -55,16 +54,16 @@ const TherapistPeekPanel = ({ t, branchName, totalServices, canSeeRates, ratesRe
     const d = describeTransfer(t.transfer.input, { viewpoint: 'receiving', day: today });
     const start = toKathmanduParts(t.transfer.input.startAt);
     const end = toKathmanduParts(t.transfer.input.revertAt);
-    const clock = (p) => (p ? formatClockTime(p.time, false) : '');
+    const clock = (p) => (p ? formatClockNow(p.time) : '');
     const endTxt = end ? (end.date === today ? clock(end) : `${end.date.slice(8)}/${end.date.slice(5, 7)} ${clock(end)}`) : '';
     const pill = d.state === 'upcoming' && d.upcomingLine ? d.upcomingLine : `Visiting${endTxt ? ` · until ${endTxt}` : ''}`;
     // "Here 4:20 – 6:20 pm": only when the window sits inside today; a window that began earlier or ends later reads open-ended.
-    const here = start && end && start.date === today && end.date === today ? `Here ${clock(start)} – ${clock(end)}`
+    const here = start && end && start.date === today && end.date === today ? `Here ${formatClockRange(start.time, end.time, readUse24h())}`
       : end ? `Here until ${endTxt}` : 'Here today';
     // The window's own hours on a given day, clipped to that day: '4:20–6:20' (null when the window does not touch the day).
     const hoursOn = (date) => {
       if (!start || !end || date < start.date || date > end.date) return null;
-      return `${hour12(start.date === date ? start.time : '00:00')}–${hour12(end.date === date ? end.time : '24:00')}`;
+      return formatClockRange(start.date === date ? start.time : '00:00', end.date === date ? end.time : '24:00', readUse24h());
     };
     return { state: d.state, pill, here, hoursOn };
   }, [visitor, t.transfer, today]);
@@ -91,7 +90,7 @@ const TherapistPeekPanel = ({ t, branchName, totalServices, canSeeRates, ratesRe
     }).catch(() => {});
     return () => { live = false; };
   }, [visitor, t.id, t.branchId, branchId]);
-  const shift = t.hours.startTime && t.hours.endTime && !t.hours.isDayOff ? `Shift ${t.hours.startTime.slice(0, 5)} – ${t.hours.endTime.slice(0, 5)}` : null;
+  const shift = t.hours.startTime && t.hours.endTime && !t.hours.isDayOff ? `Shift ${formatClockRange(t.hours.startTime.slice(0, 5), t.hours.endTime.slice(0, 5), readUse24h())}` : null;
   // Lent out today: the right side says where they are (or will be) and when, not the home shift.
   const lent = (() => {
     const inp = t.transfer?.viewpoint === 'home' ? t.transfer.input : null;

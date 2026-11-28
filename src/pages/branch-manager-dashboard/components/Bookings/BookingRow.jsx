@@ -2,11 +2,13 @@ import React from 'react';
 import { nameForList } from '../../../../services/dataMasking';
 import Icon from '../../../../components/AppIcon';
 import { getBookingStatusColors } from '../../../../utils/bookingStatusColors';
-import { isNoShow, toDbStatus, to12h } from '../../../../services/bookingTransformers';
+import { isNoShow, toDbStatus } from '../../../../services/bookingTransformers';
 import { formatPhoneGrouped } from '../../../../utils/phone';
 import { initials } from '../../../../utils/customerDirectory';
-import { formatLate, groupInfo } from '../../../../utils/bookingsList';
+import { formatLate, groupInfo, visitCount } from '../../../../utils/bookingsList';
 import { teamMemberWord } from '../../../../utils/industryTerms';
+import { useOrg } from '../../../../contexts/OrgContext';
+import { useClock } from '../../../../hooks/useUse24h';
 
 export const COLUMN_DEFS = [
   { id: 'service', label: 'Service' },
@@ -41,10 +43,13 @@ const AmountCell = ({ a }) => {
 };
 
 const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, action, busy, suggestion, onSuggest, bp, onOpen, onAction, onNav, scrollMargin }) => {
+  const clock = useClock();
   const color = getBookingStatusColors(isNoShow(b) ? 'No Show' : toDbStatus(b.status)).bar;
   const edge = unread ? '#2D5A27' : color;
   const people = b.therapists || [];
   const grp = groupInfo(b, all);
+  const { multiServiceBookings } = useOrg();
+  const vis = multiServiceBookings ? visitCount(b, all) : 1;   // ZNLY-402: "N services" only for orgs with the visit model ON
   const mins = minutesOf(b);
   const isOnline = b.createdBy == null;
   const bg = selected ? 'bg-[#F2F6F0]' : unread ? 'bg-[#F7FAF6] hover:bg-[#F2F6F0]' : 'hover:bg-[#FAFAF9]';
@@ -60,7 +65,7 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
       }}
       style={{ scrollMarginTop: scrollMargin }} className={`group cursor-pointer ${bg}`}>
       <td className={`${cell} pl-2 pr-2 ${dim ? 'opacity-[.55]' : ''}`} style={{ boxShadow: `inset 3px 0 0 0 ${edge}` }}>
-        <div className="pl-2 text-[13px] font-medium tabular-nums whitespace-nowrap">{b.time ? to12h(b.time) : '—'}</div>
+        <div className="pl-2 text-[13px] font-medium tabular-nums whitespace-nowrap">{b.time ? clock(b.time) : '—'}</div>
         {mins != null && <div className="pl-2 text-[12px] text-[#8A8A90] tabular-nums">{mins} min</div>}
       </td>
       <td className={`${cell} pr-3 ${dim ? 'opacity-[.55]' : ''}`}>
@@ -78,7 +83,7 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
       {bp.md && columns.service && (
         <td className={`${cell} pr-3 ${dim ? 'opacity-[.55]' : ''}`}>
           <div className="text-[13px] truncate">{b.service}</div>
-          <div className="text-[12.5px] text-[#8A8A90] truncate">{[b.roomName, grp > 1 && `Group of ${grp}`].filter(Boolean).join(' · ') || ' '}</div>
+          <div className="text-[12.5px] text-[#8A8A90] truncate">{[b.roomName, (vis > 1 ? `${vis} services` : grp > 1 && `Group of ${grp}`)].filter(Boolean).join(' · ') || ' '}</div>
         </td>
       )}
       {bp.lg && columns.therapist && (

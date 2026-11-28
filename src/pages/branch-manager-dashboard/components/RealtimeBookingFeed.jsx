@@ -5,12 +5,15 @@ import Button from '../../../components/ui/Button';
 import { supabase } from '../../../lib/supabase';
 import { fetchBookings } from '../../../services/api';
 import { transformBookings } from '../../../services/bookingTransformers';
+import { useClock, useUse24h } from '../../../hooks/useUse24h';
 
 const RealtimeBookingFeed = ({
   bookings: propBookings,
   onQuickStatusUpdate,
   branchId
 }) => {
+  const clock = useClock();
+  const [use24h] = useUse24h();
   const [filter, setFilter] = useState('all');
   const [internalBookings, setInternalBookings] = useState([]);
   const [connectionStatus, setConnectionStatus] = useState('connecting'); // 'connecting' | 'connected' | 'disconnected'
@@ -127,22 +130,15 @@ const RealtimeBookingFeed = ({
     }
   };
 
-  const formatTime = (timeString) => {
-    if (!timeString) return '';
-    return new Date(`2024-01-01 ${timeString}`).toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
-  };
+  const formatTime = clock;
 
   const formatLastUpdate = () => {
     if (!lastUpdate) return '';
-    return lastUpdate.toLocaleTimeString('en-US', {
+    return lastUpdate.toLocaleTimeString(use24h ? 'en-GB' : 'en-US', {
       hour: 'numeric',
       minute: '2-digit',
       second: '2-digit',
-      hour12: true
+      hour12: !use24h
     });
   };
 

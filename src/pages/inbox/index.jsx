@@ -24,6 +24,7 @@ import { fetchInbox, fetchInboxCounts, fetchLastNotificationAt, markInboxFilterR
 import InboxBookingPanel from './InboxBookingPanel';
 import NotificationSettingsContent, { CATEGORY_META } from './NotificationSettingsPanel';
 import { wordBranch, wordBranches } from '../../utils/industryTerms';
+import { formatClockIsoNow, formatStampNow } from '../../utils/clockTime';
 
 const TYPE_ICON = {
   new_online_booking: 'Globe', booking_cancelled_by_guest: 'CalendarX', booking_rescheduled_by_guest: 'CalendarClock',
@@ -34,8 +35,8 @@ const ICON_STYLE = { bookings: 'bg-primary/10 text-primary', approvals: 'bg-warn
 // Where a non-booking item leads (the panel offers it as a link).
 const DESTINATION = { stock: ['products', 'Open products'], team: ['attendance', 'Open attendance'], guests: ['outreach-review', 'Open outreach review'] };
 
-const timeOf = (iso) => new Intl.DateTimeFormat('en-US', { timeZone: NEPAL_TZ, hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
-const dateTimeOf = (iso) => new Intl.DateTimeFormat('en-GB', { timeZone: NEPAL_TZ, day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
+const timeOf = (iso) => formatClockIsoNow(iso);
+const dateTimeOf = (iso) => formatStampNow(iso);
 
 const normalizeRow = (r) => ({
   id: r.id, type: r.type, title: r.title, body: r.body, bookingId: r.booking_id, branchId: r.branch_id || null, actorId: r.actor_id || null, booking: r.booking || null,

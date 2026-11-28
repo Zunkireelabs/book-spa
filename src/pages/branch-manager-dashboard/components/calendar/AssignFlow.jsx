@@ -216,6 +216,7 @@ const AssignFlow = ({
                 statusLine={info.statusLine}
                 pill={info.pill}
                 problem={info.problem}
+                note={info.note}
                 emptyLabel={`Pick ${staffLower}`}
                 title={`Staff for ${item.customer}`}
                 onOpenPhone={() => setPickOpen(true)}

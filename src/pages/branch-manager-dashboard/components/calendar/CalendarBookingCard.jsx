@@ -6,13 +6,14 @@ import { CSS } from '@dnd-kit/utilities';
 
 import { getBookingStatusColors } from '../../../../utils/bookingStatusColors';
 import { useBookingHover, HOVER_CARD_ID } from './BookingHoverCard';
-import { formatClockTime } from './timeFormat';
+import { formatClockTime, formatClockRange } from '../../../../utils/clockTime';
 import { isNoShow } from '../../../../services/bookingTransformers';
 import { OUTSIDE_HOURS_OUTLINE } from '../../../../services/availabilityShading';
 import { cardTier, iconsForBooking, splitForShortCard, statusTag, shouldMoveNameDown, lockReason, fitTinyItems, planFullCard, LINE_PX } from '../../../../services/calendarCardLayout';
 import Tooltip from '../../../../components/ui/Tooltip';
 import CardIcon, { LockMark } from './CardIcon';
 import { useCardIconPrefs } from './cardIconPrefs';
+import { snapLength, lengthLabel } from '../../../../utils/calendarStep';
 import { phoneCardPlan, startNoMeridiem, coupleName, shortName, oneLineShowsIcon } from './phoneCalendarLayout';
 
 // Row of 13px icons; `wrap` lets them flow onto a second row before they clip. `more` = "+N" for icons a short card has no room for.
@@ -22,17 +23,6 @@ const IconRow = ({ icons, more = 0, uid, wrap = false, className = '', rowRef })
     {more > 0 && <Tooltip label={`${more} more: open the booking`}><span className="font-data text-[10px] text-text-tertiary leading-none">+{more}</span></Tooltip>}
   </span>
 );
-
-// Compact range: "2:30–3:15pm", or "11:30am–12:15pm" when the period differs; "14:30–15:15" in 24h mode
-function compactRange12h(startStr, endStr, use24h = false) {
-  if (!startStr) return '';
-  const start = formatClockTime(startStr, use24h);
-  if (!endStr) return start;
-  const end = formatClockTime(endStr, use24h);
-  if (use24h) return `${start}–${end}`;
-  const sp = start.slice(-2);
-  return sp === end.slice(-2) ? `${start.slice(0, -2)}–${end}` : `${start}–${end}`;
-}
 
 // Statuses that cannot be dragged (terminal states)
 const NON_DRAGGABLE_STATUSES = ['Completed', 'Cancelled', 'No Show'];
@@ -71,12 +61,34 @@ export function canDragBooking(booking) {
   return true;
 }
 
-const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate, onClientActivate, onClientDeactivate, sameClient = false, hideSensitive = false, use24h = false, outsideHours = null, phone = false, narrow = false, chipWidth = 0 }) => {
+const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate, onClientActivate, onClientDeactivate, sameClient = false, hideSensitive = false, use24h = false, outsideHours = null, phone = false, narrow = false, chipWidth = 0, extendEnabled = false, onExtend, pxPerMin = 2 }) => {
   const colors = getBookingStatusColors(isNoShow(booking) ? 'No Show' : booking.status);
   const isDraggable = canDragBooking(booking);
 
   // Hover card: one shared popover (see BookingHoverCard.jsx). Not shown for the booking already open in the side panel.
   const { ref: cardRef, handlers: hoverHandlers, open: hoverOpen, hideNow } = useBookingHover(booking, { draggable: isDraggable, suppress: isPanelSelected || hideSensitive });
+  // ZNLY-407: make the appointment longer by dragging its bottom edge (length only; the price never changes). Whole 5-minute steps, never shorter than the service.
+  const [extLen, setExtLen] = useState(null); // live length in minutes while dragging
+  const toMinutes = (t) => { if (!t) return null; const [h, m] = String(t).split(':').map(Number); return h * 60 + (m || 0); };
+  const lenNow = toMinutes(booking.endTime) != null && toMinutes(booking.startTime) != null ? toMinutes(booking.endTime) - toMinutes(booking.startTime) : null;
+  const baseLen = booking.serviceMinutes ?? booking.serviceDuration; // the calendar's rows carry serviceDuration, the panel's carry serviceMinutes
+  const canExtendThis = extendEnabled && !phone && !!onExtend && baseLen > 0 && lenNow > 0 && ['pending', 'confirmed', 'in-progress'].includes(String(booking.status || '').toLowerCase())
+    && !booking.isLocked && !booking.isCombo && !booking.isRoomShared;
+  const startExtend = (e) => {
+    if (e.button != null && e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+    const y0 = e.clientY; const el = e.currentTarget;
+    try { el.setPointerCapture(e.pointerId); } catch { /* older browsers: window listeners below still work */ }
+    let last = lenNow;
+    const move = (ev) => { last = snapLength(lenNow + (ev.clientY - y0) / pxPerMin, baseLen); setExtLen(last); };
+    const end = async (ev) => {
+      el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', end); el.removeEventListener('pointercancel', end);
+      try { el.releasePointerCapture(ev.pointerId); } catch { /* already released */ }
+      if (ev.type !== 'pointercancel' && last !== lenNow && Math.abs(ev.clientY - y0) >= 3) await onExtend(booking, last - baseLen);
+      setExtLen(null);
+    };
+    el.addEventListener('pointermove', move); el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+  };
   const [isResizing, setIsResizing] = useState(false);
   const [resizeDir, setResizeDir] = useState(null); // 'top' or 'bottom'
   const [resizeDelta, setResizeDelta] = useState(0);
@@ -138,7 +150,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
     boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,0.2)' : undefined,
   } : {};
 
-  const rangeLabel = compactRange12h(booking.startTime, booking.endTime, use24h);
+  const rangeLabel = formatClockRange(booking.startTime, booking.endTime, use24h);
   const cardHeight = typeof style?.height === 'number' ? style.height : parseFloat(style?.height) || 0;
   const tier = cardTier(cardHeight);
   const uid = useId().replace(/:/g, '');
@@ -230,7 +242,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         cardRef.current = node;
         setNodeRef(node);
       }}
-      className={`absolute left-1 right-1 rounded-spa overflow-visible outline-none focus-visible:ring-2 focus-visible:ring-primary/60 transition-colors duration-150 ease-out hover:z-dropdown hover:brightness-[0.97] ${
+      className={`group/card absolute left-1 right-1 rounded-spa overflow-visible outline-none focus-visible:ring-2 focus-visible:ring-primary/60 transition-colors duration-150 ease-out hover:z-dropdown hover:brightness-[0.97] ${
         isDraggable && !isResizing ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
       } ${isSelected ? 'ring-2 ring-primary ring-offset-1' : ''} ${isPanelSelected ? 'ring-2 ring-primary z-[3] shadow-spa-elevated' : ''} ${booking.isWalkIn && !isPanelSelected ? 'shadow-[inset_4px_0_0_0_theme(colors.warning/40%)]' : ''}`}
       data-booking-card="true"
@@ -242,6 +254,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       style={{
         ...style,
         ...(isResizing ? {} : dragStyle),
+        ...(extLen != null ? { height: Math.max((style?.height || 60) + (extLen - lenNow) * pxPerMin, 24), zIndex: 9999 } : {}),
         ...(isResizing && resizeDir === 'bottom' ? { height: Math.max((style?.height || 60) + resizeDelta, 20), zIndex: 9999 } : {}),
         ...(isResizing && resizeDir === 'top' ? { top: (style?.top || 0) + resizeDelta, height: Math.max((style?.height || 60) - resizeDelta, 20), zIndex: 9999 } : {}),
         // Secondary copies of a shared booking stay readable: a lighter fill and a softer bar, not ghosted.
@@ -253,8 +266,8 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         ...(outsideHours && !isDragging ? { boxShadow: `inset 0 0 0 1.5px ${OUTSIDE_HOURS_OUTLINE}` } : {}),
         // Linked highlight (all copies of the hovered/focused/open shared booking); the panel ring wins on the open card.
         ...(isLinkedActive && !isPanelSelected && !isDragging ? { outline: `1.5px solid ${colors.bar}`, outlineOffset: 1 } : {}),
-        // Same client as the hovered / focused / open booking (ZNLY-281): brand outline; a linked (spa) copy keeps its own status-colour outline.
-        ...(sameClient && !isLinkedActive && !isPanelSelected && !isDragging ? { outline: '2px solid #2D5A27', outlineOffset: 1 } : {}),
+        // Same visit as the hovered / focused / open booking (ZNLY-402): brand outline; same client but another visit: faint outline (sameClient.js); a linked (spa) copy keeps its own status-colour outline.
+        ...(sameClient && !isLinkedActive && !isPanelSelected && !isDragging ? { outline: sameClient === 'client' ? '1.5px solid rgba(45, 90, 39, 0.35)' : '2px solid #2D5A27', outlineOffset: 1 } : {}),
       }}
       onClick={(e) => {
         if (!isDragging && !isResizing) {
@@ -376,6 +389,20 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
           </>
         )}
       </div>
+
+      {canExtendThis && (
+        <>
+          <div data-extend-grip role="separator" aria-label="Drag to make this longer" onPointerDown={startExtend} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}
+            className="absolute left-0 right-0 -bottom-[3px] h-[9px] z-10 cursor-ns-resize touch-none flex items-end justify-center group/grip">
+            <span className={`mb-[3px] h-[3px] w-6 rounded-full bg-text-secondary/60 transition-opacity ${extLen != null ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-100'}`} />
+          </div>
+          {extLen != null && (
+            <div data-extend-label className="absolute left-1 top-full mt-1 z-[10000] whitespace-nowrap px-1.5 py-0.5 rounded-spa bg-surface border border-border font-data text-[11px] text-text-primary shadow-spa-resting pointer-events-none">
+              {lengthLabel(formatClockTime(`${String(Math.floor((toMinutes(booking.startTime) + extLen) / 60) % 24).padStart(2, '0')}:${String((toMinutes(booking.startTime) + extLen) % 60).padStart(2, '0')}`, use24h), extLen, baseLen)}
+            </div>
+          )}
+        </>
+      )}
 
       {/* Resize handles for shared booking cards */}
       {canResize && (

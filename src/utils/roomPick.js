@@ -1,7 +1,7 @@
 // ZNLY-365: what each room looks like for the chosen time, for the shared RoomPickRow list.
 //   free = room (or a place in it) is open for the whole service   few = some places taken (rooms with capacity > 1)   full = nothing left.
 // A full room says when it is free again ("free from 2:00 pm"). Pure, so it is table-tested.
-import { fmt12 } from './errorGuide';
+import { formatClockNow } from './clockTime';
 
 const toMin = (t) => { const m = /^(\d{1,2}):(\d{2})/.exec(t || ''); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
 // Places in a room: exactly api.getRoomCapacity (the rooms.capacity column, default 1), which is what the server and the DB trigger count with.
@@ -64,7 +64,7 @@ export function anyAvailableLine(states, roomWord = 'room') {
 }
 
 export const statusText = (st) => {
-  if (st.state === 'full') return st.freeFrom ? `Full · free from ${fmt12(st.freeFrom)}` : 'Full';
+  if (st.state === 'full') return st.freeFrom ? `Full · free from ${formatClockNow(st.freeFrom)}` : 'Full';
   if (st.state === 'few') return `${st.remaining} of ${st.capacity} places left`;
   if (st.state === 'free') return 'Free';
   return '';

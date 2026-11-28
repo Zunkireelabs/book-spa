@@ -9,11 +9,12 @@ import { lateMinutes } from './bookingsList';
 import { todayStatusLine } from './todayStatusLine';
 import { wordBranchCap, localizeTerms } from './industryTerms';
 import { isOwed } from '../lib/dashboardMoney';
+import { formatClockNow } from './clockTime';
 
 export const toMin = (t) => { if (t == null || t === '') return null; const [h, m] = String(t).slice(0, 5).split(':').map(Number); return h * 60 + (m || 0); };
 export const fromMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 /** 15:00 → "3:00pm" */
-export const clock = (min) => { const h = Math.floor(min / 60) % 24; return `${h % 12 === 0 ? 12 : h % 12}:${String(min % 60).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`; };
+export const clock = (min) => formatClockNow(fromMin(min % 1440));
 
 const LEAVE = ['Leave', 'Annual Leave', 'Sick Leave', 'Day Off'];
 const ACTIVE = ['pending', 'confirmed', 'in-progress'];
@@ -140,8 +141,8 @@ export function availabilityNow(therapists, ctx) {
   return { free, inSession, source: ctx.source, basis: shiftBasis(therapists, ctx) };
 }
 
-/** Next 10-minute slot at or after `nowMin`, e.g. 13:52 → 14:00. */
-export const nextSlot10 = (nowMin) => Math.min(Math.ceil(nowMin / 10) * 10, 1430);
+/** Next 5-minute slot at or after `nowMin`, e.g. 13:52 → 13:55 (ZNLY-407: the calendar steps in 5 minutes everywhere). */
+export const nextSlot10 = (nowMin) => Math.min(Math.ceil(nowMin / 5) * 5, 1435);
 
 /** Is the therapist on shift for the whole [start, end) and unoccupied (optionally ignoring one booking)? */
 export function freeForSlot(t, startMin, endMin, ctx, opts = {}) {

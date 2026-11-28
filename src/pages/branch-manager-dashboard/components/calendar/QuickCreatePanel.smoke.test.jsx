@@ -4,7 +4,7 @@ import React from 'react';
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 
-vi.mock('../../../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { role: 'manager' } }) }));
+vi.mock('../../../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { role: 'manager' } }), useOptionalAuth: () => ({ profile: { role: 'manager' } }) }));
 vi.mock('../../../../contexts/OrgContext', () => ({ useOrg: () => ({ allowStaffOverlap: false, requireCustomerPhone: true }) }));
 vi.mock('../../../../hooks/useIndustry', () => ({ useIndustry: () => ({ staffLabel: 'Therapist', staffLabelPlural: 'Therapists', locationLabel: 'Room' }) }));
 const precheckMock = vi.hoisted(() => ({ value: { blocked: false, warn: false } }));
@@ -44,9 +44,9 @@ describe('QuickCreatePanel smoke', () => {
   it('renders closed without crashing', () => {
     expect(() => render(<QuickCreatePanel {...props} slotInfo={null} />)).not.toThrow();
   });
-  it('renders open, with Create disabled and the "Pick a service" hint', () => {
+  it('renders open, with Create disabled and the first hint naming the customer (customer comes first)', () => {
     render(<QuickCreatePanel {...props} slotInfo={{ day: '2026-11-20', hour: 17, minute: 20, colType: 'therapist', colId: 't1', dragMinutes: 0 }} />);
-    expect(screen.getByText('Pick a service')).toBeTruthy();
+    expect(screen.getAllByText(/Pick a customer/).length).toBeGreaterThan(1); // the row and the footer reason
     expect(screen.getByRole('button', { name: /create booking/i }).disabled).toBe(true);
   });
   it('opens slot-less from a prefill (?view=new-booking): name, phone, email and gender are filled, service preselected', () => {
@@ -61,6 +61,19 @@ describe('QuickCreatePanel smoke', () => {
     expect(screen.getByText('Existing customer')).toBeTruthy();
     expect(screen.getByText(/Massage/)).toBeTruthy();
     expect(screen.getByDisplayValue('5:30pm')).toBeTruthy();
+  });
+
+  it('ZNLY-402 U10: every business gets the grey service card from the first service: no "Service 1" title, Remove or Starts while single (OFF org: no Add button)', () => {
+    const slot = newBookingSlot({
+      today: '2026-11-20', nowHM: '17:20', branchHours: { openTime: '09:00:00', closeTime: '21:00:00' },
+      prefill: { fullName: 'Hema Devi', phone: '+9779841000000', serviceId: 's1' },
+    });
+    render(<QuickCreatePanel {...props} slotInfo={slot} />);
+    expect(document.querySelector('[data-extra-services]')).toBeTruthy();
+    expect(screen.queryByText('Service 1')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Remove service/ })).toBeNull();
+    expect(screen.queryByText('Starts')).toBeNull();
+    expect(screen.queryByText('Add another service')).toBeNull();
   });
 
   describe('group mode (ZNLY-303)', () => {
@@ -150,10 +163,10 @@ describe('QuickCreatePanel smoke', () => {
     const { container } = render(<QuickCreatePanel {...props} rooms={rooms} bookings={bookings} slotInfo={slot} />);
     const card = container.ownerDocument.querySelector('[data-guide-card="ROOMS_FULL"]');
     expect(card).toBeTruthy();
-    expect(card.textContent).toMatch(/Every room is taken 12:00 pm–1:00 pm\./);
-    expect(card.textContent).toMatch(/Book at 2:00 pm/);
+    expect(card.textContent).toMatch(/Every room is taken 12:00pm–1:00pm\./);
+    expect(card.textContent).toMatch(/Book at 2:00pm/);
     expect(screen.getByRole('button', { name: /create booking/i }).disabled).toBe(true);
-    fireEvent.click(screen.getByText('Book at 2:00 pm'));
+    fireEvent.click(screen.getByText('Book at 2:00pm'));
     expect(container.ownerDocument.querySelector('[data-guide-card="ROOMS_FULL"]')).toBeNull();
   });
   it('ZNLY-365: a beauty org (no rooms) never sees room wording in a guidance card', () => {
@@ -192,14 +205,14 @@ describe('QuickCreatePanel smoke', () => {
   });
   it('ZNLY-365: a manager picking busy staff sees the ✦ card live (no Create press), with "Give it to <free person>", and Create stays enabled', () => {
     precheckMock.value = { blocked: false, warn: true, canOverride: true, nextFree: ['13:00'], otherFree: null,
-      verdict: { code: 'OVERLAP', message: 'Tara Gurung already has a booking 12:00 pm–1:00 pm' } };
+      verdict: { code: 'OVERLAP', message: 'Tara Gurung already has a booking 12:00pm–1:00pm' } };
     const bookings = [{ id: 'bx', date: '2026-11-22', status: 'Confirmed', therapist_id: 't1', start_time: '12:00:00', end_time: '13:00:00' }];
     const slot = { day: '2026-11-22', hour: 12, minute: 0, defaultServiceId: 's1', walkIn: true, defaultTherapistIds: ['t1'] };
     const { container } = render(<QuickCreatePanel {...props} therapists={[{ id: 't1', name: 'Tara Gurung' }, { id: 't2', name: 'Asha Rai' }]} bookings={bookings} offDate="2026-11-22" offStaff={{}} slotInfo={slot} />);
     const card = container.ownerDocument.querySelector('[data-guide-card="OVERLAP"]');
     expect(card).toBeTruthy();
     expect(card.textContent).toMatch(/Give it to Asha/);
-    expect(card.textContent).toMatch(/Book at 13:00|Book at 1:00 pm/);
+    expect(card.textContent).toMatch(/Book at 13:00|Book at 1:00pm/);
     expect(container.ownerDocument.body.textContent).toMatch(/You can still book it; you'll be asked why\./);
     expect(screen.getByRole('button', { name: /book anyway|create booking/i }).disabled).toBe(false);
     fireEvent.click(screen.getByText(/Give it to Asha/));
@@ -211,8 +224,8 @@ describe('QuickCreatePanel smoke', () => {
     const { container } = render(<QuickCreatePanel {...props} therapists={[{ id: 't1', name: 'Tara Gurung' }, { id: 't2', name: 'Asha Rai' }]} bookings={bookings} offDate="2026-11-22" offStaff={{}} slotInfo={slot} />);
     const card = container.ownerDocument.querySelector('[data-guide-card="THERAPIST_CONFLICT"]');
     expect(card).toBeTruthy();
-    expect(card.textContent).toMatch(/Tara Gurung is already booked 12:30 pm–1:30 pm/);
-    expect(card.textContent).toMatch(/Book at 1:30 pm/);
+    expect(card.textContent).toMatch(/Tara Gurung is already booked 12:30pm–1:30pm/);
+    expect(card.textContent).toMatch(/Book at 1:30pm/);
     expect(card.textContent).toMatch(/Give it to Asha/);
     expect(screen.getByRole('button', { name: /create booking/i }).disabled).toBe(true);
   });

@@ -14,6 +14,7 @@ import { useBranch } from '../../../../contexts/BranchContext';
 import { StarIcon, InSpaTag } from './customerBits';
 import { teamMemberWord } from '../../../../utils/industryTerms';
 import ScrollRow from '../../../../components/ui/ScrollRow';
+import { formatClockNow } from '../../../../utils/clockTime';
 
 const PAGE_SIZE = 25;
 const EMPTY_ROWS = [];
@@ -605,9 +606,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
 
 // "16:00" → "4:00pm"
 function formatTime(t) {
-  const [h, m] = String(t).split(':').map(Number);
-  if (Number.isNaN(h)) return '';
-  return `${h % 12 === 0 ? 12 : h % 12}:${String(m || 0).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`;
+  return Number.isNaN(Number(String(t).split(':')[0])) ? '' : formatClockNow(String(t));
 }
 
 export default CustomersList;

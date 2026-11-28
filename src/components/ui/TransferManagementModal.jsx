@@ -24,6 +24,7 @@ import {
   cancelScheduledTransfer,
 } from '../../services/api';
 import { wordBranch } from '../../utils/industryTerms';
+import { useUse24h } from '../../hooks/useUse24h';
 
 // Nepal-local 'YYYY-MM-DD' for capping a date input to "today" — new Date().toISOString()
 // is UTC and lands on the previous calendar day between 00:00-05:45 Nepal time (UTC+5:45),
@@ -40,7 +41,9 @@ function toLocalYMD(date) {
 // unlike AttendancePanel (which precomputes a branch-wide transferStatusByTherapist map), this
 // component fetches this one therapist's current transfer status itself on mount, so callers
 // only need to hand it a therapist + branch.
-const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName, currentBranchId, defaultStartDate, guardRef, onClose, onSuccess, onDraftChange, use24h = false }) => {
+const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName, currentBranchId, defaultStartDate, guardRef, onClose, onSuccess, onDraftChange, use24h: use24hProp }) => {
+  const [use24hPref] = useUse24h();
+  const use24h = use24hProp ?? use24hPref;
   const { staffLabel, locationLabel } = useIndustry();
   const { profile } = useAuth();
   const role = profile?.role;
@@ -146,7 +149,7 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
     }
 
     setExtending(false);
-    onSuccess(`Extended ${therapistName}'s transfer — now returns ${new Date(result.data.revertAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}.`);
+    onSuccess(`Extended ${therapistName}'s transfer — now returns ${new Date(result.data.revertAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: !use24h })}.`);
   };
 
   // One control for changing an active transfer's return: pick any date/time — a moment already
@@ -180,7 +183,7 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
 
     setReverting(false);
     onSuccess(isFuture
-      ? `${therapistName}'s return rescheduled to ${picked.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}.`
+      ? `${therapistName}'s return rescheduled to ${picked.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: !use24h })}.`
       : `${therapistName} is back — now bookable at ${activeTransfer.fromBranch}.`);
   };
 
@@ -248,7 +251,7 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
     }
 
     setEditing(false);
-    onSuccess(`${therapistName}'s return rescheduled to ${picked.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}.`);
+    onSuccess(`${therapistName}'s return rescheduled to ${picked.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: !use24h })}.`);
   };
 
   // Origin branch cancelling an active transfer they initiated — one click, right now. If the

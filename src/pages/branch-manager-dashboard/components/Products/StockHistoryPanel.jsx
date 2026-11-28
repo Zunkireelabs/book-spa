@@ -5,7 +5,7 @@ import { FilterChip, Menu } from '../../../../components/ui/ListToolbarKit';
 import { useIndustry } from '../../../../hooks/useIndustry';
 import { fetchStockMovements } from '../../../../services/api';
 import {
-  REASONS, reasonLabel, monthBounds, monthLabel, monthName, recentMonths, movementTotals, movementLeadParts, whenLabel, nepalDate, nepalTime, npr,
+  REASONS, reasonLabel, monthBounds, monthLabel, monthName, recentMonths, movementTotals, movementLeadParts, whenLabel, nepalDate, nepalTime, nepalTime24, npr,
 } from '../../../../services/productsView';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { useMinWidth, useSlashFocus, useStickyBlock, thClass, SearchBox, csvDownload, EmptyBlock, ErrorBlock } from '../Area/listKit';
@@ -95,7 +95,7 @@ const StockHistoryPanel = ({ catalog, branchId, branchName, isOverall, today, ca
 
   const exportCsv = useCallback(() => {
     csvDownload(`stock-history-${month}.csv`, ['Date', 'Time', `${wordBranchCap()}`, 'Product', 'Size', 'Change', 'Reason', 'By', 'Details', 'Left after'],
-      filtered.map((m) => [nepalDate(m.createdAt), nepalTime(m.createdAt), m.branchName, m.productName, m.variantName, m.delta, reasonText(m), m.byName, detailsOf(m), m.qtyAfter]));
+      filtered.map((m) => [nepalDate(m.createdAt), nepalTime24(m.createdAt), m.branchName, m.productName, m.variantName, m.delta, reasonText(m), m.byName, detailsOf(m), m.qtyAfter]));
   }, [filtered, month]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { registerExport({ run: exportCsv, disabled: !moves || filtered.length === 0 }); }, [exportCsv, moves, filtered.length, registerExport]);
   useEffect(() => () => registerExport(null), [registerExport]);

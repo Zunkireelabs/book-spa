@@ -12,7 +12,7 @@ vi.mock('../../../../services/api', async (orig) => ({
   fetchServiceBookingCounts: async () => ({ data: {} }),
   fetchServiceCategoryOrder: async () => ({ data: [] }),
 }));
-vi.mock('../../../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'u1', role: 'manager' } }) }));
+vi.mock('../../../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'u1', role: 'manager' } }), useOptionalAuth: () => ({ profile: { id: 'u1', role: 'manager' } }) }));
 vi.mock('../../../../hooks/useDayAvailability', () => ({ useDayAvailability: () => ({ ready: false, bookings: [], offById: {} }) }));
 vi.mock('../../../../hooks/useIndustry', () => ({ useIndustry: () => ({ staffLabelPlural: 'Therapists' }) }));
 import { WaitlistEntryForm } from './WaitlistPanel';

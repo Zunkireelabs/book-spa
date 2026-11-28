@@ -1,4 +1,5 @@
 import { NEPAL_TZ } from '../utils/nepalTime';
+import { formatClockIsoNow } from '../utils/clockTime';
 // Products page (V25): pure logic for the Products / Stock history / Suppliers tabs: stock status, the five-part strip, the lead
 // sentence, Needs-you-now, sorting, search, margins, average-cost preview, the stock-movement labels and the CSV import checks.
 // No React, no Supabase. A "row" is what buildRows() makes from fetchProductCatalog(): one product with its sizes (variants), the
@@ -14,8 +15,10 @@ const num = (v) => (v == null || v === '' ? null : Number(v));
 const TZ = NEPAL_TZ;
 /** Nepal calendar date of a timestamp. */
 export const nepalDate = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: TZ });
-/** Nepal clock time "14:20" of a timestamp. */
-export const nepalTime = (ts) => new Date(ts).toLocaleTimeString('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+/** Nepal clock time of a timestamp, as the staff member chose to see it (12h / 24h). */
+export const nepalTime = (ts) => formatClockIsoNow(ts);
+/** The same, always "14:20": for CSV exports (a file must not change with a screen setting). */
+export const nepalTime24 = (ts) => new Date(ts).toLocaleTimeString('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
 
 // ── Margin, markup, average cost ───────────────────────────────────────────────────────────────
 /** Margin % = (price − cost) / price. null when either is missing or the price is 0. */

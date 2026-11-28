@@ -2,8 +2,11 @@
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
-vi.mock('../../services/api', async (o) => ({ ...(await o()), fetchServiceEligibility: vi.fn(async () => ({ data: {}, error: null })) }));
+vi.mock('../../services/api', async (o) => ({ ...(await o()), fetchServiceEligibility: vi.fn(async () => ({ data: {}, error: null })),
+  // ZNLY-418: service s1 lists only Asha and Bina (branch B1); s2 has no list
+  fetchServiceStaffIndex: vi.fn(async () => ({ data: { lists: { s1: ['a', 'b'] }, home: { a: 'B1', b: 'B1', c: 'B1', d: 'B1' }, names: { s1: 'brows', s2: 'lip' }, labels: { s1: 'Brows Shaping', s2: 'Upper Lip' } }, error: null })) }));
 import StaffPicker from './StaffPicker';
+import { AvailabilityOverrideProvider } from '../../contexts/AvailabilityOverrideContext';
 import { nepalNow } from '../../utils/customerDirectory';
 
 afterEach(cleanup);
@@ -29,7 +32,7 @@ describe('StaffPicker (ZNLY-303 look)', () => {
     expect(screen.getByText('Free 2:00–2:30pm')).toBeTruthy();
     expect(screen.getByText('Busy at 2:00pm')).toBeTruthy();
     expect(screen.getByText('Off today', { selector: 'p' })).toBeTruthy();
-    expect(screen.getByText('Busy 1:30–2:15 · free after 2:15')).toBeTruthy();
+    expect(screen.getByText('Busy 1:30–2:15pm · free after 2:15pm')).toBeTruthy();
     expect(screen.getByText('Busy', { selector: 'span.rounded-full' })).toBeTruthy();
     expect(screen.getByText('Female', { exact: false })).toBeTruthy();
     expect(screen.getByRole('radio', { name: /Dina S/ }).disabled).toBe(true);
@@ -54,5 +57,25 @@ describe('StaffPicker (ZNLY-303 look)', () => {
     render(<StaffPicker {...base} max={1} onNone={onNone} />);
     fireEvent.click(screen.getByText('No staff · assign later'));
     expect(onNone).toHaveBeenCalled();
+  });
+});
+
+describe('StaffPicker: people not on the service staff list (ZNLY-418)', () => {
+  const base = { people, selectedIds: [], onChange: vi.fn(), slot, bookings: [], max: 1 };
+  it('staff role: a last group "Doesn\'t do this service", rows dim + disabled with the Does not do it pill, and the ask-a-manager footer', async () => {
+    render(<StaffPicker {...base} serviceId="s1" />);
+    expect(await screen.findByText("Doesn't do this service", { selector: 'p' })).toBeTruthy();
+    expect(screen.getAllByText("Doesn't do it").length).toBe(2);
+    expect(screen.getAllByText('Not set up for this service').length).toBe(2);
+    expect(screen.getByRole('radio', { name: /Cara T/ }).disabled).toBe(true);
+    expect(screen.getByRole('radio', { name: /Asha K/ }).disabled).toBe(false);
+    expect(screen.getByText('Need one of them? Ask a manager.')).toBeTruthy();
+  });
+  it('a service with no list: no such group, nobody locked', async () => {
+    render(<StaffPicker {...base} serviceId="s2" />);
+    await screen.findByText(/^Free /, { selector: 'p' });
+    expect(screen.queryByText("Doesn't do this service")).toBeNull();
+    expect(screen.queryByText("Doesn't do it")).toBeNull();
+    expect(screen.getByRole('radio', { name: /Cara T/ }).disabled).toBe(false);
   });
 });

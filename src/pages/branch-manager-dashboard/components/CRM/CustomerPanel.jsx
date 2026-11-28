@@ -10,9 +10,10 @@ import { getCustomerPanelDetail } from '../../../../services/api';
 import { formatPhoneGrouped } from '../../../../utils/phone';
 import { initials, monthYear, dayBlock, relativeDayLabel, shortDate } from '../../../../utils/customerDirectory';
 import { InSpaTag } from './customerBits';
+import { formatClockNow } from '../../../../utils/clockTime';
 
 const npr = (n) => `NPR ${Number(n || 0).toLocaleString('en-IN')}`;
-const clock = (t) => { if (!t) return ''; const [h, m] = t.split(':').map(Number); return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`; };
+const clock = (t) => formatClockNow(t);
 const range = (b) => (b.end ? `${clock(b.start)} – ${clock(b.end)}` : clock(b.start));
 
 const Label = ({ children, action }) => (

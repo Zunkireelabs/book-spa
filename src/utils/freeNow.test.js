@@ -87,7 +87,7 @@ describe('the rule\'s shift (therapist_shifts_for_range)', () => {
   it('the Free-now row carries the shared status line, and "No hours set" for someone with no hours', () => {
     const open = row({ source: 'none', start_time: '10:00:00', end_time: '20:00:00' });
     const r = availabilityNow([A, B], ctx({ shiftById: { a: open, b: row() } }));
-    expect(r.free.find((f) => f.therapist.id === 'a')).toMatchObject({ status: 'No hours set · bookable in branch hours 10:00–20:00', label: 'free until 8:00pm' });
+    expect(r.free.find((f) => f.therapist.id === 'a')).toMatchObject({ status: 'No hours set · bookable in branch hours 10:00am–8:00pm', label: 'free until 8:00pm' });
     expect(r.free.find((f) => f.therapist.id === 'b').label).toBe('free until 6:00pm');
   });
   it('a closed branch day (no hours, not working) is off', () => {
@@ -163,7 +163,7 @@ describe('availabilityNow', () => {
     expect(freeUntilLabel(toMin('14:30'), toMin('13:55'))).toBe('free until 2:30pm (35 min)');
     expect(freeUntilLabel(null, toMin('10:00'))).toBe('free all day');
     expect(freeUntilLabel(null, toMin('18:00'))).toBe('free all evening');
-    expect(nextSlot10(toMin('13:52'))).toBe(toMin('14:00'));
+    expect(nextSlot10(toMin('13:52'))).toBe(toMin('13:55'));
     expect(nextSlot10(toMin('14:00'))).toBe(toMin('14:00'));
     expect(clock(0)).toBe('12:00am');
   });

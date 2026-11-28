@@ -4,12 +4,13 @@ import Icon from '../AppIcon';
 import { fetchAuditLogs } from '../../services/api';
 import { humanizePaymentMethod } from '../../services/paymentMethods';
 import { describeClientAdded, describeDetailsChanged } from '../../utils/bookingHistoryText';
+import { formatStampNow } from '../../utils/clockTime';
 
 // Booking history (managers/admins; audit_logs is not readable by staff). Shows the staff-availability override rows
 // written by migration-353's guard: what was skipped, the reason the manager gave, who and when (panel C, right).
 const when = (iso) => {
   try {
-    return new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: NEPAL_TZ });
+    return formatStampNow(iso, false);
   } catch { return ''; }
 };
 
@@ -24,7 +25,11 @@ const describe = (log) => {
   }
   switch (log.action_type) {
     case 'AVAILABILITY_OVERRIDE':
+      // ZNLY-418: booked someone who is not on the service's staff list (same audit action, distinct code)
+      if (d.code === 'THERAPIST_NOT_ELIGIBLE') return { icon: 'ShieldAlert', title: 'Booked with someone who doesn\'t usually do this service', detail: [d.therapist_name, d.service_name].filter(Boolean).join(' · '), reason: d.override_reason };
       return { icon: 'ShieldAlert', title: `Booked outside availability (${d.message || d.code})`, reason: d.override_reason };
+    case 'LENGTH_CHANGED': // ZNLY-407
+      return { icon: 'Clock', title: `Length changed ${log.old_data?.length_minutes} → ${d.length_minutes} min`, reason: log.reason };
     case 'ADMIN_CORRECTION':
       return { icon: 'PenLine', title: 'Corrected by admin', reason: log.reason };
     case 'STATUS_CHANGE':
@@ -70,6 +75,7 @@ const BookingHistory = ({ bookingId, paymentIds = [], reloadKey = 0 }) => {
             <Icon name={info.icon} size={13} className="mt-0.5 shrink-0 text-text-tertiary" />
             <div className="min-w-0">
               <p className="text-text-primary">{info.title}</p>
+              {info.detail && <p>{info.detail}</p>}
               {info.reason && <p>Reason: “{info.reason}”</p>}
               <p className="text-text-tertiary">{log.changed_by_name || 'System'} · {when(log.changed_at)}</p>
             </div>

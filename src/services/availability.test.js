@@ -3,8 +3,28 @@ import {
   parseAvailabilityError, formatAvailabilityMessage, evaluateAvailability, nextFreeStarts, firstOtherFreeTherapist, isOverridableCode, createEnforcementCache,
 } from './availability';
 
+// The refusal text follows the saved 12h/24h choice (utils/clockPref); tests flip it here.
+let mock24h = true;
+vi.mock('../utils/clockPref', () => ({ readUse24h: () => mock24h }));
+
 const pgError = (code, detail, text = 'x') => ({
   code: 'P0006', message: `${code}: ${text}`, details: JSON.stringify(detail),
+});
+
+describe('refusal ranges follow the 12h/24h choice', () => {
+  const d = { therapist_name: 'Rojina', reason: 'booking', range_start: '14:00', range_end: '14:30' };
+  it.each([
+    [false, 'OVERLAP', d, 'Rojina already has a booking 2:00–2:30pm'],
+    [true, 'OVERLAP', d, 'Rojina already has a booking 14:00–14:30'],
+    [false, 'ON_BREAK', { ...d, range_start: '11:30', range_end: '12:15' }, 'Rojina is on a break 11:30am–12:15pm'],
+    [false, 'BLOCKED', { ...d, range_start: '15:00', range_end: '16:00', label: 'training' }, 'Rojina is blocked 3:00–4:00pm (training)'],
+    [false, 'ON_LEAVE', { reason: 'leave_half', therapist_name: 'Rojina', range_start: '09:00', range_end: '13:00' }, 'Rojina is off 9:00am–1:00pm'],
+    [false, 'OFF_SHIFT', { reason: 'before_shift', therapist_name: 'Rojina', range_start: '00:00', range_end: '11:00' }, 'Rojina is off until 11:00am'],
+    [false, 'OFF_SHIFT', { reason: 'after_shift', therapist_name: 'Rojina', range_start: '18:00', range_end: '24:00' }, "Rojina's shift ends at 6:00pm"],
+  ])('use24h=%s %s', (use24h, code, detail, message) => {
+    mock24h = use24h;
+    try { expect(formatAvailabilityMessage(code, detail)).toBe(message); } finally { mock24h = true; }
+  });
 });
 
 describe('parseAvailabilityError', () => {
@@ -150,5 +170,19 @@ describe('createEnforcementCache (JS pre-checks defer to the DB guard when the s
   it('fails safe to OFF when the flag cannot be read, and without a branch', async () => {
     expect(await createEnforcementCache(async () => { throw new Error('rls'); }).get('b1')).toBe(false);
     expect(await createEnforcementCache(async () => true).get(null)).toBe(false);
+  });
+});
+
+describe('THERAPIST_NOT_ELIGIBLE (ZNLY-418)', () => {
+  it('is overridable and reads as a plain sentence built from the detail, never the SQL text', () => {
+    const r = parseAvailabilityError({ message: 'THERAPIST_NOT_ELIGIBLE: Jayanti R. is not on the staff list for Brows.', details: JSON.stringify({ code: 'THERAPIST_NOT_ELIGIBLE', therapist_name: 'Jayanti R.', service_name: 'Brows Shaping' }) });
+    expect(r.code).toBe('THERAPIST_NOT_ELIGIBLE');
+    expect(r.overridable).toBe(true);
+    expect(r.message).toBe("Jayanti R. doesn't usually do Brows Shaping");
+  });
+  it('staff + reason: OVERRIDE_NOT_ALLOWED says only a manager can', () => {
+    const r = parseAvailabilityError({ message: 'OVERRIDE_NOT_ALLOWED: x', details: JSON.stringify({ not_listed: true }) });
+    expect(r.overridable).toBe(false);
+    expect(r.message).toBe("Only a manager can book someone for a service they don't do.");
   });
 });

@@ -8,13 +8,14 @@ import { approveDiscount, fetchNeeds, rejectDiscount } from '../../services/api'
 import { adminDiscounts, groupNeeds, summarizeWaiting } from '../../lib/dashboardNeeds';
 import { friendlyError } from '../../utils/friendlyError';
 import { wordBranch, wordBranchCap, wordBranches, wordBranchesCap } from '../../utils/industryTerms';
+import { formatClockIsoNow } from '../../utils/clockTime';
 
 const waited = (min) => (min >= 24 * 60 ? `${Math.floor(min / 1440)}d` : min >= 60 ? `${Math.floor(min / 60)}h` : `${min}m`);
 const nepalDay = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: NEPAL_TZ });
 const sinceLabel = (ms, today) => {
   if (ms == null) return null;
   if (nepalDay(ms) !== today) return shortDay(nepalDay(ms));
-  return new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: NEPAL_TZ }).toLowerCase();
+  return formatClockIsoNow(ms);
 };
 
 const Change = ({ pct }) => (pct == null ? <span className="text-gray-400">—</span>

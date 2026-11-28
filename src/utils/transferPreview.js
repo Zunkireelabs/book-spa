@@ -1,4 +1,5 @@
 import { friendlyError } from './friendlyError';
+import { formatClockNow } from './clockTime';
 // Client-side revert-time estimate for a temporary transfer (the server — transfer_therapist(), migration-041 — independently
 // computes the authoritative revert_at). Used for the preview line, and for the grid's shaded-window preview.
 export const DURATION_UNIT_OPTIONS = [
@@ -35,8 +36,7 @@ export const toHm = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 export function formatRevert(d) {
   if (!d) return '';
   const day = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '');
-  const h = d.getHours();
-  return `${day}, ${h % 12 === 0 ? 12 : h % 12}:${pad(d.getMinutes())}${h >= 12 ? 'pm' : 'am'}`;
+  return `${day}, ${formatClockNow(toHm(d))}`;
 }
 
 // 'Mon 30 Nov' from a 'YYYY-MM-DD' string (parsed as local, no timezone shift).

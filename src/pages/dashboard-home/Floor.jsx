@@ -1,6 +1,8 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import Icon from '../../components/AppIcon';
 import { axisBounds, fmtClock, fmtDuration, upcomingGaps } from '../../lib/dashboardFloor';
+import { formatHourLabel } from '../../utils/clockTime';
+import { readUse24h } from '../../utils/clockPref';
 
 const KIND_STYLE = {
   done: 'bg-gray-100 text-gray-500',
@@ -19,10 +21,10 @@ const LEGEND = [
   ['Free 1h+', 'bg-accent/20 border border-accent/60'],
 ];
 
-const hourLabel = (m) => `${(m / 60) % 12 || 12}${m === 720 ? 'pm' : ''}`;
+const hourLabel = (m) => (readUse24h() ? formatHourLabel(m / 60, true) : `${(m / 60) % 12 || 12}${m === 720 ? 'pm' : ''}`);
 const initials = (name) => String(name || '').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 
-const compact = (m) => fmtClock(m).replace(' ', ''); // "11:45 am" -> "11:45am" (the app's compact time), so the status stays on one line
+const compact = (m) => fmtClock(m);
 const subline = (t, nowMin) => {
   if (nowMin == null) return t.blocks[0] ? `first ${t.blocks.find((b) => b.booking_id)?.from || t.shift_from}` : 'free all day';
   const cur = t.blocks.find((b) => b.from_min <= nowMin && nowMin < b.to_min);
@@ -89,7 +91,7 @@ const Floor = ({ floor, nowMin, open, close, collapsedCount = 6, onOpenBooking, 
             <div className="max-md:sticky max-md:left-0 max-md:z-header max-md:bg-surface" />
             <div className="relative h-4">
               {hours.map((m) => (
-                <span key={m} className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: pos(m) }}><span className="md:hidden">{`${Math.floor(m / 60) % 12 || 12}${Math.floor(m / 60) % 24 >= 12 ? 'pm' : 'am'}`}</span><span className="max-md:hidden">{hourLabel(m)}</span></span>
+                <span key={m} className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: pos(m) }}><span className="md:hidden">{formatHourLabel(Math.floor(m / 60) % 24, readUse24h())}</span><span className="max-md:hidden">{hourLabel(m)}</span></span>
               ))}
             </div>
           </div>

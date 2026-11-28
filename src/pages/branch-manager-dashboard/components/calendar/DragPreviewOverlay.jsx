@@ -1,10 +1,14 @@
 import React from 'react';
 import { DragOverlay } from '@dnd-kit/core';
 import { formatTimeFromSlot, calculateEndTime } from './calendarDates';
+import { formatClockRange } from '../../../../utils/clockTime';
+import { useUse24h } from '../../../../hooks/useUse24h';
 import { slotVerdict } from '../../../../services/availabilityShading';
 
 // Floating preview that follows the pointer while a booking or block is dragged.
-const DragPreviewOverlay = ({ activeDragBlock, activeDragBooking, overSlotData, columnMode = 'therapist', shiftsByTherapist = {}, therapists = [], enforce = false, canOverride = false }) => (
+const DragPreviewOverlay = ({ activeDragBlock, activeDragBooking, overSlotData, columnMode = 'therapist', shiftsByTherapist = {}, therapists = [], enforce = false, canOverride = false }) => {
+  const [use24h] = useUse24h();
+  return (
   <DragOverlay>
     {activeDragBlock && (() => {
       const [fh, fm] = activeDragBlock.fromTime.split(':').map(Number);
@@ -15,7 +19,7 @@ const DragPreviewOverlay = ({ activeDragBlock, activeDragBooking, overSlotData, 
           <div className="font-body text-[11px] text-text-secondary">{activeDragBlock.description || 'Blocked'}</div>
           {overSlotData && blockMins > 0 && (
             <div className="font-data text-xs font-semibold text-text-primary mt-0.5">
-              {formatTimeFromSlot(overSlotData.hour, overSlotData.minute)} – {calculateEndTime(overSlotData.hour, overSlotData.minute, blockMins)}
+              {formatClockRange(formatTimeFromSlot(overSlotData.hour, overSlotData.minute), calculateEndTime(overSlotData.hour, overSlotData.minute, blockMins), use24h)}
             </div>
           )}
         </div>
@@ -53,7 +57,7 @@ const DragPreviewOverlay = ({ activeDragBlock, activeDragBooking, overSlotData, 
         <div className={`bg-white rounded-md border-2 shadow-lg px-3 py-2 opacity-95 min-w-[140px] ${verdict ? '' : 'border-primary'}`} style={verdict ? { borderColor: refused ? '#DC2626' : '#D97706' } : undefined}>
           {/* Time display - prominent */}
           <div className="font-data text-sm font-semibold text-text-primary mb-1">
-            {previewStartTime} – {previewEndTime}
+            {formatClockRange(previewStartTime, previewEndTime, use24h)}
           </div>
           <div className="font-body font-semibold text-xs text-text-primary">
             {activeDragBooking.customerName}
@@ -80,6 +84,7 @@ const DragPreviewOverlay = ({ activeDragBlock, activeDragBooking, overSlotData, 
       );
     })()}
   </DragOverlay>
-);
+  );
+};
 
 export default DragPreviewOverlay;

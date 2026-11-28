@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { staffPickIncomplete, arrangeByTime, staffDayRanges, rangeLabel, pillRange, offStaffReasons, offDayLabel, offReasonFor, staffHeldByOthers, pickedRowStatus, pickedRowStatusMulti, clockToMin, pickProblems, fillFreeStaff, undoFill } from './staffFit';
+import { eligibleFor, staffPickIncomplete, arrangeByTime, staffDayRanges, rangeLabel, pillRange, offStaffReasons, offDayLabel, offReasonFor, staffHeldByOthers, pickedRowStatus, pickedRowStatusMulti, clockToMin, pickProblems, fillFreeStaff, undoFill, overlapNote, overlapLine, ownRowBookings, singleMoveOverlap } from './staffFit';
 
 const P = (id, name) => ({ id, name });
 const people = [P('a', 'Asha'), P('b', 'Bishnu'), P('c', 'Chhori'), P('d', 'Dil')];
@@ -14,7 +14,7 @@ describe('staffDayRanges', () => {
       bk('4', 'c', '09:00:00', '10:00:00', { therapist_id: null, booking_therapists: [{ therapist_id: 'c' }, { therapist_id: 'd' }] }),
       { ...bk('5', 'a', '13:00:00', '14:00:00'), date: '2026-11-21' },
     ], { date: '2026-11-20', excludeBookingId: 'self' });
-    expect(r.a).toEqual([{ start: 780, end: 840 }]);
+    expect(r.a).toEqual([{ start: 780, end: 840, customer: '', service: '' }]);
     expect(r.b).toBeUndefined();
     expect(Object.keys(r).sort()).toEqual(['a', 'c', 'd']);
   });
@@ -59,9 +59,9 @@ describe('arrangeByTime', () => {
 
 describe('labels and off reasons', () => {
   it('formats ranges', () => {
-    expect(rangeLabel(13 * 60 + 15, 14 * 60)).toBe('1:15–2pm');
+    expect(rangeLabel(13 * 60 + 15, 14 * 60)).toBe('1:15–2:00pm');
     expect(rangeLabel(11 * 60 + 30, 12 * 60 + 15)).toBe('11:30am–12:15pm');
-    expect(pillRange(13 * 60, 14 * 60 + 30)).toBe('1–2:30');
+    expect(pillRange(13 * 60, 14 * 60 + 30)).toBe('1:00–2:30pm');
   });
   it('offStaffReasons reads attendance and roster day-off', () => {
     const r = offStaffReasons(people, { attendanceMap: { a: 'Leave', b: 'Absent' }, shiftsByTherapist: { c: { d1: { works: false, source: 'weekly' } }, d: { d1: { works: false, source: 'none' } } }, date: 'd1' });
@@ -135,7 +135,7 @@ describe('group staff (ZNLY-303)', () => {
       expect(r.unfilled).toEqual([1, 2]);
     });
     it('Best fit (eligible, fewest booked minutes) goes first', () => {
-      const r = fillFreeStaff([G(0, '')], { people, rangesById: { a: [{ start: 0, end: 60 }] }, eligibleByService: { s: ['a', 'b'] } });
+      const r = fillFreeStaff([G(0, '')], { people, rangesById: { a: [{ start: 0, end: 60 }] }, eligibility: { lists: { s: ['a', 'b'] }, home: { a: 'B', b: 'B', c: 'B' }, names: {} }, branchId: 'B' });
       expect(r.picks).toEqual({ 0: 'b' });
     });
     it('Undo restores exactly what was empty and leaves later manual changes alone', () => {
@@ -192,7 +192,7 @@ describe('ZNLY-310 pickedRowStatus', () => {
   const slot = { start: 840, end: 900 }; // 2:00-3:00pm
   const T = '2026-11-22';
   it('free', () => {
-    expect(pickedRowStatus(k, { slot, date: T, today: T })).toEqual({ name: 'Kebisha S.', statusLine: 'Free 2–3pm', pill: 'free', problem: '' });
+    expect(pickedRowStatus(k, { slot, date: T, today: T })).toEqual({ name: 'Kebisha S.', statusLine: 'Free 2:00–3:00pm', pill: 'free', problem: '' });
   });
   it('busy: problem unless busyOk', () => {
     const rangesById = { k: [{ start: 810, end: 855 }] };
@@ -256,5 +256,90 @@ describe('allowOverlap (ZNLY-389)', () => {
   it('a busy pick has no problem text when busyOk', () => {
     const r = pickedRowStatus({ id: 's1', name: 'Sami' }, { slot: { start: 600, end: 660 }, rangesById, busyOk: true });
     expect(r.pill).toBe('busy'); expect(r.problem).toBe('');
+  });
+});
+
+describe('overlapNote (ZNLY-404)', () => {
+  const day = [
+    bk('1', 'a', '11:15:00', '11:45:00', { customer_name: 'Anisha Koirala', service: { name: 'Brows' } }),
+    bk('2', 'a', '13:00:00', '14:00:00', { customer_name: 'Ram', service: { name: 'Lash' } }),
+    bk('3', 'b', '11:15:00', '11:45:00', { customer_name: 'Sita' }),
+  ];
+  const at = (h, m = 0) => h * 60 + m;
+  it.each([
+    ['none: other person', 'c', at(11, 15), at(11, 45), [], null],
+    ['none: free slot', 'a', at(12), at(12, 30), [], null],
+    ['one clash, labelled', 'a', at(11, 30), at(12), [], { customer: 'Anisha Koirala', service: 'Brows', start: at(11, 15), end: at(11, 45) }],
+    ['excluded self', 'a', at(11, 30), at(12), ['1'], null],
+    ['touching: end == start is no clash', 'a', at(11, 45), at(12, 30), [], null],
+    ['touching: start == end is no clash', 'a', at(10, 30), at(11, 15), [], null],
+    ['first of two clashes (earliest)', 'a', at(11, 30), at(13, 30), [], { customer: 'Anisha Koirala', service: 'Brows', start: at(11, 15), end: at(11, 45) }],
+  ])('%s', (_n, who, s, e, ex, want) => { expect(overlapNote(who, s, e, day, ex)).toEqual(want); });
+  it('own-row clash: two rows of the same booking on one person', () => {
+    const own = ownRowBookings([{ staffId: 'a', start: at(15), end: at(16), service: 'Brows' }], null);
+    expect(overlapNote('a', at(15, 30), at(16, 30), [...day, ...own])).toEqual({ customer: 'this booking', service: 'Brows', start: at(15), end: at(16) });
+  });
+  it('one wording, 12h and the clock follows the pref', () => {
+    expect(overlapLine({ customer: 'Anisha Koirala', service: 'Brows', start: at(11, 15), end: at(11, 45) })).toBe('⚠ Overlaps Anisha Koirala 11:15–11:45am (Brows). You can still book it.');
+  });
+  it('pickedRowStatus: note only when overlap is allowed', () => {
+    const rangesById = { a: [{ start: at(11, 15), end: at(11, 45), customer: 'Anisha Koirala', service: 'Brows' }] };
+    const o = { slot: { start: at(11, 30), end: at(12) }, rangesById };
+    expect(pickedRowStatus({ id: 'a', name: 'Asha' }, { ...o, busyOk: true }).note).toMatch(/^⚠ Overlaps Anisha Koirala/);
+    expect(pickedRowStatus({ id: 'a', name: 'Asha' }, { ...o, busyOk: false }).note).toBe('');
+    expect(pickedRowStatus({ id: 'a', name: 'Asha' }, { ...o, busyOk: false }).problem).toMatch(/is busy/);
+  });
+});
+
+describe('singleMoveOverlap (1-service reschedule target)', () => {
+  const day = [bk('x', 'a', '14:00:00', '14:30:00'), bk('me', 'a', '09:00:00', '09:30:00'), bk('y', 'a', '14:00:00', '14:30:00', { date: '2026-11-21' })];
+  const base = { allow: true, staffId: 'a', date: '2026-11-20', startTime: '14:10', minutes: 30, bookings: day, ownId: 'me' };
+  it('returns the overlapping booking when the org allows overlaps and the staff member is busy then', () => {
+    expect(singleMoveOverlap(base)).toMatchObject({ start: 14 * 60, end: 14 * 60 + 30 });
+  });
+  it('is null for a free slot, another day, the booking itself, an org that blocks overlaps, or no staff / length', () => {
+    expect(singleMoveOverlap({ ...base, startTime: '15:00' })).toBeNull();
+    expect(singleMoveOverlap({ ...base, date: '2026-11-22' })).toBeNull();
+    expect(singleMoveOverlap({ ...base, startTime: '09:10' })).toBeNull(); // only its own old slot
+    expect(singleMoveOverlap({ ...base, allow: false })).toBeNull();
+    expect(singleMoveOverlap({ ...base, staffId: null })).toBeNull();
+    expect(singleMoveOverlap({ ...base, minutes: 0 })).toBeNull();
+  });
+});
+
+describe('eligibleFor (ZNLY-418: the staff-list rule, same as the database guard)', () => {
+  const idx = {
+    lists: { svcA: ['t1', 't2'], svcA2: ['v1'], svcNone: [], svcMulti: ['t1', 'x1'], svcCut: ['x1'] },
+    home: { t1: 'B1', t2: 'B1', t3: 'B1', v1: 'B2', v2: 'B2', x1: 'B2' },
+    names: { svcA: 'brows', svcA2: 'brows', svcNone: 'lip', svcMulti: 'wax', svcOther: 'wax', svcCut: 'cut' },
+  };
+  const f = (serviceId, therapistId, branchId = 'B1') => eligibleFor(idx, { serviceId, therapistId, branchId });
+  it('no list = everyone can do it', () => {
+    expect(f('svcNone', 't3').ok).toBe(true);
+    expect(f('svcUnknown', 't3').ok).toBe(true);
+  });
+  it('with a list only listed staff do it, and the reason is not_listed', () => {
+    expect(f('svcA', 't1').ok).toBe(true);
+    expect(f('svcA', 't3')).toEqual({ ok: false, reason: 'not_listed' });
+  });
+  it('rows of another branch never restrict this branch (multi-branch)', () => {
+    expect(f('svcMulti', 't3').ok).toBe(false);           // B1 has a row (t1), t3 is not on it
+    expect(f('svcMulti', 'v2', 'B2').ok).toBe(false);     // B2 has a row (x1), v2 is not on it
+    expect(eligibleFor(idx, { serviceId: 'svcA2', therapistId: 't3', branchId: 'B1' }).ok).toBe(true); // svcA2's only row is at B2
+  });
+  it('a visitor is judged on the home branch list of the same-named service', () => {
+    expect(f('svcA', 'v1').ok).toBe(true);   // v1 (home B2) is on svcA2 'brows' list at home
+    expect(f('svcA', 'v2').ok).toBe(true);   // v2 (home B2) is on no list, but svcA has no B2 row, so 'brows' is open at their home
+    expect(f('svcCut', 'v2').ok).toBe(false); // 'cut' has a B2 list (x1) and v2 is not on it
+    expect(f('svcCut', 'x1').ok).toBe(true);
+  });
+  it('unknown index / person never locks anyone', () => {
+    expect(eligibleFor(null, { serviceId: 'svcA', therapistId: 't3' }).ok).toBe(true);
+    expect(eligibleFor(idx, { serviceId: 'svcA', therapistId: 'ghost', branchId: 'B1' }).ok).toBe(false); // no home: judged at the booking branch, not listed
+  });
+  it('arrangeByTime isEligible: not-eligible people are flagged and never Best fit', () => {
+    const r = arrangeByTime(people, { slotStart: 840, slotEnd: 900, isEligible: (p) => p.id !== 'a', max: 1 });
+    expect(r.free.find((x) => x.person.id === 'a').eligible).toBe(false);
+    expect(r.bestIds).not.toContain('a');
   });
 });

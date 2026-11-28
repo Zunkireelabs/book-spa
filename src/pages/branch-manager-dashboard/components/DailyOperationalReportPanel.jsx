@@ -11,6 +11,8 @@ import { useIndustry } from '../../../hooks/useIndustry';
 import { paymentStatusLabel } from '../../../utils/paymentStatusLabel';
 import { wordBranch } from '../../../utils/industryTerms';
 import { formatNPR } from '../../../services/bookingTransformers';
+import { formatClockIso, formatClockNow } from '../../../utils/clockTime';
+import { useUse24h } from '../../../hooks/useUse24h';
 
 function formatDate(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -19,13 +21,11 @@ function formatDate(dateStr) {
 
 function formatTime(timeStr) {
   if (!timeStr) return '—';
-  const [h, m] = timeStr.split(':');
-  const d = new Date();
-  d.setHours(Number(h), Number(m), 0, 0);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return formatClockNow(timeStr);
 }
 
 const DailyOperationalReportPanel = ({ branchId }) => {
+  const [use24h] = useUse24h();
   const { staffLabel } = useIndustry();
   const today = nepalToday();
   const [selectedDate, setSelectedDate] = useState(today);
@@ -209,7 +209,7 @@ const DailyOperationalReportPanel = ({ branchId }) => {
             </span>
             {report.closedAt && (
               <span className="text-xs text-text-secondary ml-auto">
-                at {new Date(report.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                at {formatClockIso(report.closedAt, use24h)}
               </span>
             )}
           </div>

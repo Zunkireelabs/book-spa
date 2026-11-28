@@ -189,6 +189,7 @@ export function transformBooking(dbBooking) {
     duration: dbBooking.service
       ? `${dbBooking.service.duration_minutes} min`
       : '',
+    serviceMinutes: dbBooking.service?.duration_minutes ?? null, // ZNLY-407: the service's own length; the booking is longer than this when it was made longer
     time: dbBooking.start_time ? dbBooking.start_time.slice(0, 5) : '',
     date: dbBooking.date,
     status: dbBooking.status ? dbBooking.status.toLowerCase() : 'pending',
@@ -223,6 +224,7 @@ export function transformBooking(dbBooking) {
     price: formatNPR(dbBooking.final_amount ?? dbBooking.base_amount ?? 0),
     isLocked: dbBooking.is_locked || false,
     bookingGroupId: dbBooking.booking_group_id || null,
+    visitId: dbBooking.visit_id || null, // ZNLY-402: the visit link (NULL = its own visit); see utils/visit.js
     payments: paymentRows
       ? paymentRows.map(p => ({ id: p.id || null, amount: Number(p.amount || 0), paymentMode: p.payment_mode, createdAt: p.created_at }))
       : [],

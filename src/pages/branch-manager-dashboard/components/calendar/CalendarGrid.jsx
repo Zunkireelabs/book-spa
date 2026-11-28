@@ -1,4 +1,6 @@
-import { buildClientIndex, customerIdOf, isSameClient, clientDayInfo } from './sameClient';
+import { buildClientIndex, customerIdOf, isSameClient } from './sameClient';
+import { buildVisitIndex, bookingOf, highlightLevel, visitDayInfo } from './sameVisit';
+import { useOrg } from '../../../../contexts/OrgContext';
 import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
@@ -8,7 +10,7 @@ import Icon from '../../../../components/AppIcon';
 import CalendarBookingCard from './CalendarBookingCard';
 import { BookingHoverLayer, useHoverCardBookingId } from './BookingHoverCard';
 import { toKathmanduParts, addDays } from './calendarDates';
-import { formatClockTime, formatHourLabel } from './timeFormat';
+import { formatClockTime, formatHourLabel, formatClockRange } from '../../../../utils/clockTime';
 import SharedBookingLines from './SharedBookingLines';
 import { STATUS_DOT_COLOR, isClosedByBlocks } from '../../../../utils/todayStatusLine';
 import OverflowBadge from './OverflowBadge';
@@ -34,6 +36,7 @@ import { SHADE_STYLES, buildShadeSegments, shiftHeaderInfo, slotVerdict, outside
 import { hhmmToMinutes } from '../../../../services/availability';
 import { staffWord, wordBranch } from '../../../../utils/industryTerms';
 import BottomSheet from '../../../../components/ui/BottomSheet';
+import { CAL_STEP_MIN } from '../../../../utils/calendarStep';
 import {
   PHONE_HOUR_BASE, PHONE_MAX_LANES, phoneColumnCount, phoneColumnWidth, clampPhoneZoom, assignPhoneLanes, coupleName, shortName, avatarColor,
 } from './phoneCalendarLayout';
@@ -210,7 +213,10 @@ const CalendarGrid = ({
   blockOccurrences,
   onDeleteManualBlock,
   onResizeManualBlock,
+  canExtend = false, // ZNLY-407: bottom-edge grip on bookings (org setting)
+  onExtendBooking,
   onEditManualBlock,
+  pickMode = false,
   draftGhost,
   selectedBookingId,
   onDragCreate,
@@ -253,8 +259,14 @@ const CalendarGrid = ({
   useEffect(() => () => clearTimeout(clientClearTimer.current), []);
   const popoverBookingId = useHoverCardBookingId();
   const activeSharedId = hoverSharedId || popoverBookingId || selectedBookingId || null;
-  const clientIndex = useMemo(() => buildClientIndex(bookings), [bookings]); // one map customerId -> bookings for the whole render, no per-card scans
-  const activeCustomerId = useMemo(() => customerIdOf(bookings, hoverClientId || popoverBookingId || selectedBookingId || null), [bookings, hoverClientId, popoverBookingId, selectedBookingId]);
+  // ZNLY-402: the visit rules (sameVisit.js) only for orgs with "Several services in one booking" ON; every other org keeps the same-client rules (sameClient.js) exactly as before.
+  const { multiServiceBookings } = useOrg();
+  const clientIndex = useMemo(() => (multiServiceBookings ? buildVisitIndex(bookings) : buildClientIndex(bookings)), [bookings, multiServiceBookings]); // one map for the whole render, no per-card scans
+  // ZNLY-435: "Also booked today" is the same rule for every org (a visit counts once); only the outline above differs by setting.
+  const dayIndex = useMemo(() => (multiServiceBookings ? clientIndex : buildVisitIndex(bookings)), [bookings, multiServiceBookings, clientIndex]);
+  const activeKey = hoverClientId || popoverBookingId || selectedBookingId || null;
+  const activeBooking = useMemo(() => (multiServiceBookings ? bookingOf(bookings, activeKey) : null), [bookings, activeKey, multiServiceBookings]);
+  const activeCustomerId = useMemo(() => (multiServiceBookings ? null : customerIdOf(bookings, activeKey)), [bookings, activeKey, multiServiceBookings]);
   // Hide the connector of the booking being dragged (its copies are mid-move); it redraws from fresh data on drop.
   const draggingSharedId = activeDragId ? String(activeDragId).split('__')[0] : null;
 
@@ -648,6 +660,7 @@ const CalendarGrid = ({
         companionName: b.companion_name || null, // couple: the second guest's name
         isWalkIn: !!b.is_walk_in, // ZNLY-327: customerName already reads "Walk-in · <label>"
         customerId: b.customer_id || null, // ZNLY-281: same-client highlight matches on this id only
+        visitId: b.visit_id || null, // ZNLY-402: same-visit link (NULL = its own visit); utils/visit.js
         serviceName: b.service?.name || 'Service',
         serviceDuration: b.service?.duration_minutes || null,
         status: b.status,
@@ -968,7 +981,7 @@ const CalendarGrid = ({
   };
   const formatBackLabel = (ymd, hm) => {
     const [h, m] = (hm || '00:00').split(':').map(Number);
-    const t = `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`;
+    const t = formatClockTime(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, use24h);
     if (ymd === todayStr) return t;
     return `${new Date(`${ymd}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}, ${t}`;
   };
@@ -1039,7 +1052,7 @@ const CalendarGrid = ({
   };
 
   // Resize a manual block by dragging its bottom edge: live preview via `resizingBlock`
-  // state, snapped to 10 minutes and persisted on mouseup (scoped to this occurrence).
+  // state, snapped to 5 minutes and persisted on mouseup (scoped to this occurrence).
   const [resizingBlock, setResizingBlock] = useState(null); // { blockId, day, previewHeight }
   const blockResizeRef = useRef(null);
   const handleBlockResizeStart = useCallback((e, block, day) => {
@@ -1067,7 +1080,7 @@ const CalendarGrid = ({
       // A plain click (no real drag) must never commit a resize.
       if (Math.abs(upEvent.clientY - ref.startY) < 5) return;
       const rawHeight = Math.max(20, ref.startHeight + (upEvent.clientY - ref.startY));
-      const snappedMinutes = Math.max(10, Math.round((rawHeight / eHH * 60) / 10) * 10);
+      const snappedMinutes = Math.max(10, Math.round((rawHeight / eHH * 60) / CAL_STEP_MIN) * CAL_STEP_MIN);
       const originalMinutes = Math.round(ref.startHeight / eHH * 60);
       if (snappedMinutes === originalMinutes) return;
       onResizeManualBlock?.({ blockId: ref.blockId, day: ref.day, durationMinutes: snappedMinutes });
@@ -1099,6 +1112,7 @@ const CalendarGrid = ({
           onDeleteClick={(e) => handleDeleteBlockClick(e, range, range.day)}
           onResizeStart={(e) => handleBlockResizeStart(e, range, range.day)}
           onClick={() => onEditManualBlock?.(range)}
+          passThrough={pickMode}
           use24h={use24h}
         />
       );
@@ -1125,11 +1139,7 @@ const CalendarGrid = ({
   const todayStr = nowParts?.date;
   const nowTime = (nowParts?.time || '00:00').replace(/^24:/, '00:');
   const nowTop = timeToTop(`${nowTime}:00`);
-  const nowLabel = (() => {
-    const [h, m] = nowTime.split(':').map(Number);
-    if (use24h) return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-    return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')}`;
-  })();
+  const nowLabel = formatClockTime(nowTime, use24h);
 
   // Scroll the grid to the current time once, when the calendar opens on today.
   // Deferred via rAF so it runs after the flex layout has sized the scroll
@@ -1438,7 +1448,7 @@ const CalendarGrid = ({
   // ── Hover time label ──────────────────────────────────────
   // One pill + one dashed hairline per grid container, moved by direct style
   // updates (no React state) so mousemove never re-renders the grid.
-  const HOVER_SNAP_MIN = 10;
+  const HOVER_SNAP_MIN = CAL_STEP_MIN; // ZNLY-407: 5 minutes, the same step as the move-drag (useCalendarDnd) and the +5/-5 buttons
   const hoverLineRef = useRef(null);
   const hoverPillRef = useRef(null);
   const dragCreateRef = useRef(null); // drag-to-create session (see handleGridPointerDown)
@@ -1479,7 +1489,7 @@ const CalendarGrid = ({
     pill.style.display = 'block';
     pill.style.top = `${top - 9}px`;
     pill.style.left = `${left + 3}px`;
-    pill.textContent = `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, '0')}${hour < 12 ? 'am' : 'pm'}`;
+    pill.textContent = formatClockTime(`${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`, use24h);
   };
 
   const renderHoverTime = () => (
@@ -1506,7 +1516,7 @@ const CalendarGrid = ({
   }, [onBookingResize, eHH]);
 
   // ── Drag-to-create ────────────────────────────────────────
-  // Press on empty column space and drag vertically: a live dashed ghost (snapped to 10 min) is drawn straight into the
+  // Press on empty column space and drag vertically: a live dashed ghost (snapped to 5 min) is drawn straight into the
   // column's DOM (no React state, so no re-render per move). On release `onDragCreate` opens quick-create there.
   // < 5px of movement stays a plain click (existing menu / retarget behaviour). Mouse only; Esc cancels.
   const handleGridPointerDown = (e) => {
@@ -1758,10 +1768,10 @@ const CalendarGrid = ({
                 onSharedDeactivate={deactivateShared}
                 onClientActivate={activateClient}
                 onClientDeactivate={deactivateClient}
-                sameClient={isSameClient(clientIndex, activeCustomerId, booking)}
+                sameClient={multiServiceBookings ? highlightLevel(clientIndex, activeBooking, booking) : isSameClient(clientIndex, activeCustomerId, booking)}
                 key={cardKey}
                 booking={(() => {
-                  const info = clientDayInfo(clientIndex, booking);
+                  const info = visitDayInfo(dayIndex, booking);
                   const o = outsideOf(col, day, booking);
                   return o || info ? { ...booking, ...(o ? { availabilityNote: o.note } : {}), ...(info ? { _clientDay: info } : {}) } : booking;
                 })()}
@@ -1778,6 +1788,9 @@ const CalendarGrid = ({
                   ...(pos ? { left: pos.left, width: pos.width, right: 'auto' } : {}),
                 }}
                 onClick={onBookingClick}
+                extendEnabled={canExtend}
+                onExtend={onExtendBooking}
+                pxPerMin={eHH / 60}
                 {...(v.cardInteractions ? {
                   onResize: handleBookingResize,
                   isSelected: selectedCardIds.has(cardKey),
@@ -2090,7 +2103,7 @@ const CalendarGrid = ({
           {(overflowSheet || []).map((b) => (
             <button key={`${b.id}-${b._comboIndex ?? ''}`} type="button" className="w-full text-left py-3 px-1 min-h-[56px]"
               onClick={() => { setOverflowSheet(null); onBookingClick?.(b); }}>
-              <div className="font-data text-[12px] text-text-secondary">{formatClockTime(b.startTime, use24h)} – {formatClockTime(b.endTime, use24h)}</div>
+              <div className="font-data text-[12px] text-text-secondary">{formatClockRange(b.startTime, b.endTime, use24h)}</div>
               <div className="font-body text-[14px] font-semibold text-text-primary truncate">{hideSensitive ? '•••••' : coupleName(b.customerName || 'Guest', b.companionName)}</div>
               <div className="font-body text-[12px] text-text-secondary truncate">{b.serviceName}</div>
             </button>

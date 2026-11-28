@@ -3,9 +3,11 @@ import { dbDowOfDate, DB_DOW_LABELS, formatMinutes, dayWorkingMinutes, NO_HOURS_
 import { buildTimeline } from '../profileModel';
 import { Loading, Problem, Fig, Figs, npr } from './ui';
 import { SHADE_STYLES } from '../../../services/availabilityShading';
+import { formatClockNow, formatClockRange } from '../../../utils/clockTime';
+import { readUse24h } from '../../../utils/clockPref';
 
 const hhmm = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
-const short = (t) => String(t || '').slice(0, 5);
+const short = (t) => formatClockNow(String(t || '').slice(0, 5));
 const STATUS_WORD = { Completed: 'Done', 'In-Progress': 'In progress', Confirmed: 'Confirmed', Pending: 'Pending' };
 
 const BLOCK = {
@@ -28,7 +30,7 @@ const TodayTimeline = ({ model, onOpenBooking, openCalendar }) => {
       >
         {model.breaks.map((b, i) => (
           <div
-            key={i} title={`${b.name || 'Break'} ${short(b.startTime)} – ${short(b.endTime)}`}
+            key={i} title={`${b.name || 'Break'} ${formatClockRange(String(b.startTime || '').slice(0, 5), String(b.endTime || '').slice(0, 5), readUse24h())}`}
             className={`absolute top-2 bottom-2 rounded-lg border border-dashed border-[#DADAD6] ${hatch} px-2 py-1.5 text-xs text-text-secondary overflow-hidden whitespace-nowrap`}
             style={{ left: `calc(${b.left}% + 2px)`, width: `calc(${b.width}% - 4px)` }}
           >{b.name || 'Break'}</div>
@@ -66,7 +68,7 @@ const TodayTimeline = ({ model, onOpenBooking, openCalendar }) => {
             style={{ left: `clamp(0px, ${hover.left}%, calc(100% - 230px))` }}
           >
             <p className="font-semibold">{hover.serviceName}</p>
-            <p className="opacity-80">{short(hover.startTime)} – {short(hover.endTime)} · {hover.minutes} min · {STATUS_WORD[hover.status] || hover.status}</p>
+            <p className="opacity-80">{formatClockRange(String(hover.startTime || '').slice(0, 5), String(hover.endTime || '').slice(0, 5), readUse24h())} · {hover.minutes} min · {STATUS_WORD[hover.status] || hover.status}</p>
             {hover.customerName && <p className="opacity-80">{hover.customerName}</p>}
           </div>
         )}
@@ -105,7 +107,7 @@ const WeekBars = ({ week, today }) => (
       const brk = Math.max(0, full - mins);
       const isToday = d.date === today;
       const label = DB_DOW_LABELS[dbDowOfDate(d.date)].slice(0, 3);
-      const tip = off ? `${label}: day off` : d.hours.openNoHours ? `${label}: ${NO_HOURS_LABEL} · bookable in branch hours ${short(d.hours.startTime)}–${short(d.hours.endTime)}` : `${label}: ${short(d.hours.startTime)} – ${short(d.hours.endTime)} · ${formatMinutes(mins)}${d.changed ? ' · changed on the roster' : ''}`;
+      const tip = off ? `${label}: day off` : d.hours.openNoHours ? `${label}: ${NO_HOURS_LABEL} · bookable in branch hours ${short(d.hours.startTime)}–${short(d.hours.endTime)}` : `${label}: ${formatClockRange(String(d.hours.startTime || '').slice(0, 5), String(d.hours.endTime || '').slice(0, 5), readUse24h())} · ${formatMinutes(mins)}${d.changed ? ' · changed on the roster' : ''}`;
       const barH = off ? 6 : Math.max(8, (full / 600) * 56);
       return (
         <div key={d.date} title={tip} className="flex flex-col items-center justify-end gap-1 h-full text-xs text-text-secondary">
