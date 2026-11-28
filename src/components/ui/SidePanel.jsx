@@ -104,7 +104,7 @@ const SidePanel = ({ isOpen, title, onClose, onBack, children, footer, headerExt
       <aside
         aria-hidden={!isOpen}
         data-side-panel="true"
-        className="fixed top-0 right-0 h-screen z-modal bg-surface border-l border-border overflow-hidden transition-transform duration-200 ease-out motion-reduce:transition-none"
+        className={`fixed top-0 right-0 h-screen z-modal bg-surface border-l border-border overflow-hidden transition-transform duration-200 ease-out motion-reduce:transition-none`}
         style={{
           width,
           maxWidth: '100vw',
@@ -123,8 +123,8 @@ const SidePanel = ({ isOpen, title, onClose, onBack, children, footer, headerExt
   // the overlay beneath the sticky app header, so the scrim would not cover the whole viewport.
   return createPortal(
     <>
-      <div className="fixed inset-0 z-modal bg-black/10" onClick={onClose} aria-hidden="true" />
-      <div className="fixed top-0 right-0 h-full w-full sm:w-[400px] max-w-full z-modal border-l border-border shadow-spa-elevated">
+      <div className={`fixed inset-0 z-modal bg-black/10`} onClick={onClose} aria-hidden="true" />
+      <div className={`fixed top-0 right-0 h-full w-full sm:w-[400px] max-w-full z-modal border-l border-border shadow-spa-elevated`}>
         {inner}
       </div>
     </>,

@@ -22,10 +22,10 @@ import PaymentModeCorrectionModal from './PaymentModeCorrectionModal';
 import TimeBoxInput from './TimeBoxInput';
 import { paymentStatusLabel } from '../../utils/paymentStatusLabel';
 const payTone = (b) => ({ success: 'text-success', neutral: 'text-text-secondary', warning: 'text-warning' })[paymentStatusLabel(b).tone];
-import InvoicePrintModal from './InvoicePrintModal';
+import BillActions from './Bill/BillActions';
 import { relatedFetchers } from '../../utils/visitGate';
 import { deleteBlockers } from '../../utils/deleteBlockers';
-import { fetchBookingServices } from '../../services/api';
+import { fetchBookingServices, extendBooking } from '../../services/api';
 import { buildBookingBlock } from '../../utils/bookingBlock';
 import { VisitStatusFlow } from './VisitStatusDialog';
 import RemoveServiceFlow from './RemoveServiceFlow';
@@ -40,6 +40,8 @@ import { adminCorrectBooking, correctPaymentMode, adminDeleteBooking, correctPay
 import { excludeRelatedFromPreviousDue, toDbStatus } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
+import { useAvailabilityGuard } from '../../contexts/AvailabilityOverrideContext';
+import { CAL_STEP_MIN } from '../../utils/calendarStep';
 import { getExtendOptions } from '../../utils/serviceVariants';
 import BlockOverlapWarning from './BlockOverlapWarning';
 import SidePanel, { PANEL_WIDTH_BOOKING } from './SidePanel';
@@ -318,7 +320,8 @@ const BookingActionModal = ({
   const use24h = use24hProp ?? use24hPref;
   const clock = (t) => formatClockTime(t, use24h);
   const { branchId } = useBranch();
-  const { org: orgForNav, paymentMethods, orgSettings, staffLabel, staffLabelPlural, allowStaffOverlap, multiServiceBookings } = useOrg();
+  const { org: orgForNav, paymentMethods, orgSettings, staffLabel, staffLabelPlural, allowStaffOverlap, multiServiceBookings, canExtend } = useOrg();
+  const { guard: lengthGuard, canOverride: canOverrideLength } = useAvailabilityGuard();
   const navigate = useNavigate();
   const cancelReasonOptions = orgSettings?.cancellation_reasons?.length
     ? orgSettings.cancellation_reasons
@@ -358,7 +361,6 @@ const BookingActionModal = ({
   // Products added to this visit (V26, product_sales.booking_id): read-only lines on the Payment tab; a manager/admin can refund one.
   const [visitProducts, setVisitProducts] = useState([]);
   const [visitProductRefund, setVisitProductRefund] = useState(null); // the sale awaiting a refund confirmation
-  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   // Keeps "Print invoice" reachable for a booking invoiced before billing was
   // later disabled — the invoice data isn't orphaned, only this button would
   // be if it hid unconditionally on the toggle. See CustomerPaymentsTab for the
@@ -810,6 +812,33 @@ const BookingActionModal = ({
       default: break;
     }
   };
+
+  // ZNLY-407: −5 / +5 on the booking's length (price never changes). Each tap saves, with the same checks and history as dragging the end on the calendar.
+  const [lengthBusy, setLengthBusy] = useState(false);
+  const [lengthError, setLengthError] = useState(null); // { id, text }
+  const clockMin = (t) => { const [h, m] = String(t || '').split(':').map(Number); return Number.isFinite(h) ? h * 60 + (m || 0) : null; };
+  const lengthNow = clockMin(booking?.endTime) != null && clockMin(booking?.startTime) != null ? clockMin(booking?.endTime) - clockMin(booking?.startTime) : null;
+  const lengthBase = booking?.serviceMinutes || null;
+  const lengthExtra = lengthNow != null && lengthBase ? Math.max(0, lengthNow - lengthBase) : 0;
+  const canChangeLength = !!canExtend && !!onRefreshBooking && !!lengthBase && lengthNow > 0 && userRole !== 'admin_viewer' && !booking?.isLocked && !booking?.isCombo
+    && ['pending', 'confirmed', 'in-progress'].includes(String(booking?.status || '').toLowerCase());
+  const changeLengthOf = async (bookingId, currentExtra, delta) => {
+    if (lengthBusy) return;
+    setLengthBusy(true); setLengthError(null);
+    const r = await lengthGuard((overrideReason) => extendBooking({ bookingId, extraMinutes: Math.max(0, currentExtra + delta), overrideReason }));
+    if (r?.error) {
+      if (!r.error.cancelled) setLengthError({ id: bookingId, text: `${(r.error.message || "Couldn't change the length. Nothing was changed.").replace(/[.\s]+$/, '')}.${r.error.overridable && !canOverrideLength ? ' Ask a manager.' : ''}` });
+    } else {
+      setBlockReload((n) => n + 1);
+      await onRefreshBooking?.(booking.bookingId);
+    }
+    setLengthBusy(false);
+  };
+  const changeLength = (delta) => changeLengthOf(booking.bookingId, lengthExtra, delta);
+  // The "This booking" card: a row can be made longer when it is still open (not done / cancelled), the setting is on and the day is not closed.
+  const rowLength = (r) => (canExtend && onRefreshBooking && userRole !== 'admin_viewer' && r.baseMinutes && r.minutes && !r.dead && !r.locked && ['pending', 'confirmed', 'in-progress'].includes(r.status)
+    ? { minutes: r.minutes, extra: Math.max(0, r.minutes - r.baseMinutes), busy: lengthBusy, error: lengthError?.id === r.id ? lengthError.text : '', change: (d) => changeLengthOf(r.id, Math.max(0, r.minutes - r.baseMinutes), d) }
+    : null);
 
   const handleExtendService = async (option) => {
     if (!booking || !onEditBooking) return;
@@ -2045,6 +2074,7 @@ const BookingActionModal = ({
                 canViewPrices={canViewPrices}
                 paidState={blockPaid}
                 collect={activeTab === 'details' ? blockCollect : null}
+                lengthAction={activeTab === 'details' ? rowLength : undefined}
                 earlier={canViewPrices ? earlierBalance : 0}
                 earlierRows={previousDueFor === booking.bookingId ? previousDueBookings : []}
                 onViewEarlier={onViewBooking}
@@ -2451,7 +2481,19 @@ const BookingActionModal = ({
                         <div className="flex gap-4">
                           <div>
                             <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Duration</label>
-                            <p className="font-body font-body-normal text-sm text-text-primary">{booking.duration}</p>
+                            <p className="font-body font-body-normal text-sm text-text-primary" data-length-line>{lengthExtra > 0 ? `${lengthNow} min (+${lengthExtra})` : booking.duration}</p>
+                            {canChangeLength && (
+                              <div className="mt-1.5" data-length-controls>
+                                <div className="flex items-center gap-2">
+                                  <button type="button" onClick={() => changeLength(-CAL_STEP_MIN)} disabled={lengthBusy || lengthExtra === 0} aria-label="5 minutes shorter"
+                                    className="min-w-[44px] min-h-[44px] px-3 rounded-spa border border-border text-sm font-medium text-text-primary hover:bg-background disabled:opacity-40 disabled:cursor-not-allowed spa-transition-fast">−5</button>
+                                  <button type="button" onClick={() => changeLength(CAL_STEP_MIN)} disabled={lengthBusy} aria-label="5 minutes longer"
+                                    className="min-w-[44px] min-h-[44px] px-3 rounded-spa border border-border text-sm font-medium text-text-primary hover:bg-background disabled:opacity-40 disabled:cursor-not-allowed spa-transition-fast">+5</button>
+                                </div>
+                                <p className="mt-1 text-xs text-text-tertiary">The price stays the same.</p>
+                                {lengthError?.id === booking.bookingId && <p role="alert" className="mt-1 text-xs text-error">{lengthError.text}</p>}
+                              </div>
+                            )}
                           </div>
                           <div>
                             <label className="flex items-center gap-1.5 font-body font-body-medium text-xs sm:text-sm text-text-secondary">
@@ -3653,6 +3695,13 @@ const BookingActionModal = ({
                   </div>
                 )}
 
+                {canViewCustomerDetails && booking.paymentStatus !== 'paid' && (['partial', 'refunded'].includes(booking.paymentStatus) || String(booking.status).toLowerCase() === 'completed') && (
+                  <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-spa border border-border" data-bill-row>
+                    <span className="text-xs sm:text-sm font-body-medium text-text-primary">Bill</span>
+                    <BillActions bookingId={booking.bookingId} up />
+                  </div>
+                )}
+
                 {canPay && (
                   <Button
                     variant="primary"
@@ -3671,16 +3720,7 @@ const BookingActionModal = ({
                         <Icon name="CheckCircle" size={14} className="text-success flex-shrink-0" />
                         <span className="font-body font-body-normal text-xs sm:text-sm text-success">Payment has been recorded.</span>
                       </div>
-                      {canViewCustomerDetails && (orgSettings?.billing_enabled === true || hasExistingInvoice) && (
-                        <button
-                          type="button"
-                          onClick={() => setShowInvoiceModal(true)}
-                          className="flex items-center gap-1 text-xs font-body-medium text-primary hover:underline flex-shrink-0"
-                        >
-                          <Icon name="Receipt" size={14} />
-                          Print invoice
-                        </button>
-                      )}
+                      {canViewCustomerDetails && <BillActions bookingId={booking.bookingId} up />}
                     </div>
                     {(booking.payments || []).map((p) => (
                       p.id && showAdminCorrection ? (
@@ -3815,9 +3855,6 @@ const BookingActionModal = ({
             loadVisitProducts();
           }}
         />
-      )}
-      {showInvoiceModal && (
-        <InvoicePrintModal bookingId={booking.bookingId} onClose={() => setShowInvoiceModal(false)} />
       )}
       {/* Cancel / No Show confirmation */}
       {visitStatusFlow && (
@@ -3991,6 +4028,7 @@ const BookingActionModal = ({
       {showPaymentModal && (
         <PaymentModal
           key={payMainId}
+          showBill={canViewCustomerDetails}
           savesProducts
           visitList={!legacyGroups}
           visitOrder={payOrder}

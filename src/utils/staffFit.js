@@ -49,17 +49,39 @@ export const ownRowBookings = (rows, date = null, customer = 'this booking') => 
   .map((r, i) => ({ id: `own-${i}`, date, status: 'Confirmed', therapist_id: r.staffId, start_time: hhmm(r.start), end_time: hhmm(r.end), customer_name: customer, service_name_snapshot: r.service || '' }));
 
 /**
+ * ZNLY-418: the ONE "does this person do this service?" rule, the same as the database guard (check_therapist_booking_guards).
+ * index = fetchServiceStaffIndex(): { lists, home, names }. A service with NO list rows at the booking's branch = everyone can do it.
+ * With rows, only listed staff do it. A visitor (home branch is not the booking's branch) is judged on the home branch's list of the
+ * same-named service. Unknown index / service / person = ok (never lock people on missing data). -> { ok, reason: 'not_listed' | null }
+ */
+export function eligibleFor(index, { serviceId, therapistId, branchId = null } = {}) {
+  if (!index || !serviceId || !therapistId) return { ok: true, reason: null };
+  const { lists = {}, home = {}, names = {} } = index;
+  const onList = (sid) => (lists[sid] || []).includes(therapistId);
+  const hasListAt = (sid, b) => !!b && (lists[sid] || []).some((t) => home[t] === b);
+  const mine = home[therapistId];
+  const at = branchId || mine;
+  let ok;
+  if (mine && at && mine !== at) {
+    const key = names[serviceId];
+    const same = key ? Object.keys(names).filter((sid) => names[sid] === key) : [serviceId];
+    ok = same.some((sid) => onList(sid) || !hasListAt(sid, mine));
+  } else ok = !hasListAt(serviceId, at) || onList(serviceId);
+  return ok ? { ok: true, reason: null } : { ok: false, reason: 'not_listed' };
+}
+
+/**
  * Group people for a slot [slotStart, slotEnd).
  *  free  = not off, no overlapping booking; eligible (can do the service) first, then fewest booked minutes, last person, A-Z
  *  busy  = overlapping booking (still selectable); busyRange = the overlapping range(s) as { start, end }
  *  off   = off/leave (not selectable), reason from offById
  *  bestIds = up to `max` free + eligible people by the rule above, never one in `excludeIds` (not pickable, e.g. held by another guest); empty when nobody qualifies
- * eligibleIds null/empty = nobody is restricted (everyone can do it).
+ * eligibleIds null/empty = nobody is restricted (everyone can do it). `isEligible(person) => boolean` (eligibleFor) replaces eligibleIds when given.
  */
-export function arrangeByTime(people, { slotStart, slotEnd, rangesById = {}, offById = {}, eligibleIds = null, lastStaffId = null, max = 1, excludeIds = null } = {}) {
+export function arrangeByTime(people, { slotStart, slotEnd, rangesById = {}, offById = {}, eligibleIds = null, isEligible = null, lastStaffId = null, max = 1, excludeIds = null } = {}) {
   const elig = eligibleIds && eligibleIds.length ? new Set(eligibleIds) : null;
   const booked = (id) => (rangesById[id] || []).reduce((t, r) => t + (r.end - r.start), 0);
-  const info = (p) => ({ person: p, bookedMinutes: booked(p.id), bookings: (rangesById[p.id] || []).length, eligible: !elig || elig.has(p.id) });
+  const info = (p) => ({ person: p, bookedMinutes: booked(p.id), bookings: (rangesById[p.id] || []).length, eligible: isEligible ? !!isEligible(p) : (!elig || elig.has(p.id)) });
   const free = []; const busy = []; const off = [];
   for (const p of people) {
     if (offById[p.id]) { off.push({ ...info(p), reason: offById[p.id] }); continue; }
@@ -201,17 +223,17 @@ export function pickProblems(guests, { rangesById = {}, offById = {}, allowOverl
  * never picks Busy/Off, never a person held by an overlapping guest. Best fit (free + eligible, fewest minutes) first.
  * Returns { picks: { [idx]: staffId }, filled: [idx], unfilled: [idx] }. `unfilled` = empty guests nobody was free for.
  */
-export function fillFreeStaff(guests, { people = [], rangesById = {}, offById = {}, eligibleByService = null, lastStaffId = null } = {}) {
+export function fillFreeStaff(guests, { people = [], rangesById = {}, offById = {}, eligibility = null, branchId = null, lastStaffId = null } = {}) {
   const current = guests.map((g) => ({ ...g }));
   const picks = {}; const filled = []; const unfilled = [];
   for (const g of current) {
     if (g.staffId) continue;
     const { free } = arrangeByTime(people, {
       slotStart: g.start, slotEnd: g.end, rangesById, offById,
-      eligibleIds: g.serviceId && eligibleByService ? eligibleByService[g.serviceId] : null, lastStaffId, max: people.length,
+      isEligible: eligibility && g.serviceId ? (p) => eligibleFor(eligibility, { serviceId: g.serviceId, therapistId: p.id, branchId }).ok : null, lastStaffId, max: people.length,
     });
     const held = staffHeldByOthers(current)[g.idx];
-    const pick = free.find((x) => held[x.person.id] == null);
+    const pick = free.find((x) => x.eligible && held[x.person.id] == null); // ZNLY-418: never auto-pick someone not on the service's staff list
     if (!pick) { unfilled.push(g.idx); continue; }
     g.staffId = pick.person.id;
     picks[g.idx] = pick.person.id; filled.push(g.idx);

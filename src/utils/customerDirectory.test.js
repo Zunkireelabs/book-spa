@@ -55,13 +55,18 @@ describe('lifecycle segments', () => {
     expect(seg(3, 400, { next: true })).toBe('occasional');
     expect(seg(1, 400, { next: true })).toBe('occasional');
   });
-  it('a booking later today counts as next; one earlier today does not', () => {
-    const later = one([cust('a')], [bk('a', ago(100)), bk('a', ago(120)), bk('a', TODAY, 'Confirmed', { start_time: '16:00:00' })])[0];
-    expect(later.nextBooking.time).toBe('16:00');
-    expect(later.segment).toBe('occasional');
-    const earlier = one([cust('a')], [bk('a', ago(100)), bk('a', ago(120)), bk('a', TODAY, 'Confirmed', { start_time: '09:00:00' })])[0];
-    expect(earlier.nextBooking).toBeNull();
-    expect(earlier.segment).toBe('at-risk');
+  it('an open booking dated today is upcoming whether or not its time has passed: amount and next booking agree (ZNLY-444)', () => {
+    for (const start_time of ['16:00:00', '09:00:00']) {
+      const c = one([cust('a')], [bk('a', ago(100)), bk('a', ago(120)), bk('a', TODAY, 'Confirmed', { start_time, final_amount: 448, payment_status: 'unpaid' })])[0];
+      expect(c.nextBooking.time).toBe(start_time.slice(0, 5));
+      expect(c.upcoming).toBe(448);
+      expect(c.segment).toBe('occasional');
+    }
+    // a Completed one today is a visit, not upcoming
+    const done = one([cust('a')], [bk('a', TODAY, 'Completed', { start_time: '09:00:00', final_amount: 448 })])[0];
+    expect(done.nextBooking).toBeNull();
+    expect(done.upcoming).toBe(0);
+    expect(done.completedVisits).toBe(1);
   });
   it('Regular is 4+ visits that are not new / at risk / lapsed; the rest are Occasional', () => {
     expect(seg(4, 10)).toBe('regular');

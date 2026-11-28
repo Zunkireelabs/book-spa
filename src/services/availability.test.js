@@ -172,3 +172,17 @@ describe('createEnforcementCache (JS pre-checks defer to the DB guard when the s
     expect(await createEnforcementCache(async () => true).get(null)).toBe(false);
   });
 });
+
+describe('THERAPIST_NOT_ELIGIBLE (ZNLY-418)', () => {
+  it('is overridable and reads as a plain sentence built from the detail, never the SQL text', () => {
+    const r = parseAvailabilityError({ message: 'THERAPIST_NOT_ELIGIBLE: Jayanti R. is not on the staff list for Brows.', details: JSON.stringify({ code: 'THERAPIST_NOT_ELIGIBLE', therapist_name: 'Jayanti R.', service_name: 'Brows Shaping' }) });
+    expect(r.code).toBe('THERAPIST_NOT_ELIGIBLE');
+    expect(r.overridable).toBe(true);
+    expect(r.message).toBe("Jayanti R. doesn't usually do Brows Shaping");
+  });
+  it('staff + reason: OVERRIDE_NOT_ALLOWED says only a manager can', () => {
+    const r = parseAvailabilityError({ message: 'OVERRIDE_NOT_ALLOWED: x', details: JSON.stringify({ not_listed: true }) });
+    expect(r.overridable).toBe(false);
+    expect(r.message).toBe("Only a manager can book someone for a service they don't do.");
+  });
+});
