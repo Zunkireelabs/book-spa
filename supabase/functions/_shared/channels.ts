@@ -2,6 +2,7 @@ export interface ChannelSendInput {
   to: string;
   subject?: string;
   body: string;
+  replyTo?: string;
   meta?: Record<string, unknown>;
 }
 
@@ -36,6 +37,7 @@ export class ResendEmailProvider implements ChannelProvider {
     to,
     subject,
     body,
+    replyTo,
   }: ChannelSendInput): Promise<ChannelSendResult> {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -48,6 +50,7 @@ export class ResendEmailProvider implements ChannelProvider {
         to,
         subject,
         html: body,
+        ...(replyTo ? { reply_to: replyTo } : {}),
       }),
     });
 
@@ -78,4 +81,16 @@ export function resolveProvider(
   throw new Error(
     `No provider registered for channel=${channel} provider=${config.provider}`
   );
+}
+
+// The business's contact email for Reply-To: Billing settings email, else the org owner's. None (or not an address) -> undefined, so no Reply-To.
+export function pickReplyTo(
+  settings: Record<string, unknown> | null | undefined,
+  ownerEmail?: string | null
+): string | undefined {
+  for (const c of [settings?.billing_email, ownerEmail]) {
+    const v = typeof c === 'string' ? c.trim() : '';
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return v;
+  }
+  return undefined;
 }

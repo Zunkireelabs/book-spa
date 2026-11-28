@@ -9,11 +9,12 @@ import { useParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import ModalShell from '../ModalShell';
 import Button from '../Button';
-import { fetchBillUnit, fixBillNumber, fetchBillLink, turnOffBillLink, shareBill, fetchBillMessage, fetchBillSendInfo, sendCustomerMessage, updateCustomerContact } from '../../../services/api';
+import { fetchBillUnit, fixBillNumber, fetchBillLink, turnOffBillLink, shareBill, fetchBillMessage, fetchBillSendInfo, sendCustomerMessage, sendBillEmailNow, updateCustomerContact } from '../../../services/api';
 import { fillBillMessage } from '../../../utils/billMessage';
 import { useOrg } from '../../../contexts/OrgContext';
 import { useToast } from '../../../pages/branch-manager-dashboard/components/Area/listKit';
 import { buildBill, billSource } from '../../../utils/buildBill';
+import { buildBillEmailHtml } from '../../../utils/billEmail';
 import { Bill, BILL_CSS, printBill } from './Bill';
 import { useMenuNav } from '../useMenuNav';
 
@@ -79,7 +80,6 @@ const LinkMenu = ({ token, onOff }) => {
 };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const SEND_WORDS = { queued: 'Sending', approved: 'Sending', sending: 'Sending', sent: 'Sent', delivered: 'Sent', failed: 'Failed' };
 
 // Asks for an address when the customer has none (bottom sheet on a phone), optionally saving it to the profile.
@@ -188,12 +188,23 @@ const BillActions = ({ bookingId, extraIds, up = false, onView, hideView = false
       if (msgErr || !msg) throw new Error('message');
       const vars = { first_name: info.name.trim().split(/\s+/)[0] || '', business: orgInfo.name || '', bill_number: shared.billNumber };
       const url = `${window.location.origin}/${orgSlug}/bill/${shared.token}`;
-      const html = `${esc(fillBillMessage(msg.body, vars)).replace(/\n/g, '<br>')}<p><a href="${url}">View bill</a></p>`;
-      const { error: sendErr } = await sendCustomerMessage({ customerId: info.customerId, bookingId, channel: 'email', toAddress: to, subject: fillBillMessage(msg.subject, vars), body: html, dedupePrefix: `bill:${shared.billNumber}` });
+      const html = buildBillEmailHtml({ business: orgInfo.name, message: fillBillMessage(msg.body, vars), url, phone: info.branch?.phone, address: info.branch?.address });
+      const { data: queued, error: sendErr } = await sendCustomerMessage({ customerId: info.customerId, bookingId, channel: 'email', toAddress: to, subject: fillBillMessage(msg.subject, vars), body: html, dedupePrefix: `bill:${shared.billNumber}` });
       if (sendErr) throw new Error('send');
       setAskEmail(false);
-      notify(`Bill sent to ${to} by email`);
-      setInfo((i) => ({ ...i, last: { status: 'queued' } }));
+      // Send now; the outbox row is the record and the cron drain retries if this doesn't land. Say "sent" only once it is.
+      const { dispatched } = await sendBillEmailNow(queued.id);
+      let status = 'queued';
+      for (let i = 0; dispatched && i < 8; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const { data: st } = await fetchBillSendInfo(bookingId, { multi, single: billingOn, extraIds });
+        status = st?.last?.status || status;
+        if (status === 'sent' || status === 'failed') break;
+      }
+      if (status === 'sent') notify(`Bill sent to ${to} by email`);
+      else if (status === 'failed') notify("The email didn't go out. Try again in a moment.", 'error');
+      else notify(`Bill is on its way to ${to}`);
+      setInfo((i) => ({ ...i, last: { status } }));
     } catch (e) {
       const text = e.message === 'save' ? "Couldn't save the email to the profile. Try again." : "Couldn't send this bill. Try again.";
       setDialogError(text);

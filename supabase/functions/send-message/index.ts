@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { resolveProvider } from '../_shared/channels.ts';
+import { pickReplyTo, resolveProvider } from '../_shared/channels.ts';
 
 interface MessageRequest {
   message_id: string;
@@ -150,7 +150,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const { data: orgData } = await supabase
       .from('organizations')
-      .select('name')
+      .select('name, owner_email, settings')
       .eq('id', msg.org_id)
       .single();
 
@@ -165,6 +165,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       to: msg.to_address,
       subject: msg.subject,
       body: msg.body,
+      replyTo: msg.channel === 'email' ? pickReplyTo(orgData?.settings, orgData?.owner_email) : undefined,
     });
 
     // Update message: status='sent', sent_at=now(), provider=<name>, provider_message_id=<id>
