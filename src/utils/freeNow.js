@@ -141,8 +141,8 @@ export function availabilityNow(therapists, ctx) {
   return { free, inSession, source: ctx.source, basis: shiftBasis(therapists, ctx) };
 }
 
-/** Next 10-minute slot at or after `nowMin`, e.g. 13:52 → 14:00. */
-export const nextSlot10 = (nowMin) => Math.min(Math.ceil(nowMin / 10) * 10, 1430);
+/** Next 5-minute slot at or after `nowMin`, e.g. 13:52 → 13:55 (ZNLY-407: the calendar steps in 5 minutes everywhere). */
+export const nextSlot10 = (nowMin) => Math.min(Math.ceil(nowMin / 5) * 5, 1435);
 
 /** Is the therapist on shift for the whole [start, end) and unoccupied (optionally ignoring one booking)? */
 export function freeForSlot(t, startMin, endMin, ctx, opts = {}) {

@@ -21,6 +21,7 @@ import { PLATFORM_ADMIN_ENABLED } from 'lib/featureFlags';
 const CustomerBookingFlowV2 = lazy(() => import("pages/customer-booking-flow-v2"));
 const StaffLoginAuthentication = lazy(() => import("pages/login"));
 const BranchStaffDashboard = lazy(() => import("pages/branch-staff-dashboard"));
+const PublicBill = lazy(() => import("pages/public-bill"));
 const BookingDetailsAssignmentModal = lazy(() => import("pages/booking-details-assignment-modal"));
 const StaffDetailPage = lazy(() => import("pages/staff-detail"));
 const LocationDetailPage = lazy(() => import("pages/location-detail"));
@@ -123,6 +124,9 @@ const AppRoutes = () => {
         <Route path="/" element={<ExternalRedirect to="https://www.zunkireelabs.com/products/ai-booking-engine/" />} />
 
         {/* ==================== ORG-SCOPED STAFF ROUTES ==================== */}
+
+        {/* The customer's bill link: public, no login (ZNLY-410) */}
+        <Route path="/:orgSlug/bill/:token" element={<PublicBill />} />
 
         {/* Org-scoped login */}
         <Route path="/:orgSlug/login" element={

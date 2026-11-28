@@ -59,7 +59,7 @@ const TemplateEditorPanel = () => {
       setLoading(false);
       return;
     }
-    setTemplates(data || []);
+    setTemplates((data || []).filter((t) => !t.key.startsWith('bill_ready'))); // edited in the Bill card on Rules
     setLayouts(layoutData || []);
     setLoading(false);
   }, []);

@@ -2,6 +2,13 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import Icon from '../AppIcon';
 import { buildPaymentMethodTree } from '../../services/paymentMethods';
+import { placeFlyout } from '../../utils/flyoutPlacement';
+
+// Flyout geometry for placement: `w-32` = 128px; each sub row is ~28px (py-1 + text-sm
+// line) inside a p-1 box.
+const FLYOUT_WIDTH = 128;
+const FLYOUT_ROW_HEIGHT = 28;
+const FLYOUT_PADDING = 8;
 
 const SIZE_CLASSES = {
   sm: 'h-9 px-3 text-sm',
@@ -30,7 +37,7 @@ const PaymentMethodSelector = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [openSubmenu, setOpenSubmenu] = useState(null);
-  const [submenuPos, setSubmenuPos] = useState(null); // { top, left }
+  const [submenuPos, setSubmenuPos] = useState(null); // { top, left, side }
   const containerRef = useRef(null);
   const flyoutRef = useRef(null);
 
@@ -67,6 +74,19 @@ const PaymentMethodSelector = ({
     }
   }, [isOpen]);
 
+  // The flyout is position: fixed from a rect measured at click time, so any
+  // viewport change makes it stale — close it rather than leave it adrift.
+  useEffect(() => {
+    if (!openSubmenu) return undefined;
+    const close = () => setOpenSubmenu(null);
+    window.addEventListener('resize', close);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, [openSubmenu]);
+
   const toggleOpen = () => {
     if (disabled) return;
     setIsOpen((prev) => !prev);
@@ -91,7 +111,12 @@ const PaymentMethodSelector = ({
       return;
     }
     const rowRect = e.currentTarget.getBoundingClientRect();
-    setSubmenuPos({ top: rowRect.top, left: rowRect.right + 4 });
+    setSubmenuPos(placeFlyout(rowRect, {
+      width: FLYOUT_WIDTH,
+      height: item.subMethods.length * FLYOUT_ROW_HEIGHT + FLYOUT_PADDING,
+      viewportW: window.innerWidth,
+      viewportH: window.innerHeight,
+    }));
     setOpenSubmenu(item.value);
   };
 
@@ -144,7 +169,11 @@ const PaymentMethodSelector = ({
               >
                 <span className="truncate">{item.label}</span>
                 {hasSub ? (
-                  <Icon name="ChevronRight" size={13} className="text-text-secondary flex-shrink-0" />
+                  <Icon
+                    name={isSubmenuOpen && submenuPos?.side === 'left' ? 'ChevronLeft' : 'ChevronRight'}
+                    size={13}
+                    className="text-text-secondary flex-shrink-0"
+                  />
                 ) : isSelected ? (
                   <Icon name="Check" size={13} className="text-primary flex-shrink-0" />
                 ) : null}

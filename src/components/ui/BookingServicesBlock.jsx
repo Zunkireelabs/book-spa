@@ -59,6 +59,7 @@ const BookingServicesBlock = ({
   paidState,        // e.g. { label: 'Not paid yet', tone: 'warning' }: the same word the panel uses for money state
   canViewPrices = true,
   onSelect,         // (bookingId) => switch the panel to that service; undefined = rows are not clickable
+  lengthAction,     // (row) => null | { minutes, extra, busy, error, change(delta) }: the −5 / +5 on a row (ZNLY-407; length only, the price stays)
   rowAction,        // (row) => { start?: {disabled, reason, run}, done?: {...}, remove?: {...} } for the full mode
   busyId = null,
   use24h: use24hProp,
@@ -103,6 +104,7 @@ const BookingServicesBlock = ({
           {block.rows.map((r) => {
             const here = r.id === block.openId;
             const acts = mode === 'full' && rowAction ? rowAction(r) : null;
+            const len = mode === 'full' && lengthAction ? lengthAction(r) : null;
             const clickable = !!onSelect && !here;
             return (
               <li key={r.id} data-block-row={r.id} data-open={here ? 'true' : undefined} className={here && block.rows.length > 1 ? 'bg-primary/5' : ''}>
@@ -123,6 +125,20 @@ const BookingServicesBlock = ({
                     {acts.done && <button type="button" disabled={acts.done.disabled || busyId === r.id} title={acts.done.reason || undefined} onClick={acts.done.run} className="h-8 px-3 rounded-spa border border-border text-[12px] font-medium text-text-primary hover:bg-background disabled:opacity-40">Done</button>}
                     {acts.lock && <span className="inline-flex items-center gap-1 text-[12px] text-text-secondary" data-row-locked><Icon name="Lock" size={12} />{acts.lock}</span>}
                     {acts.remove && <button type="button" disabled={acts.remove.disabled} title={acts.remove.reason || undefined} onClick={acts.remove.run} className="h-8 px-3 rounded-spa text-[12px] text-error hover:bg-error/5 disabled:opacity-40">Remove</button>}
+                  </div>
+                )}
+                {len && (
+                  <div className="px-3 pb-2.5 -mt-0.5" data-length-controls>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[12px] text-text-secondary mr-1">Length</span>
+                      <button type="button" disabled={len.busy || len.extra === 0} onClick={() => len.change(-5)} aria-label={`5 minutes shorter for ${r.name}`}
+                        className="min-w-[44px] min-h-[44px] px-3 rounded-spa border border-border text-[13px] font-medium text-text-primary hover:bg-background disabled:opacity-40 disabled:cursor-not-allowed spa-transition-fast">−5</button>
+                      <span className="text-[13px] font-medium text-text-primary tabular-nums min-w-[64px] text-center" data-length-line>{len.minutes} min{len.extra > 0 ? ` (+${len.extra})` : ''}</span>
+                      <button type="button" disabled={len.busy} onClick={() => len.change(5)} aria-label={`5 minutes longer for ${r.name}`}
+                        className="min-w-[44px] min-h-[44px] px-3 rounded-spa border border-border text-[13px] font-medium text-text-primary hover:bg-background disabled:opacity-40 disabled:cursor-not-allowed spa-transition-fast">+5</button>
+                    </div>
+                    <p className="mt-0.5 text-[12px] text-text-tertiary">The price stays the same.</p>
+                    {len.error && <p role="alert" className="mt-1 text-[12px] text-error">{len.error}</p>}
                   </div>
                 )}
               </li>

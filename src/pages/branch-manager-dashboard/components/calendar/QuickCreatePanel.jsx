@@ -534,7 +534,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const emptyGuests = guestSlots.filter((g) => !g.staffId).length;
   const hasAnyService = shouldShowFillFree({ serviceMode, groupServiceId, people });
   const fillFree = () => {
-    const { picks } = fillFreeStaff(guestSlots, { people: pickerPeople, rangesById: groupRanges, offById: groupOff, eligibleByService: groupEligibility });
+    const { picks } = fillFreeStaff(guestSlots, { people: pickerPeople, rangesById: groupRanges, offById: groupOff, eligibility: groupEligibility, branchId });
     if (!Object.keys(picks).length) return;
     setPeople((prev) => prev.map((p, i) => (picks[i] ? { ...p, therapistId: picks[i] } : p)));
     setFillUndo({ picks, count: Object.keys(picks).length });

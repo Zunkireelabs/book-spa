@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { staffPickIncomplete, arrangeByTime, staffDayRanges, rangeLabel, pillRange, offStaffReasons, offDayLabel, offReasonFor, staffHeldByOthers, pickedRowStatus, pickedRowStatusMulti, clockToMin, pickProblems, fillFreeStaff, undoFill, overlapNote, overlapLine, ownRowBookings, singleMoveOverlap } from './staffFit';
+import { eligibleFor, staffPickIncomplete, arrangeByTime, staffDayRanges, rangeLabel, pillRange, offStaffReasons, offDayLabel, offReasonFor, staffHeldByOthers, pickedRowStatus, pickedRowStatusMulti, clockToMin, pickProblems, fillFreeStaff, undoFill, overlapNote, overlapLine, ownRowBookings, singleMoveOverlap } from './staffFit';
 
 const P = (id, name) => ({ id, name });
 const people = [P('a', 'Asha'), P('b', 'Bishnu'), P('c', 'Chhori'), P('d', 'Dil')];
@@ -135,7 +135,7 @@ describe('group staff (ZNLY-303)', () => {
       expect(r.unfilled).toEqual([1, 2]);
     });
     it('Best fit (eligible, fewest booked minutes) goes first', () => {
-      const r = fillFreeStaff([G(0, '')], { people, rangesById: { a: [{ start: 0, end: 60 }] }, eligibleByService: { s: ['a', 'b'] } });
+      const r = fillFreeStaff([G(0, '')], { people, rangesById: { a: [{ start: 0, end: 60 }] }, eligibility: { lists: { s: ['a', 'b'] }, home: { a: 'B', b: 'B', c: 'B' }, names: {} }, branchId: 'B' });
       expect(r.picks).toEqual({ 0: 'b' });
     });
     it('Undo restores exactly what was empty and leaves later manual changes alone', () => {
@@ -304,5 +304,42 @@ describe('singleMoveOverlap (1-service reschedule target)', () => {
     expect(singleMoveOverlap({ ...base, allow: false })).toBeNull();
     expect(singleMoveOverlap({ ...base, staffId: null })).toBeNull();
     expect(singleMoveOverlap({ ...base, minutes: 0 })).toBeNull();
+  });
+});
+
+describe('eligibleFor (ZNLY-418: the staff-list rule, same as the database guard)', () => {
+  const idx = {
+    lists: { svcA: ['t1', 't2'], svcA2: ['v1'], svcNone: [], svcMulti: ['t1', 'x1'], svcCut: ['x1'] },
+    home: { t1: 'B1', t2: 'B1', t3: 'B1', v1: 'B2', v2: 'B2', x1: 'B2' },
+    names: { svcA: 'brows', svcA2: 'brows', svcNone: 'lip', svcMulti: 'wax', svcOther: 'wax', svcCut: 'cut' },
+  };
+  const f = (serviceId, therapistId, branchId = 'B1') => eligibleFor(idx, { serviceId, therapistId, branchId });
+  it('no list = everyone can do it', () => {
+    expect(f('svcNone', 't3').ok).toBe(true);
+    expect(f('svcUnknown', 't3').ok).toBe(true);
+  });
+  it('with a list only listed staff do it, and the reason is not_listed', () => {
+    expect(f('svcA', 't1').ok).toBe(true);
+    expect(f('svcA', 't3')).toEqual({ ok: false, reason: 'not_listed' });
+  });
+  it('rows of another branch never restrict this branch (multi-branch)', () => {
+    expect(f('svcMulti', 't3').ok).toBe(false);           // B1 has a row (t1), t3 is not on it
+    expect(f('svcMulti', 'v2', 'B2').ok).toBe(false);     // B2 has a row (x1), v2 is not on it
+    expect(eligibleFor(idx, { serviceId: 'svcA2', therapistId: 't3', branchId: 'B1' }).ok).toBe(true); // svcA2's only row is at B2
+  });
+  it('a visitor is judged on the home branch list of the same-named service', () => {
+    expect(f('svcA', 'v1').ok).toBe(true);   // v1 (home B2) is on svcA2 'brows' list at home
+    expect(f('svcA', 'v2').ok).toBe(true);   // v2 (home B2) is on no list, but svcA has no B2 row, so 'brows' is open at their home
+    expect(f('svcCut', 'v2').ok).toBe(false); // 'cut' has a B2 list (x1) and v2 is not on it
+    expect(f('svcCut', 'x1').ok).toBe(true);
+  });
+  it('unknown index / person never locks anyone', () => {
+    expect(eligibleFor(null, { serviceId: 'svcA', therapistId: 't3' }).ok).toBe(true);
+    expect(eligibleFor(idx, { serviceId: 'svcA', therapistId: 'ghost', branchId: 'B1' }).ok).toBe(false); // no home: judged at the booking branch, not listed
+  });
+  it('arrangeByTime isEligible: not-eligible people are flagged and never Best fit', () => {
+    const r = arrangeByTime(people, { slotStart: 840, slotEnd: 900, isEligible: (p) => p.id !== 'a', max: 1 });
+    expect(r.free.find((x) => x.person.id === 'a').eligible).toBe(false);
+    expect(r.bestIds).not.toContain('a');
   });
 });
