@@ -18465,6 +18465,13 @@ export async function sendCustomerMessage({ customerId, bookingId = null, channe
   }
 }
 
+// ZNLY-445: send one just-queued bill email now (migration 440) instead of waiting for the cron drain. The outbox row stays the
+// record and the retry path: if this returns false or throws, the drain still sends it.
+export async function sendBillEmailNow(messageId) {
+  const { data, error } = await supabase.rpc('outreach_send_now', { p_message_id: messageId });
+  return { dispatched: !error && data === true, error };
+}
+
 // ---- ZNLY-410 Part B: sending a bill by email ---------------------------------
 // Who the bill goes to, whether email can go out, and what happened to the last send of this bill (migration 438, every role).
 export async function fetchBillSendInfo(bookingId, { multi = false, single = false, extraIds = [] } = {}) {
@@ -18477,7 +18484,7 @@ export async function fetchBillSendInfo(bookingId, { multi = false, single = fal
     const { data: unit } = await fetchBillUnit({ bookingId, multi, single, extraIds });
     const { data: st, error: stErr } = await supabase.rpc('bill_send_state', { p_bill_number: unit?.billNumber || null });
     if (stErr) throw stErr;
-    return { data: { customerId: b.customer_id, name: b.customers?.full_name || '', email: b.customers?.email || '', emailReady: st?.email_ready === true, last: st?.last ? { status: st.last.status, at: st.last.created_at } : null }, error: null };
+    return { data: { customerId: b.customer_id, name: b.customers?.full_name || '', email: b.customers?.email || '', emailReady: st?.email_ready === true, last: st?.last ? { status: st.last.status, at: st.last.created_at } : null, branch: unit?.branch || {} }, error: null };
   } catch (error) {
     console.error('[API] fetchBillSendInfo error:', error.message);
     return { data: null, error };
