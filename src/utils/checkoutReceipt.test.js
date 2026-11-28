@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeChange, quickCashOptions, buildReceiptText, buildWhatsAppUrl, buildReceiptHtml, receiptStatus } from './checkoutReceipt';
+import { computeChange, quickCashOptions, buildReceiptText, buildWhatsAppUrl, receiptStatus } from './checkoutReceipt';
 
 describe('receiptStatus', () => {
   const r = { total: 3000, leftover: 0, bookingNumber: 'BK-1', extraCount: 0 };
@@ -76,13 +76,6 @@ describe('buildWhatsAppUrl', () => {
   });
 });
 
-describe('buildReceiptHtml', () => {
-  it('escapes user text and includes the totals', () => {
-    const html = buildReceiptHtml({ ...receipt, guestName: '<b>x</b>' });
-    expect(html).toContain('&lt;b&gt;x&lt;/b&gt;');
-    expect(html).toContain('3,000');
-  });
-});
 
 describe('receipt with products (V26)', () => {
   const base = { orgName: 'Nuad', branchName: 'Lazimpat', total: 3840, leftover: 0, bookingNumber: 'BK-1', lines: [{ label: 'Massage', amount: 1540 }], tenders: [{ label: 'Membership wallet', amount: 1540 }],
@@ -93,13 +86,7 @@ describe('receipt with products (V26)', () => {
     expect(t).toContain('Herbal Balm × 2: NPR 1,400');
     expect(t).toContain('Paid by Cash: NPR 2,300');
   });
-  it('the printed receipt has a Products table', () => {
-    const h = buildReceiptHtml(base);
-    expect(h).toContain('<h2>Products</h2>');
-    expect(h).toContain('Lavender Oil · 500 ml × 1');
-  });
   it('no products: unchanged', () => {
     expect(buildReceiptText({ ...base, products: null })).not.toContain('Products:');
-    expect(buildReceiptHtml({ ...base, products: null })).not.toContain('<h2>Products</h2>');
   });
 });

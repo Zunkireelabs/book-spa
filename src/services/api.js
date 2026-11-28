@@ -8,6 +8,8 @@ import { toTransferInput } from '../utils/transferText';
 import { workedAtNote } from './visitorAttendance';
 import { computeReferralCommission, payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, computeNetPay, splitServiceRevenueByBranch, visitorPayrollHelpLine } from './payrollCalc';
 import { supabase, supabaseCustomer, supabaseProvision } from '../lib/supabase';
+import { groupBillUnits, billExists } from '../utils/buildBill';
+import { BILL_TEMPLATE_KEYS, DEFAULT_BILL_MESSAGE, badBillPlaceholders } from '../utils/billMessage';
 import { isReadingViaSafeViews } from '../lib/restrictedReads';
 import { maskCustomerName, maskPhone, viewerAccess, calendarColumnsFor } from './dataMasking';
 import { isOwnCalendar } from './staffAccessRules';
@@ -17979,6 +17981,54 @@ export async function upsertOutreachTemplate(payload) {
   }
 }
 
+// ---- Bill message (ZNLY-410 step 2): wording for Send to ▾, set in Outreach → Rules ----
+
+// Both channels' wording, falling back to the default text when the org has no row (e.g. created after migration 437).
+export async function fetchBillMessages() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data, error } = await supabase
+      .from('outreach_templates')
+      .select('id, key, channel, subject, body, is_active')
+      .eq('org_id', profile.org_id)
+      .is('branch_id', null)
+      .in('key', Object.values(BILL_TEMPLATE_KEYS));
+    if (error) throw error;
+    const out = {};
+    for (const ch of ['email', 'whatsapp']) {
+      const row = (data || []).find((r) => r.key === BILL_TEMPLATE_KEYS[ch] && r.is_active);
+      out[ch] = row
+        ? { id: row.id, subject: ch === 'email' ? row.subject || DEFAULT_BILL_MESSAGE.email.subject : null, body: row.body }
+        : { id: null, ...DEFAULT_BILL_MESSAGE[ch] };
+    }
+    return { data: out, error: null };
+  } catch (error) {
+    console.error('[API] fetchBillMessages error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// channel 'email' | 'whatsapp' → { data: { subject, body }, error }
+export async function fetchBillMessage(channel) {
+  if (!BILL_TEMPLATE_KEYS[channel]) return { data: null, error: { code: 'VALIDATION', message: 'Unknown channel.' } };
+  const { data, error } = await fetchBillMessages();
+  if (error) return { data: null, error };
+  return { data: { subject: data[channel].subject, body: data[channel].body }, error: null };
+}
+
+// Admin saves one channel's wording. Only {first_name}, {business}, {bill_number} are allowed.
+export async function saveBillMessage(channel, { subject, body }) {
+  if (!BILL_TEMPLATE_KEYS[channel]) return { data: null, error: { code: 'VALIDATION', message: 'Unknown channel.' } };
+  const bad = [...badBillPlaceholders(body), ...(channel === 'email' ? badBillPlaceholders(subject) : [])];
+  if (bad.length) {
+    return { data: null, error: { code: 'VALIDATION', message: `Only first name, business and bill number can be used in this message. Remove {${bad[0]}}.` } };
+  }
+  if (!String(body || '').trim()) return { data: null, error: { code: 'VALIDATION', message: 'Write the message first.' } };
+  if (channel === 'email' && !String(subject || '').trim()) return { data: null, error: { code: 'VALIDATION', message: 'Write the email subject first.' } };
+  return upsertOutreachTemplate({ key: BILL_TEMPLATE_KEYS[channel], channel, subject: channel === 'email' ? subject : null, body });
+}
+
 export async function deleteOutreachTemplate(id) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
@@ -18368,7 +18418,7 @@ export async function updateOutreachAiConfig(payload) {
 // Inserts one outreach_messages row via the outreach_send_manual SECURITY
 // DEFINER RPC (migration-110) — outreach_messages has no client INSERT
 // policy by design (migration-104), so this cannot be a raw .insert().
-export async function sendCustomerMessage({ customerId, bookingId = null, channel, toAddress, subject = null, body }) {
+export async function sendCustomerMessage({ customerId, bookingId = null, channel, toAddress, subject = null, body, dedupePrefix = 'manual' }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -18378,8 +18428,8 @@ export async function sendCustomerMessage({ customerId, bookingId = null, channe
     }
 
     const dedupeKey = typeof crypto !== 'undefined' && crypto.randomUUID
-      ? `manual:${crypto.randomUUID()}`
-      : `manual:${customerId}:${Date.now()}`;
+      ? `${dedupePrefix}:${crypto.randomUUID()}`
+      : `${dedupePrefix}:${customerId}:${Date.now()}`;
 
     const { data: messageId, error } = await supabase.rpc('outreach_send_manual', {
       p_customer_id: customerId,
@@ -18396,6 +18446,25 @@ export async function sendCustomerMessage({ customerId, bookingId = null, channe
     return { data: { id: messageId }, error: null };
   } catch (error) {
     console.error('[API] sendCustomerMessage error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ---- ZNLY-410 Part B: sending a bill by email ---------------------------------
+// Who the bill goes to, whether email can go out, and what happened to the last send of this bill (migration 438, every role).
+export async function fetchBillSendInfo(bookingId, { multi = false, single = false, extraIds = [] } = {}) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data: b, error } = await supabase.from('bookings').select('customer_id, customers(full_name, email)').eq('id', bookingId).maybeSingle();
+    if (error) throw error;
+    if (!b?.customer_id) return { data: null, error: { message: 'No customer on this booking.' } };
+    const { data: unit } = await fetchBillUnit({ bookingId, multi, single, extraIds });
+    const { data: st, error: stErr } = await supabase.rpc('bill_send_state', { p_bill_number: unit?.billNumber || null });
+    if (stErr) throw stErr;
+    return { data: { customerId: b.customer_id, name: b.customers?.full_name || '', email: b.customers?.email || '', emailReady: st?.email_ready === true, last: st?.last ? { status: st.last.status, at: st.last.created_at } : null }, error: null };
+  } catch (error) {
+    console.error('[API] fetchBillSendInfo error:', error.message);
     return { data: null, error };
   }
 }
@@ -21229,29 +21298,6 @@ export async function fetchInvoiceDialogInfo(bookingId) {
   }
 }
 
-// Which of these bookings already has an invoice — one query for the whole
-// set, not one per row. Lets a list (CustomerPaymentsTab) keep the "Print
-// invoice" entry point visible for a booking that was invoiced before billing
-// got disabled, without an N+1 lookup across every paid booking in the list.
-export async function fetchInvoiceExistenceForBookingIds(bookingIds) {
-  try {
-    const { error: authError } = await getAuthenticatedUser();
-    if (authError) return { data: null, error: authError };
-    const ids = [...new Set((bookingIds || []).filter(Boolean))];
-    if (ids.length === 0) return { data: new Set(), error: null };
-
-    const { data, error } = await supabase
-      .from('invoices')
-      .select('booking_id')
-      .in('booking_id', ids);
-    if (error) throw error;
-    return { data: new Set((data || []).map((r) => r.booking_id)), error: null };
-  } catch (error) {
-    console.error('[API] fetchInvoiceExistenceForBookingIds error:', error.message);
-    return { data: null, error };
-  }
-}
-
 // Logs that an invoice was actually printed, and tells the caller whether to
 // render it as ORIGINAL or COPY. The ordinal is allocated atomically inside
 // record_invoice_print() (migration-331) — a count-then-insert from the
@@ -21274,6 +21320,163 @@ export async function recordInvoicePrint({ invoiceId, printType }) {
     return { data: { copyLabel: row.copy_label }, error: null };
   } catch (error) {
     console.error('[API] recordInvoicePrint error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ───────────────────────── ZNLY-410: bills (one bill = a visit, or one booking) ─────────────────────────
+// A bill is built live from booking rows + payments (nothing stored but its number, migration 435). These return raw rows in the shape
+// utils/buildBill.js wants; the drawing never touches the database.
+const BILL_SELECT = 'id, booking_number, visit_id, customer_id, customer_name, customer_phone, branch_id, date, start_time, end_time, status, base_amount, discount_amount, final_amount, service_name_snapshot, therapist_name_snapshot, service:services(name), therapist:therapists(name), payments(amount, payment_mode, created_at), payment_refunds(amount, created_at), booking_tips(amount)';
+const shortStaff = (n) => { const w = String(n || '').trim().split(/\s+/).filter(Boolean); return w.length > 1 ? `${w[0]} ${w[w.length - 1][0]}.` : (w[0] || ''); };
+const toBillRow = (b) => ({
+  id: b.id, visitId: b.visit_id, bookingNumber: b.booking_number, date: b.date, startTime: b.start_time, endTime: b.end_time, status: b.status,
+  customerName: b.customer_name, customerPhone: b.customer_phone, branchId: b.branch_id,
+  service: b.service?.name || b.service_name_snapshot || 'Service', staff: shortStaff(b.therapist?.name || b.therapist_name_snapshot),
+  base: Number(b.base_amount || 0), discount: Number(b.discount_amount || 0), final: Number(b.final_amount || 0),
+  payments: (b.payments || []).map((p) => ({ amount: Number(p.amount || 0), mode: p.payment_mode, at: p.created_at })),
+  refunds: (b.payment_refunds || []).map((x) => ({ amount: Number(x.amount || 0), at: x.created_at })),
+  tip: (b.booking_tips || []).reduce((s, t) => s + Number(t.amount || 0), 0),
+});
+// Product lines bought on these bookings (V26), refunded sales left off.
+async function loadBillProducts(bookingIds) {
+  if (!bookingIds.length) return [];
+  const { data, error } = await supabase.from('product_sales')
+    .select('booking_id, product_name, variant_name, quantity, total_amount, product_sale_payments(amount, payment_mode, created_at)')
+    .in('booking_id', bookingIds).is('refunded_at', null);
+  if (error) throw error;
+  return (data || []).map((x) => ({ bookingId: x.booking_id, name: `${x.product_name}${x.variant_name ? ` · ${x.variant_name}` : ''}`, qty: x.quantity, amount: Number(x.total_amount || 0), payments: (x.product_sale_payments || []).map((p) => ({ amount: Number(p.amount || 0), mode: p.payment_mode, at: p.created_at })) }));
+}
+async function loadBillBranches(branchIds) {
+  const ids = [...new Set(branchIds.filter(Boolean))];
+  if (!ids.length) return {};
+  const { data, error } = await supabase.from('branches').select('id, name, address, phone').in('id', ids);
+  if (error) throw error;
+  return Object.fromEntries((data || []).map((b) => [b.id, { name: b.name, address: b.address, phone: b.phone }]));
+}
+
+/** Everything one bill needs. `extraIds` = the other bookings paid in the same checkout (orgs without "Several services in one booking"): the bill is exactly that set. `single` = this booking only (tax-invoice orgs: one invoice per booking row). `multi` = the org's "Several services in one booking". */
+export async function fetchBillUnit({ bookingId, multi = false, single = false, extraIds = [] }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data: me, error: meErr } = await supabase.from('bookings').select('id, visit_id').eq('id', bookingId).maybeSingle();
+    if (meErr) throw meErr;
+    if (!me) return { data: null, error: { message: 'Could not find this booking.' } };
+    // An invoiced booking is its own bill (one tax invoice per booking row), whatever the setting now says.
+    const { data: inv, error: invErr } = await supabase.from('invoices').select('id, invoice_number, issued_at, tax_mode, vat_rate, subtotal, discount_amount, taxable_amount, vat_amount, total_amount, seller_name, seller_pan, seller_address, seller_phone, branch_name, branch_address, buyer_name, buyer_phone, buyer_pan, footer_text').eq('booking_id', bookingId).maybeSingle();
+    if (invErr) throw invErr;
+    const bundle = (extraIds || []).filter((x) => x && x !== bookingId);
+    const byVisit = multi && !single && me.visit_id && !inv && !bundle.length;
+    const q = supabase.from('bookings').select(BILL_SELECT);
+    const { data, error } = await (byVisit ? q.eq('visit_id', me.visit_id) : bundle.length ? q.in('id', [bookingId, ...bundle]) : q.eq('id', bookingId)).order('start_time');
+    if (error) throw error;
+    const rows = (data || []).map(toBillRow).sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)) || String(a.bookingNumber).localeCompare(String(b.bookingNumber)));
+    const ids = rows.map((r) => r.id);
+    const [products, branches, num] = await Promise.all([
+      loadBillProducts(ids),
+      loadBillBranches(rows.map((r) => r.branchId)),
+      supabase.from('bill_numbers').select('bill_number').in('anchor_booking_id', ids).limit(1).maybeSingle(),
+    ]);
+    return { data: { rows, products, branch: branches[rows[0]?.branchId] || {}, invoice: inv || null, billNumber: num.data?.bill_number || null }, error: null };
+  } catch (error) {
+    console.error('[API] fetchBillUnit error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** The profile's Bills list: every booking of this customer, split into bill units (a visit when `multi`), with money / invoice numbers. */
+export async function fetchCustomerBillUnits({ customerId, multi = false }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: [], error: authError };
+    const { data, error } = await supabase.from('bookings').select(BILL_SELECT).eq('customer_id', customerId).order('date', { ascending: false }).limit(500);
+    if (error) throw error;
+    const rows = (data || []).map(toBillRow);
+    const ids = rows.map((r) => r.id);
+    const [products, inv] = await Promise.all([
+      loadBillProducts(ids),
+      supabase.from('invoices').select('booking_id, invoice_number').in('booking_id', ids),
+    ]);
+    const invoiceOf = Object.fromEntries((inv.data || []).map((i) => [i.booking_id, i.invoice_number]));
+    const units = groupBillUnits(rows, multi).filter(billExists).map((g) => ({
+      rows: g, products: products.filter((p) => g.some((r) => r.id === p.bookingId)),
+      invoiceNumber: g.map((r) => invoiceOf[r.id]).find(Boolean) || null,
+    }));
+    return { data: units, error: null };
+  } catch (error) {
+    console.error('[API] fetchCustomerBillUnits error:', error.message);
+    return { data: [], error };
+  }
+}
+
+/** The bill's number, fixed on the first print (migration 435): the visit's first booking number. Always the same afterwards. */
+export async function fixBillNumber(bookingId, single = false) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data, error } = await supabase.rpc('fix_bill_number', { p_booking_id: bookingId, p_single: single });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fixBillNumber error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ZNLY-410 step 2 (part A): the customer's bill link. share_bill fixes the bill number and returns the bill's active link token (made on first use).
+// extraIds = the other bookings paid in the same checkout (orgs without "Several services in one booking"), exactly as for fetchBillUnit.
+export async function shareBill(bookingId, extraIds = []) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data, error } = await supabase.rpc('share_bill', { p_booking_id: bookingId, p_extra_ids: extraIds || [] });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    return { data: { billNumber: row.bill_number, token: row.token }, error: null };
+  } catch (error) {
+    console.error('[API] shareBill error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** The active link of the bill made of these rows (fetchBillUnit's rows), or null. Staff read; the link is made by shareBill. */
+export async function fetchBillLink(rows) {
+  try {
+    const ids = (rows || []).map((r) => r.id).filter(Boolean);
+    const visits = [...new Set((rows || []).map((r) => r.visitId).filter(Boolean))];
+    if (!ids.length) return { data: null, error: null };
+    const cond = [`booking_ids.ov.{${ids.join(',')}}`, ...visits.map((v) => `visit_id.eq.${v}`)].join(',');
+    const { data, error } = await supabase.from('bill_links').select('token, created_at').eq('active', true).or(cond).order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (error) throw error;
+    return { data: data ? { token: data.token } : null, error: null };
+  } catch (error) {
+    console.error('[API] fetchBillLink error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function turnOffBillLink(token) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data, error } = await supabase.rpc('turn_off_bill_link', { p_token: token });
+    if (error) throw error;
+    return { data: data === true, error: null };
+  } catch (error) {
+    console.error('[API] turnOffBillLink error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** The public bill page: anon, one bill by its token. Returns { active:false[, businessName] } or the bill. */
+export async function fetchPublicBill(token) {
+  try {
+    const { data, error } = await supabase.rpc('get_public_bill', { p_token: token });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchPublicBill error:', error.message);
     return { data: null, error };
   }
 }

@@ -189,6 +189,7 @@ All staff/customer routes are org-scoped: `/:orgSlug/login`, `/:orgSlug/dashboar
 | `/:orgSlug/dashboard` | UnifiedDashboard (role-dispatched view) | staff, manager, admin |
 | `/:orgSlug/attendance-calendar` | AttendanceCalendarPage | manager, admin |
 | `/:orgSlug/bookings/:bookingId` | BookingDetailsAssignmentModal | staff, manager, admin |
+| `/:orgSlug/bill/:token` | PublicBill (the customer's bill link: one bill by its token, no login, noindex) | Public |
 | `/:orgSlug/book` | CustomerBookingFlow (via TenantProvider) | Public |
 | `/:orgSlug/manage` | Redirects to `/:orgSlug/book` (self-service booking search moved to staff-only "Check Booking") | Public |
 | `/:orgSlug` | CustomerBookingFlow (shortcut) | Public |
